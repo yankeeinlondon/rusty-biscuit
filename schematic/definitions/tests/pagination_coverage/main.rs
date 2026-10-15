@@ -390,12 +390,12 @@ fn paginated_counts_per_api() {
         ("GitHub", 9),
         ("GitLab", 9),
         ("Gitea", 8),
-        ("OpenAI", 58),
+        ("OpenAI", 57),
     ]
     .into_iter()
     .collect();
     assert_eq!(counts, expected);
-    assert_eq!(counts.values().sum::<usize>(), 94);
+    assert_eq!(counts.values().sum::<usize>(), 93);
 }
 
 /// Every list left unpaginated for want of evidence carries its recalled

@@ -12,7 +12,7 @@ pub fn banned_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListBannedResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "CreateBan".to_string(),
@@ -23,7 +23,7 @@ pub fn banned_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("BanInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "DeleteBan".to_string(),
@@ -35,7 +35,7 @@ pub fn banned_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }

@@ -13,6 +13,16 @@ pub struct AddUploadPartRequest2 {
     ///The chunk of bytes for this Part.
     pub data: String,
 }
+impl schematic_define::Registration for AddUploadPartRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AddUploadPartRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents an individual Admin API key in an org.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -33,6 +43,14 @@ pub struct AdminApiKey {
     pub last_used_at: Option<serde_json::Value>,
     pub owner: serde_json::Value,
 }
+impl schematic_define::Registration for AdminApiKey {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AdminApiKey));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct AdminApiKeyCreateResponse {
@@ -40,6 +58,16 @@ pub struct AdminApiKeyCreateResponse {
     pub admin_api_key: AdminApiKey,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for AdminApiKeyCreateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AdminApiKeyCreateResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -51,6 +79,14 @@ pub struct ApiKeyList {
     pub first_id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_id: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ApiKeyList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ApiKeyList));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Detailed information about a role assignment entry returned when listing assignments.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -81,6 +117,14 @@ pub struct AssignedRoleDetails {
     ///Principals from which the role assignment is inherited, when available.
     pub assignment_sources: serde_json::Value,
 }
+impl schematic_define::Registration for AssignedRoleDetails {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AssignedRoleDetails));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents an `assistant` that can call the model and use tools.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -107,6 +151,14 @@ pub struct AssistantObject {
     pub top_p: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for AssistantObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AssistantObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Represents an event emitted when streaming a Run.
 
@@ -142,6 +194,14 @@ pub enum AssistantStreamEvent {
 impl Default for AssistantStreamEvent {
     fn default() -> Self {
         Self::ThreadStreamEvent(Default::default())
+    }
+}
+impl schematic_define::Registration for AssistantStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AssistantStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -233,12 +293,30 @@ pub enum AssistantSupportedModels {
     #[serde(rename = "gpt-3.5-turbo-16k-0613")]
     Gpt35Turbo16k0613,
 }
+impl schematic_define::Registration for AssistantSupportedModels {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AssistantSupportedModels),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct AssistantToolsCode {
     ///The type of tool being defined: `code_interpreter`
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for AssistantToolsCode {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AssistantToolsCode));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -250,12 +328,32 @@ pub struct AssistantToolsFileSearch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_search: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for AssistantToolsFileSearch {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AssistantToolsFileSearch),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct AssistantToolsFileSearchTypeOnly {
     ///The type of tool being defined: `file_search`
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for AssistantToolsFileSearchTypeOnly {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AssistantToolsFileSearchTypeOnly),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -264,6 +362,16 @@ pub struct AssistantToolsFunction {
     #[serde(rename = "type")]
     pub type_: String,
     pub function: FunctionObject,
+}
+impl schematic_define::Registration for AssistantToolsFunction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AssistantToolsFunction),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Specifies the format that the model must output. Compatible with [GPT-4o](/docs/models#gpt-4o), [GPT-4 Turbo](/docs/models#gpt-4-turbo-and-gpt-4), and all GPT-3.5 Turbo models since `gpt-3.5-turbo-1106`.
 
@@ -287,6 +395,16 @@ impl Default for AssistantsApiResponseFormatOption {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for AssistantsApiResponseFormatOption {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AssistantsApiResponseFormatOption),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Controls which (if any) tool is called by the model.
 `none` means the model will not call any tools and instead generates a message.
 `auto` is the default value and means the model can pick between generating a message or calling one or more tools.
@@ -305,6 +423,16 @@ impl Default for AssistantsApiToolChoiceOption {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for AssistantsApiToolChoiceOption {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AssistantsApiToolChoiceOption),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Specifies a tool the model should use. Use to force the model to call a specific tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -314,6 +442,16 @@ pub struct AssistantsNamedToolChoice {
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for AssistantsNamedToolChoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AssistantsNamedToolChoice),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, `vtt`, or `diarized_json`. For `gpt-4o-transcribe` and `gpt-4o-mini-transcribe`, the only supported format is `json`. For `gpt-4o-transcribe-diarize`, the supported formats are `json`, `text`, and `diarized_json`, with `diarized_json` required to receive speaker annotations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -332,6 +470,14 @@ pub enum AudioResponseFormat {
     Vtt,
     #[serde(rename = "diarized_json")]
     DiarizedJson,
+}
+impl schematic_define::Registration for AudioResponseFormat {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AudioResponseFormat));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -363,6 +509,14 @@ Only supported with `gpt-realtime-whisper` in GA Realtime sessions.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delay: Option<String>,
 }
+impl schematic_define::Registration for AudioTranscription {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AudioTranscription));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct AudioTranscriptionResponse {
@@ -378,6 +532,16 @@ pub struct AudioTranscriptionResponse {
     ///The prompt configured for input audio transcription, when present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+}
+impl schematic_define::Registration for AudioTranscriptionResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AudioTranscriptionResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A log of a user action or configuration change within this organization.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -615,6 +779,14 @@ pub struct AuditLog {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub certificates_deactivated: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for AuditLog {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AuditLog));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The actor who performed the audit logged action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -627,6 +799,14 @@ pub struct AuditLogActor {
     pub session: Option<AuditLogActorSession>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<AuditLogActorApiKey>,
+}
+impl schematic_define::Registration for AuditLogActor {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AuditLogActor));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The API Key used to perform the audit logged action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -644,6 +824,14 @@ pub struct AuditLogActorApiKey {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_account: Option<AuditLogActorServiceAccount>,
 }
+impl schematic_define::Registration for AuditLogActorApiKey {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AuditLogActorApiKey));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The service account that performed the audit logged action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -651,6 +839,16 @@ pub struct AuditLogActorServiceAccount {
     ///The service account id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+}
+impl schematic_define::Registration for AuditLogActorServiceAccount {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AuditLogActorServiceAccount),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The session in which the audit logged action was performed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -662,6 +860,14 @@ pub struct AuditLogActorSession {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_address: Option<String>,
 }
+impl schematic_define::Registration for AuditLogActorSession {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AuditLogActorSession));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The user who performed the audit logged action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -672,6 +878,14 @@ pub struct AuditLogActorUser {
     ///The user email.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+}
+impl schematic_define::Registration for AuditLogActorUser {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AuditLogActorUser));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The event type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -965,6 +1179,14 @@ pub enum AuditLogEventType {
     #[serde(rename = "tenant.workspace_invite_email_settings.updated")]
     TenantWorkspaceInviteEmailSettingsUpdated,
 }
+impl schematic_define::Registration for AuditLogEventType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AuditLogEventType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The default strategy. This strategy currently uses a `max_chunk_size_tokens` of `800` and `chunk_overlap_tokens` of `400`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -972,6 +1194,16 @@ pub struct AutoChunkingStrategyRequestParam {
     ///Always `auto`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for AutoChunkingStrategyRequestParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AutoChunkingStrategyRequestParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1037,6 +1269,14 @@ batches created after September 7, 2025.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
+impl schematic_define::Registration for Batch {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Batch));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BatchError {
@@ -1051,6 +1291,14 @@ pub struct BatchError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BatchError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BatchError));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The expiration policy for the output and/or error file that are generated for a batch.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1059,6 +1307,16 @@ pub struct BatchFileExpirationAfter {
     pub anchor: String,
     ///The number of seconds after the anchor time that the file will expire. Must be between 3600 (1 hour) and 2592000 (30 days).
     pub seconds: i64,
+}
+impl schematic_define::Registration for BatchFileExpirationAfter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BatchFileExpirationAfter),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The request counts for different statuses within the batch.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1070,6 +1328,14 @@ pub struct BatchRequestCounts {
     pub completed: i64,
     ///Number of requests that have failed.
     pub failed: i64,
+}
+impl schematic_define::Registration for BatchRequestCounts {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BatchRequestCounts));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents an individual `certificate` uploaded to the organization.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1091,6 +1357,14 @@ pub struct Certificate {
     ///Whether the certificate is currently active at the specified scope. Not returned when getting details for a specific certificate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
+}
+impl schematic_define::Registration for Certificate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Certificate));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Constrains the tools available to the model to a pre-defined set.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1114,6 +1388,16 @@ For the Chat Completions API, the list of tool definitions might look like:
 ```*/
     pub tools: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for ChatCompletionAllowedTools {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionAllowedTools),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Constrains the tools available to the model to a pre-defined set.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1122,6 +1406,16 @@ pub struct ChatCompletionAllowedToolsChoice {
     #[serde(rename = "type")]
     pub type_: String,
     pub allowed_tools: ChatCompletionAllowedTools,
+}
+impl schematic_define::Registration for ChatCompletionAllowedToolsChoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionAllowedToolsChoice),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1133,12 +1427,32 @@ pub struct ChatCompletionDeleted {
     ///Whether the chat completion was deleted.
     pub deleted: bool,
 }
+impl schematic_define::Registration for ChatCompletionDeleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionDeleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Specifying a particular function via `{"name": "my_function"}` forces the model to call that function.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatCompletionFunctionCallOption {
     ///The name of the function to call.
     pub name: String,
+}
+impl schematic_define::Registration for ChatCompletionFunctionCallOption {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionFunctionCallOption),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1150,6 +1464,16 @@ pub struct ChatCompletionFunctions {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<FunctionParameters>,
+}
+impl schematic_define::Registration for ChatCompletionFunctions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionFunctions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An object representing a list of Chat Completions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1166,6 +1490,14 @@ pub struct ChatCompletionList {
     ///Indicates whether there are more Chat Completions available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for ChatCompletionList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ChatCompletionList));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A call to a custom tool created by the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1177,6 +1509,16 @@ pub struct ChatCompletionMessageCustomToolCall {
     pub type_: String,
     ///The custom tool that the model called.
     pub custom: serde_json::Value,
+}
+impl schematic_define::Registration for ChatCompletionMessageCustomToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionMessageCustomToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An object representing a list of chat completion messages.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1193,6 +1535,16 @@ pub struct ChatCompletionMessageList {
     ///Indicates whether there are more chat messages available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for ChatCompletionMessageList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionMessageList),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A call to a function tool created by the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1204,6 +1556,16 @@ pub struct ChatCompletionMessageToolCall {
     pub type_: String,
     ///The function that the model called.
     pub function: serde_json::Value,
+}
+impl schematic_define::Registration for ChatCompletionMessageToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionMessageToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1218,6 +1580,16 @@ pub struct ChatCompletionMessageToolCallChunk {
     pub type_: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ChatCompletionMessageToolCallChunk {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionMessageToolCallChunk),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The tool calls generated by the model, such as function calls.
 pub type ChatCompletionMessageToolCalls = Vec<serde_json::Value>;
@@ -1234,6 +1606,16 @@ impl Default for ChatCompletionModalities {
         Self::TextList(Default::default())
     }
 }
+impl schematic_define::Registration for ChatCompletionModalities {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionModalities),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Moderation results or errors for the request input and generated output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1242,6 +1624,16 @@ pub struct ChatCompletionModeration {
     pub input: serde_json::Value,
     ///Moderation for the generated output.
     pub output: serde_json::Value,
+}
+impl schematic_define::Registration for ChatCompletionModeration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionModeration),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An error produced while attempting moderation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1255,6 +1647,16 @@ pub struct ChatCompletionModerationError {
     ///The error message.
     pub message: String,
 }
+impl schematic_define::Registration for ChatCompletionModerationError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionModerationError),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Successful moderation results for the request input or generated output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1267,6 +1669,16 @@ pub struct ChatCompletionModerationResults {
     ///A list of moderation results.
     pub results: Vec<ModerationResultBody>,
 }
+impl schematic_define::Registration for ChatCompletionModerationResults {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionModerationResults),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Specifies a tool the model should use. Use to force the model to call a specific function.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1276,6 +1688,16 @@ pub struct ChatCompletionNamedToolChoice {
     pub type_: String,
     pub function: serde_json::Value,
 }
+impl schematic_define::Registration for ChatCompletionNamedToolChoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionNamedToolChoice),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Specifies a tool the model should use. Use to force the model to call a specific custom tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1284,6 +1706,16 @@ pub struct ChatCompletionNamedToolChoiceCustom {
     #[serde(rename = "type")]
     pub type_: String,
     pub custom: serde_json::Value,
+}
+impl schematic_define::Registration for ChatCompletionNamedToolChoiceCustom {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionNamedToolChoiceCustom),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Messages sent by the model in response to user messages.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1305,6 +1737,16 @@ pub struct ChatCompletionRequestAssistantMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_call: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ChatCompletionRequestAssistantMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestAssistantMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1322,6 +1764,17 @@ impl Default for ChatCompletionRequestAssistantMessageContentPart {
         Self::ChatCompletionRequestMessageContentPartText(Default::default())
     }
 }
+impl schematic_define::Registration
+for ChatCompletionRequestAssistantMessageContentPart {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestAssistantMessageContentPart),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Developer-provided instructions that the model should follow, regardless of
 messages sent by the user. With o1 models and newer, `developer` messages
 replace the previous `system` messages.*/
@@ -1336,6 +1789,16 @@ pub struct ChatCompletionRequestDeveloperMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
+impl schematic_define::Registration for ChatCompletionRequestDeveloperMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestDeveloperMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestFunctionMessage {
@@ -1344,6 +1807,16 @@ pub struct ChatCompletionRequestFunctionMessage {
     pub content: serde_json::Value,
     ///The name of the function to call.
     pub name: String,
+}
+impl schematic_define::Registration for ChatCompletionRequestFunctionMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestFunctionMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1362,6 +1835,16 @@ impl Default for ChatCompletionRequestMessage {
         Self::ChatCompletionRequestDeveloperMessage(Default::default())
     }
 }
+impl schematic_define::Registration for ChatCompletionRequestMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Learn about [audio inputs](/docs/guides/audio).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1372,6 +1855,16 @@ pub struct ChatCompletionRequestMessageContentPartAudio {
     pub input_audio: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointParam>,
+}
+impl schematic_define::Registration for ChatCompletionRequestMessageContentPartAudio {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestMessageContentPartAudio),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Learn about [file inputs](/docs/guides/text) for text generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1384,6 +1877,16 @@ pub struct ChatCompletionRequestMessageContentPartFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointParam>,
 }
+impl schematic_define::Registration for ChatCompletionRequestMessageContentPartFile {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestMessageContentPartFile),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Learn about [image inputs](/docs/guides/vision).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1395,6 +1898,16 @@ pub struct ChatCompletionRequestMessageContentPartImage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointParam>,
 }
+impl schematic_define::Registration for ChatCompletionRequestMessageContentPartImage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestMessageContentPartImage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestMessageContentPartRefusal {
@@ -1403,6 +1916,16 @@ pub struct ChatCompletionRequestMessageContentPartRefusal {
     pub type_: String,
     ///The refusal message generated by the model.
     pub refusal: String,
+}
+impl schematic_define::Registration for ChatCompletionRequestMessageContentPartRefusal {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestMessageContentPartRefusal),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Learn about [text inputs](/docs/guides/text-generation).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1415,6 +1938,16 @@ pub struct ChatCompletionRequestMessageContentPartText {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointParam>,
+}
+impl schematic_define::Registration for ChatCompletionRequestMessageContentPartText {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestMessageContentPartText),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Developer-provided instructions that the model should follow, regardless of
 messages sent by the user. With o1 models and newer, use `developer` messages
@@ -1430,6 +1963,16 @@ pub struct ChatCompletionRequestSystemMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
+impl schematic_define::Registration for ChatCompletionRequestSystemMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestSystemMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1444,6 +1987,16 @@ impl Default for ChatCompletionRequestSystemMessageContentPart {
         Self::ChatCompletionRequestMessageContentPartText(Default::default())
     }
 }
+impl schematic_define::Registration for ChatCompletionRequestSystemMessageContentPart {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestSystemMessageContentPart),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatCompletionRequestToolMessage {
@@ -1453,6 +2006,16 @@ pub struct ChatCompletionRequestToolMessage {
     pub content: serde_json::Value,
     ///Tool call that this message is responding to.
     pub tool_call_id: String,
+}
+impl schematic_define::Registration for ChatCompletionRequestToolMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestToolMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1468,6 +2031,16 @@ impl Default for ChatCompletionRequestToolMessageContentPart {
         Self::ChatCompletionRequestMessageContentPartText(Default::default())
     }
 }
+impl schematic_define::Registration for ChatCompletionRequestToolMessageContentPart {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestToolMessageContentPart),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Messages sent by an end user, containing prompts or additional context
 information.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1480,6 +2053,16 @@ pub struct ChatCompletionRequestUserMessage {
     ///An optional name for the participant. Provides the model information to differentiate between participants of the same role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+impl schematic_define::Registration for ChatCompletionRequestUserMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestUserMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1504,6 +2087,16 @@ impl Default for ChatCompletionRequestUserMessageContentPart {
         Self::ChatCompletionRequestMessageContentPartText(Default::default())
     }
 }
+impl schematic_define::Registration for ChatCompletionRequestUserMessageContentPart {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionRequestUserMessageContentPart),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A chat completion message generated by the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1524,6 +2117,16 @@ pub struct ChatCompletionResponseMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ChatCompletionResponseMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionResponseMessage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The role of the author of a message
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1542,6 +2145,14 @@ pub enum ChatCompletionRole {
     #[serde(rename = "function")]
     Function,
 }
+impl schematic_define::Registration for ChatCompletionRole {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ChatCompletionRole));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1553,6 +2164,16 @@ pub enum ChatCompletionStreamOptions {
 impl Default for ChatCompletionStreamOptions {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for ChatCompletionStreamOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionStreamOptions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A chat completion delta generated by streamed model responses.
@@ -1572,6 +2193,16 @@ pub struct ChatCompletionStreamResponseDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ChatCompletionStreamResponseDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionStreamResponseDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatCompletionTokenLogprob {
@@ -1583,6 +2214,16 @@ pub struct ChatCompletionTokenLogprob {
     ///List of the most likely tokens and their log probability, at this token position. The number of entries may be fewer than the requested `top_logprobs`.
     pub top_logprobs: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for ChatCompletionTokenLogprob {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionTokenLogprob),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A function tool that can be used to generate a response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1591,6 +2232,14 @@ pub struct ChatCompletionTool {
     #[serde(rename = "type")]
     pub type_: String,
     pub function: FunctionObject,
+}
+impl schematic_define::Registration for ChatCompletionTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ChatCompletionTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Controls which (if any) tool is called by the model.
 `none` means the model will not call any tool and instead generates a message.
@@ -1614,6 +2263,16 @@ impl Default for ChatCompletionToolChoiceOption {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for ChatCompletionToolChoiceOption {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatCompletionToolChoiceOption),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The chunking strategy used to chunk the file(s). If not set, will use the `auto` strategy.
 pub type ChunkingStrategyRequestParam = serde_json::Value;
 ///The output of a code interpreter tool call that is a file.
@@ -1625,6 +2284,16 @@ pub struct CodeInterpreterFileOutput {
     pub type_: String,
     pub files: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for CodeInterpreterFileOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CodeInterpreterFileOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The output of a code interpreter tool call that is text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1634,6 +2303,16 @@ pub struct CodeInterpreterTextOutput {
     pub type_: String,
     ///The logs of the code interpreter tool call.
     pub logs: String,
+}
+impl schematic_define::Registration for CodeInterpreterTextOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CodeInterpreterTextOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool that runs Python code to help generate a response to a prompt.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1648,6 +2327,14 @@ optional `memory_limit` setting.*/
     pub container: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CodeInterpreterTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CodeInterpreterTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call to run code.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1664,6 +2351,16 @@ pub struct CodeInterpreterToolCall {
     pub container_id: String,
     pub code: serde_json::Value,
     pub outputs: serde_json::Value,
+}
+impl schematic_define::Registration for CodeInterpreterToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CodeInterpreterToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A filter used to compare a specified attribute key to a given value using a defined comparison operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1685,6 +2382,14 @@ pub struct ComparisonFilter {
     ///The value to compare against the attribute key; supports string, number, or boolean types.
     pub value: serde_json::Value,
 }
+impl schematic_define::Registration for ComparisonFilter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ComparisonFilter));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CompleteUploadRequest2 {
@@ -1693,6 +2398,16 @@ pub struct CompleteUploadRequest2 {
     ///The optional md5 checksum for the file contents to verify if the bytes uploaded matches what you expect.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub md5: Option<String>,
+}
+impl schematic_define::Registration for CompleteUploadRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CompleteUploadRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Usage statistics for the completion request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1711,6 +2426,14 @@ pub struct CompletionUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_tokens_details: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for CompletionUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CompletionUsage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Combine multiple filters using `and` or `or`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1720,6 +2443,14 @@ pub struct CompoundFilter {
     pub type_: String,
     ///Array of filters to combine. Items can be `ComparisonFilter` or `CompoundFilter`.
     pub filters: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for CompoundFilter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CompoundFilter));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1741,6 +2472,14 @@ impl Default for ComputerAction {
         Self::ClickParam(Default::default())
     }
 }
+impl schematic_define::Registration for ComputerAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ComputerAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Flattened batched actions for `computer_use`. Each action includes an
 `type` discriminator and action-specific fields.*/
 pub type ComputerActionList = Vec<ComputerAction>;
@@ -1758,6 +2497,16 @@ always set to `computer_screenshot`.*/
     ///The identifier of an uploaded file that contains the screenshot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<String>,
+}
+impl schematic_define::Registration for ComputerScreenshotImage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerScreenshotImage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A tool call to a computer use tool. See the
 [computer use guide](/docs/guides/tools-computer-use) for more information.*/
@@ -1781,6 +2530,14 @@ pub struct ComputerToolCall {
 `incomplete`. Populated when items are returned via API.*/
     pub status: String,
 }
+impl schematic_define::Registration for ComputerToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ComputerToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The output of a computer tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1803,6 +2560,16 @@ developer.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
+impl schematic_define::Registration for ComputerToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ComputerToolCallOutputResource {
@@ -1810,6 +2577,16 @@ pub struct ComputerToolCallOutputResource {
     pub computer_tool_call_output: ComputerToolCallOutput,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for ComputerToolCallOutputResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerToolCallOutputResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1824,6 +2601,16 @@ pub struct ContainerFileListResource {
     pub last_id: String,
     ///Whether there are more files available.
     pub has_more: bool,
+}
+impl schematic_define::Registration for ContainerFileListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerFileListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1843,6 +2630,16 @@ pub struct ContainerFileResource {
     ///Source of the file (e.g., `user`, `assistant`).
     pub source: String,
 }
+impl schematic_define::Registration for ContainerFileResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerFileResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ContainerListResource {
@@ -1856,6 +2653,16 @@ pub struct ContainerListResource {
     pub last_id: String,
     ///Whether there are more containers available.
     pub has_more: bool,
+}
+impl schematic_define::Registration for ContainerListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1885,6 +2692,14 @@ The minutes is the number of minutes after the anchor before the container expir
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_policy: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ContainerResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ContainerResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Multi-modal input and output contents.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1897,6 +2712,14 @@ pub enum Content {
 impl Default for Content {
     fn default() -> Self {
         Self::InputContent(Default::default())
+    }
+}
+impl schematic_define::Registration for Content {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Content));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A single item within a conversation. The set of possible types are the same as the `output` type of a [Response object](/docs/api-reference/responses/object#responses/object-output).
@@ -1939,6 +2762,14 @@ impl Default for ConversationItem {
         Self::Message(Default::default())
     }
 }
+impl schematic_define::Registration for ConversationItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ConversationItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A list of Conversation items.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -1954,6 +2785,14 @@ pub struct ConversationItemList {
     ///The ID of the last item in the list.
     pub last_id: String,
 }
+impl schematic_define::Registration for ConversationItemList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ConversationItemList));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**The conversation that this response belongs to. Items from this conversation are prepended to `input_items` for this response request.
 Input items and output items from this response are automatically added to this conversation after this response completes.*/
 #[allow(clippy::large_enum_variant)]
@@ -1967,6 +2806,14 @@ pub enum ConversationParam {
 impl Default for ConversationParam {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for ConversationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ConversationParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///The aggregated costs details of the specific time bucket.
@@ -1985,6 +2832,14 @@ pub struct CostsResult {
     pub api_key_id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantity: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CostsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CostsResult));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2013,6 +2868,16 @@ pub struct CreateAssistantRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for CreateAssistantRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateAssistantRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateBatchRequest2 {
@@ -2031,6 +2896,14 @@ Your input file must be formatted as a [JSONL file](/docs/api-reference/batch/re
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_expires_after: Option<BatchFileExpirationAfter>,
 }
+impl schematic_define::Registration for CreateBatchRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateBatchRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateChatCompletionRequest2 {
@@ -2038,6 +2911,16 @@ pub struct CreateChatCompletionRequest2 {
     pub create_model_response_properties: CreateModelResponseProperties,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for CreateChatCompletionRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateChatCompletionRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a chat completion response returned by model, based on the provided input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2064,6 +2947,16 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     pub usage: Option<CompletionUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moderation: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CreateChatCompletionResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateChatCompletionResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Represents a streamed chunk of a chat completion response returned
 by the model, based on the provided input.
@@ -2092,6 +2985,16 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     pub usage: Option<CompletionUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moderation: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CreateChatCompletionStreamResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateChatCompletionStreamResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2175,6 +3078,16 @@ We generally recommend altering this or `temperature` but not both.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 }
+impl schematic_define::Registration for CreateCompletionRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateCompletionRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents a completion response from the API. Note: both the streamed and non-streamed response objects share the same shape (unlike the chat endpoint).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2197,6 +3110,16 @@ Can be used in conjunction with the `seed` request parameter to understand when 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<CompletionUsage>,
 }
+impl schematic_define::Registration for CreateCompletionResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateCompletionResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateContainerBody {
@@ -2218,6 +3141,14 @@ pub struct CreateContainerBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_policy: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for CreateContainerBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateContainerBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateContainerFileBody {
@@ -2227,6 +3158,16 @@ pub struct CreateContainerFileBody {
     ///The File object (not file name) to be uploaded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+}
+impl schematic_define::Registration for CreateContainerFileBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateContainerFileBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2245,6 +3186,16 @@ pub struct CreateEmbeddingRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 }
+impl schematic_define::Registration for CreateEmbeddingRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEmbeddingRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateEmbeddingResponse {
@@ -2256,6 +3207,16 @@ pub struct CreateEmbeddingResponse {
     pub object: String,
     ///The usage information for the request.
     pub usage: serde_json::Value,
+}
+impl schematic_define::Registration for CreateEmbeddingResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEmbeddingResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A CompletionsRunDataSource object describing a model sampling configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2275,6 +3236,16 @@ pub struct CreateEvalCompletionsRunDataSource {
     ///Determines what populates the `item` namespace in this run's data source.
     pub source: serde_json::Value,
 }
+impl schematic_define::Registration for CreateEvalCompletionsRunDataSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalCompletionsRunDataSource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A CustomDataSourceConfig object that defines the schema for the data source used for the evaluation runs.
 This schema is used to define the shape of the data that will be:
 - Used to define your testing criteria and
@@ -2291,6 +3262,16 @@ pub struct CreateEvalCustomDataSourceConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_sample_schema: Option<bool>,
 }
+impl schematic_define::Registration for CreateEvalCustomDataSourceConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalCustomDataSourceConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A chat message that makes up the prompt or context. May include variable references to the `item` namespace, ie {{item.name}}.
 pub type CreateEvalItem = serde_json::Value;
 ///A JsonlRunDataSource object with that specifies a JSONL file that matches the eval
@@ -2302,6 +3283,16 @@ pub struct CreateEvalJsonlRunDataSource {
     pub type_: String,
     ///Determines what populates the `item` namespace in the data source.
     pub source: serde_json::Value,
+}
+impl schematic_define::Registration for CreateEvalJsonlRunDataSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalJsonlRunDataSource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A LabelModelGrader object which uses a model to assign labels to each item
 in the evaluation.*/
@@ -2322,6 +3313,16 @@ pub struct CreateEvalLabelModelGrader {
     ///The labels that indicate a passing result. Must be a subset of labels.
     pub passing_labels: Vec<String>,
 }
+impl schematic_define::Registration for CreateEvalLabelModelGrader {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalLabelModelGrader),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A data source config which specifies the metadata property of your logs query.
 This is usually metadata like `usecase=chatbot` or `prompt-version=v2`, etc.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2333,6 +3334,16 @@ pub struct CreateEvalLogsDataSourceConfig {
     ///Metadata filters for the logs data source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CreateEvalLogsDataSourceConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalLogsDataSourceConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2346,6 +3357,14 @@ pub struct CreateEvalRequest2 {
     pub data_source_config: serde_json::Value,
     ///A list of graders for all eval runs in this group. Graders can reference variables in the data source using double curly braces notation, like `{{item.variable_name}}`. To reference the model's output, use the `sample` namespace (ie, `{{sample.output_text}}`).
     pub testing_criteria: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for CreateEvalRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateEvalRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A ResponsesRunDataSource object describing a model sampling configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2365,6 +3384,16 @@ pub struct CreateEvalResponsesRunDataSource {
     ///Determines what populates the `item` namespace in this run's data source.
     pub source: serde_json::Value,
 }
+impl schematic_define::Registration for CreateEvalResponsesRunDataSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalResponsesRunDataSource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateEvalRunRequest2 {
@@ -2376,6 +3405,16 @@ pub struct CreateEvalRunRequest2 {
     ///Details about the run's data source.
     pub data_source: serde_json::Value,
 }
+impl schematic_define::Registration for CreateEvalRunRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalRunRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Deprecated in favor of LogsDataSourceConfig.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2386,6 +3425,16 @@ pub struct CreateEvalStoredCompletionsDataSourceConfig {
     ///Metadata filters for the stored completions data source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CreateEvalStoredCompletionsDataSourceConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateEvalStoredCompletionsDataSourceConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2403,11 +3452,29 @@ pub struct CreateFileRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_after: Option<FileExpirationAfter>,
 }
+impl schematic_define::Registration for CreateFileRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateFileRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateFineTuningCheckpointPermissionRequest2 {
     ///The project identifiers to grant access to.
     pub project_ids: Vec<String>,
+}
+impl schematic_define::Registration for CreateFineTuningCheckpointPermissionRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateFineTuningCheckpointPermissionRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2458,6 +3525,16 @@ If a seed is not specified, one will be generated for you.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
+impl schematic_define::Registration for CreateFineTuningJobRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateFineTuningJobRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Request payload for creating a new group in the organization.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2465,12 +3542,28 @@ pub struct CreateGroupBody {
     ///Human readable name for the group.
     pub name: String,
 }
+impl schematic_define::Registration for CreateGroupBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateGroupBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Request payload for adding a user to a group.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateGroupUserBody {
     ///Identifier of the user to add to the group.
     pub user_id: String,
+}
+impl schematic_define::Registration for CreateGroupUserBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateGroupUserBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2535,6 +3628,16 @@ formats, and defaults to 100.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<String>,
 }
+impl schematic_define::Registration for CreateImageEditRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateImageEditRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateImageRequest2 {
@@ -2592,6 +3695,14 @@ should be set to either `png` (default value) or `webp`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 }
+impl schematic_define::Registration for CreateImageRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateImageRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateImageVariationRequest2 {
@@ -2613,6 +3724,16 @@ pub struct CreateImageVariationRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 }
+impl schematic_define::Registration for CreateImageVariationRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateImageVariationRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateMessageRequest2 {
@@ -2626,6 +3747,16 @@ pub struct CreateMessageRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
+impl schematic_define::Registration for CreateMessageRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateMessageRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateModelResponseProperties {
@@ -2633,6 +3764,16 @@ pub struct CreateModelResponseProperties {
     pub model_response_properties: ModelResponseProperties,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for CreateModelResponseProperties {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateModelResponseProperties),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2646,6 +3787,16 @@ available models [here](/docs/models#moderation).*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for CreateModerationRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateModerationRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents if a given text input is potentially harmful.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2657,6 +3808,16 @@ pub struct CreateModerationResponse {
     ///A list of moderation objects.
     pub results: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for CreateModerationResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateModerationResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateResponse {
@@ -2666,6 +3827,14 @@ pub struct CreateResponse {
     pub response_properties: ResponseProperties,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for CreateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2717,6 +3886,14 @@ We generally recommend altering this or temperature but not both.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<AssistantsApiResponseFormatOption>,
 }
+impl schematic_define::Registration for CreateRunRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateRunRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateSpeechRequest2 {
@@ -2738,6 +3915,14 @@ pub struct CreateSpeechRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_format: Option<String>,
 }
+impl schematic_define::Registration for CreateSpeechRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateSpeechRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2751,6 +3936,16 @@ impl Default for CreateSpeechResponseStreamEvent {
         Self::SpeechAudioDeltaEvent(Default::default())
     }
 }
+impl schematic_define::Registration for CreateSpeechResponseStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateSpeechResponseStreamEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Parameters for creating or updating a spend alert.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2762,6 +3957,14 @@ pub struct CreateSpendAlertBody {
     ///The time interval for evaluating spend against the threshold.
     pub interval: String,
     pub notification_channel: SpendAlertNotificationChannel,
+}
+impl schematic_define::Registration for CreateSpendAlertBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateSpendAlertBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2810,6 +4013,16 @@ We generally recommend altering this or temperature but not both.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<AssistantsApiResponseFormatOption>,
 }
+impl schematic_define::Registration for CreateThreadAndRunRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateThreadAndRunRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Options to create a new thread. If no thread is provided when running a
 request, an empty thread will be created.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2822,6 +4035,14 @@ pub struct CreateThreadRequest2 {
     pub tool_resources: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+impl schematic_define::Registration for CreateThreadRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateThreadRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2869,6 +4090,16 @@ This option is not available for `gpt-4o-transcribe-diarize`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub known_speaker_references: Option<Vec<String>>,
 }
+impl schematic_define::Registration for CreateTranscriptionRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranscriptionRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents a diarized transcription response returned by the model, including the combined transcript and speaker-segment annotations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2884,6 +4115,16 @@ pub struct CreateTranscriptionResponseDiarizedJson {
     ///Token or duration usage statistics for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CreateTranscriptionResponseDiarizedJson {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranscriptionResponseDiarizedJson),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a transcription response returned by model, based on the provided input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2901,6 +4142,16 @@ pub struct CreateTranscriptionResponseJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for CreateTranscriptionResponseJson {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranscriptionResponseJson),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2913,6 +4164,16 @@ pub enum CreateTranscriptionResponseStreamEvent {
 impl Default for CreateTranscriptionResponseStreamEvent {
     fn default() -> Self {
         Self::TranscriptTextSegmentEvent(Default::default())
+    }
+}
+impl schematic_define::Registration for CreateTranscriptionResponseStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranscriptionResponseStreamEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Represents a verbose json transcription response returned by model, based on the provided input.
@@ -2934,6 +4195,16 @@ pub struct CreateTranscriptionResponseVerboseJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<TranscriptTextUsageDuration>,
 }
+impl schematic_define::Registration for CreateTranscriptionResponseVerboseJson {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranscriptionResponseVerboseJson),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateTranslationRequest2 {
@@ -2951,10 +4222,30 @@ pub struct CreateTranslationRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
 }
+impl schematic_define::Registration for CreateTranslationRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranslationRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateTranslationResponseJson {
     pub text: String,
+}
+impl schematic_define::Registration for CreateTranslationResponseJson {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranslationResponseJson),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2968,6 +4259,16 @@ pub struct CreateTranslationResponseVerboseJson {
     ///Segments of the translated text and their corresponding details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segments: Option<Vec<TranscriptionSegment>>,
+}
+impl schematic_define::Registration for CreateTranslationResponseVerboseJson {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateTranslationResponseVerboseJson),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -2990,6 +4291,14 @@ the supported MIME types for assistants and vision.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_after: Option<FileExpirationAfter>,
 }
+impl schematic_define::Registration for CreateUploadRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateUploadRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateVectorStoreFileBatchRequest2 {
@@ -3004,6 +4313,16 @@ pub struct CreateVectorStoreFileBatchRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<VectorStoreFileAttributes>,
 }
+impl schematic_define::Registration for CreateVectorStoreFileBatchRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVectorStoreFileBatchRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateVectorStoreFileRequest2 {
@@ -3013,6 +4332,16 @@ pub struct CreateVectorStoreFileRequest2 {
     pub chunking_strategy: Option<ChunkingStrategyRequestParam>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<VectorStoreFileAttributes>,
+}
+impl schematic_define::Registration for CreateVectorStoreFileRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVectorStoreFileRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3034,6 +4363,16 @@ pub struct CreateVectorStoreRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
+impl schematic_define::Registration for CreateVectorStoreRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVectorStoreRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateVoiceConsentRequest2 {
@@ -3047,6 +4386,16 @@ Supported MIME types:
     ///The BCP 47 language tag for the consent phrase (for example, `en-US`).
     pub language: String,
 }
+impl schematic_define::Registration for CreateVoiceConsentRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVoiceConsentRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateVoiceRequest2 {
@@ -3059,6 +4408,14 @@ Supported MIME types:
     pub audio_sample: String,
     ///The consent recording ID (for example, `cons_1234`).
     pub consent: String,
+}
+impl schematic_define::Registration for CreateVoiceRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateVoiceRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A call to a custom tool created by the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3082,6 +4439,14 @@ pub struct CustomToolCall {
     ///The input for the custom tool call generated by the model.
     pub input: String,
 }
+impl schematic_define::Registration for CustomToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CustomToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The output of a custom tool call from your code, being sent back to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3100,6 +4465,14 @@ pub struct CustomToolCallOutput {
 Can be a string or an list of output content.*/
     pub output: serde_json::Value,
 }
+impl schematic_define::Registration for CustomToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CustomToolCallOutput));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CustomToolCallOutputResource {
@@ -3108,6 +4481,16 @@ pub struct CustomToolCallOutputResource {
     #[serde(flatten)]
     pub json: serde_json::Value,
 }
+impl schematic_define::Registration for CustomToolCallOutputResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CustomToolCallOutputResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CustomToolCallResource {
@@ -3115,6 +4498,16 @@ pub struct CustomToolCallResource {
     pub custom_tool_call: CustomToolCall,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for CustomToolCallResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CustomToolCallResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A custom tool that processes input using a specified format.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3126,12 +4519,32 @@ pub struct CustomToolChatCompletions {
     ///Properties of the custom tool.
     pub custom: serde_json::Value,
 }
+impl schematic_define::Registration for CustomToolChatCompletions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CustomToolChatCompletions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeleteAssistantResponse {
     pub id: String,
     pub deleted: bool,
     pub object: String,
+}
+impl schematic_define::Registration for DeleteAssistantResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeleteAssistantResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3141,12 +4554,30 @@ pub struct DeleteCertificateResponse {
     ///The ID of the certificate that was deleted.
     pub id: String,
 }
+impl schematic_define::Registration for DeleteCertificateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeleteCertificateResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeleteFileResponse {
     pub id: String,
     pub object: String,
     pub deleted: bool,
+}
+impl schematic_define::Registration for DeleteFileResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DeleteFileResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3158,12 +4589,32 @@ pub struct DeleteFineTuningCheckpointPermissionResponse {
     ///Whether the fine-tuned model checkpoint permission was successfully deleted.
     pub deleted: bool,
 }
+impl schematic_define::Registration for DeleteFineTuningCheckpointPermissionResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeleteFineTuningCheckpointPermissionResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeleteMessageResponse {
     pub id: String,
     pub deleted: bool,
     pub object: String,
+}
+impl schematic_define::Registration for DeleteMessageResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeleteMessageResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3172,12 +4623,28 @@ pub struct DeleteModelResponse {
     pub deleted: bool,
     pub object: String,
 }
+impl schematic_define::Registration for DeleteModelResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DeleteModelResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeleteThreadResponse {
     pub id: String,
     pub deleted: bool,
     pub object: String,
+}
+impl schematic_define::Registration for DeleteThreadResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DeleteThreadResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3186,6 +4653,16 @@ pub struct DeleteVectorStoreFileResponse {
     pub deleted: bool,
     pub object: String,
 }
+impl schematic_define::Registration for DeleteVectorStoreFileResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeleteVectorStoreFileResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeleteVectorStoreResponse {
@@ -3193,11 +4670,29 @@ pub struct DeleteVectorStoreResponse {
     pub deleted: bool,
     pub object: String,
 }
+impl schematic_define::Registration for DeleteVectorStoreResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeleteVectorStoreResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeletedConversation {
     #[serde(flatten)]
     pub deleted_conversation_resource: DeletedConversationResource,
+}
+impl schematic_define::Registration for DeletedConversation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DeletedConversation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Confirmation payload returned after unassigning a role.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3208,12 +4703,30 @@ pub struct DeletedRoleAssignmentResource {
     ///Whether the assignment was removed.
     pub deleted: bool,
 }
+impl schematic_define::Registration for DeletedRoleAssignmentResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeletedRoleAssignmentResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Occurs when a stream ends.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DoneEvent {
     pub event: String,
     pub data: String,
+}
+impl schematic_define::Registration for DoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DoneEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A message input to the model with a role indicating instruction following
 hierarchy. Instructions given with the `developer` or `system` role take
@@ -3235,6 +4748,14 @@ Can also contain previous assistant responses.*/
     #[serde(rename = "type")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
+}
+impl schematic_define::Registration for EasyInputMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EasyInputMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**JSON request body for image edits.
 
@@ -3288,6 +4809,16 @@ monitor and detect abuse.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial_images: Option<PartialImages>,
 }
+impl schematic_define::Registration for EditImageBodyJsonParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EditImageBodyJsonParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents an embedding vector returned by embedding endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3299,6 +4830,14 @@ pub struct Embedding {
     ///The object type, which is always "embedding".
     pub object: String,
 }
+impl schematic_define::Registration for Embedding {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Embedding));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct Error {
@@ -3308,6 +4847,14 @@ pub struct Error {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for Error {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Error));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Occurs when an [error](/docs/guides/error-codes#api-errors) occurs. This can happen due to an internal server error or a timeout.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3315,10 +4862,26 @@ pub struct ErrorEvent {
     pub event: String,
     pub data: Error,
 }
+impl schematic_define::Registration for ErrorEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ErrorEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ErrorResponse {
     pub error: Error,
+}
+impl schematic_define::Registration for ErrorResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ErrorResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**An Eval object with a data source config and testing criteria.
 An Eval represents a task to be done for your LLM integration.
@@ -3343,6 +4906,14 @@ pub struct Eval {
     pub created_at: i64,
     pub metadata: Metadata,
 }
+impl schematic_define::Registration for Eval {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Eval));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An object representing an error response from the Eval API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3351,6 +4922,14 @@ pub struct EvalApiError {
     pub code: String,
     ///The error message.
     pub message: String,
+}
+impl schematic_define::Registration for EvalApiError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalApiError));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A CustomDataSourceConfig which specifies the schema of your `item` and optionally `sample` namespaces.
 The response schema defines the shape of the data that will be:
@@ -3365,6 +4944,16 @@ pub struct EvalCustomDataSourceConfig {
     /**The json schema for the run data source items.
 Learn how to build JSON schemas [here](https://json-schema.org/).*/
     pub schema: serde_json::Value,
+}
+impl schematic_define::Registration for EvalCustomDataSourceConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalCustomDataSourceConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 pub type EvalGraderLabelModel = serde_json::Value;
 pub type EvalGraderPython = serde_json::Value;
@@ -3388,6 +4977,14 @@ pub struct EvalItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
 }
+impl schematic_define::Registration for EvalItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Inputs to the model - can contain template strings. Supports text, output text, input images, and input audio, either as a single item or an array of items.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3400,6 +4997,14 @@ pub enum EvalItemContent {
 impl Default for EvalItemContent {
     fn default() -> Self {
         Self::EvalItemContentItem(Default::default())
+    }
+}
+impl schematic_define::Registration for EvalItemContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalItemContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**A list of inputs, each of which may be either an input text, output text, input
@@ -3422,6 +5027,14 @@ impl Default for EvalItemContentItem {
         Self::EvalItemContentText(Default::default())
     }
 }
+impl schematic_define::Registration for EvalItemContentItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalItemContentItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A text output from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3431,6 +5044,16 @@ pub struct EvalItemContentOutputText {
     pub type_: String,
     ///The text output from the model.
     pub text: String,
+}
+impl schematic_define::Registration for EvalItemContentOutputText {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalItemContentOutputText),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A text input to the model.
 pub type EvalItemContentText = String;
@@ -3447,6 +5070,14 @@ pub struct EvalItemInputImage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
+impl schematic_define::Registration for EvalItemInputImage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalItemInputImage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct EvalJsonlFileContentSource {
@@ -3456,6 +5087,16 @@ pub struct EvalJsonlFileContentSource {
     ///The content of the jsonl file.
     pub content: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for EvalJsonlFileContentSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalJsonlFileContentSource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct EvalJsonlFileIdSource {
@@ -3464,6 +5105,16 @@ pub struct EvalJsonlFileIdSource {
     pub type_: String,
     ///The identifier of the file.
     pub id: String,
+}
+impl schematic_define::Registration for EvalJsonlFileIdSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalJsonlFileIdSource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An object representing a list of evals.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3480,6 +5131,14 @@ pub struct EvalList {
     ///Indicates whether there are more evals available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for EvalList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalList));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A LogsDataSourceConfig which specifies the metadata property of your logs query.
 This is usually metadata like `usecase=chatbot` or `prompt-version=v2`, etc.
 The schema returned by this data source config is used to defined what variables are available in your evals.
@@ -3495,6 +5154,16 @@ pub struct EvalLogsDataSourceConfig {
     /**The json schema for the run data source items.
 Learn how to build JSON schemas [here](https://json-schema.org/).*/
     pub schema: serde_json::Value,
+}
+impl schematic_define::Registration for EvalLogsDataSourceConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalLogsDataSourceConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A EvalResponsesSource object describing a run data source configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3523,6 +5192,14 @@ pub struct EvalResponsesSource {
     pub users: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for EvalResponsesSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalResponsesSource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A schema representing an evaluation run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3555,6 +5232,14 @@ pub struct EvalRun {
     pub metadata: Metadata,
     pub error: EvalApiError,
 }
+impl schematic_define::Registration for EvalRun {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalRun));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An object representing a list of runs for an evaluation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3569,6 +5254,14 @@ pub struct EvalRunList {
     pub last_id: String,
     ///Indicates whether there are more evals available.
     pub has_more: bool,
+}
+impl schematic_define::Registration for EvalRunList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalRunList));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A schema representing an evaluation run output item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3595,6 +5288,14 @@ pub struct EvalRunOutputItem {
     ///A sample containing the input and output of the evaluation run.
     pub sample: serde_json::Value,
 }
+impl schematic_define::Registration for EvalRunOutputItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EvalRunOutputItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An object representing a list of output items for an evaluation run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3609,6 +5310,16 @@ pub struct EvalRunOutputItemList {
     pub last_id: String,
     ///Indicates whether there are more eval run output items available.
     pub has_more: bool,
+}
+impl schematic_define::Registration for EvalRunOutputItemList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalRunOutputItemList),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A single grader result for an evaluation run output item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3631,6 +5342,16 @@ pub struct EvalRunOutputItemResult {
     #[serde(flatten)]
     pub additional_properties: HashMap<String, serde_json::Value>,
 }
+impl schematic_define::Registration for EvalRunOutputItemResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalRunOutputItemResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Deprecated in favor of LogsDataSourceConfig.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3643,6 +5364,16 @@ pub struct EvalStoredCompletionsDataSourceConfig {
     /**The json schema for the run data source items.
 Learn how to build JSON schemas [here](https://json-schema.org/).*/
     pub schema: serde_json::Value,
+}
+impl schematic_define::Registration for EvalStoredCompletionsDataSourceConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalStoredCompletionsDataSourceConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A StoredCompletionsRunDataSource configuration describing a set of filters
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3662,6 +5393,16 @@ pub struct EvalStoredCompletionsSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for EvalStoredCompletionsSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(EvalStoredCompletionsSource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The expiration policy for a file. By default, files with `purpose=batch` expire after 30 days and all other files are persisted until they are manually deleted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3670,6 +5411,14 @@ pub struct FileExpirationAfter {
     pub anchor: String,
     ///The number of seconds after the anchor time that the file will expire. Must be between 3600 (1 hour) and 2592000 (30 days).
     pub seconds: i64,
+}
+impl schematic_define::Registration for FileExpirationAfter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileExpirationAfter));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A path to a file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3683,6 +5432,14 @@ pub struct FilePath {
     ///The index of the file in the list of files.
     pub index: i64,
 }
+impl schematic_define::Registration for FilePath {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FilePath));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The ranker to use for the file search. If not specified will use the `auto` ranker.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3692,6 +5449,14 @@ pub enum FileSearchRanker {
     Auto,
     #[serde(rename = "default_2024_08_21")]
     Default20240821,
+}
+impl schematic_define::Registration for FileSearchRanker {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileSearchRanker));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**The ranking options for the file search. If not specified, the file search tool will use the `auto` ranker and a score_threshold of 0.
 
@@ -3703,6 +5468,16 @@ pub struct FileSearchRankingOptions {
     pub ranker: Option<FileSearchRanker>,
     ///The score threshold for the file search. All values must be a floating point number between 0 and 1.
     pub score_threshold: f64,
+}
+impl schematic_define::Registration for FileSearchRankingOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FileSearchRankingOptions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**The results of a file search tool call. See the
 [file search guide](/docs/guides/tools-file-search) for more information.*/
@@ -3722,6 +5497,14 @@ pub struct FileSearchToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FileSearchToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileSearchToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 pub type FineTuneChatCompletionRequestAssistantMessage = serde_json::Value;
 ///The hyperparameters used for the DPO fine-tuning job.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3740,12 +5523,30 @@ pub struct FineTuneDPOHyperparameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n_epochs: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FineTuneDPOHyperparameters {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuneDPOHyperparameters),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Configuration for the DPO fine-tuning method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FineTuneDPOMethod {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hyperparameters: Option<FineTuneDPOHyperparameters>,
+}
+impl schematic_define::Registration for FineTuneDPOMethod {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FineTuneDPOMethod));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The method used for fine-tuning.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3760,6 +5561,14 @@ pub struct FineTuneMethod {
     pub dpo: Option<FineTuneDPOMethod>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reinforcement: Option<FineTuneReinforcementMethod>,
+}
+impl schematic_define::Registration for FineTuneMethod {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FineTuneMethod));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The hyperparameters used for the reinforcement fine-tuning job.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3787,6 +5596,16 @@ pub struct FineTuneReinforcementHyperparameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eval_samples: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FineTuneReinforcementHyperparameters {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuneReinforcementHyperparameters),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Configuration for the reinforcement fine-tuning method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3795,6 +5614,16 @@ pub struct FineTuneReinforcementMethod {
     pub grader: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hyperparameters: Option<FineTuneReinforcementHyperparameters>,
+}
+impl schematic_define::Registration for FineTuneReinforcementMethod {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuneReinforcementMethod),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The hyperparameters used for the fine-tuning job.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3810,12 +5639,32 @@ pub struct FineTuneSupervisedHyperparameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n_epochs: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FineTuneSupervisedHyperparameters {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuneSupervisedHyperparameters),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Configuration for the supervised fine-tuning method.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FineTuneSupervisedMethod {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hyperparameters: Option<FineTuneSupervisedHyperparameters>,
+}
+impl schematic_define::Registration for FineTuneSupervisedMethod {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuneSupervisedMethod),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The `checkpoint.permission` object represents a permission for a fine-tuned model checkpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3830,6 +5679,16 @@ pub struct FineTuningCheckpointPermission {
     ///The object type, which is always "checkpoint.permission".
     pub object: String,
 }
+impl schematic_define::Registration for FineTuningCheckpointPermission {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuningCheckpointPermission),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FineTuningIntegration {
@@ -3840,6 +5699,16 @@ pub struct FineTuningIntegration {
 metrics will be sent to. Optionally, you can set an explicit display name for your run, add tags
 to your run, and set a default entity (team, username, etc) to be associated with your run.*/
     pub wandb: serde_json::Value,
+}
+impl schematic_define::Registration for FineTuningIntegration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuningIntegration),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The `fine_tuning.job` object represents a fine-tuning job that has been created through the API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3879,6 +5748,14 @@ pub struct FineTuningJob {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
+impl schematic_define::Registration for FineTuningJob {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FineTuningJob));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The `fine_tuning.job.checkpoint` object represents a model checkpoint for a fine-tuning job that is ready to use.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3897,6 +5774,16 @@ pub struct FineTuningJobCheckpoint {
     pub fine_tuning_job_id: String,
     ///The object type, which is always "fine_tuning.job.checkpoint".
     pub object: String,
+}
+impl schematic_define::Registration for FineTuningJobCheckpoint {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FineTuningJobCheckpoint),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Fine-tuning job event object
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3920,6 +5807,14 @@ pub struct FineTuningJobEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FineTuningJobEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FineTuningJobEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -3932,6 +5827,16 @@ pub enum FunctionAndCustomToolCallOutput {
 impl Default for FunctionAndCustomToolCallOutput {
     fn default() -> Self {
         Self::InputTextContent(Default::default())
+    }
+}
+impl schematic_define::Registration for FunctionAndCustomToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionAndCustomToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3947,6 +5852,14 @@ pub struct FunctionObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FunctionObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**The parameters the functions accepts, described as a JSON Schema object. See the [guide](/docs/guides/function-calling) for examples, and the [JSON Schema reference](https://json-schema.org/understanding-json-schema/) for documentation about the format.
 
 Omitting `parameters` defines a function with an empty parameter list.*/
@@ -3956,6 +5869,14 @@ pub struct FunctionParameters {
     /// Additional properties not captured by named fields.
     #[serde(flatten)]
     pub additional_properties: HashMap<String, serde_json::Value>,
+}
+impl schematic_define::Registration for FunctionParameters {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionParameters));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A tool call to run a function. See the
 [function calling guide](/docs/guides/function-calling) for more information.*/
@@ -3983,6 +5904,14 @@ pub struct FunctionToolCall {
 `incomplete`. Populated when items are returned via API.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+}
+impl schematic_define::Registration for FunctionToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a function tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4013,6 +5942,16 @@ Can be a string or an list of output content.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
+impl schematic_define::Registration for FunctionToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FunctionToolCallOutputResource {
@@ -4021,6 +5960,16 @@ pub struct FunctionToolCallOutputResource {
     #[serde(flatten)]
     pub json: serde_json::Value,
 }
+impl schematic_define::Registration for FunctionToolCallOutputResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionToolCallOutputResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FunctionToolCallResource {
@@ -4028,6 +5977,16 @@ pub struct FunctionToolCallResource {
     pub function_tool_call: FunctionToolCall,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for FunctionToolCallResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionToolCallResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A LabelModelGrader object which uses a model to assign labels to each item
 in the evaluation.*/
@@ -4047,6 +6006,14 @@ pub struct GraderLabelModel {
     ///The labels that indicate a passing result. Must be a subset of labels.
     pub passing_labels: Vec<String>,
 }
+impl schematic_define::Registration for GraderLabelModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderLabelModel));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A MultiGrader object combines the output of multiple graders to produce a single score.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4059,6 +6026,14 @@ pub struct GraderMulti {
     pub graders: serde_json::Value,
     ///A formula to calculate the output based on grader results.
     pub calculate_output: String,
+}
+impl schematic_define::Registration for GraderMulti {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderMulti));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A PythonGrader object that runs a python script on the input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4074,6 +6049,14 @@ pub struct GraderPython {
     ///The image tag to use for the python script.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_tag: Option<String>,
+}
+impl schematic_define::Registration for GraderPython {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderPython));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A ScoreModelGrader object that uses a model to assign a score to the input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4095,6 +6078,14 @@ pub struct GraderScoreModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub range: Option<Vec<f64>>,
 }
+impl schematic_define::Registration for GraderScoreModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderScoreModel));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A StringCheckGrader object that performs a string comparison between input and reference using a specified operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4110,6 +6101,14 @@ pub struct GraderStringCheck {
     pub reference: String,
     ///The string check operation to perform. One of `eq`, `ne`, `like`, or `ilike`.
     pub operation: String,
+}
+impl schematic_define::Registration for GraderStringCheck {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderStringCheck));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A TextSimilarityGrader object which grades text based on similarity metrics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4129,6 +6128,14 @@ pub struct GraderTextSimilarity {
 or `rouge_l`.*/
     pub evaluation_metric: String,
 }
+impl schematic_define::Registration for GraderTextSimilarity {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GraderTextSimilarity));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Summary information about a group returned in role assignment responses.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4144,6 +6151,14 @@ pub struct Group {
     ///Whether the group is managed through SCIM.
     pub scim_managed: bool,
 }
+impl schematic_define::Registration for Group {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Group));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting a group.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4154,6 +6169,14 @@ pub struct GroupDeletedResource {
     pub id: String,
     ///Whether the group was deleted.
     pub deleted: bool,
+}
+impl schematic_define::Registration for GroupDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GroupDeletedResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Paginated list of organization groups.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4167,6 +6190,14 @@ pub struct GroupListResource {
     pub has_more: bool,
     ///Cursor to fetch the next page of results, or `null` if there are no more results.
     pub next: serde_json::Value,
+}
+impl schematic_define::Registration for GroupListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GroupListResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Details about a user returned from an organization group membership lookup.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4185,6 +6216,14 @@ pub struct GroupMemberUser {
     ///The type of user.
     pub user_type: String,
 }
+impl schematic_define::Registration for GroupMemberUser {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GroupMemberUser));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Response returned after updating a group.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4197,6 +6236,16 @@ pub struct GroupResourceWithSuccess {
     pub created_at: i64,
     ///Whether the group is managed through SCIM and controlled by your identity provider.
     pub is_scim_managed: bool,
+}
+impl schematic_define::Registration for GroupResourceWithSuccess {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(GroupResourceWithSuccess),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Details about an organization group.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4213,6 +6262,14 @@ pub struct GroupResponse {
     ///The type of the group.
     pub group_type: String,
 }
+impl schematic_define::Registration for GroupResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GroupResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Role assignment linking a group to a role.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4221,6 +6278,14 @@ pub struct GroupRoleAssignment {
     pub object: String,
     pub group: Group,
     pub role: Role,
+}
+impl schematic_define::Registration for GroupRoleAssignment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GroupRoleAssignment));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents an individual user returned when inspecting group membership.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4233,6 +6298,14 @@ pub struct GroupUser {
     ///The email address of the user.
     pub email: serde_json::Value,
 }
+impl schematic_define::Registration for GroupUser {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GroupUser));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after adding a user to a group.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4244,6 +6317,14 @@ pub struct GroupUserAssignment {
     ///Identifier of the group the user was added to.
     pub group_id: String,
 }
+impl schematic_define::Registration for GroupUserAssignment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GroupUserAssignment));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after removing a user from a group.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4253,6 +6334,16 @@ pub struct GroupUserDeletedResource {
     ///Whether the group membership was removed.
     pub deleted: bool,
 }
+impl schematic_define::Registration for GroupUserDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(GroupUserDeletedResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Permission state for a single hosted tool on a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4260,11 +6351,29 @@ pub struct HostedToolPermission {
     ///Whether the hosted tool is enabled for the project.
     pub enabled: bool,
 }
+impl schematic_define::Registration for HostedToolPermission {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(HostedToolPermission));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct HostedToolPermissionUpdate {
     ///Whether to enable the hosted tool for the project.
     pub enabled: bool,
+}
+impl schematic_define::Registration for HostedToolPermissionUpdate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(HostedToolPermissionUpdate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents the content or the URL of an image generated by the OpenAI API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4279,6 +6388,14 @@ pub struct Image {
     ///For `dall-e-3` only, the revised prompt that was used to generate the image.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revised_prompt: Option<String>,
+}
+impl schematic_define::Registration for Image {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Image));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when image editing has completed and the final image is available.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4300,6 +6417,16 @@ pub struct ImageEditCompletedEvent {
     ///The output format for the edited image.
     pub output_format: String,
     pub usage: ImagesUsage,
+}
+impl schematic_define::Registration for ImageEditCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ImageEditCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a partial image is available during image editing streaming.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4323,6 +6450,16 @@ pub struct ImageEditPartialImageEvent {
     ///0-based index for the partial image (streaming).
     pub partial_image_index: i64,
 }
+impl schematic_define::Registration for ImageEditPartialImageEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ImageEditPartialImageEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4334,6 +6471,14 @@ pub enum ImageEditStreamEvent {
 impl Default for ImageEditStreamEvent {
     fn default() -> Self {
         Self::ImageEditPartialImageEvent(Default::default())
+    }
+}
+impl schematic_define::Registration for ImageEditStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageEditStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Emitted when image generation has completed and the final image is available.
@@ -4357,6 +6502,16 @@ pub struct ImageGenCompletedEvent {
     pub output_format: String,
     pub usage: ImagesUsage,
 }
+impl schematic_define::Registration for ImageGenCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ImageGenCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a partial image is available during image generation streaming.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4379,6 +6534,16 @@ pub struct ImageGenPartialImageEvent {
     ///0-based index for the partial image (streaming).
     pub partial_image_index: i64,
 }
+impl schematic_define::Registration for ImageGenPartialImageEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ImageGenPartialImageEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4390,6 +6555,14 @@ pub enum ImageGenStreamEvent {
 impl Default for ImageGenStreamEvent {
     fn default() -> Self {
         Self::ImageGenPartialImageEvent(Default::default())
+    }
+}
+impl schematic_define::Registration for ImageGenStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageGenStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A tool that generates images using the GPT image models.
@@ -4434,6 +6607,14 @@ or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<ImageGenActionEnum>,
 }
+impl schematic_define::Registration for ImageGenTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageGenTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An image generation request made by the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4447,6 +6628,14 @@ pub struct ImageGenToolCall {
     pub status: String,
     pub result: serde_json::Value,
 }
+impl schematic_define::Registration for ImageGenToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageGenToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Reference an input image by either URL or uploaded file ID.
 Provide exactly one of `image_url` or `file_id`.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4458,6 +6647,14 @@ pub struct ImageRefParam {
     ///The File API ID of an uploaded image to use as input.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<String>,
+}
+impl schematic_define::Registration for ImageRefParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageRefParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The response from the image generation endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4483,6 +6680,14 @@ pub struct ImagesResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<ImageGenUsage>,
 }
+impl schematic_define::Registration for ImagesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImagesResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///For the GPT image models only, the token usage information for the image generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4496,6 +6701,14 @@ pub struct ImagesUsage {
     ///The input tokens detailed information for the image generation.
     pub input_tokens_details: serde_json::Value,
 }
+impl schematic_define::Registration for ImagesUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImagesUsage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An audio input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4504,6 +6717,14 @@ pub struct InputAudio {
     #[serde(rename = "type")]
     pub type_: String,
     pub input_audio: serde_json::Value,
+}
+impl schematic_define::Registration for InputAudio {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputAudio));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4517,6 +6738,14 @@ pub enum InputContent {
 impl Default for InputContent {
     fn default() -> Self {
         Self::InputTextContent(Default::default())
+    }
+}
+impl schematic_define::Registration for InputContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[allow(clippy::large_enum_variant)]
@@ -4534,6 +6763,14 @@ pub enum InputItem {
 impl Default for InputItem {
     fn default() -> Self {
         Self::EasyInputMessage(Default::default())
+    }
+}
+impl schematic_define::Registration for InputItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**A message input to the model with a role indicating instruction following
@@ -4554,6 +6791,14 @@ pub struct InputMessage {
     pub status: Option<String>,
     pub content: InputMessageContentList,
 }
+impl schematic_define::Registration for InputMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A list of one or many input items to the model, containing different content
 types.*/
 pub type InputMessageContentList = Vec<InputContent>;
@@ -4564,6 +6809,14 @@ pub struct InputMessageResource {
     pub input_message: InputMessage,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for InputMessageResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputMessageResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Text, image, or file inputs to the model, used to generate a response.
 
@@ -4584,6 +6837,14 @@ pub enum InputParam {
 impl Default for InputParam {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for InputParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Represents an individual `invite` to the organization.
@@ -4611,6 +6872,14 @@ pub struct Invite {
     ///The projects that were granted membership upon acceptance of the invite.
     pub projects: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for Invite {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Invite));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct InviteDeleteResponse {
@@ -4618,6 +6887,14 @@ pub struct InviteDeleteResponse {
     pub object: String,
     pub id: String,
     pub deleted: bool,
+}
+impl schematic_define::Registration for InviteDeleteResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InviteDeleteResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4634,6 +6911,14 @@ pub struct InviteListResponse {
     ///The `has_more` property is used for pagination to indicate there are additional results.
     pub has_more: bool,
 }
+impl schematic_define::Registration for InviteListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InviteListResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Request payload for granting a group access to a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4642,6 +6927,16 @@ pub struct InviteProjectGroupBody {
     pub group_id: String,
     ///Identifier of the project role to grant to the group.
     pub role: String,
+}
+impl schematic_define::Registration for InviteProjectGroupBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(InviteProjectGroupBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4653,6 +6948,14 @@ pub struct InviteRequest {
     ///An array of projects to which membership is granted at the same time the org invite is accepted. If omitted, the user will be invited to the default project for compatibility with legacy behavior. If empty list is passed, the user will not be invited to any projects, including the default one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projects: Option<Vec<serde_json::Value>>,
+}
+impl schematic_define::Registration for InviteRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InviteRequest));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Content item used to generate a response.
 pub type Item = serde_json::Value;
@@ -4697,6 +7000,14 @@ impl Default for ItemResource {
         Self::InputMessageResource(Default::default())
     }
 }
+impl schematic_define::Registration for ItemResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ItemResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListAssistantsResponse {
@@ -4705,6 +7016,16 @@ pub struct ListAssistantsResponse {
     pub first_id: String,
     pub last_id: String,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ListAssistantsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListAssistantsResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4717,6 +7038,16 @@ pub struct ListAuditLogsResponse {
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
 }
+impl schematic_define::Registration for ListAuditLogsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListAuditLogsResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListBatchesResponse {
@@ -4728,6 +7059,14 @@ pub struct ListBatchesResponse {
     pub has_more: bool,
     pub object: String,
 }
+impl schematic_define::Registration for ListBatchesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ListBatchesResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListCertificatesResponse {
@@ -4737,6 +7076,16 @@ pub struct ListCertificatesResponse {
     pub has_more: bool,
     pub object: String,
 }
+impl schematic_define::Registration for ListCertificatesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListCertificatesResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListFilesResponse {
@@ -4745,6 +7094,14 @@ pub struct ListFilesResponse {
     pub first_id: String,
     pub last_id: String,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ListFilesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ListFilesResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4757,6 +7114,16 @@ pub struct ListFineTuningCheckpointPermissionResponse {
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
 }
+impl schematic_define::Registration for ListFineTuningCheckpointPermissionResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListFineTuningCheckpointPermissionResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListFineTuningJobCheckpointsResponse {
@@ -4768,12 +7135,32 @@ pub struct ListFineTuningJobCheckpointsResponse {
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
 }
+impl schematic_define::Registration for ListFineTuningJobCheckpointsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListFineTuningJobCheckpointsResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListFineTuningJobEventsResponse {
     pub data: Vec<FineTuningJobEvent>,
     pub object: String,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ListFineTuningJobEventsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListFineTuningJobEventsResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4784,11 +7171,27 @@ pub struct ListMessagesResponse {
     pub last_id: String,
     pub has_more: bool,
 }
+impl schematic_define::Registration for ListMessagesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ListMessagesResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListModelsResponse {
     pub object: String,
     pub data: Vec<Model>,
+}
+impl schematic_define::Registration for ListModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ListModelsResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4796,6 +7199,16 @@ pub struct ListPaginatedFineTuningJobsResponse {
     pub data: Vec<FineTuningJob>,
     pub has_more: bool,
     pub object: String,
+}
+impl schematic_define::Registration for ListPaginatedFineTuningJobsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListPaginatedFineTuningJobsResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4806,6 +7219,16 @@ pub struct ListProjectCertificatesResponse {
     pub has_more: bool,
     pub object: String,
 }
+impl schematic_define::Registration for ListProjectCertificatesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListProjectCertificatesResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListRunStepsResponse {
@@ -4814,6 +7237,14 @@ pub struct ListRunStepsResponse {
     pub first_id: String,
     pub last_id: String,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ListRunStepsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ListRunStepsResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4824,6 +7255,14 @@ pub struct ListRunsResponse {
     pub last_id: String,
     pub has_more: bool,
 }
+impl schematic_define::Registration for ListRunsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ListRunsResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListVectorStoreFilesResponse {
@@ -4833,6 +7272,16 @@ pub struct ListVectorStoreFilesResponse {
     pub last_id: String,
     pub has_more: bool,
 }
+impl schematic_define::Registration for ListVectorStoreFilesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListVectorStoreFilesResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ListVectorStoresResponse {
@@ -4841,6 +7290,16 @@ pub struct ListVectorStoresResponse {
     pub first_id: String,
     pub last_id: String,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ListVectorStoresResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ListVectorStoresResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call to run a command on the local shell.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4857,6 +7316,14 @@ pub struct LocalShellToolCall {
     ///The status of the local shell call.
     pub status: String,
 }
+impl schematic_define::Registration for LocalShellToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(LocalShellToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The output of a local shell tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4871,6 +7338,16 @@ pub struct LocalShellToolCallOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for LocalShellToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(LocalShellToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A log probability object.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4881,6 +7358,14 @@ pub struct LogProbProperties {
     pub logprob: f64,
     ///The bytes that were used to generate the log probability.
     pub bytes: Vec<i64>,
+}
+impl schematic_define::Registration for LogProbProperties {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(LogProbProperties));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A request for human approval of a tool invocation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4898,6 +7383,14 @@ pub struct MCPApprovalRequest {
     ///A JSON string of arguments for the tool.
     pub arguments: String,
 }
+impl schematic_define::Registration for MCPApprovalRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPApprovalRequest));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A response to an MCP approval request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4913,6 +7406,14 @@ pub struct MCPApprovalResponse {
     pub approve: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for MCPApprovalResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPApprovalResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A response to an MCP approval request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -4930,6 +7431,16 @@ pub struct MCPApprovalResponseResource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MCPApprovalResponseResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MCPApprovalResponseResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A list of tools available on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4946,6 +7457,14 @@ pub struct MCPListTools {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MCPListTools {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPListTools));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool available on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -4958,6 +7477,14 @@ pub struct MCPListToolsTool {
     pub input_schema: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for MCPListToolsTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPListToolsTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Give the model access to additional tools via remote Model Context Protocol
 (MCP) servers. [Learn more about MCP](/docs/guides/tools-remote-mcp).*/
@@ -5013,6 +7540,14 @@ must handle the OAuth authorization flow and provide the token here.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
 }
+impl schematic_define::Registration for MCPTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An invocation of a tool on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5037,6 +7572,14 @@ pub struct MCPToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_request_id: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MCPToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A filter object to specify which tools are allowed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5050,6 +7593,14 @@ it will match this filter.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
 }
+impl schematic_define::Registration for MCPToolFilter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPToolFilter));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///References an image [File](/docs/api-reference/files) in the content of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5058,6 +7609,16 @@ pub struct MessageContentImageFileObject {
     #[serde(rename = "type")]
     pub type_: String,
     pub image_file: serde_json::Value,
+}
+impl schematic_define::Registration for MessageContentImageFileObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageContentImageFileObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///References an image URL in the content of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5068,6 +7629,16 @@ pub struct MessageContentImageUrlObject {
     pub type_: String,
     pub image_url: serde_json::Value,
 }
+impl schematic_define::Registration for MessageContentImageUrlObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageContentImageUrlObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The refusal content generated by the assistant.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5076,6 +7647,16 @@ pub struct MessageContentRefusalObject {
     #[serde(rename = "type")]
     pub type_: String,
     pub refusal: String,
+}
+impl schematic_define::Registration for MessageContentRefusalObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageContentRefusalObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A citation within the message that points to a specific quote from a specific File associated with the assistant or the message. Generated when the assistant uses the "file_search" tool to search files.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5090,6 +7671,16 @@ pub struct MessageContentTextAnnotationsFileCitationObject {
     pub start_index: i64,
     pub end_index: i64,
 }
+impl schematic_define::Registration for MessageContentTextAnnotationsFileCitationObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageContentTextAnnotationsFileCitationObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A URL for the file that's generated when the assistant used the `code_interpreter` tool to generate a file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5103,6 +7694,16 @@ pub struct MessageContentTextAnnotationsFilePathObject {
     pub start_index: i64,
     pub end_index: i64,
 }
+impl schematic_define::Registration for MessageContentTextAnnotationsFilePathObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageContentTextAnnotationsFilePathObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The text content that is part of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5111,6 +7712,16 @@ pub struct MessageContentTextObject {
     #[serde(rename = "type")]
     pub type_: String,
     pub text: serde_json::Value,
+}
+impl schematic_define::Registration for MessageContentTextObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageContentTextObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///References an image [File](/docs/api-reference/files) in the content of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5124,6 +7735,16 @@ pub struct MessageDeltaContentImageFileObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_file: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MessageDeltaContentImageFileObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageDeltaContentImageFileObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///References an image URL in the content of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5136,6 +7757,16 @@ pub struct MessageDeltaContentImageUrlObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MessageDeltaContentImageUrlObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageDeltaContentImageUrlObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The refusal content that is part of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5147,6 +7778,16 @@ pub struct MessageDeltaContentRefusalObject {
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+}
+impl schematic_define::Registration for MessageDeltaContentRefusalObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageDeltaContentRefusalObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A citation within the message that points to a specific quote from a specific File associated with the assistant or the message. Generated when the assistant uses the "file_search" tool to search files.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5167,6 +7808,17 @@ pub struct MessageDeltaContentTextAnnotationsFileCitationObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_index: Option<i64>,
 }
+impl schematic_define::Registration
+for MessageDeltaContentTextAnnotationsFileCitationObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageDeltaContentTextAnnotationsFileCitationObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A URL for the file that's generated when the assistant used the `code_interpreter` tool to generate a file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5186,6 +7838,17 @@ pub struct MessageDeltaContentTextAnnotationsFilePathObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_index: Option<i64>,
 }
+impl schematic_define::Registration
+for MessageDeltaContentTextAnnotationsFilePathObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageDeltaContentTextAnnotationsFilePathObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The text content that is part of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5198,6 +7861,16 @@ pub struct MessageDeltaContentTextObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MessageDeltaContentTextObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageDeltaContentTextObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents a message delta i.e. any changed fields on a message during streaming.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5208,6 +7881,14 @@ pub struct MessageDeltaObject {
     pub object: String,
     ///The delta containing the fields that have changed on the Message.
     pub delta: serde_json::Value,
+}
+impl schematic_define::Registration for MessageDeltaObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessageDeltaObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a message within a [thread](/docs/api-reference/threads).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5235,6 +7916,14 @@ pub struct MessageObject {
     pub attachments: serde_json::Value,
     pub metadata: Metadata,
 }
+impl schematic_define::Registration for MessageObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessageObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Labels an `assistant` message as intermediate commentary (`commentary`) or the final answer (`final_answer`).
 For models like `gpt-5.3-codex` and beyond, when sending follow-up requests, preserve and resend
 phase on all assistant messages — dropping it can degrade performance. Not used for user messages.*/
@@ -5247,6 +7936,14 @@ pub enum MessagePhase {
     #[serde(rename = "final_answer")]
     FinalAnswer,
 }
+impl schematic_define::Registration for MessagePhase {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessagePhase));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The text content that is part of a message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5256,6 +7953,16 @@ pub struct MessageRequestContentTextObject {
     pub type_: String,
     ///Text content to be sent to the model
     pub text: String,
+}
+impl schematic_define::Registration for MessageRequestContentTextObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(MessageRequestContentTextObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5273,6 +7980,14 @@ impl Default for MessageStreamEvent {
         Self::Json(Default::default())
     }
 }
+impl schematic_define::Registration for MessageStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessageStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5284,6 +7999,14 @@ pub enum Metadata {
 impl Default for Metadata {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for Metadata {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Metadata));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Describes an OpenAI model offering that can be used with the API.
@@ -5299,6 +8022,14 @@ pub struct Model {
     ///The organization that owns the model.
     pub owned_by: String,
 }
+impl schematic_define::Registration for Model {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Model));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5310,6 +8041,14 @@ pub enum ModelIds {
 impl Default for ModelIds {
     fn default() -> Self {
         Self::ModelIdsShared(Default::default())
+    }
+}
+impl schematic_define::Registration for ModelIds {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModelIds));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Model ID used to generate the response, like `gpt-5` or `o3`. OpenAI offers a wide range of models with different capabilities, performance characteristics, and price points. Refer to the [model guide](/docs/models) to browse and compare available models.
@@ -5327,6 +8066,14 @@ impl Default for ModelIdsCompaction {
         Self::ModelIdsResponses(Default::default())
     }
 }
+impl schematic_define::Registration for ModelIdsCompaction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModelIdsCompaction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5340,6 +8087,14 @@ impl Default for ModelIdsResponses {
         Self::ModelIdsShared(Default::default())
     }
 }
+impl schematic_define::Registration for ModelIdsResponses {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModelIdsResponses));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5351,6 +8106,14 @@ pub enum ModelIdsShared {
 impl Default for ModelIdsShared {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for ModelIdsShared {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModelIdsShared));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5377,6 +8140,16 @@ Used to boost cache hit rates by better bucketing similar requests and  to help 
     pub service_tier: Option<ServiceTier>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_retention: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ModelResponseProperties {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ModelResponseProperties),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5406,6 +8179,16 @@ pub struct ModifyAssistantRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ModifyAssistantRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ModifyAssistantRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ModifyCertificateRequest2 {
@@ -5413,17 +8196,45 @@ pub struct ModifyCertificateRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
+impl schematic_define::Registration for ModifyCertificateRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ModifyCertificateRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ModifyMessageRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
+impl schematic_define::Registration for ModifyMessageRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ModifyMessageRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ModifyRunRequest2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+impl schematic_define::Registration for ModifyRunRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModifyRunRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5432,6 +8243,14 @@ pub struct ModifyThreadRequest2 {
     pub tool_resources: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+impl schematic_define::Registration for ModifyThreadRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModifyThreadRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Type of noise reduction. `near_field` is for close-talking microphones such as headphones, `far_field` is for far-field microphones such as laptop or conference room microphones.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5442,6 +8261,14 @@ pub enum NoiseReductionType {
     NearField,
     #[serde(rename = "far_field")]
     FarField,
+}
+impl schematic_define::Registration for NoiseReductionType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(NoiseReductionType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The `File` object represents a document that has been uploaded to OpenAI.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5468,6 +8295,14 @@ pub struct OpenAIFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_details: Option<String>,
 }
+impl schematic_define::Registration for OpenAIFile {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OpenAIFile));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents an individual certificate configured at the organization level.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5484,6 +8319,16 @@ pub struct OrganizationCertificate {
     ///Whether the certificate is currently active at the organization level.
     pub active: bool,
 }
+impl schematic_define::Registration for OrganizationCertificate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationCertificate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct OrganizationCertificateActivationResponse {
@@ -5491,12 +8336,32 @@ pub struct OrganizationCertificateActivationResponse {
     pub object: String,
     pub data: Vec<OrganizationCertificate>,
 }
+impl schematic_define::Registration for OrganizationCertificateActivationResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationCertificateActivationResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct OrganizationCertificateDeactivationResponse {
     ///The organization certificate deactivation result type.
     pub object: String,
     pub data: Vec<OrganizationCertificate>,
+}
+impl schematic_define::Registration for OrganizationCertificateDeactivationResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationCertificateDeactivationResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents the organization's data retention control setting.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5507,6 +8372,16 @@ pub struct OrganizationDataRetention {
     ///The configured organization data retention type.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for OrganizationDataRetention {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationDataRetention),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents an individual certificate configured at the project level.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5524,6 +8399,16 @@ pub struct OrganizationProjectCertificate {
     ///Whether the certificate is currently active at the project level.
     pub active: bool,
 }
+impl schematic_define::Registration for OrganizationProjectCertificate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationProjectCertificate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct OrganizationProjectCertificateActivationResponse {
@@ -5531,12 +8416,34 @@ pub struct OrganizationProjectCertificateActivationResponse {
     pub object: String,
     pub data: Vec<OrganizationProjectCertificate>,
 }
+impl schematic_define::Registration
+for OrganizationProjectCertificateActivationResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationProjectCertificateActivationResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct OrganizationProjectCertificateDeactivationResponse {
     ///The project certificate deactivation result type.
     pub object: String,
     pub data: Vec<OrganizationProjectCertificate>,
+}
+impl schematic_define::Registration
+for OrganizationProjectCertificateDeactivationResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationProjectCertificateDeactivationResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a spend alert configured at the organization level.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5554,6 +8461,16 @@ pub struct OrganizationSpendAlert {
     pub interval: String,
     pub notification_channel: SpendAlertNotificationChannel,
 }
+impl schematic_define::Registration for OrganizationSpendAlert {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationSpendAlert),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting an organization spend alert.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5564,6 +8481,16 @@ pub struct OrganizationSpendAlertDeletedResource {
     pub object: String,
     ///Whether the spend alert was deleted.
     pub deleted: bool,
+}
+impl schematic_define::Registration for OrganizationSpendAlertDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationSpendAlertDeletedResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Paginated list of organization spend alerts.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5580,6 +8507,16 @@ pub struct OrganizationSpendAlertListResource {
     ///Whether more spend alerts are available when paginating.
     pub has_more: bool,
 }
+impl schematic_define::Registration for OrganizationSpendAlertListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationSpendAlertListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///This is returned when the chunking strategy is unknown. Typically, this is because the file was indexed before the `chunking_strategy` concept was introduced in the API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5587,6 +8524,16 @@ pub struct OtherChunkingStrategyResponseParam {
     ///Always `other`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for OtherChunkingStrategyResponseParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OtherChunkingStrategyResponseParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An audio output from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5600,6 +8547,14 @@ pub struct OutputAudio {
     ///The transcript of the audio data from the model.
     pub transcript: String,
 }
+impl schematic_define::Registration for OutputAudio {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OutputAudio));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5612,6 +8567,14 @@ pub enum OutputContent {
 impl Default for OutputContent {
     fn default() -> Self {
         Self::OutputTextContent(Default::default())
+    }
+}
+impl schematic_define::Registration for OutputContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OutputContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[allow(clippy::large_enum_variant)]
@@ -5653,6 +8616,14 @@ impl Default for OutputItem {
         Self::OutputMessage(Default::default())
     }
 }
+impl schematic_define::Registration for OutputItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OutputItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An output message from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5672,6 +8643,14 @@ pub struct OutputMessage {
 `incomplete`. Populated when input items are returned via API.*/
     pub status: String,
 }
+impl schematic_define::Registration for OutputMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OutputMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5683,6 +8662,14 @@ pub enum OutputMessageContent {
 impl Default for OutputMessageContent {
     fn default() -> Self {
         Self::OutputTextContent(Default::default())
+    }
+}
+impl schematic_define::Registration for OutputMessageContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OutputMessageContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Whether to enable [parallel function calling](/docs/guides/function-calling#configuring-parallel-function-calling) during tool use.
@@ -5700,6 +8687,14 @@ impl Default for PartialImages {
         Self::Integer(Default::default())
     }
 }
+impl schematic_define::Registration for PartialImages {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PartialImages));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Static predicted output content, such as the content of a text file that is
 being regenerated.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5713,6 +8708,14 @@ currently always `content`.*/
 If generated tokens would match this content, the entire model response
 can be returned much more quickly.*/
     pub content: serde_json::Value,
+}
+impl schematic_define::Registration for PredictionContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PredictionContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents an individual project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5736,6 +8739,14 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_key_id: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for Project {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Project));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents an individual API key in a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5756,12 +8767,30 @@ pub struct ProjectApiKey {
     pub owner_project_access: String,
     pub owner: serde_json::Value,
 }
+impl schematic_define::Registration for ProjectApiKey {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectApiKey));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectApiKeyDeleteResponse {
     pub object: String,
     pub id: String,
     pub deleted: bool,
+}
+impl schematic_define::Registration for ProjectApiKeyDeleteResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectApiKeyDeleteResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5773,6 +8802,16 @@ pub struct ProjectApiKeyListResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ProjectApiKeyListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectApiKeyListResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The service account that owns a project API key.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5786,6 +8825,16 @@ pub struct ProjectApiKeyOwnerServiceAccount {
     pub created_at: i64,
     ///The service account's project role.
     pub role: String,
+}
+impl schematic_define::Registration for ProjectApiKeyOwnerServiceAccount {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectApiKeyOwnerServiceAccount),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The user that owns a project API key.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5802,6 +8851,16 @@ pub struct ProjectApiKeyOwnerUser {
     ///The user's project role.
     pub role: String,
 }
+impl schematic_define::Registration for ProjectApiKeyOwnerUser {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectApiKeyOwnerUser),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectCreateRequest {
@@ -5814,6 +8873,14 @@ pub struct ProjectCreateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_key_id: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ProjectCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectCreateRequest));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents a project's data retention control setting.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5823,6 +8890,14 @@ pub struct ProjectDataRetention {
     ///The configured project data retention type.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ProjectDataRetention {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectDataRetention));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Details about a group's membership in a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5841,6 +8916,14 @@ pub struct ProjectGroup {
     ///Unix timestamp (in seconds) when the group was granted project access.
     pub created_at: i64,
 }
+impl schematic_define::Registration for ProjectGroup {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectGroup));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after removing a group from a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5849,6 +8932,16 @@ pub struct ProjectGroupDeletedResource {
     pub object: String,
     ///Whether the group membership in the project was removed.
     pub deleted: bool,
+}
+impl schematic_define::Registration for ProjectGroupDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectGroupDeletedResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Paginated list of groups that have access to a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5863,6 +8956,16 @@ pub struct ProjectGroupListResource {
     ///Cursor to fetch the next page of results, or `null` when there are no more results.
     pub next: serde_json::Value,
 }
+impl schematic_define::Registration for ProjectGroupListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectGroupListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents hosted tool permissions for a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5872,6 +8975,16 @@ pub struct ProjectHostedToolPermissions {
     pub image_generation: HostedToolPermission,
     pub mcp: HostedToolPermission,
     pub code_interpreter: HostedToolPermission,
+}
+impl schematic_define::Registration for ProjectHostedToolPermissions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectHostedToolPermissions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5892,6 +9005,16 @@ pub struct ProjectHostedToolPermissionsUpdateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_interpreter: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ProjectHostedToolPermissionsUpdateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectHostedToolPermissionsUpdateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectListResponse {
@@ -5902,6 +9025,14 @@ pub struct ProjectListResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ProjectListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectListResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents the model allowlist or denylist policy for a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5914,6 +9045,16 @@ pub struct ProjectModelPermissions {
     ///The model IDs included in the model permissions policy.
     pub model_ids: Vec<String>,
 }
+impl schematic_define::Registration for ProjectModelPermissions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectModelPermissions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting project model permissions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5923,6 +9064,16 @@ pub struct ProjectModelPermissionsDeleteResponse {
     ///Whether the project model permissions were deleted.
     pub deleted: bool,
 }
+impl schematic_define::Registration for ProjectModelPermissionsDeleteResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectModelPermissionsDeleteResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectModelPermissionsUpdateRequest {
@@ -5930,6 +9081,16 @@ pub struct ProjectModelPermissionsUpdateRequest {
     pub mode: String,
     ///The model IDs included in this permissions policy.
     pub model_ids: Vec<String>,
+}
+impl schematic_define::Registration for ProjectModelPermissionsUpdateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectModelPermissionsUpdateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a project rate limit config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5958,6 +9119,14 @@ pub struct ProjectRateLimit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_1_day_max_input_tokens: Option<i64>,
 }
+impl schematic_define::Registration for ProjectRateLimit {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectRateLimit));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectRateLimitListResponse {
@@ -5968,6 +9137,16 @@ pub struct ProjectRateLimitListResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ProjectRateLimitListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectRateLimitListResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -5991,6 +9170,16 @@ pub struct ProjectRateLimitUpdateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_1_day_max_input_tokens: Option<i64>,
 }
+impl schematic_define::Registration for ProjectRateLimitUpdateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectRateLimitUpdateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents an individual service account in a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6006,6 +9195,16 @@ pub struct ProjectServiceAccount {
     ///The Unix timestamp (in seconds) of when the service account was created
     pub created_at: i64,
 }
+impl schematic_define::Registration for ProjectServiceAccount {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectServiceAccount),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccountApiKey {
@@ -6016,6 +9215,16 @@ pub struct ProjectServiceAccountApiKey {
     pub created_at: i64,
     pub id: String,
 }
+impl schematic_define::Registration for ProjectServiceAccountApiKey {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectServiceAccountApiKey),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccountCreateRequest {
@@ -6023,6 +9232,16 @@ pub struct ProjectServiceAccountCreateRequest {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub create_service_account_only: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ProjectServiceAccountCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectServiceAccountCreateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6035,12 +9254,32 @@ pub struct ProjectServiceAccountCreateResponse {
     pub created_at: i64,
     pub api_key: serde_json::Value,
 }
+impl schematic_define::Registration for ProjectServiceAccountCreateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectServiceAccountCreateResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectServiceAccountDeleteResponse {
     pub object: String,
     pub id: String,
     pub deleted: bool,
+}
+impl schematic_define::Registration for ProjectServiceAccountDeleteResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectServiceAccountDeleteResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6052,6 +9291,16 @@ pub struct ProjectServiceAccountListResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
+}
+impl schematic_define::Registration for ProjectServiceAccountListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectServiceAccountListResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a spend alert configured at the project level.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6069,6 +9318,14 @@ pub struct ProjectSpendAlert {
     pub interval: String,
     pub notification_channel: SpendAlertNotificationChannel,
 }
+impl schematic_define::Registration for ProjectSpendAlert {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectSpendAlert));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting a project spend alert.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6079,6 +9336,16 @@ pub struct ProjectSpendAlertDeletedResource {
     pub object: String,
     ///Whether the spend alert was deleted.
     pub deleted: bool,
+}
+impl schematic_define::Registration for ProjectSpendAlertDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectSpendAlertDeletedResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Paginated list of project spend alerts.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6095,6 +9362,16 @@ pub struct ProjectSpendAlertListResource {
     ///Whether more spend alerts are available when paginating.
     pub has_more: bool,
 }
+impl schematic_define::Registration for ProjectSpendAlertListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectSpendAlertListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectUpdateRequest {
@@ -6107,6 +9384,14 @@ pub struct ProjectUpdateRequest {
     ///Geography for the project.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub geography: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ProjectUpdateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectUpdateRequest));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents an individual user in a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6127,6 +9412,14 @@ pub struct ProjectUser {
     ///The Unix timestamp (in seconds) of when the project was added.
     pub added_at: i64,
 }
+impl schematic_define::Registration for ProjectUser {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProjectUser));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectUserCreateRequest {
@@ -6139,12 +9432,32 @@ pub struct ProjectUserCreateRequest {
     ///`owner` or `member`
     pub role: String,
 }
+impl schematic_define::Registration for ProjectUserCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectUserCreateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectUserDeleteResponse {
     pub object: String,
     pub id: String,
     pub deleted: bool,
+}
+impl schematic_define::Registration for ProjectUserDeleteResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectUserDeleteResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6157,12 +9470,32 @@ pub struct ProjectUserListResponse {
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
 }
+impl schematic_define::Registration for ProjectUserListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectUserListResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProjectUserUpdateRequest {
     ///`owner` or `member`
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ProjectUserUpdateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectUserUpdateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6177,12 +9510,30 @@ impl Default for Prompt {
         Self::Json(Default::default())
     }
 }
+impl schematic_define::Registration for Prompt {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Prompt));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Request payload for assigning a role to a group or user.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct PublicAssignOrganizationGroupRoleBody {
     ///Identifier of the role to assign.
     pub role_id: String,
+}
+impl schematic_define::Registration for PublicAssignOrganizationGroupRoleBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PublicAssignOrganizationGroupRoleBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Request payload for creating a custom role.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6196,6 +9547,16 @@ pub struct PublicCreateOrganizationRoleBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for PublicCreateOrganizationRoleBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PublicCreateOrganizationRoleBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Paginated list of roles available on an organization or project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6208,6 +9569,16 @@ pub struct PublicRoleListResource {
     pub has_more: bool,
     ///Cursor to fetch the next page of results, or `null` when there are no additional roles.
     pub next: serde_json::Value,
+}
+impl schematic_define::Registration for PublicRoleListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PublicRoleListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Request payload for updating an existing role.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6223,6 +9594,16 @@ pub struct PublicUpdateOrganizationRoleBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role_name: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for PublicUpdateOrganizationRoleBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PublicUpdateOrganizationRoleBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6235,6 +9616,14 @@ pub enum RealtimeAudioFormats {
 impl Default for RealtimeAudioFormats {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for RealtimeAudioFormats {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeAudioFormats));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**Add a new Item to the Conversation's context, including messages, function
@@ -6262,6 +9651,16 @@ ID cannot be found, an error will be returned and the item will not be added.*/
     pub previous_item_id: Option<String>,
     pub item: RealtimeConversationItem,
 }
+impl schematic_define::Registration for RealtimeBetaClientEventConversationItemCreate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventConversationItemCreate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event when you want to remove any item from the conversation
 history. The server will respond with a `conversation.item.deleted` event,
 unless the item does not exist in the conversation history, in which case the
@@ -6278,6 +9677,16 @@ pub struct RealtimeBetaClientEventConversationItemDelete {
     ///The ID of the item to delete.
     pub item_id: String,
 }
+impl schematic_define::Registration for RealtimeBetaClientEventConversationItemDelete {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventConversationItemDelete),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event when you want to retrieve the server's representation of a specific item in the conversation history. This is useful, for example, to inspect user audio after noise cancellation and VAD.
 The server will respond with a `conversation.item.retrieved` event,
 unless the item does not exist in the conversation history, in which case the
@@ -6293,6 +9702,16 @@ pub struct RealtimeBetaClientEventConversationItemRetrieve {
     pub type_: String,
     ///The ID of the item to retrieve.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeBetaClientEventConversationItemRetrieve {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventConversationItemRetrieve),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Send this event to truncate a previous assistant message’s audio. The server
 will produce audio faster than realtime, so this event is useful when the user
@@ -6324,6 +9743,16 @@ the audio_end_ms is greater than the actual audio duration, the server
 will respond with an error.*/
     pub audio_end_ms: i64,
 }
+impl schematic_define::Registration for RealtimeBetaClientEventConversationItemTruncate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventConversationItemTruncate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event to append audio bytes to the input audio buffer. The audio
 buffer is temporary storage you can write to and later commit. In Server VAD
 mode, the audio buffer is used to detect speech and the server will decide
@@ -6347,6 +9776,16 @@ pub struct RealtimeBetaClientEventInputAudioBufferAppend {
 `input_audio_format` field in the session configuration.*/
     pub audio: String,
 }
+impl schematic_define::Registration for RealtimeBetaClientEventInputAudioBufferAppend {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventInputAudioBufferAppend),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event to clear the audio bytes in the buffer. The server will
 respond with an `input_audio_buffer.cleared` event.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6358,6 +9797,16 @@ pub struct RealtimeBetaClientEventInputAudioBufferClear {
     ///The event type, must be `input_audio_buffer.clear`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeBetaClientEventInputAudioBufferClear {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventInputAudioBufferClear),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Send this event to commit the user input audio buffer, which will create a
 new user message item in the conversation. This event will produce an error
@@ -6379,6 +9828,16 @@ pub struct RealtimeBetaClientEventInputAudioBufferCommit {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for RealtimeBetaClientEventInputAudioBufferCommit {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventInputAudioBufferCommit),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[doc = "**WebRTC/SIP Only:** Emit to cut off the current audio response. This will trigger the server to\nstop generating audio and emit a `output_audio_buffer.cleared` event. This\nevent should be preceded by a `response.cancel` client event to stop the\ngeneration of the current response.\n[Learn more](/docs/guides/realtime-conversations#client-and-server-events-for-audio-in-webrtc)."]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6389,6 +9848,16 @@ pub struct RealtimeBetaClientEventOutputAudioBufferClear {
     ///The event type, must be `output_audio_buffer.clear`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeBetaClientEventOutputAudioBufferClear {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventOutputAudioBufferClear),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Send this event to cancel an in-progress response. The server will respond
 with a `response.done` event with a status of `response.status=cancelled`. If
@@ -6406,6 +9875,16 @@ pub struct RealtimeBetaClientEventResponseCancel {
 in-progress response in the default conversation.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
+}
+impl schematic_define::Registration for RealtimeBetaClientEventResponseCancel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventResponseCancel),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**This event instructs the server to create a Response, which means triggering
 model inference. When in Server VAD mode, the server will create Responses
@@ -6443,6 +9922,16 @@ pub struct RealtimeBetaClientEventResponseCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<RealtimeBetaResponseCreateParams>,
 }
+impl schematic_define::Registration for RealtimeBetaClientEventResponseCreate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventResponseCreate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event to update the session’s default configuration.
 The client may send this event at any time to update any field,
 except for `voice`. However, note that once a session has been
@@ -6464,6 +9953,16 @@ pub struct RealtimeBetaClientEventSessionUpdate {
     pub type_: String,
     pub session: RealtimeSessionCreateRequest,
 }
+impl schematic_define::Registration for RealtimeBetaClientEventSessionUpdate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventSessionUpdate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Send this event to update a transcription session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6475,6 +9974,17 @@ pub struct RealtimeBetaClientEventTranscriptionSessionUpdate {
     #[serde(rename = "type")]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateRequest,
+}
+impl schematic_define::Registration
+for RealtimeBetaClientEventTranscriptionSessionUpdate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaClientEventTranscriptionSessionUpdate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The response resource.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6530,6 +10040,14 @@ could be responding in either text or audio.*/
 inclusive of tool calls, that was used in this response.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for RealtimeBetaResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeBetaResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Create a new Realtime response with these parameters
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6592,6 +10110,16 @@ Note that this can include references to items from the default conversation.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<Vec<RealtimeConversationItem>>,
 }
+impl schematic_define::Registration for RealtimeBetaResponseCreateParams {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaResponseCreateParams),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a conversation item is created. There are several scenarios that produce this event:
   - The server is generating a Response, which if successful will produce
     either one or two Items, which will be of type `message`
@@ -6613,6 +10141,16 @@ pub struct RealtimeBetaServerEventConversationItemCreated {
     pub previous_item_id: Option<serde_json::Value>,
     pub item: RealtimeConversationItem,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventConversationItemCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventConversationItemCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when an item in the conversation is deleted by the client with a
 `conversation.item.delete` event. This event is used to synchronize the
 server's understanding of the conversation history with the client's view.*/
@@ -6626,6 +10164,16 @@ pub struct RealtimeBetaServerEventConversationItemDeleted {
     pub type_: String,
     ///The ID of the item that was deleted.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventConversationItemDeleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventConversationItemDeleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**This event is the output of audio transcription for user audio written to the
 user audio buffer. Transcription begins when the input audio buffer is
@@ -6660,6 +10208,19 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionComplet
     ///Usage statistics for the transcription.
     pub usage: serde_json::Value,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(
+            RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted
+        ),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when the text value of an input audio transcription content part is updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6680,6 +10241,17 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<serde_json::Value>,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventConversationItemInputAudioTranscriptionDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventConversationItemInputAudioTranscriptionDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when input audio transcription is configured, and a transcription
 request for a user message failed. These events are separate from other
 `error` events so that the client can identify the related Item.*/
@@ -6698,6 +10270,17 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionFailed 
     pub content_index: i64,
     ///Details of the transcription error.
     pub error: serde_json::Value,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventConversationItemInputAudioTranscriptionFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventConversationItemInputAudioTranscriptionFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when an input audio transcription segment is identified for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6723,6 +10306,17 @@ pub struct RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment
     ///End time of the segment in seconds.
     pub end: f64,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when a conversation item is retrieved with `conversation.item.retrieve`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6733,6 +10327,17 @@ pub struct RealtimeBetaServerEventConversationItemRetrieved {
     #[serde(rename = "type")]
     pub type_: String,
     pub item: RealtimeConversationItem,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventConversationItemRetrieved {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventConversationItemRetrieved),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when an earlier assistant audio message item is truncated by the
 client with a `conversation.item.truncate` event. This event is used to
@@ -6755,6 +10360,17 @@ pub struct RealtimeBetaServerEventConversationItemTruncated {
     ///The duration up to which the audio was truncated, in milliseconds.
     pub audio_end_ms: i64,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventConversationItemTruncated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventConversationItemTruncated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when an error occurs, which could be a client problem or a server
 problem. Most errors are recoverable and the session will stay open, we
 recommend to implementors to monitor and log error messages by default.*/
@@ -6769,6 +10385,16 @@ pub struct RealtimeBetaServerEventError {
     ///Details of the error.
     pub error: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventError),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when the input audio buffer is cleared by the client with a
 `input_audio_buffer.clear` event.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6779,6 +10405,16 @@ pub struct RealtimeBetaServerEventInputAudioBufferCleared {
     ///The event type, must be `input_audio_buffer.cleared`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventInputAudioBufferCleared {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventInputAudioBufferCleared),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when an input audio buffer is committed, either by the client or
 automatically in server VAD mode. The `item_id` property is the ID of the user
@@ -6796,6 +10432,17 @@ pub struct RealtimeBetaServerEventInputAudioBufferCommitted {
     pub previous_item_id: Option<serde_json::Value>,
     ///The ID of the user message item that will be created.
     pub item_id: String,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventInputAudioBufferCommitted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventInputAudioBufferCommitted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Sent by the server when in `server_vad` mode to indicate that speech has been
 detected in the audio buffer. This can happen any time audio is added to the
@@ -6823,6 +10470,17 @@ beginning of audio sent to the model, and thus includes the
     ///The ID of the user message item that will be created when speech stops.
     pub item_id: String,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventInputAudioBufferSpeechStarted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventInputAudioBufferSpeechStarted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned in `server_vad` mode when the server detects the end of speech in
 the audio buffer. The server will also send an `conversation.item.created`
 event with the user message item that is created from the audio buffer.*/
@@ -6841,6 +10499,17 @@ correspond to the end of audio sent to the model, and thus includes the
     ///The ID of the user message item that will be created.
     pub item_id: String,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventInputAudioBufferSpeechStopped {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventInputAudioBufferSpeechStopped),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when listing MCP tools has completed for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6852,6 +10521,16 @@ pub struct RealtimeBetaServerEventMCPListToolsCompleted {
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventMCPListToolsCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventMCPListToolsCompleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when listing MCP tools has failed for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6865,6 +10544,16 @@ pub struct RealtimeBetaServerEventMCPListToolsFailed {
     ///The ID of the MCP list tools item.
     pub item_id: String,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventMCPListToolsFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventMCPListToolsFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when listing MCP tools is in progress for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -6876,6 +10565,16 @@ pub struct RealtimeBetaServerEventMCPListToolsInProgress {
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventMCPListToolsInProgress {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventMCPListToolsInProgress),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Emitted at the beginning of a Response to indicate the updated rate limits.
 When a Response is created some tokens will be "reserved" for the output
@@ -6891,6 +10590,16 @@ pub struct RealtimeBetaServerEventRateLimitsUpdated {
     pub type_: String,
     ///List of rate limit information.
     pub rate_limits: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventRateLimitsUpdated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventRateLimitsUpdated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when the model-generated audio is updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6912,6 +10621,16 @@ pub struct RealtimeBetaServerEventResponseAudioDelta {
     ///Base64-encoded audio data delta.
     pub delta: String,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventResponseAudioDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseAudioDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when the model-generated audio is done. Also emitted when a Response
 is interrupted, incomplete, or cancelled.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6930,6 +10649,16 @@ pub struct RealtimeBetaServerEventResponseAudioDone {
     pub output_index: i64,
     ///The index of the content part in the item's content array.
     pub content_index: i64,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventResponseAudioDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseAudioDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when the model-generated transcription of audio output is updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6950,6 +10679,17 @@ pub struct RealtimeBetaServerEventResponseAudioTranscriptDelta {
     pub content_index: i64,
     ///The transcript delta.
     pub delta: String,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventResponseAudioTranscriptDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseAudioTranscriptDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when the model-generated transcription of audio output is done
 streaming. Also emitted when a Response is interrupted, incomplete, or
@@ -6973,6 +10713,17 @@ pub struct RealtimeBetaServerEventResponseAudioTranscriptDone {
     ///The final transcript of the audio.
     pub transcript: String,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventResponseAudioTranscriptDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseAudioTranscriptDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a new content part is added to an assistant message item during
 response generation.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -6993,6 +10744,16 @@ pub struct RealtimeBetaServerEventResponseContentPartAdded {
     pub content_index: i64,
     ///The content part that was added.
     pub part: serde_json::Value,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventResponseContentPartAdded {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseContentPartAdded),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a content part is done streaming in an assistant message item.
 Also emitted when a Response is interrupted, incomplete, or cancelled.*/
@@ -7015,6 +10776,16 @@ pub struct RealtimeBetaServerEventResponseContentPartDone {
     ///The content part that is done.
     pub part: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventResponseContentPartDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseContentPartDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a new Response is created. The first event of response creation,
 where the response is in an initial state of `in_progress`.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7026,6 +10797,16 @@ pub struct RealtimeBetaServerEventResponseCreated {
     #[serde(rename = "type")]
     pub type_: String,
     pub response: RealtimeBetaResponse,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventResponseCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a Response is done streaming. Always emitted, no matter the
 final state. The Response object included in the `response.done` event will
@@ -7039,6 +10820,16 @@ pub struct RealtimeBetaServerEventResponseDone {
     #[serde(rename = "type")]
     pub type_: String,
     pub response: RealtimeBetaResponse,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventResponseDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when the model-generated function call arguments are updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7059,6 +10850,17 @@ pub struct RealtimeBetaServerEventResponseFunctionCallArgumentsDelta {
     pub call_id: String,
     ///The arguments delta as a JSON string.
     pub delta: String,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventResponseFunctionCallArgumentsDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseFunctionCallArgumentsDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when the model-generated function call arguments are done streaming.
 Also emitted when a Response is interrupted, incomplete, or cancelled.*/
@@ -7083,6 +10885,17 @@ pub struct RealtimeBetaServerEventResponseFunctionCallArgumentsDone {
     ///The final arguments as a JSON string.
     pub arguments: String,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventResponseFunctionCallArgumentsDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseFunctionCallArgumentsDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when MCP tool call arguments are updated during response generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7103,6 +10916,17 @@ pub struct RealtimeBetaServerEventResponseMCPCallArgumentsDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub obfuscation: Option<serde_json::Value>,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventResponseMCPCallArgumentsDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseMCPCallArgumentsDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when MCP tool call arguments are finalized during response generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7121,6 +10945,17 @@ pub struct RealtimeBetaServerEventResponseMCPCallArgumentsDone {
     ///The final JSON-encoded arguments string.
     pub arguments: String,
 }
+impl schematic_define::Registration
+for RealtimeBetaServerEventResponseMCPCallArgumentsDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseMCPCallArgumentsDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when an MCP tool call has completed successfully.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7134,6 +10969,16 @@ pub struct RealtimeBetaServerEventResponseMCPCallCompleted {
     pub output_index: i64,
     ///The ID of the MCP tool call item.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventResponseMCPCallCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseMCPCallCompleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when an MCP tool call has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7149,6 +10994,16 @@ pub struct RealtimeBetaServerEventResponseMCPCallFailed {
     ///The ID of the MCP tool call item.
     pub item_id: String,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventResponseMCPCallFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseMCPCallFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when an MCP tool call has started and is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7162,6 +11017,17 @@ pub struct RealtimeBetaServerEventResponseMCPCallInProgress {
     pub output_index: i64,
     ///The ID of the MCP tool call item.
     pub item_id: String,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventResponseMCPCallInProgress {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseMCPCallInProgress),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when a new Item is created during Response generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7178,6 +11044,16 @@ pub struct RealtimeBetaServerEventResponseOutputItemAdded {
     pub output_index: i64,
     pub item: RealtimeConversationItem,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventResponseOutputItemAdded {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseOutputItemAdded),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when an Item is done streaming. Also emitted when a Response is
 interrupted, incomplete, or cancelled.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7193,6 +11069,16 @@ pub struct RealtimeBetaServerEventResponseOutputItemDone {
     ///The index of the output item in the Response.
     pub output_index: i64,
     pub item: RealtimeConversationItem,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventResponseOutputItemDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseOutputItemDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when the text value of an "output_text" content part is updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7213,6 +11099,16 @@ pub struct RealtimeBetaServerEventResponseTextDelta {
     pub content_index: i64,
     ///The text delta.
     pub delta: String,
+}
+impl schematic_define::Registration for RealtimeBetaServerEventResponseTextDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseTextDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when the text value of an "output_text" content part is done streaming. Also
 emitted when a Response is interrupted, incomplete, or cancelled.*/
@@ -7235,6 +11131,16 @@ pub struct RealtimeBetaServerEventResponseTextDone {
     ///The final text content.
     pub text: String,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventResponseTextDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventResponseTextDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a Session is created. Emitted automatically when a new
 connection is established as the first server event. This event will contain
 the default Session configuration.*/
@@ -7248,6 +11154,16 @@ pub struct RealtimeBetaServerEventSessionCreated {
     pub type_: String,
     pub session: RealtimeSession,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventSessionCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventSessionCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a session is updated with a `session.update` event, unless
 there is an error.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7260,6 +11176,16 @@ pub struct RealtimeBetaServerEventSessionUpdated {
     pub type_: String,
     pub session: RealtimeSession,
 }
+impl schematic_define::Registration for RealtimeBetaServerEventSessionUpdated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventSessionUpdated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when a transcription session is created.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7270,6 +11196,17 @@ pub struct RealtimeBetaServerEventTranscriptionSessionCreated {
     #[serde(rename = "type")]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateResponse,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventTranscriptionSessionCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventTranscriptionSessionCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a transcription session is updated with a `transcription_session.update` event, unless
 there is an error.*/
@@ -7282,6 +11219,17 @@ pub struct RealtimeBetaServerEventTranscriptionSessionUpdated {
     #[serde(rename = "type")]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateResponse,
+}
+impl schematic_define::Registration
+for RealtimeBetaServerEventTranscriptionSessionUpdated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeBetaServerEventTranscriptionSessionUpdated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Parameters required to initiate a realtime call and receive the SDP answer
 needed to complete a WebRTC peer connection. Provide an SDP offer generated
@@ -7297,6 +11245,16 @@ request.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeCallCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeCallCreateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Parameters required to transfer a SIP call to a new destination using the
 Realtime API.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7306,6 +11264,16 @@ pub struct RealtimeCallReferRequest {
 `tel:+14155550123` or `sip:agent@example.com`.*/
     pub target_uri: String,
 }
+impl schematic_define::Registration for RealtimeCallReferRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeCallReferRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Parameters used to decline an incoming SIP call handled by the Realtime API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7314,6 +11282,16 @@ pub struct RealtimeCallRejectRequest {
 when omitted.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_code: Option<i64>,
+}
+impl schematic_define::Registration for RealtimeCallRejectRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeCallRejectRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A realtime client event.
 #[allow(clippy::large_enum_variant)]
@@ -7342,6 +11320,14 @@ impl Default for RealtimeClientEvent {
         Self::RealtimeClientEventConversationItemCreate(Default::default())
     }
 }
+impl schematic_define::Registration for RealtimeClientEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeClientEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Add a new Item to the Conversation's context, including messages, function
 calls, and function call responses. This event can be used both to populate a
 "history" of the conversation and to add new items mid-stream, but has the
@@ -7367,6 +11353,16 @@ If set to an existing ID, it allows an item to be inserted mid-conversation. If 
     pub previous_item_id: Option<String>,
     pub item: RealtimeConversationItem,
 }
+impl schematic_define::Registration for RealtimeClientEventConversationItemCreate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventConversationItemCreate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event when you want to remove any item from the conversation
 history. The server will respond with a `conversation.item.deleted` event,
 unless the item does not exist in the conversation history, in which case the
@@ -7383,6 +11379,16 @@ pub struct RealtimeClientEventConversationItemDelete {
     ///The ID of the item to delete.
     pub item_id: String,
 }
+impl schematic_define::Registration for RealtimeClientEventConversationItemDelete {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventConversationItemDelete),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event when you want to retrieve the server's representation of a specific item in the conversation history. This is useful, for example, to inspect user audio after noise cancellation and VAD.
 The server will respond with a `conversation.item.retrieved` event,
 unless the item does not exist in the conversation history, in which case the
@@ -7398,6 +11404,16 @@ pub struct RealtimeClientEventConversationItemRetrieve {
     pub type_: String,
     ///The ID of the item to retrieve.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeClientEventConversationItemRetrieve {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventConversationItemRetrieve),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Send this event to truncate a previous assistant message’s audio. The server
 will produce audio faster than realtime, so this event is useful when the user
@@ -7429,6 +11445,16 @@ the audio_end_ms is greater than the actual audio duration, the server
 will respond with an error.*/
     pub audio_end_ms: i64,
 }
+impl schematic_define::Registration for RealtimeClientEventConversationItemTruncate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventConversationItemTruncate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event to append audio bytes to the input audio buffer. The audio
 buffer is temporary storage you can write to and later commit. A "commit" will create a new
 user message item in the conversation history from the buffer content and clear the buffer.
@@ -7455,6 +11481,16 @@ pub struct RealtimeClientEventInputAudioBufferAppend {
 `input_audio_format` field in the session configuration.*/
     pub audio: String,
 }
+impl schematic_define::Registration for RealtimeClientEventInputAudioBufferAppend {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventInputAudioBufferAppend),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event to clear the audio bytes in the buffer. The server will
 respond with an `input_audio_buffer.cleared` event.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7466,6 +11502,16 @@ pub struct RealtimeClientEventInputAudioBufferClear {
     ///The event type, must be `input_audio_buffer.clear`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeClientEventInputAudioBufferClear {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventInputAudioBufferClear),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Send this event to commit the user input audio buffer, which will create a  new user message item in the conversation. This event will produce an error  if the input audio buffer is empty. When in Server VAD mode, the client does  not need to send this event, the server will commit the audio buffer  automatically.
 
@@ -7480,6 +11526,16 @@ pub struct RealtimeClientEventInputAudioBufferCommit {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for RealtimeClientEventInputAudioBufferCommit {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventInputAudioBufferCommit),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[doc = "**WebRTC/SIP Only:** Emit to cut off the current audio response. This will trigger the server to\nstop generating audio and emit a `output_audio_buffer.cleared` event. This\nevent should be preceded by a `response.cancel` client event to stop the\ngeneration of the current response.\n[Learn more](/docs/guides/realtime-conversations#client-and-server-events-for-audio-in-webrtc)."]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7490,6 +11546,16 @@ pub struct RealtimeClientEventOutputAudioBufferClear {
     ///The event type, must be `output_audio_buffer.clear`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeClientEventOutputAudioBufferClear {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventOutputAudioBufferClear),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Send this event to cancel an in-progress response. The server will respond
 with a `response.done` event with a status of `response.status=cancelled`. If
@@ -7509,6 +11575,16 @@ pub struct RealtimeClientEventResponseCancel {
 in-progress response in the default conversation.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
+}
+impl schematic_define::Registration for RealtimeClientEventResponseCancel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventResponseCancel),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**This event instructs the server to create a Response, which means triggering
 model inference. When in Server VAD mode, the server will create Responses
@@ -7547,6 +11623,16 @@ pub struct RealtimeClientEventResponseCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<RealtimeResponseCreateParams>,
 }
+impl schematic_define::Registration for RealtimeClientEventResponseCreate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventResponseCreate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Send this event to update the session’s configuration.
 The client may send this event at any time to update any field
 except for `voice` and `model`. `voice` can be updated only if there have been no other audio outputs yet.
@@ -7569,6 +11655,16 @@ pub struct RealtimeClientEventSessionUpdate {
 session or a transcription session.*/
     pub session: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeClientEventSessionUpdate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventSessionUpdate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Send this event to update a transcription session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7580,6 +11676,16 @@ pub struct RealtimeClientEventTranscriptionSessionUpdate {
     #[serde(rename = "type")]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateRequest,
+}
+impl schematic_define::Registration for RealtimeClientEventTranscriptionSessionUpdate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeClientEventTranscriptionSessionUpdate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A single item within a Realtime conversation.
 #[allow(clippy::large_enum_variant)]
@@ -7602,6 +11708,16 @@ pub enum RealtimeConversationItem {
 impl Default for RealtimeConversationItem {
     fn default() -> Self {
         Self::RealtimeConversationItemMessageSystem(Default::default())
+    }
+}
+impl schematic_define::Registration for RealtimeConversationItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeConversationItem),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A function call item in a Realtime conversation.
@@ -7628,6 +11744,16 @@ pub struct RealtimeConversationItemFunctionCall {
     ///The arguments of the function call. This is a JSON-encoded string representing the arguments passed to the function, for example `{"arg1": "value1", "arg2": 42}`.
     pub arguments: String,
 }
+impl schematic_define::Registration for RealtimeConversationItemFunctionCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeConversationItemFunctionCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A function call output item in a Realtime conversation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7648,6 +11774,16 @@ pub struct RealtimeConversationItemFunctionCallOutput {
     pub call_id: String,
     ///The output of the function call, this is free text and can contain any information or simply be empty.
     pub output: String,
+}
+impl schematic_define::Registration for RealtimeConversationItemFunctionCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeConversationItemFunctionCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An assistant message item in a Realtime conversation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7670,6 +11806,16 @@ pub struct RealtimeConversationItemMessageAssistant {
     ///The content of the message.
     pub content: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeConversationItemMessageAssistant {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeConversationItemMessageAssistant),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A system message in a Realtime conversation can be used to provide additional context or instructions to the model. This is similar but distinct from the instruction prompt provided at the start of a conversation, as system messages can be added at any point in the conversation. For major changes to the conversation's behavior, use instructions, but for smaller updates (e.g. "the user is now asking about a different topic"), use system messages.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7691,6 +11837,16 @@ pub struct RealtimeConversationItemMessageSystem {
     ///The content of the message.
     pub content: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeConversationItemMessageSystem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeConversationItemMessageSystem),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A user message item in a Realtime conversation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7711,6 +11867,16 @@ pub struct RealtimeConversationItemMessageUser {
     pub role: String,
     ///The content of the message.
     pub content: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for RealtimeConversationItemMessageUser {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeConversationItemMessageUser),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The item to add to the conversation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7763,6 +11929,16 @@ ID exists in the conversation history.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
 }
+impl schematic_define::Registration for RealtimeConversationItemWithReference {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeConversationItemWithReference),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Create a session and client secret for the Realtime API. The request can specify
 either a realtime or a transcription session configuration.
 [Learn more about the Realtime API](/docs/guides/realtime).*/
@@ -7780,6 +11956,16 @@ session or a transcription session.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeCreateClientSecretRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeCreateClientSecretRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Response from creating a session and client secret for the Realtime API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7790,6 +11976,16 @@ pub struct RealtimeCreateClientSecretResponse {
     pub expires_at: i64,
     ///The session configuration for either a realtime or transcription session.
     pub session: serde_json::Value,
+}
+impl schematic_define::Registration for RealtimeCreateClientSecretResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeCreateClientSecretResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7810,6 +12006,14 @@ to call it, and guidance about what to tell the user when calling
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeFunctionTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeFunctionTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A Realtime item requesting human approval of a tool invocation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -7825,6 +12029,16 @@ pub struct RealtimeMCPApprovalRequest {
     pub name: String,
     ///A JSON string of arguments for the tool.
     pub arguments: String,
+}
+impl schematic_define::Registration for RealtimeMCPApprovalRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeMCPApprovalRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A Realtime item responding to an MCP approval request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7842,6 +12056,16 @@ pub struct RealtimeMCPApprovalResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeMCPApprovalResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeMCPApprovalResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RealtimeMCPHTTPError {
@@ -7849,6 +12073,14 @@ pub struct RealtimeMCPHTTPError {
     pub type_: String,
     pub code: i64,
     pub message: String,
+}
+impl schematic_define::Registration for RealtimeMCPHTTPError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeMCPHTTPError));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A Realtime item listing tools available on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7865,6 +12097,14 @@ pub struct RealtimeMCPListTools {
     ///The tools available on the server.
     pub tools: Vec<MCPListToolsTool>,
 }
+impl schematic_define::Registration for RealtimeMCPListTools {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeMCPListTools));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RealtimeMCPProtocolError {
@@ -7872,6 +12112,16 @@ pub struct RealtimeMCPProtocolError {
     pub type_: String,
     pub code: i64,
     pub message: String,
+}
+impl schematic_define::Registration for RealtimeMCPProtocolError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeMCPProtocolError),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A Realtime item representing an invocation of a tool on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7895,6 +12145,14 @@ pub struct RealtimeMCPToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeMCPToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeMCPToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RealtimeMCPToolExecutionError {
@@ -7902,12 +12160,30 @@ pub struct RealtimeMCPToolExecutionError {
     pub type_: String,
     pub message: String,
 }
+impl schematic_define::Registration for RealtimeMCPToolExecutionError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeMCPToolExecutionError),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Configuration for reasoning-capable Realtime models such as `gpt-realtime-2`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RealtimeReasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<RealtimeReasoningEffort>,
+}
+impl schematic_define::Registration for RealtimeReasoning {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeReasoning));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Constrains effort on reasoning for reasoning-capable Realtime models such as
 `gpt-realtime-2`.*/
@@ -7925,6 +12201,16 @@ pub enum RealtimeReasoningEffort {
     High,
     #[serde(rename = "xhigh")]
     Xhigh,
+}
+impl schematic_define::Registration for RealtimeReasoningEffort {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeReasoningEffort),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The response resource.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -7974,6 +12260,14 @@ output to mode `text` will disable audio output from the model.*/
 inclusive of tool calls, that was used in this response.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for RealtimeResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Create a new Realtime response with these parameters
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8028,6 +12322,16 @@ Note that this can include references to items that previously appeared in the s
 using their id.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<Vec<RealtimeConversationItem>>,
+}
+impl schematic_define::Registration for RealtimeResponseCreateParams {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeResponseCreateParams),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A realtime server event.
 #[allow(clippy::large_enum_variant)]
@@ -8143,6 +12447,14 @@ impl Default for RealtimeServerEvent {
         Self::RealtimeServerEventConversationCreated(Default::default())
     }
 }
+impl schematic_define::Registration for RealtimeServerEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeServerEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when a conversation is created. Emitted right after session creation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8154,6 +12466,16 @@ pub struct RealtimeServerEventConversationCreated {
     pub type_: String,
     ///The conversation resource.
     pub conversation: serde_json::Value,
+}
+impl schematic_define::Registration for RealtimeServerEventConversationCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Sent by the server when an Item is added to the default Conversation. This can happen in several cases:
 - When the client sends a `conversation.item.create` event.
@@ -8172,6 +12494,16 @@ pub struct RealtimeServerEventConversationItemAdded {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
     pub item: RealtimeConversationItem,
+}
+impl schematic_define::Registration for RealtimeServerEventConversationItemAdded {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemAdded),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a conversation item is created. There are several scenarios that produce this event:
   - The server is generating a Response, which if successful will produce
@@ -8194,6 +12526,16 @@ pub struct RealtimeServerEventConversationItemCreated {
     pub previous_item_id: Option<serde_json::Value>,
     pub item: RealtimeConversationItem,
 }
+impl schematic_define::Registration for RealtimeServerEventConversationItemCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when an item in the conversation is deleted by the client with a
 `conversation.item.delete` event. This event is used to synchronize the
 server's understanding of the conversation history with the client's view.*/
@@ -8207,6 +12549,16 @@ pub struct RealtimeServerEventConversationItemDeleted {
     pub type_: String,
     ///The ID of the item that was deleted.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeServerEventConversationItemDeleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemDeleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a conversation item is finalized.
 
@@ -8222,6 +12574,16 @@ pub struct RealtimeServerEventConversationItemDone {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_item_id: Option<serde_json::Value>,
     pub item: RealtimeConversationItem,
+}
+impl schematic_define::Registration for RealtimeServerEventConversationItemDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**This event is the output of audio transcription for user audio written to the
 user audio buffer. Transcription begins when the input audio buffer is
@@ -8256,6 +12618,17 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionCompleted {
     ///Usage statistics for the transcription, this is billed according to the ASR model's pricing rather than the realtime model's pricing.
     pub usage: serde_json::Value,
 }
+impl schematic_define::Registration
+for RealtimeServerEventConversationItemInputAudioTranscriptionCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemInputAudioTranscriptionCompleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when the text value of an input audio transcription content part is updated with incremental transcription results.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8276,6 +12649,17 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<serde_json::Value>,
 }
+impl schematic_define::Registration
+for RealtimeServerEventConversationItemInputAudioTranscriptionDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemInputAudioTranscriptionDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when input audio transcription is configured, and a transcription
 request for a user message failed. These events are separate from other
 `error` events so that the client can identify the related Item.*/
@@ -8294,6 +12678,17 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionFailed {
     pub content_index: i64,
     ///Details of the transcription error.
     pub error: serde_json::Value,
+}
+impl schematic_define::Registration
+for RealtimeServerEventConversationItemInputAudioTranscriptionFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemInputAudioTranscriptionFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when an input audio transcription segment is identified for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8319,6 +12714,17 @@ pub struct RealtimeServerEventConversationItemInputAudioTranscriptionSegment {
     ///End time of the segment in seconds.
     pub end: f64,
 }
+impl schematic_define::Registration
+for RealtimeServerEventConversationItemInputAudioTranscriptionSegment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemInputAudioTranscriptionSegment),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when a conversation item is retrieved with `conversation.item.retrieve`. This is provided as a way to fetch the server's representation of an item, for example to get access to the post-processed audio data after noise cancellation and VAD. It includes the full content of the Item, including audio data.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8329,6 +12735,16 @@ pub struct RealtimeServerEventConversationItemRetrieved {
     #[serde(rename = "type")]
     pub type_: String,
     pub item: RealtimeConversationItem,
+}
+impl schematic_define::Registration for RealtimeServerEventConversationItemRetrieved {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemRetrieved),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when an earlier assistant audio message item is truncated by the
 client with a `conversation.item.truncate` event. This event is used to
@@ -8351,6 +12767,16 @@ pub struct RealtimeServerEventConversationItemTruncated {
     ///The duration up to which the audio was truncated, in milliseconds.
     pub audio_end_ms: i64,
 }
+impl schematic_define::Registration for RealtimeServerEventConversationItemTruncated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventConversationItemTruncated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when an error occurs, which could be a client problem or a server
 problem. Most errors are recoverable and the session will stay open, we
 recommend to implementors to monitor and log error messages by default.*/
@@ -8365,6 +12791,16 @@ pub struct RealtimeServerEventError {
     ///Details of the error.
     pub error: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeServerEventError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventError),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when the input audio buffer is cleared by the client with a
 `input_audio_buffer.clear` event.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8375,6 +12811,16 @@ pub struct RealtimeServerEventInputAudioBufferCleared {
     ///The event type, must be `input_audio_buffer.cleared`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeServerEventInputAudioBufferCleared {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventInputAudioBufferCleared),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when an input audio buffer is committed, either by the client or
 automatically in server VAD mode. The `item_id` property is the ID of the user
@@ -8393,6 +12839,16 @@ pub struct RealtimeServerEventInputAudioBufferCommitted {
     ///The ID of the user message item that will be created.
     pub item_id: String,
 }
+impl schematic_define::Registration for RealtimeServerEventInputAudioBufferCommitted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventInputAudioBufferCommitted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[doc = "**SIP Only:** Returned when an DTMF event is received. A DTMF event is a message that\nrepresents a telephone keypad press (0–9, *, #, A–D). The `event` property\nis the keypad that the user press. The `received_at` is the UTC Unix Timestamp\nthat the server received the event."]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8404,6 +12860,17 @@ pub struct RealtimeServerEventInputAudioBufferDtmfEventReceived {
     pub event: String,
     ///UTC Unix Timestamp when DTMF Event was received by server.
     pub received_at: i64,
+}
+impl schematic_define::Registration
+for RealtimeServerEventInputAudioBufferDtmfEventReceived {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventInputAudioBufferDtmfEventReceived),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Sent by the server when in `server_vad` mode to indicate that speech has been
 detected in the audio buffer. This can happen any time audio is added to the
@@ -8431,6 +12898,17 @@ beginning of audio sent to the model, and thus includes the
     ///The ID of the user message item that will be created when speech stops.
     pub item_id: String,
 }
+impl schematic_define::Registration
+for RealtimeServerEventInputAudioBufferSpeechStarted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventInputAudioBufferSpeechStarted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned in `server_vad` mode when the server detects the end of speech in
 the audio buffer. The server will also send an `conversation.item.created`
 event with the user message item that is created from the audio buffer.*/
@@ -8448,6 +12926,17 @@ correspond to the end of audio sent to the model, and thus includes the
     pub audio_end_ms: i64,
     ///The ID of the user message item that will be created.
     pub item_id: String,
+}
+impl schematic_define::Registration
+for RealtimeServerEventInputAudioBufferSpeechStopped {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventInputAudioBufferSpeechStopped),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when the Server VAD timeout is triggered for the input audio buffer. This is configured
 with `idle_timeout_ms` in the `turn_detection` settings of the session, and it indicates that
@@ -8477,6 +12966,17 @@ pub struct RealtimeServerEventInputAudioBufferTimeoutTriggered {
     ///The ID of the item associated with this segment.
     pub item_id: String,
 }
+impl schematic_define::Registration
+for RealtimeServerEventInputAudioBufferTimeoutTriggered {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventInputAudioBufferTimeoutTriggered),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when listing MCP tools has completed for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8488,6 +12988,16 @@ pub struct RealtimeServerEventMCPListToolsCompleted {
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeServerEventMCPListToolsCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventMCPListToolsCompleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when listing MCP tools has failed for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8501,6 +13011,16 @@ pub struct RealtimeServerEventMCPListToolsFailed {
     ///The ID of the MCP list tools item.
     pub item_id: String,
 }
+impl schematic_define::Registration for RealtimeServerEventMCPListToolsFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventMCPListToolsFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when listing MCP tools is in progress for an item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8512,6 +13032,16 @@ pub struct RealtimeServerEventMCPListToolsInProgress {
     pub type_: String,
     ///The ID of the MCP list tools item.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeServerEventMCPListToolsInProgress {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventMCPListToolsInProgress),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[doc = "**WebRTC/SIP Only:** Emitted when the output audio buffer is cleared. This happens either in VAD\nmode when the user has interrupted (`input_audio_buffer.speech_started`),\nor when the client has emitted the `output_audio_buffer.clear` event to manually\ncut off the current audio response.\n[Learn more](/docs/guides/realtime-conversations#client-and-server-events-for-audio-in-webrtc)."]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8525,6 +13055,16 @@ pub struct RealtimeServerEventOutputAudioBufferCleared {
     ///The unique ID of the response that produced the audio.
     pub response_id: String,
 }
+impl schematic_define::Registration for RealtimeServerEventOutputAudioBufferCleared {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventOutputAudioBufferCleared),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[doc = "**WebRTC/SIP Only:** Emitted when the server begins streaming audio to the client. This event is\nemitted after an audio content part has been added (`response.content_part.added`)\nto the response.\n[Learn more](/docs/guides/realtime-conversations#client-and-server-events-for-audio-in-webrtc)."]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8537,6 +13077,16 @@ pub struct RealtimeServerEventOutputAudioBufferStarted {
     ///The unique ID of the response that produced the audio.
     pub response_id: String,
 }
+impl schematic_define::Registration for RealtimeServerEventOutputAudioBufferStarted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventOutputAudioBufferStarted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[doc = "**WebRTC/SIP Only:** Emitted when the output audio buffer has been completely drained on the server,\nand no more audio is forthcoming. This event is emitted after the full response\ndata has been sent to the client (`response.done`).\n[Learn more](/docs/guides/realtime-conversations#client-and-server-events-for-audio-in-webrtc)."]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8548,6 +13098,16 @@ pub struct RealtimeServerEventOutputAudioBufferStopped {
     pub type_: String,
     ///The unique ID of the response that produced the audio.
     pub response_id: String,
+}
+impl schematic_define::Registration for RealtimeServerEventOutputAudioBufferStopped {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventOutputAudioBufferStopped),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Emitted at the beginning of a Response to indicate the updated rate limits.
 When a Response is created some tokens will be "reserved" for the output
@@ -8563,6 +13123,16 @@ pub struct RealtimeServerEventRateLimitsUpdated {
     pub type_: String,
     ///List of rate limit information.
     pub rate_limits: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for RealtimeServerEventRateLimitsUpdated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventRateLimitsUpdated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when the model-generated audio is updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8584,6 +13154,16 @@ pub struct RealtimeServerEventResponseAudioDelta {
     ///Base64-encoded audio data delta.
     pub delta: String,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseAudioDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseAudioDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when the model-generated audio is done. Also emitted when a Response
 is interrupted, incomplete, or cancelled.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8602,6 +13182,16 @@ pub struct RealtimeServerEventResponseAudioDone {
     pub output_index: i64,
     ///The index of the content part in the item's content array.
     pub content_index: i64,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseAudioDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseAudioDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when the model-generated transcription of audio output is updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8622,6 +13212,16 @@ pub struct RealtimeServerEventResponseAudioTranscriptDelta {
     pub content_index: i64,
     ///The transcript delta.
     pub delta: String,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseAudioTranscriptDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseAudioTranscriptDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when the model-generated transcription of audio output is done
 streaming. Also emitted when a Response is interrupted, incomplete, or
@@ -8645,6 +13245,16 @@ pub struct RealtimeServerEventResponseAudioTranscriptDone {
     ///The final transcript of the audio.
     pub transcript: String,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseAudioTranscriptDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseAudioTranscriptDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a new content part is added to an assistant message item during
 response generation.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8665,6 +13275,16 @@ pub struct RealtimeServerEventResponseContentPartAdded {
     pub content_index: i64,
     ///The content part that was added.
     pub part: serde_json::Value,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseContentPartAdded {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseContentPartAdded),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a content part is done streaming in an assistant message item.
 Also emitted when a Response is interrupted, incomplete, or cancelled.*/
@@ -8687,6 +13307,16 @@ pub struct RealtimeServerEventResponseContentPartDone {
     ///The content part that is done.
     pub part: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseContentPartDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseContentPartDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a new Response is created. The first event of response creation,
 where the response is in an initial state of `in_progress`.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8698,6 +13328,16 @@ pub struct RealtimeServerEventResponseCreated {
     #[serde(rename = "type")]
     pub type_: String,
     pub response: RealtimeResponse,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a Response is done streaming. Always emitted, no matter the
 final state. The Response object included in the `response.done` event will
@@ -8718,6 +13358,16 @@ pub struct RealtimeServerEventResponseDone {
     pub type_: String,
     pub response: RealtimeResponse,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when the model-generated function call arguments are updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8737,6 +13387,17 @@ pub struct RealtimeServerEventResponseFunctionCallArgumentsDelta {
     pub call_id: String,
     ///The arguments delta as a JSON string.
     pub delta: String,
+}
+impl schematic_define::Registration
+for RealtimeServerEventResponseFunctionCallArgumentsDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseFunctionCallArgumentsDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when the model-generated function call arguments are done streaming.
 Also emitted when a Response is interrupted, incomplete, or cancelled.*/
@@ -8761,6 +13422,17 @@ pub struct RealtimeServerEventResponseFunctionCallArgumentsDone {
     ///The final arguments as a JSON string.
     pub arguments: String,
 }
+impl schematic_define::Registration
+for RealtimeServerEventResponseFunctionCallArgumentsDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseFunctionCallArgumentsDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when MCP tool call arguments are updated during response generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8781,6 +13453,17 @@ pub struct RealtimeServerEventResponseMCPCallArgumentsDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub obfuscation: Option<serde_json::Value>,
 }
+impl schematic_define::Registration
+for RealtimeServerEventResponseMCPCallArgumentsDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseMCPCallArgumentsDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when MCP tool call arguments are finalized during response generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8799,6 +13482,16 @@ pub struct RealtimeServerEventResponseMCPCallArgumentsDone {
     ///The final JSON-encoded arguments string.
     pub arguments: String,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseMCPCallArgumentsDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseMCPCallArgumentsDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when an MCP tool call has completed successfully.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8812,6 +13505,16 @@ pub struct RealtimeServerEventResponseMCPCallCompleted {
     pub output_index: i64,
     ///The ID of the MCP tool call item.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseMCPCallCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseMCPCallCompleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when an MCP tool call has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8827,6 +13530,16 @@ pub struct RealtimeServerEventResponseMCPCallFailed {
     ///The ID of the MCP tool call item.
     pub item_id: String,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseMCPCallFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseMCPCallFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when an MCP tool call has started and is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -8840,6 +13553,16 @@ pub struct RealtimeServerEventResponseMCPCallInProgress {
     pub output_index: i64,
     ///The ID of the MCP tool call item.
     pub item_id: String,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseMCPCallInProgress {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseMCPCallInProgress),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when a new Item is created during Response generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8856,6 +13579,16 @@ pub struct RealtimeServerEventResponseOutputItemAdded {
     pub output_index: i64,
     pub item: RealtimeConversationItem,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseOutputItemAdded {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseOutputItemAdded),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when an Item is done streaming. Also emitted when a Response is
 interrupted, incomplete, or cancelled.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8871,6 +13604,16 @@ pub struct RealtimeServerEventResponseOutputItemDone {
     ///The index of the output item in the Response.
     pub output_index: i64,
     pub item: RealtimeConversationItem,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseOutputItemDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseOutputItemDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Returned when the text value of an "output_text" content part is updated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8891,6 +13634,16 @@ pub struct RealtimeServerEventResponseTextDelta {
     pub content_index: i64,
     ///The text delta.
     pub delta: String,
+}
+impl schematic_define::Registration for RealtimeServerEventResponseTextDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseTextDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when the text value of an "output_text" content part is done streaming. Also
 emitted when a Response is interrupted, incomplete, or cancelled.*/
@@ -8913,6 +13666,16 @@ pub struct RealtimeServerEventResponseTextDone {
     ///The final text content.
     pub text: String,
 }
+impl schematic_define::Registration for RealtimeServerEventResponseTextDone {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventResponseTextDone),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a Session is created. Emitted automatically when a new
 connection is established as the first server event. This event will contain
 the default Session configuration.*/
@@ -8927,6 +13690,16 @@ pub struct RealtimeServerEventSessionCreated {
     ///The session configuration.
     pub session: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeServerEventSessionCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventSessionCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a session is updated with a `session.update` event, unless
 there is an error.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8940,6 +13713,16 @@ pub struct RealtimeServerEventSessionUpdated {
     ///The session configuration.
     pub session: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeServerEventSessionUpdated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventSessionUpdated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a transcription session is updated with a `transcription_session.update` event, unless
 there is an error.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -8951,6 +13734,16 @@ pub struct RealtimeServerEventTranscriptionSessionUpdated {
     #[serde(rename = "type")]
     pub type_: String,
     pub session: RealtimeTranscriptionSessionCreateResponse,
+}
+impl schematic_define::Registration for RealtimeServerEventTranscriptionSessionUpdated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeServerEventTranscriptionSessionUpdated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Realtime session object for the beta interface.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9035,6 +13828,14 @@ given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeSession {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeSession));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A new Realtime session configuration, with an ephemeral key. Default TTL
 for keys is one minute.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9103,6 +13904,16 @@ given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Prompt>,
 }
+impl schematic_define::Registration for RealtimeSessionCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeSessionCreateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Realtime session object configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9161,6 +13972,16 @@ given model. Defaults to `inf`.*/
     pub truncation: Option<RealtimeTruncation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Prompt>,
+}
+impl schematic_define::Registration for RealtimeSessionCreateRequestGA {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeSessionCreateRequestGA),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A Realtime session configuration object.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9229,6 +14050,16 @@ given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeSessionCreateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeSessionCreateResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A Realtime session configuration object.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9286,6 +14117,16 @@ given model. Defaults to `inf`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Prompt>,
 }
+impl schematic_define::Registration for RealtimeSessionCreateResponseGA {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeSessionCreateResponseGA),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Realtime transcription session object configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9310,6 +14151,16 @@ single channel (mono), and little-endian byte order.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<Vec<String>>,
 }
+impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranscriptionSessionCreateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Realtime transcription session object configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9325,6 +14176,16 @@ pub struct RealtimeTranscriptionSessionCreateRequestGA {
 `item.input_audio_transcription.logprobs`: Include logprobs for input audio transcription.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<Vec<String>>,
+}
+impl schematic_define::Registration for RealtimeTranscriptionSessionCreateRequestGA {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranscriptionSessionCreateRequestGA),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A new Realtime transcription session configuration.
 
@@ -9352,6 +14213,16 @@ audio volume and respond at the end of user speech.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_detection: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeTranscriptionSessionCreateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranscriptionSessionCreateResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A Realtime transcription session configuration object.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9374,6 +14245,16 @@ pub struct RealtimeTranscriptionSessionCreateResponseGA {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeTranscriptionSessionCreateResponseGA {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranscriptionSessionCreateResponseGA),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A Realtime translation client event.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9393,6 +14274,16 @@ pub enum RealtimeTranslationClientEvent {
 impl Default for RealtimeTranslationClientEvent {
     fn default() -> Self {
         Self::RealtimeTranslationClientEventSessionUpdate(Default::default())
+    }
+}
+impl schematic_define::Registration for RealtimeTranslationClientEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationClientEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**Send this event to append audio bytes to the translation session input audio buffer.
@@ -9422,6 +14313,17 @@ pub struct RealtimeTranslationClientEventInputAudioBufferAppend {
     ///Base64-encoded 24 kHz PCM16 mono audio bytes.
     pub audio: String,
 }
+impl schematic_define::Registration
+for RealtimeTranslationClientEventInputAudioBufferAppend {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationClientEventInputAudioBufferAppend),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Gracefully close the realtime translation session. The server flushes pending
 input audio and emits any remaining translated output before closing the
 session.*/
@@ -9434,6 +14336,16 @@ pub struct RealtimeTranslationClientEventSessionClose {
     ///The event type, must be `session.close`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeTranslationClientEventSessionClose {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationClientEventSessionClose),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Send this event to update the translation session configuration. Translation
 sessions support updates to `audio.output.language`, `audio.input.transcription`,
@@ -9449,6 +14361,16 @@ pub struct RealtimeTranslationClientEventSessionUpdate {
     pub type_: String,
     pub session: RealtimeTranslationSessionUpdateRequest,
 }
+impl schematic_define::Registration for RealtimeTranslationClientEventSessionUpdate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationClientEventSessionUpdate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Create a translation session and client secret for the Realtime API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9461,6 +14383,16 @@ until it expires.*/
     pub expires_after: Option<serde_json::Value>,
     pub session: RealtimeTranslationSessionCreateRequest,
 }
+impl schematic_define::Registration for RealtimeTranslationClientSecretCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationClientSecretCreateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Response from creating a translation session and client secret for the Realtime API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9470,6 +14402,16 @@ pub struct RealtimeTranslationClientSecretCreateResponse {
     ///Expiration timestamp for the client secret, in seconds since epoch.
     pub expires_at: i64,
     pub session: RealtimeTranslationSession,
+}
+impl schematic_define::Registration for RealtimeTranslationClientSecretCreateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationClientSecretCreateResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A Realtime translation server event.
 #[allow(clippy::large_enum_variant)]
@@ -9502,6 +14444,16 @@ impl Default for RealtimeTranslationServerEvent {
         Self::RealtimeServerEventError(Default::default())
     }
 }
+impl schematic_define::Registration for RealtimeTranslationServerEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationServerEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Returned when a realtime translation session is closed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9511,6 +14463,16 @@ pub struct RealtimeTranslationServerEventSessionClosed {
     ///The event type, must be `session.closed`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for RealtimeTranslationServerEventSessionClosed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationServerEventSessionClosed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when a translation session is created. Emitted automatically when a
 new connection is established as the first server event. This event contains
@@ -9524,6 +14486,16 @@ pub struct RealtimeTranslationServerEventSessionCreated {
     #[serde(rename = "type")]
     pub type_: String,
     pub session: RealtimeTranslationSession,
+}
+impl schematic_define::Registration for RealtimeTranslationServerEventSessionCreated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationServerEventSessionCreated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when optional source-language transcript text is available. This event
 is emitted only when `audio.input.transcription` is configured.
@@ -9542,6 +14514,17 @@ pub struct RealtimeTranslationServerEventSessionInputTranscriptDelta {
     pub delta: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<serde_json::Value>,
+}
+impl schematic_define::Registration
+for RealtimeTranslationServerEventSessionInputTranscriptDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationServerEventSessionInputTranscriptDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Returned when translated output audio is available. Output audio deltas are
 200 ms frames of PCM16 audio.*/
@@ -9567,6 +14550,17 @@ pub struct RealtimeTranslationServerEventSessionOutputAudioDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<serde_json::Value>,
 }
+impl schematic_define::Registration
+for RealtimeTranslationServerEventSessionOutputAudioDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationServerEventSessionOutputAudioDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when translated transcript text is available.
 
 Transcript deltas are append-only text fragments. Clients should not insert
@@ -9584,6 +14578,17 @@ pub struct RealtimeTranslationServerEventSessionOutputTranscriptDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<serde_json::Value>,
 }
+impl schematic_define::Registration
+for RealtimeTranslationServerEventSessionOutputTranscriptDelta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationServerEventSessionOutputTranscriptDelta),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Returned when a translation session is updated with a `session.update` event,
 unless there is an error.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9595,6 +14600,16 @@ pub struct RealtimeTranslationServerEventSessionUpdated {
     #[serde(rename = "type")]
     pub type_: String,
     pub session: RealtimeTranslationSession,
+}
+impl schematic_define::Registration for RealtimeTranslationServerEventSessionUpdated {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationServerEventSessionUpdated),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A Realtime translation session. Translation sessions continuously translate input
 audio into the configured output language.*/
@@ -9614,6 +14629,16 @@ session creation and cannot be changed with `session.update`.*/
     ///Configuration for translation input and output audio.
     pub audio: serde_json::Value,
 }
+impl schematic_define::Registration for RealtimeTranslationSession {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationSession),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Realtime translation session configuration. Translation sessions stream source
 audio in and translated audio plus transcript deltas out continuously.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9625,6 +14650,16 @@ pub struct RealtimeTranslationSessionCreateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RealtimeTranslationSessionCreateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationSessionCreateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Realtime translation session fields that can be updated with `session.update`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9632,6 +14667,16 @@ pub struct RealtimeTranslationSessionUpdateRequest {
     ///Configuration for translation input and output audio.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for RealtimeTranslationSessionUpdateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTranslationSessionUpdateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**When the number of tokens in a conversation exceeds the model's input token limit, the conversation be truncated, meaning messages (starting from the oldest) will not be included in the model's context. A 32k context model with 4,096 max output tokens can only include 28,224 tokens in the context before truncation occurs.
 
@@ -9653,6 +14698,14 @@ impl Default for RealtimeTruncation {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for RealtimeTruncation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RealtimeTruncation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9664,6 +14717,16 @@ pub enum RealtimeTurnDetection {
 impl Default for RealtimeTurnDetection {
     fn default() -> Self {
         Self::Variant0(Default::default())
+    }
+}
+impl schematic_define::Registration for RealtimeTurnDetection {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RealtimeTurnDetection),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[doc = "**gpt-5 and o-series models only**\n\nConfiguration options for\n[reasoning models](https://platform.openai.com/docs/guides/reasoning)."]
@@ -9681,6 +14744,14 @@ pub struct Reasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generate_summary: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for Reasoning {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Reasoning));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9692,6 +14763,14 @@ pub enum ReasoningEffort {
 impl Default for ReasoningEffort {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for ReasoningEffort {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ReasoningEffort));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**A description of the chain of thought used by a reasoning model while generating
@@ -9718,6 +14797,14 @@ pub struct ReasoningItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
+impl schematic_define::Registration for ReasoningItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ReasoningItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct Response {
@@ -9727,6 +14814,14 @@ pub struct Response {
     pub response_properties: ResponseProperties,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for Response {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Response));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is a partial audio response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9740,6 +14835,16 @@ pub struct ResponseAudioDeltaEvent {
     ///A chunk of Base64 encoded response audio bytes.
     pub delta: String,
 }
+impl schematic_define::Registration for ResponseAudioDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseAudioDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the audio response is complete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9749,6 +14854,16 @@ pub struct ResponseAudioDoneEvent {
     pub type_: String,
     ///The sequence number of the delta.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseAudioDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseAudioDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is a partial transcript of audio.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9762,6 +14877,16 @@ pub struct ResponseAudioTranscriptDeltaEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseAudioTranscriptDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseAudioTranscriptDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the full audio transcript is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9771,6 +14896,16 @@ pub struct ResponseAudioTranscriptDoneEvent {
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseAudioTranscriptDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseAudioTranscriptDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a partial code snippet is streamed by the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9788,6 +14923,16 @@ pub struct ResponseCodeInterpreterCallCodeDeltaEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseCodeInterpreterCallCodeDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCodeInterpreterCallCodeDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the code snippet is finalized by the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9804,6 +14949,16 @@ pub struct ResponseCodeInterpreterCallCodeDoneEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseCodeInterpreterCallCodeDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCodeInterpreterCallCodeDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the code interpreter call is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9817,6 +14972,16 @@ pub struct ResponseCodeInterpreterCallCompletedEvent {
     pub item_id: String,
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseCodeInterpreterCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCodeInterpreterCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a code interpreter call is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9832,6 +14997,16 @@ pub struct ResponseCodeInterpreterCallInProgressEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseCodeInterpreterCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCodeInterpreterCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the code interpreter is actively interpreting the code snippet.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9846,6 +15021,16 @@ pub struct ResponseCodeInterpreterCallInterpretingEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseCodeInterpreterCallInterpretingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCodeInterpreterCallInterpretingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the model response is complete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9856,6 +15041,16 @@ pub struct ResponseCompletedEvent {
     pub response: Response,
     ///The sequence number for this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a new content part is added.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9874,6 +15069,16 @@ pub struct ResponseContentPartAddedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseContentPartAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseContentPartAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a content part is done.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9891,6 +15096,16 @@ pub struct ResponseContentPartDoneEvent {
     pub sequence_number: i64,
     pub part: OutputContent,
 }
+impl schematic_define::Registration for ResponseContentPartDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseContentPartDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An event that is emitted when a response is created.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9901,6 +15116,14 @@ pub struct ResponseCreatedEvent {
     pub response: Response,
     ///The sequence number for this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseCreatedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseCreatedEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Event representing a delta (partial update) to the input of a custom tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -9918,6 +15141,16 @@ pub struct ResponseCustomToolCallInputDeltaEvent {
     ///The incremental input data (delta) for the custom tool call.
     pub delta: String,
 }
+impl schematic_define::Registration for ResponseCustomToolCallInputDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCustomToolCallInputDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Event indicating that input for a custom tool call is complete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9934,6 +15167,16 @@ pub struct ResponseCustomToolCallInputDoneEvent {
     ///The complete input data for the custom tool call.
     pub input: String,
 }
+impl schematic_define::Registration for ResponseCustomToolCallInputDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseCustomToolCallInputDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -9945,6 +15188,14 @@ pub enum ResponseError {
 impl Default for ResponseError {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for ResponseError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseError));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///The error code for the response.
@@ -9993,6 +15244,14 @@ pub enum ResponseErrorCode {
     #[serde(rename = "image_file_not_found")]
     ImageFileNotFound,
 }
+impl schematic_define::Registration for ResponseErrorCode {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseErrorCode));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an error occurs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10007,6 +15266,14 @@ pub struct ResponseErrorEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseErrorEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseErrorEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An event that is emitted when a response fails.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10017,6 +15284,14 @@ pub struct ResponseFailedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
     pub response: Response,
+}
+impl schematic_define::Registration for ResponseFailedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseFailedEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a file search call is completed (results found).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10032,6 +15307,16 @@ pub struct ResponseFileSearchCallCompletedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseFileSearchCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFileSearchCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a file search call is initiated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10045,6 +15330,16 @@ pub struct ResponseFileSearchCallInProgressEvent {
     pub item_id: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseFileSearchCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFileSearchCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a file search is currently searching.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10060,6 +15355,16 @@ pub struct ResponseFileSearchCallSearchingEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseFileSearchCallSearchingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFileSearchCallSearchingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**JSON object response format. An older method of generating JSON responses.
 Using `json_schema` is recommended for models that support it. Note that the
 model will not generate JSON without a system or user message instructing it
@@ -10070,6 +15375,16 @@ pub struct ResponseFormatJsonObject {
     ///The type of response format being defined. Always `json_object`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ResponseFormatJsonObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFormatJsonObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**JSON Schema response format. Used to generate structured JSON responses.
 Learn more about [Structured Outputs](/docs/guides/structured-outputs).*/
@@ -10082,6 +15397,16 @@ pub struct ResponseFormatJsonSchema {
     ///Structured Outputs configuration options, including a JSON Schema.
     pub json_schema: serde_json::Value,
 }
+impl schematic_define::Registration for ResponseFormatJsonSchema {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFormatJsonSchema),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**The schema for the response format, described as a JSON Schema object.
 Learn how to build JSON schemas [here](https://json-schema.org/).*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10091,6 +15416,16 @@ pub struct ResponseFormatJsonSchemaSchema {
     #[serde(flatten)]
     pub additional_properties: HashMap<String, serde_json::Value>,
 }
+impl schematic_define::Registration for ResponseFormatJsonSchemaSchema {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFormatJsonSchemaSchema),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Default response format. Used to generate text responses.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10098,6 +15433,14 @@ pub struct ResponseFormatText {
     ///The type of response format being defined. Always `text`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ResponseFormatText {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseFormatText));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A custom grammar for the model to follow when generating text.
 Learn more in the [custom grammars guide](/docs/guides/custom-grammars).*/
@@ -10110,6 +15453,16 @@ pub struct ResponseFormatTextGrammar {
     ///The custom grammar for the model to follow.
     pub grammar: String,
 }
+impl schematic_define::Registration for ResponseFormatTextGrammar {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFormatTextGrammar),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Configure the model to generate valid Python code. See the
 [custom grammars guide](/docs/guides/custom-grammars) for more details.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10118,6 +15471,16 @@ pub struct ResponseFormatTextPython {
     ///The type of response format being defined. Always `python`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ResponseFormatTextPython {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFormatTextPython),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is a partial function-call arguments delta.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10134,6 +15497,16 @@ pub struct ResponseFunctionCallArgumentsDeltaEvent {
     pub sequence_number: i64,
     ///The function-call arguments delta that is added.
     pub delta: String,
+}
+impl schematic_define::Registration for ResponseFunctionCallArgumentsDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFunctionCallArgumentsDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when function-call arguments are finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10152,6 +15525,16 @@ pub struct ResponseFunctionCallArgumentsDoneEvent {
     ///The function-call arguments.
     pub arguments: String,
 }
+impl schematic_define::Registration for ResponseFunctionCallArgumentsDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseFunctionCallArgumentsDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an image generation tool call has completed and the final image is available.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10165,6 +15548,16 @@ pub struct ResponseImageGenCallCompletedEvent {
     pub sequence_number: i64,
     ///The unique identifier of the image generation item being processed.
     pub item_id: String,
+}
+impl schematic_define::Registration for ResponseImageGenCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseImageGenCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when an image generation tool call is actively generating an image (intermediate state).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10180,6 +15573,16 @@ pub struct ResponseImageGenCallGeneratingEvent {
     ///The sequence number of the image generation item being processed.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseImageGenCallGeneratingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseImageGenCallGeneratingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an image generation tool call is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10193,6 +15596,16 @@ pub struct ResponseImageGenCallInProgressEvent {
     pub item_id: String,
     ///The sequence number of the image generation item being processed.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseImageGenCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseImageGenCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a partial image is available during image generation streaming.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10212,6 +15625,16 @@ pub struct ResponseImageGenCallPartialImageEvent {
     ///Base64-encoded partial image data, suitable for rendering as an image.
     pub partial_image_b64: String,
 }
+impl schematic_define::Registration for ResponseImageGenCallPartialImageEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseImageGenCallPartialImageEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the response is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10223,6 +15646,16 @@ pub struct ResponseInProgressEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An event that is emitted when a response finishes as incomplete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10233,6 +15666,16 @@ pub struct ResponseIncompleteEvent {
     pub response: Response,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseIncompleteEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseIncompleteEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A list of Response items.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10249,6 +15692,14 @@ pub struct ResponseItemList {
     ///The ID of the last item in the list.
     pub last_id: String,
 }
+impl schematic_define::Registration for ResponseItemList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseItemList));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A logprob is the logarithmic probability that the model assigns to producing
 a particular token at a given position in the sequence. Less-negative (higher)
 logprob values indicate greater model confidence in that token choice.*/
@@ -10262,6 +15713,14 @@ pub struct ResponseLogProb {
     ///The log probabilities of up to 20 of the most likely tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_logprobs: Option<Vec<serde_json::Value>>,
+}
+impl schematic_define::Registration for ResponseLogProb {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseLogProb));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is a delta (partial update) to the arguments of an MCP tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10279,6 +15738,16 @@ pub struct ResponseMCPCallArgumentsDeltaEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseMCPCallArgumentsDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPCallArgumentsDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the arguments for an MCP tool call are finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10295,6 +15764,16 @@ pub struct ResponseMCPCallArgumentsDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseMCPCallArgumentsDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPCallArgumentsDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an MCP  tool call has completed successfully.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10308,6 +15787,16 @@ pub struct ResponseMCPCallCompletedEvent {
     pub output_index: i64,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseMCPCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when an MCP  tool call has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10323,6 +15812,16 @@ pub struct ResponseMCPCallFailedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseMCPCallFailedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPCallFailedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an MCP  tool call is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10336,6 +15835,16 @@ pub struct ResponseMCPCallInProgressEvent {
     pub output_index: i64,
     ///The unique identifier of the MCP tool call item being processed.
     pub item_id: String,
+}
+impl schematic_define::Registration for ResponseMCPCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when the list of available MCP tools has been successfully retrieved.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10351,6 +15860,16 @@ pub struct ResponseMCPListToolsCompletedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseMCPListToolsCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPListToolsCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the attempt to list available MCP tools has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10364,6 +15883,16 @@ pub struct ResponseMCPListToolsFailedEvent {
     pub output_index: i64,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseMCPListToolsFailedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPListToolsFailedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when the system is in the process of retrieving the list of available MCP tools.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10379,6 +15908,16 @@ pub struct ResponseMCPListToolsInProgressEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseMCPListToolsInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseMCPListToolsInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10390,6 +15929,14 @@ pub enum ResponseModalities {
 impl Default for ResponseModalities {
     fn default() -> Self {
         Self::TextList(Default::default())
+    }
+}
+impl schematic_define::Registration for ResponseModalities {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseModalities));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Emitted when a new output item is added.
@@ -10405,6 +15952,16 @@ pub struct ResponseOutputItemAddedEvent {
     pub sequence_number: i64,
     pub item: OutputItem,
 }
+impl schematic_define::Registration for ResponseOutputItemAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseOutputItemAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an output item is marked done.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10417,6 +15974,16 @@ pub struct ResponseOutputItemDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
     pub item: OutputItem,
+}
+impl schematic_define::Registration for ResponseOutputItemDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseOutputItemDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when an annotation is added to output text content.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10438,6 +16005,16 @@ pub struct ResponseOutputTextAnnotationAddedEvent {
     ///The annotation object being added. (See annotation schema for details.)
     pub annotation: serde_json::Value,
 }
+impl schematic_define::Registration for ResponseOutputTextAnnotationAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseOutputTextAnnotationAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10449,6 +16026,16 @@ pub enum ResponsePromptVariables {
 impl Default for ResponsePromptVariables {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for ResponsePromptVariables {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponsePromptVariables),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10471,6 +16058,14 @@ pub struct ResponseProperties {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<Prompt>,
 }
+impl schematic_define::Registration for ResponseProperties {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseProperties));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a response is queued and waiting to be processed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10481,6 +16076,14 @@ pub struct ResponseQueuedEvent {
     pub response: Response,
     ///The sequence number for this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseQueuedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseQueuedEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a new reasoning summary part is added.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10499,6 +16102,16 @@ pub struct ResponseReasoningSummaryPartAddedEvent {
     pub sequence_number: i64,
     ///The summary part that was added.
     pub part: serde_json::Value,
+}
+impl schematic_define::Registration for ResponseReasoningSummaryPartAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseReasoningSummaryPartAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a reasoning summary part is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10522,6 +16135,16 @@ normally and set to `incomplete` when generation was interrupted.*/
     ///The completed summary part.
     pub part: serde_json::Value,
 }
+impl schematic_define::Registration for ResponseReasoningSummaryPartDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseReasoningSummaryPartDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a delta is added to a reasoning summary text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10539,6 +16162,16 @@ pub struct ResponseReasoningSummaryTextDeltaEvent {
     pub delta: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseReasoningSummaryTextDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseReasoningSummaryTextDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a reasoning summary text is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10558,6 +16191,16 @@ pub struct ResponseReasoningSummaryTextDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseReasoningSummaryTextDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseReasoningSummaryTextDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a delta is added to a reasoning text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10575,6 +16218,16 @@ pub struct ResponseReasoningTextDeltaEvent {
     pub delta: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseReasoningTextDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseReasoningTextDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a reasoning text is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10594,6 +16247,16 @@ pub struct ResponseReasoningTextDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseReasoningTextDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseReasoningTextDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when there is a partial refusal text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10612,6 +16275,16 @@ pub struct ResponseRefusalDeltaEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseRefusalDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseRefusalDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when refusal text is finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10629,6 +16302,16 @@ pub struct ResponseRefusalDoneEvent {
     pub refusal: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseRefusalDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseRefusalDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10698,6 +16381,14 @@ impl Default for ResponseStreamEvent {
         Self::ResponseAudioDeltaEvent(Default::default())
     }
 }
+impl schematic_define::Registration for ResponseStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10709,6 +16400,16 @@ pub enum ResponseStreamOptions {
 impl Default for ResponseStreamOptions {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for ResponseStreamOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseStreamOptions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Emitted when there is an additional text delta.
@@ -10731,6 +16432,16 @@ pub struct ResponseTextDeltaEvent {
     ///The log probabilities of the tokens in the delta.
     pub logprobs: Vec<ResponseLogProb>,
 }
+impl schematic_define::Registration for ResponseTextDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseTextDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when text content is finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10751,6 +16462,16 @@ pub struct ResponseTextDoneEvent {
     ///The log probabilities of the tokens in the delta.
     pub logprobs: Vec<ResponseLogProb>,
 }
+impl schematic_define::Registration for ResponseTextDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseTextDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Configuration options for a text response from the model. Can be plain
 text or structured JSON data. Learn more:
 - [Text inputs and outputs](/docs/guides/text)
@@ -10762,6 +16483,14 @@ pub struct ResponseTextParam {
     pub format: Option<TextResponseFormatConfiguration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verbosity: Option<Verbosity>,
+}
+impl schematic_define::Registration for ResponseTextParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseTextParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Represents token usage details including input tokens, output tokens,
 a breakdown of output tokens, and the total tokens used.*/
@@ -10779,6 +16508,14 @@ pub struct ResponseUsage {
     ///The total number of tokens used.
     pub total_tokens: i64,
 }
+impl schematic_define::Registration for ResponseUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseUsage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a web search call is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10792,6 +16529,16 @@ pub struct ResponseWebSearchCallCompletedEvent {
     pub item_id: String,
     ///The sequence number of the web search call being processed.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for ResponseWebSearchCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseWebSearchCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a web search call is initiated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10807,6 +16554,16 @@ pub struct ResponseWebSearchCallInProgressEvent {
     ///The sequence number of the web search call being processed.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseWebSearchCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseWebSearchCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a web search call is executing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10821,6 +16578,16 @@ pub struct ResponseWebSearchCallSearchingEvent {
     ///The sequence number of the web search call being processed.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for ResponseWebSearchCallSearchingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponseWebSearchCallSearchingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Client events accepted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10832,6 +16599,14 @@ pub enum ResponsesClientEvent {
 impl Default for ResponsesClientEvent {
     fn default() -> Self {
         Self::ResponsesClientEventResponseCreate(Default::default())
+    }
+}
+impl schematic_define::Registration for ResponsesClientEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponsesClientEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**Client event for creating a response over a persistent WebSocket connection.
@@ -10848,6 +16623,16 @@ pub struct ResponsesClientEventResponseCreate {
     #[serde(flatten)]
     pub create_response: CreateResponse,
 }
+impl schematic_define::Registration for ResponsesClientEventResponseCreate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ResponsesClientEventResponseCreate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Server events emitted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10859,6 +16644,14 @@ pub enum ResponsesServerEvent {
 impl Default for ResponsesServerEvent {
     fn default() -> Self {
         Self::ResponseStreamEvent(Default::default())
+    }
+}
+impl schematic_define::Registration for ResponsesServerEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponsesServerEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Details about a role that can be assigned through the public Roles API.
@@ -10880,6 +16673,14 @@ pub struct Role {
     ///Whether the role is predefined and managed by OpenAI.
     pub predefined_role: bool,
 }
+impl schematic_define::Registration for Role {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Role));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting a role.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10890,6 +16691,14 @@ pub struct RoleDeletedResource {
     pub id: String,
     ///Whether the role was deleted.
     pub deleted: bool,
+}
+impl schematic_define::Registration for RoleDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RoleDeletedResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Paginated list of roles assigned to a principal.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10904,6 +16713,14 @@ pub struct RoleListResource {
     ///Cursor to fetch the next page of results, or `null` when there are no more assignments.
     pub next: serde_json::Value,
 }
+impl schematic_define::Registration for RoleListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RoleListResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -10915,6 +16732,14 @@ pub enum RunCompletionUsage {
 impl Default for RunCompletionUsage {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for RunCompletionUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunCompletionUsage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10932,6 +16757,14 @@ The `output_json` variable will be populated if the model sample is a
 valid JSON string.*/
     pub model_sample: String,
 }
+impl schematic_define::Registration for RunGraderRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunGraderRequest2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RunGraderResponse {
@@ -10939,6 +16772,14 @@ pub struct RunGraderResponse {
     pub metadata: serde_json::Value,
     pub sub_rewards: serde_json::Value,
     pub model_grader_token_usage_per_model: serde_json::Value,
+}
+impl schematic_define::Registration for RunGraderResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunGraderResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents an execution run on a [thread](/docs/api-reference/threads).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10995,6 +16836,14 @@ pub struct RunObject {
     pub parallel_tool_calls: ParallelToolCalls,
     pub response_format: AssistantsApiResponseFormatOption,
 }
+impl schematic_define::Registration for RunObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11008,6 +16857,16 @@ impl Default for RunStepCompletionUsage {
         Self::Json(Default::default())
     }
 }
+impl schematic_define::Registration for RunStepCompletionUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepCompletionUsage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents a run step delta i.e. any changed fields on a run step during streaming.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11019,6 +16878,14 @@ pub struct RunStepDeltaObject {
     ///The delta containing the fields that have changed on the run step.
     pub delta: serde_json::Value,
 }
+impl schematic_define::Registration for RunStepDeltaObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunStepDeltaObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Details of the message creation by the run step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11028,6 +16895,16 @@ pub struct RunStepDeltaStepDetailsMessageCreationObject {
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_creation: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for RunStepDeltaStepDetailsMessageCreationObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDeltaStepDetailsMessageCreationObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Details of the Code Interpreter tool call the run step was involved in.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11045,6 +16922,16 @@ pub struct RunStepDeltaStepDetailsToolCallsCodeObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_interpreter: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RunStepDeltaStepDetailsToolCallsCodeObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDeltaStepDetailsToolCallsCodeObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RunStepDeltaStepDetailsToolCallsCodeOutputImageObject {
@@ -11055,6 +16942,17 @@ pub struct RunStepDeltaStepDetailsToolCallsCodeOutputImageObject {
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image: Option<serde_json::Value>,
+}
+impl schematic_define::Registration
+for RunStepDeltaStepDetailsToolCallsCodeOutputImageObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDeltaStepDetailsToolCallsCodeOutputImageObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Text output from the Code Interpreter tool call as part of a run step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11069,6 +16967,17 @@ pub struct RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logs: Option<String>,
 }
+impl schematic_define::Registration
+for RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RunStepDeltaStepDetailsToolCallsFileSearchObject {
@@ -11082,6 +16991,17 @@ pub struct RunStepDeltaStepDetailsToolCallsFileSearchObject {
     pub type_: String,
     ///For now, this is always going to be an empty object.
     pub file_search: serde_json::Value,
+}
+impl schematic_define::Registration
+for RunStepDeltaStepDetailsToolCallsFileSearchObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDeltaStepDetailsToolCallsFileSearchObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11098,6 +17018,16 @@ pub struct RunStepDeltaStepDetailsToolCallsFunctionObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for RunStepDeltaStepDetailsToolCallsFunctionObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDeltaStepDetailsToolCallsFunctionObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Details of the tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11109,6 +17039,16 @@ pub struct RunStepDeltaStepDetailsToolCallsObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<serde_json::Value>>,
 }
+impl schematic_define::Registration for RunStepDeltaStepDetailsToolCallsObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDeltaStepDetailsToolCallsObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Details of the message creation by the run step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11117,6 +17057,16 @@ pub struct RunStepDetailsMessageCreationObject {
     #[serde(rename = "type")]
     pub type_: String,
     pub message_creation: serde_json::Value,
+}
+impl schematic_define::Registration for RunStepDetailsMessageCreationObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsMessageCreationObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Details of the Code Interpreter tool call the run step was involved in.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11130,6 +17080,16 @@ pub struct RunStepDetailsToolCallsCodeObject {
     ///The Code Interpreter tool call definition.
     pub code_interpreter: serde_json::Value,
 }
+impl schematic_define::Registration for RunStepDetailsToolCallsCodeObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsCodeObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RunStepDetailsToolCallsCodeOutputImageObject {
@@ -11137,6 +17097,16 @@ pub struct RunStepDetailsToolCallsCodeOutputImageObject {
     #[serde(rename = "type")]
     pub type_: String,
     pub image: serde_json::Value,
+}
+impl schematic_define::Registration for RunStepDetailsToolCallsCodeOutputImageObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsCodeOutputImageObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Text output from the Code Interpreter tool call as part of a run step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11147,6 +17117,16 @@ pub struct RunStepDetailsToolCallsCodeOutputLogsObject {
     pub type_: String,
     ///The text output from the Code Interpreter tool call.
     pub logs: String,
+}
+impl schematic_define::Registration for RunStepDetailsToolCallsCodeOutputLogsObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsCodeOutputLogsObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11159,6 +17139,16 @@ pub struct RunStepDetailsToolCallsFileSearchObject {
     ///For now, this is always going to be an empty object.
     pub file_search: serde_json::Value,
 }
+impl schematic_define::Registration for RunStepDetailsToolCallsFileSearchObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsFileSearchObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The ranking options for the file search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11166,6 +17156,17 @@ pub struct RunStepDetailsToolCallsFileSearchRankingOptionsObject {
     pub ranker: FileSearchRanker,
     ///The score threshold for the file search. All values must be a floating point number between 0 and 1.
     pub score_threshold: f64,
+}
+impl schematic_define::Registration
+for RunStepDetailsToolCallsFileSearchRankingOptionsObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsFileSearchRankingOptionsObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A result instance of the file search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11181,6 +17182,16 @@ pub struct RunStepDetailsToolCallsFileSearchResultObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<Vec<serde_json::Value>>,
 }
+impl schematic_define::Registration for RunStepDetailsToolCallsFileSearchResultObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsFileSearchResultObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct RunStepDetailsToolCallsFunctionObject {
@@ -11192,6 +17203,16 @@ pub struct RunStepDetailsToolCallsFunctionObject {
     ///The definition of the function that was called.
     pub function: serde_json::Value,
 }
+impl schematic_define::Registration for RunStepDetailsToolCallsFunctionObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsFunctionObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Details of the tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11201,6 +17222,16 @@ pub struct RunStepDetailsToolCallsObject {
     pub type_: String,
     ///An array of tool calls the run step was involved in. These can be associated with one of three types of tools: `code_interpreter`, `file_search`, or `function`.
     pub tool_calls: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for RunStepDetailsToolCallsObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(RunStepDetailsToolCallsObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a step in execution of a run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11233,6 +17264,14 @@ pub struct RunStepObject {
     pub metadata: Metadata,
     pub usage: RunStepCompletionUsage,
 }
+impl schematic_define::Registration for RunStepObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunStepObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11249,6 +17288,14 @@ pub enum RunStepStreamEvent {
 impl Default for RunStepStreamEvent {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for RunStepStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunStepStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[allow(clippy::large_enum_variant)]
@@ -11272,6 +17319,14 @@ impl Default for RunStreamEvent {
         Self::Json(Default::default())
     }
 }
+impl schematic_define::Registration for RunStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Tool call objects
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11283,6 +17338,14 @@ pub struct RunToolCallObject {
     pub type_: String,
     ///The function definition.
     pub function: serde_json::Value,
+}
+impl schematic_define::Registration for RunToolCallObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RunToolCallObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11297,6 +17360,14 @@ impl Default for ServiceTier {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for ServiceTier {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ServiceTier));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted for each chunk of audio data generated during speech synthesis.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11307,6 +17378,16 @@ pub struct SpeechAudioDeltaEvent {
     ///A chunk of Base64-encoded audio data.
     pub audio: String,
 }
+impl schematic_define::Registration for SpeechAudioDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SpeechAudioDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the speech synthesis is complete and all audio has been streamed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11316,6 +17397,14 @@ pub struct SpeechAudioDoneEvent {
     pub type_: String,
     ///Token usage statistics for the request.
     pub usage: serde_json::Value,
+}
+impl schematic_define::Registration for SpeechAudioDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SpeechAudioDoneEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Email notification settings for a spend alert.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11330,6 +17419,16 @@ pub struct SpendAlertNotificationChannel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject_prefix: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for SpendAlertNotificationChannel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SpendAlertNotificationChannel),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct StaticChunkingStrategy {
@@ -11339,6 +17438,16 @@ pub struct StaticChunkingStrategy {
 
 Note that the overlap must not exceed half of `max_chunk_size_tokens`.*/
     pub chunk_overlap_tokens: i64,
+}
+impl schematic_define::Registration for StaticChunkingStrategy {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(StaticChunkingStrategy),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Customize your own chunking strategy by setting chunk size and chunk overlap.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11350,6 +17459,16 @@ pub struct StaticChunkingStrategyRequestParam {
     #[serde(rename = "static")]
     pub static_: StaticChunkingStrategy,
 }
+impl schematic_define::Registration for StaticChunkingStrategyRequestParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(StaticChunkingStrategyRequestParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct StaticChunkingStrategyResponseParam {
@@ -11358,6 +17477,16 @@ pub struct StaticChunkingStrategyResponseParam {
     pub type_: String,
     #[serde(rename = "static")]
     pub static_: StaticChunkingStrategy,
+}
+impl schematic_define::Registration for StaticChunkingStrategyResponseParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(StaticChunkingStrategyResponseParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Not supported with latest reasoning models `o3` and `o4-mini`.
 
@@ -11376,6 +17505,14 @@ impl Default for StopConfiguration {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for StopConfiguration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(StopConfiguration));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct SubmitToolOutputsRunRequest {
@@ -11383,6 +17520,16 @@ pub struct SubmitToolOutputsRunRequest {
     pub tool_outputs: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for SubmitToolOutputsRunRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SubmitToolOutputsRunRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**An object specifying the format that the model must output.
 
@@ -11411,6 +17558,16 @@ impl Default for TextResponseFormatConfiguration {
         Self::ResponseFormatText(Default::default())
     }
 }
+impl schematic_define::Registration for TextResponseFormatConfiguration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TextResponseFormatConfiguration),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**JSON Schema response format. Used to generate structured JSON responses.
 Learn more about [Structured Outputs](/docs/guides/structured-outputs).*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11430,6 +17587,16 @@ underscores and dashes, with a maximum length of 64.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for TextResponseFormatJsonSchema {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TextResponseFormatJsonSchema),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents a thread that contains [messages](/docs/api-reference/messages).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11443,6 +17610,14 @@ pub struct ThreadObject {
     pub tool_resources: serde_json::Value,
     pub metadata: Metadata,
 }
+impl schematic_define::Registration for ThreadObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ThreadObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11455,10 +17630,28 @@ impl Default for ThreadStreamEvent {
         Self::Json(Default::default())
     }
 }
+impl schematic_define::Registration for ThreadStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ThreadStreamEvent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ToggleCertificatesRequest {
     pub certificate_ids: Vec<String>,
+}
+impl schematic_define::Registration for ToggleCertificatesRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ToggleCertificatesRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool that can be used to generate a response.
 #[allow(clippy::large_enum_variant)]
@@ -11488,6 +17681,14 @@ impl Default for Tool {
         Self::FunctionTool(Default::default())
     }
 }
+impl schematic_define::Registration for Tool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Tool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Constrains the tools available to the model to a pre-defined set.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11514,6 +17715,14 @@ For the Responses API, the list of tool definitions might look like:
 ```*/
     pub tools: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for ToolChoiceAllowed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoiceAllowed));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Use this option to force the model to call a specific custom tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11524,6 +17733,14 @@ pub struct ToolChoiceCustom {
     ///The name of the custom tool to call.
     pub name: String,
 }
+impl schematic_define::Registration for ToolChoiceCustom {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoiceCustom));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Use this option to force the model to call a specific function.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11533,6 +17750,14 @@ pub struct ToolChoiceFunction {
     pub type_: String,
     ///The name of the function to call.
     pub name: String,
+}
+impl schematic_define::Registration for ToolChoiceFunction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoiceFunction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Use this option to force the model to call a specific tool on a remote MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11545,6 +17770,14 @@ pub struct ToolChoiceMCP {
     pub server_label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ToolChoiceMCP {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoiceMCP));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Controls which (if any) tool is called by the model.
 
@@ -11564,6 +17797,14 @@ pub enum ToolChoiceOptions {
     Auto,
     #[serde(rename = "required")]
     Required,
+}
+impl schematic_define::Registration for ToolChoiceOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoiceOptions));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**How the model should select which tool (or tools) to use when generating
 a response. See the `tools` parameter to see how to specify which tools
@@ -11588,6 +17829,14 @@ impl Default for ToolChoiceParam {
         Self::ToolChoiceOptions(Default::default())
     }
 }
+impl schematic_define::Registration for ToolChoiceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoiceParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Indicates that the model should use a built-in tool to generate a response.
 [Learn more about built-in tools](/docs/guides/tools).*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11606,6 +17855,14 @@ Allowed values are:
 - `image_generation`*/
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ToolChoiceTypes {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoiceTypes));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**An array of tools the model may call while generating a response. You
 can specify which tool to use by setting the `tool_choice` parameter.
@@ -11640,6 +17897,16 @@ pub struct TranscriptTextDeltaEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub segment_id: Option<String>,
 }
+impl schematic_define::Registration for TranscriptTextDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TranscriptTextDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the transcription is complete. Contains the complete transcription text. Only emitted when you [create a transcription](/docs/api-reference/audio/create-transcription) with the `Stream` parameter set to `true`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11657,6 +17924,16 @@ pub struct TranscriptTextDoneEvent {
     pub logprobs: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<TranscriptTextUsageTokens>,
+}
+impl schematic_define::Registration for TranscriptTextDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TranscriptTextDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a diarized transcription returns a completed segment with speaker information. Only emitted when you [create a transcription](/docs/api-reference/audio/create-transcription) with `stream` set to `true` and `response_format` set to `diarized_json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11676,6 +17953,16 @@ pub struct TranscriptTextSegmentEvent {
     ///Speaker label for this segment.
     pub speaker: String,
 }
+impl schematic_define::Registration for TranscriptTextSegmentEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TranscriptTextSegmentEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Usage statistics for models billed by audio input duration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11685,6 +17972,16 @@ pub struct TranscriptTextUsageDuration {
     pub type_: String,
     ///Duration of the input audio in seconds.
     pub seconds: f64,
+}
+impl schematic_define::Registration for TranscriptTextUsageDuration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TranscriptTextUsageDuration),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Usage statistics for models billed by token usage.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11702,6 +17999,16 @@ pub struct TranscriptTextUsageTokens {
     pub output_tokens: i64,
     ///Total number of tokens used (input + output).
     pub total_tokens: i64,
+}
+impl schematic_define::Registration for TranscriptTextUsageTokens {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TranscriptTextUsageTokens),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Controls how the audio is cut into chunks. When set to `"auto"`, the
 server first normalizes loudness and then uses voice activity detection (VAD) to
@@ -11726,6 +18033,16 @@ pub struct TranscriptionDiarizedSegment {
     ///Speaker label for this segment. When known speakers are provided, the label matches `known_speaker_names[]`. Otherwise speakers are labeled sequentially using capital letters (`A`, `B`, ...).
     pub speaker: String,
 }
+impl schematic_define::Registration for TranscriptionDiarizedSegment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TranscriptionDiarizedSegment),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum TranscriptionInclude {
@@ -11733,12 +18050,30 @@ pub enum TranscriptionInclude {
     #[default]
     Logprobs,
 }
+impl schematic_define::Registration for TranscriptionInclude {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TranscriptionInclude));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A language detected in transcribed audio.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct TranscriptionLanguage {
     ///The code of a language detected in the audio.
     pub code: String,
+}
+impl schematic_define::Registration for TranscriptionLanguage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(TranscriptionLanguage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11764,6 +18099,14 @@ pub struct TranscriptionSegment {
     ///Probability of no speech in the segment. If the value is higher than 1.0 and the `avg_logprob` is below -1, consider this segment silent.
     pub no_speech_prob: f64,
 }
+impl schematic_define::Registration for TranscriptionSegment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TranscriptionSegment));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct TranscriptionWord {
@@ -11773,6 +18116,14 @@ pub struct TranscriptionWord {
     pub start: f64,
     ///End time of the word in seconds.
     pub end: f64,
+}
+impl schematic_define::Registration for TranscriptionWord {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TranscriptionWord));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Controls for how a thread will be truncated prior to the run. Use this to control the initial context window of the run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11784,12 +18135,28 @@ pub struct TruncationObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_messages: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for TruncationObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TruncationObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Request payload for updating the details of an existing group.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UpdateGroupBody {
     ///New display name for the group.
     pub name: String,
+}
+impl schematic_define::Registration for UpdateGroupBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UpdateGroupBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Parameters for updating organization data retention controls.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11798,12 +18165,32 @@ pub struct UpdateOrganizationDataRetentionBody {
     ///The desired organization data retention type.
     pub retention_type: String,
 }
+impl schematic_define::Registration for UpdateOrganizationDataRetentionBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateOrganizationDataRetentionBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Parameters for updating project data retention controls.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UpdateProjectDataRetentionBody {
     ///The desired project data retention type.
     pub retention_type: String,
+}
+impl schematic_define::Registration for UpdateProjectDataRetentionBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateProjectDataRetentionBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Parameters for updating a project service account.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11816,10 +18203,30 @@ pub struct UpdateProjectServiceAccountBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
 }
+impl schematic_define::Registration for UpdateProjectServiceAccountBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateProjectServiceAccountBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UpdateVectorStoreFileAttributesRequest2 {
     pub attributes: VectorStoreFileAttributes,
+}
+impl schematic_define::Registration for UpdateVectorStoreFileAttributesRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateVectorStoreFileAttributesRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11832,11 +18239,31 @@ pub struct UpdateVectorStoreRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
+impl schematic_define::Registration for UpdateVectorStoreRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateVectorStoreRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UpdateVoiceConsentRequest2 {
     ///The updated label for this consent recording.
     pub name: String,
+}
+impl schematic_define::Registration for UpdateVoiceConsentRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateVoiceConsentRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The Upload object can accept byte chunks in the form of Parts.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11862,6 +18289,14 @@ pub struct Upload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for Upload {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Upload));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UploadCertificateRequest2 {
@@ -11870,6 +18305,16 @@ pub struct UploadCertificateRequest2 {
     pub name: Option<String>,
     ///The certificate content in PEM format
     pub certificate: String,
+}
+impl schematic_define::Registration for UploadCertificateRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UploadCertificateRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The upload Part represents a chunk of bytes we can add to an Upload object.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11883,6 +18328,14 @@ pub struct UploadPart {
     pub upload_id: String,
     ///The object type, which is always `upload.part`.
     pub object: String,
+}
+impl schematic_define::Registration for UploadPart {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UploadPart));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The aggregated audio speeches usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11902,6 +18355,16 @@ pub struct UsageAudioSpeechesResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for UsageAudioSpeechesResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageAudioSpeechesResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The aggregated audio transcriptions usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11920,6 +18383,16 @@ pub struct UsageAudioTranscriptionsResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for UsageAudioTranscriptionsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageAudioTranscriptionsResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The aggregated code interpreter sessions usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -11929,6 +18402,16 @@ pub struct UsageCodeInterpreterSessionsResult {
     pub num_sessions: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for UsageCodeInterpreterSessionsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageCodeInterpreterSessionsResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The aggregated completions usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11990,6 +18473,16 @@ pub struct UsageCompletionsResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for UsageCompletionsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageCompletionsResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The aggregated embeddings usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12008,6 +18501,16 @@ pub struct UsageEmbeddingsResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for UsageEmbeddingsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageEmbeddingsResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The aggregated file search calls usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12023,6 +18526,16 @@ pub struct UsageFileSearchCallsResult {
     pub api_key_id: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_store_id: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for UsageFileSearchCallsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageFileSearchCallsResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The aggregated images usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12046,6 +18559,14 @@ pub struct UsageImagesResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for UsageImagesResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UsageImagesResult));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The aggregated moderations usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12064,6 +18585,16 @@ pub struct UsageModerationsResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for UsageModerationsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageModerationsResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageResponse {
@@ -12072,6 +18603,14 @@ pub struct UsageResponse {
     pub has_more: bool,
     pub next_page: serde_json::Value,
 }
+impl schematic_define::Registration for UsageResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UsageResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UsageTimeBucket {
@@ -12079,6 +18618,14 @@ pub struct UsageTimeBucket {
     pub start_time: i64,
     pub end_time: i64,
     pub results: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for UsageTimeBucket {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UsageTimeBucket));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The aggregated vector stores usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12089,6 +18636,16 @@ pub struct UsageVectorStoresResult {
     pub usage_bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for UsageVectorStoresResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageVectorStoresResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The aggregated web search calls usage details of the specific time bucket.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12109,6 +18666,16 @@ pub struct UsageWebSearchCallsResult {
     pub model: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_level: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for UsageWebSearchCallsResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UsageWebSearchCallsResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents an individual `user` within an organization.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12160,12 +18727,28 @@ pub struct User {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projects: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for User {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(User));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UserDeleteResponse {
     pub object: String,
     pub id: String,
     pub deleted: bool,
+}
+impl schematic_define::Registration for UserDeleteResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UserDeleteResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Paginated list of user objects returned when inspecting group membership.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12180,6 +18763,14 @@ pub struct UserListResource {
     ///Cursor to fetch the next page of results, or `null` when no further users are available.
     pub next: serde_json::Value,
 }
+impl schematic_define::Registration for UserListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UserListResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UserListResponse {
@@ -12191,6 +18782,14 @@ pub struct UserListResponse {
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
 }
+impl schematic_define::Registration for UserListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UserListResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Role assignment linking a user to a role.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12199,6 +18798,14 @@ pub struct UserRoleAssignment {
     pub object: String,
     pub user: User,
     pub role: Role,
+}
+impl schematic_define::Registration for UserRoleAssignment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UserRoleAssignment));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12215,6 +18822,16 @@ pub struct UserRoleUpdateRequest {
     ///Developer persona metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub developer_persona: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for UserRoleUpdateRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UserRoleUpdateRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12237,11 +18854,29 @@ thus might perform better in noisy environments.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f64>,
 }
+impl schematic_define::Registration for VadConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VadConfig));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ValidateGraderRequest2 {
     ///The grader used for the fine-tuning job.
     pub grader: serde_json::Value,
+}
+impl schematic_define::Registration for ValidateGraderRequest2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ValidateGraderRequest2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12249,6 +18884,16 @@ pub struct ValidateGraderResponse {
     ///The grader used for the fine-tuning job.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grader: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ValidateGraderResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ValidateGraderResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The expiration policy for a vector store.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12258,6 +18903,16 @@ pub struct VectorStoreExpirationAfter {
     pub anchor: String,
     ///The number of days after the anchor time that the vector store will expire.
     pub days: i64,
+}
+impl schematic_define::Registration for VectorStoreExpirationAfter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreExpirationAfter),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12270,6 +18925,16 @@ pub enum VectorStoreFileAttributes {
 impl Default for VectorStoreFileAttributes {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for VectorStoreFileAttributes {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreFileAttributes),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A batch of files attached to a vector store.
@@ -12288,6 +18953,16 @@ pub struct VectorStoreFileBatchObject {
     pub status: String,
     pub file_counts: serde_json::Value,
 }
+impl schematic_define::Registration for VectorStoreFileBatchObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreFileBatchObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents the parsed content of a vector store file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12299,6 +18974,16 @@ pub struct VectorStoreFileContentResponse {
     ///Indicates if there are more content pages to fetch.
     pub has_more: bool,
     pub next_page: serde_json::Value,
+}
+impl schematic_define::Registration for VectorStoreFileContentResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreFileContentResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A list of files attached to a vector store.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12322,6 +19007,16 @@ pub struct VectorStoreFileObject {
     pub chunking_strategy: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<VectorStoreFileAttributes>,
+}
+impl schematic_define::Registration for VectorStoreFileObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreFileObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A vector store is a collection of processed files can be used by the `file_search` tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12347,6 +19042,14 @@ pub struct VectorStoreObject {
     pub last_active_at: serde_json::Value,
     pub metadata: Metadata,
 }
+impl schematic_define::Registration for VectorStoreObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VectorStoreObject));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VectorStoreSearchRequest {
@@ -12365,6 +19068,16 @@ pub struct VectorStoreSearchRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking_options: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for VectorStoreSearchRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreSearchRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VectorStoreSearchResultContentObject {
@@ -12373,6 +19086,16 @@ pub struct VectorStoreSearchResultContentObject {
     pub type_: String,
     ///The text content returned from search.
     pub text: String,
+}
+impl schematic_define::Registration for VectorStoreSearchResultContentObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreSearchResultContentObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12387,6 +19110,16 @@ pub struct VectorStoreSearchResultItem {
     ///Content chunks from the file.
     pub content: Vec<VectorStoreSearchResultContentObject>,
 }
+impl schematic_define::Registration for VectorStoreSearchResultItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreSearchResultItem),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VectorStoreSearchResultsPage {
@@ -12398,6 +19131,16 @@ pub struct VectorStoreSearchResultsPage {
     ///Indicates if there are more results to fetch.
     pub has_more: bool,
     pub next_page: serde_json::Value,
+}
+impl schematic_define::Registration for VectorStoreSearchResultsPage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VectorStoreSearchResultsPage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12412,6 +19155,14 @@ impl Default for Verbosity {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for Verbosity {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Verbosity));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VoiceConsentDeletedResource {
@@ -12419,6 +19170,16 @@ pub struct VoiceConsentDeletedResource {
     pub id: String,
     pub object: String,
     pub deleted: bool,
+}
+impl schematic_define::Registration for VoiceConsentDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VoiceConsentDeletedResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12430,6 +19191,16 @@ pub struct VoiceConsentListResource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_id: Option<serde_json::Value>,
     pub has_more: bool,
+}
+impl schematic_define::Registration for VoiceConsentListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VoiceConsentListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A consent recording used to authorize creation of a custom voice.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12446,6 +19217,14 @@ pub struct VoiceConsentResource {
     ///The Unix timestamp (in seconds) for when the consent recording was created.
     pub created_at: i64,
 }
+impl schematic_define::Registration for VoiceConsentResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VoiceConsentResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A built-in voice name or a custom voice reference.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12458,6 +19237,16 @@ pub enum VoiceIdsOrCustomVoice {
 impl Default for VoiceIdsOrCustomVoice {
     fn default() -> Self {
         Self::VoiceIdsShared(Default::default())
+    }
+}
+impl schematic_define::Registration for VoiceIdsOrCustomVoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VoiceIdsOrCustomVoice),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[allow(clippy::large_enum_variant)]
@@ -12473,6 +19262,14 @@ impl Default for VoiceIdsShared {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for VoiceIdsShared {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VoiceIdsShared));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A custom voice that can be used for audio output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12486,6 +19283,14 @@ pub struct VoiceResource {
     ///The Unix timestamp (in seconds) for when the voice was created.
     pub created_at: i64,
 }
+impl schematic_define::Registration for VoiceResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VoiceResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Action type "find_in_page": Searches for a pattern within a loaded page.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12498,6 +19303,14 @@ pub struct WebSearchActionFind {
     ///The pattern or text to search for within the page.
     pub pattern: String,
 }
+impl schematic_define::Registration for WebSearchActionFind {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchActionFind));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Action type "open_page" - Opens a specific URL from search results.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12508,6 +19321,16 @@ pub struct WebSearchActionOpenPage {
     ///The URL opened by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for WebSearchActionOpenPage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebSearchActionOpenPage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Action type "search" - Performs a web search query.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12526,6 +19349,16 @@ pub struct WebSearchActionSearch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<serde_json::Value>>,
 }
+impl schematic_define::Registration for WebSearchActionSearch {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebSearchActionSearch),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12537,6 +19370,16 @@ pub enum WebSearchApproximateLocation {
 impl Default for WebSearchApproximateLocation {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for WebSearchApproximateLocation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebSearchApproximateLocation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**High level guidance for the amount of context window space to use for the
@@ -12551,6 +19394,14 @@ pub enum WebSearchContextSize {
     Medium,
     #[serde(rename = "high")]
     High,
+}
+impl schematic_define::Registration for WebSearchContextSize {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchContextSize));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Approximate location parameters for the search.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12572,6 +19423,14 @@ of the user, e.g. `America/Los_Angeles`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
 }
+impl schematic_define::Registration for WebSearchLocation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchLocation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Search the Internet for sources related to the prompt. Learn more about the
 [web search tool](/docs/guides/tools-web-search).*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12588,6 +19447,14 @@ pub struct WebSearchTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_context_size: Option<String>,
 }
+impl schematic_define::Registration for WebSearchTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**The results of a web search tool call. See the
 [web search guide](/docs/guides/tools-web-search) for more information.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12603,6 +19470,14 @@ pub struct WebSearchToolCall {
     /**An object describing the specific action taken in this web search call.
 Includes details on how the model used the web (search, open_page, find_in_page).*/
     pub action: serde_json::Value,
+}
+impl schematic_define::Registration for WebSearchToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Sent when a batch API request has been cancelled.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12621,6 +19496,16 @@ pub struct WebhookBatchCancelled {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookBatchCancelled {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookBatchCancelled),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Sent when a batch API request has been completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12637,6 +19522,16 @@ pub struct WebhookBatchCompleted {
     ///The type of the event. Always `batch.completed`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WebhookBatchCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookBatchCompleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Sent when a batch API request has expired.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12655,6 +19550,14 @@ pub struct WebhookBatchExpired {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookBatchExpired {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebhookBatchExpired));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Sent when a batch API request has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12671,6 +19574,14 @@ pub struct WebhookBatchFailed {
     ///The type of the event. Always `batch.failed`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WebhookBatchFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebhookBatchFailed));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Sent when an eval run has been canceled.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12689,6 +19600,16 @@ pub struct WebhookEvalRunCanceled {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookEvalRunCanceled {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookEvalRunCanceled),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Sent when an eval run has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12705,6 +19626,14 @@ pub struct WebhookEvalRunFailed {
     ///The type of the event. Always `eval.run.failed`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WebhookEvalRunFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebhookEvalRunFailed));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Sent when an eval run has succeeded.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12723,6 +19652,16 @@ pub struct WebhookEvalRunSucceeded {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookEvalRunSucceeded {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookEvalRunSucceeded),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Sent when a fine-tuning job has been cancelled.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12739,6 +19678,16 @@ pub struct WebhookFineTuningJobCancelled {
     ///The type of the event. Always `fine_tuning.job.cancelled`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WebhookFineTuningJobCancelled {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookFineTuningJobCancelled),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Sent when a fine-tuning job has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12757,6 +19706,16 @@ pub struct WebhookFineTuningJobFailed {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookFineTuningJobFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookFineTuningJobFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Sent when a fine-tuning job has succeeded.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12773,6 +19732,16 @@ pub struct WebhookFineTuningJobSucceeded {
     ///The type of the event. Always `fine_tuning.job.succeeded`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WebhookFineTuningJobSucceeded {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookFineTuningJobSucceeded),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Sent when an incoming API SIP session is available for Live acceptance. The
 same pending session can also emit `realtime.call.incoming`; the first
@@ -12793,6 +19762,16 @@ pub struct WebhookLiveCallIncoming {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookLiveCallIncoming {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookLiveCallIncoming),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Sent when an incoming API SIP session is available for Realtime acceptance.
 The same pending session can also emit `live.call.incoming`; the first
 successful Realtime or Live accept endpoint selects the runtime surface.*/
@@ -12812,6 +19791,16 @@ pub struct WebhookRealtimeCallIncoming {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookRealtimeCallIncoming {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookRealtimeCallIncoming),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Sent when a background response has been cancelled.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12828,6 +19817,16 @@ pub struct WebhookResponseCancelled {
     ///The type of the event. Always `response.cancelled`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WebhookResponseCancelled {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookResponseCancelled),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Sent when a background response has been completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12846,6 +19845,16 @@ pub struct WebhookResponseCompleted {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookResponseCompleted {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookResponseCompleted),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Sent when a background response has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12862,6 +19871,16 @@ pub struct WebhookResponseFailed {
     ///The type of the event. Always `response.failed`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WebhookResponseFailed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookResponseFailed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Sent when a background response has been interrupted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12880,6 +19899,16 @@ pub struct WebhookResponseIncomplete {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for WebhookResponseIncomplete {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(WebhookResponseIncomplete),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ModerationInputType {
@@ -12888,6 +19917,14 @@ pub enum ModerationInputType {
     Text,
     #[serde(rename = "image")]
     Image,
+}
+impl schematic_define::Registration for ModerationInputType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModerationInputType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A moderation result produced for the response input or output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12907,12 +19944,28 @@ pub struct ModerationResultBody {
     ///Which modalities of input are reflected by the score for each category.
     pub category_applied_input_types: serde_json::Value,
 }
+impl schematic_define::Registration for ModerationResultBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModerationResultBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum PromptCacheTTLEnum {
     #[serde(rename = "30m")]
     #[default]
     M,
+}
+impl schematic_define::Registration for PromptCacheTTLEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PromptCacheTTLEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12923,6 +19976,14 @@ pub enum PromptCacheModeEnum {
     #[serde(rename = "explicit")]
     Explicit,
 }
+impl schematic_define::Registration for PromptCacheModeEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PromptCacheModeEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Options for prompt caching. Supported for `gpt-5.6` and later models. By default, OpenAI automatically chooses one implicit cache breakpoint. You can add explicit breakpoints to content blocks with `prompt_cache_breakpoint`. Each request can write up to four breakpoints. For cache matching, OpenAI considers up to the latest 80 breakpoints in the conversation, without a content-block lookback limit. Set `mode` to `explicit` to disable the implicit breakpoint. The `ttl` defaults to `30m`, which is currently the only supported value. See the [prompt caching guide](/docs/guides/prompt-caching) for current details.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12932,12 +19993,32 @@ pub struct PromptCacheOptionsParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<PromptCacheModeEnum>,
 }
+impl schematic_define::Registration for PromptCacheOptionsParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PromptCacheOptionsParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Marks the exact end of a reusable prompt prefix. The breakpoint inherits its TTL from the request's `prompt_cache_options.ttl`; the boundary is not rounded to a token block.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct PromptCacheBreakpointParam {
     ///The breakpoint mode. Always `explicit`.
     pub mode: String,
+}
+impl schematic_define::Registration for PromptCacheBreakpointParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PromptCacheBreakpointParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12948,11 +20029,29 @@ pub enum ModerationMode {
     #[serde(rename = "block")]
     Block,
 }
+impl schematic_define::Registration for ModerationMode {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModerationMode));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The moderation policy for the response input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ModerationConfigParam {
     pub mode: ModerationMode,
+}
+impl schematic_define::Registration for ModerationConfigParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ModerationConfigParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The policy to apply to moderated response input and output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12963,6 +20062,16 @@ pub struct ModerationPolicyParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ModerationPolicyParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ModerationPolicyParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Configuration for running moderation on the input and output of this response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12971,6 +20080,14 @@ pub struct ModerationParam {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ModerationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModerationParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12984,6 +20101,14 @@ pub struct SkillReferenceParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
 }
+impl schematic_define::Registration for SkillReferenceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SkillReferenceParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Inline skill payload
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -12995,6 +20120,16 @@ pub struct InlineSkillSourceParam {
     pub media_type: String,
     ///Base64-encoded skill zip bundle.
     pub data: String,
+}
+impl schematic_define::Registration for InlineSkillSourceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(InlineSkillSourceParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13008,12 +20143,30 @@ pub struct InlineSkillParam {
     pub description: String,
     pub source: InlineSkillSourceParam,
 }
+impl schematic_define::Registration for InlineSkillParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InlineSkillParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ContainerNetworkPolicyDisabledParam {
     ///Disable outbound network access. Always `disabled`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ContainerNetworkPolicyDisabledParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerNetworkPolicyDisabledParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13024,6 +20177,16 @@ pub struct ContainerNetworkPolicyDomainSecretParam {
     pub name: String,
     ///The secret value to inject for the domain.
     pub value: String,
+}
+impl schematic_define::Registration for ContainerNetworkPolicyDomainSecretParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerNetworkPolicyDomainSecretParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13036,6 +20199,16 @@ pub struct ContainerNetworkPolicyAllowlistParam {
     ///Optional domain-scoped secrets for allowlisted domains.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain_secrets: Option<Vec<ContainerNetworkPolicyDomainSecretParam>>,
+}
+impl schematic_define::Registration for ContainerNetworkPolicyAllowlistParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerNetworkPolicyAllowlistParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Specify additional output data to include in the model response. Currently supported values are:
 - `web_search_call.results`: Include the search results of the web search tool call.
@@ -13067,6 +20240,14 @@ pub enum IncludeEnum {
     #[serde(rename = "message.output_text.logprobs")]
     MessageOutputTextLogprobs,
 }
+impl schematic_define::Registration for IncludeEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(IncludeEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum MessageStatus {
@@ -13077,6 +20258,14 @@ pub enum MessageStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for MessageStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessageStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13099,12 +20288,30 @@ pub enum MessageRole {
     #[serde(rename = "tool")]
     Tool,
 }
+impl schematic_define::Registration for MessageRole {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessageRole));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Marks the exact end of a reusable prompt prefix. The breakpoint inherits its TTL from the request's `prompt_cache_options.ttl`; the boundary is not rounded to a token block.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct PromptCacheBreakpointConfig {
     ///The breakpoint mode. Always `explicit`.
     pub mode: String,
+}
+impl schematic_define::Registration for PromptCacheBreakpointConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PromptCacheBreakpointConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A text input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13117,6 +20324,14 @@ pub struct InputTextContent {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointConfig>,
+}
+impl schematic_define::Registration for InputTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputTextContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A citation to a file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13131,6 +20346,14 @@ pub struct FileCitationBody {
     pub index: i64,
     ///The filename of the file cited.
     pub filename: String,
+}
+impl schematic_define::Registration for FileCitationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileCitationBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A citation for a web resource used to generate a model response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13147,6 +20370,14 @@ pub struct UrlCitationBody {
     pub end_index: i64,
     ///The title of the web resource.
     pub title: String,
+}
+impl schematic_define::Registration for UrlCitationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UrlCitationBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A citation for a container file used to generate a model response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13166,6 +20397,16 @@ pub struct ContainerFileCitationBody {
     ///The filename of the container file cited.
     pub filename: String,
 }
+impl schematic_define::Registration for ContainerFileCitationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerFileCitationBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An annotation that applies to a span of output text.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13182,6 +20423,14 @@ impl Default for Annotation {
         Self::FileCitationBody(Default::default())
     }
 }
+impl schematic_define::Registration for Annotation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Annotation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The top log probability of a token.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13189,6 +20438,14 @@ pub struct TopLogProb {
     pub token: String,
     pub logprob: f64,
     pub bytes: Vec<i64>,
+}
+impl schematic_define::Registration for TopLogProb {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TopLogProb));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The log probability of a token.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13198,6 +20455,14 @@ pub struct LogProb {
     pub logprob: f64,
     pub bytes: Vec<i64>,
     pub top_logprobs: Vec<TopLogProb>,
+}
+impl schematic_define::Registration for LogProb {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(LogProb));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A text output from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13212,6 +20477,14 @@ pub struct OutputTextContent {
     pub annotations: Vec<Annotation>,
     pub logprobs: Vec<LogProb>,
 }
+impl schematic_define::Registration for OutputTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OutputTextContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A text content.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13219,6 +20492,14 @@ pub struct TextContent {
     #[serde(rename = "type")]
     pub type_: String,
     pub text: String,
+}
+impl schematic_define::Registration for TextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TextContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A summary text from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13230,6 +20511,14 @@ pub struct SummaryTextContent {
     ///A summary of the reasoning output from the model so far.
     pub text: String,
 }
+impl schematic_define::Registration for SummaryTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SummaryTextContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Reasoning text from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13240,6 +20529,14 @@ pub struct ReasoningTextContent {
     ///The reasoning text from the model.
     pub text: String,
 }
+impl schematic_define::Registration for ReasoningTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ReasoningTextContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A refusal from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13249,6 +20546,14 @@ pub struct RefusalContent {
     pub type_: String,
     ///The refusal explanation from the model.
     pub refusal: String,
+}
+impl schematic_define::Registration for RefusalContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RefusalContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13262,6 +20567,14 @@ pub enum ImageDetail {
     Auto,
     #[serde(rename = "original")]
     Original,
+}
+impl schematic_define::Registration for ImageDetail {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageDetail));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An image input to the model. Learn about [image inputs](/docs/guides/vision).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13278,6 +20591,14 @@ pub struct InputImageContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointConfig>,
 }
+impl schematic_define::Registration for InputImageContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputImageContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A screenshot of a computer.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13291,6 +20612,16 @@ pub struct ComputerScreenshotContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<PromptCacheBreakpointConfig>,
 }
+impl schematic_define::Registration for ComputerScreenshotContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerScreenshotContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum FileInputDetail {
@@ -13301,6 +20632,14 @@ pub enum FileInputDetail {
     Low,
     #[serde(rename = "high")]
     High,
+}
+impl schematic_define::Registration for FileInputDetail {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileInputDetail));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A file input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13325,6 +20664,14 @@ pub struct InputFileContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<FileInputDetail>,
 }
+impl schematic_define::Registration for InputFileContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputFileContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum MessagePhase2 {
@@ -13333,6 +20680,14 @@ pub enum MessagePhase2 {
     Commentary,
     #[serde(rename = "final_answer")]
     FinalAnswer,
+}
+impl schematic_define::Registration for MessagePhase2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MessagePhase2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A message to or from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13350,11 +20705,27 @@ pub struct Message {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for Message {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Message));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DirectToolCallCaller {
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for DirectToolCallCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DirectToolCallCaller));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13363,6 +20734,16 @@ pub struct ProgramToolCallCaller {
     pub type_: String,
     ///The call ID of the program item that produced this tool call.
     pub caller_id: String,
+}
+impl schematic_define::Registration for ProgramToolCallCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProgramToolCallCaller),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
@@ -13378,6 +20759,14 @@ impl Default for ToolCallCaller {
         Self::DirectToolCallCaller(Default::default())
     }
 }
+impl schematic_define::Registration for ToolCallCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolCallCaller));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum FunctionCallStatus {
@@ -13389,12 +20778,30 @@ pub enum FunctionCallStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
+impl schematic_define::Registration for FunctionCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionCallStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DirectToolCallCallerParam {
     ///The caller type. Always `direct`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for DirectToolCallCallerParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DirectToolCallCallerParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13404,6 +20811,16 @@ pub struct ProgramToolCallCallerParam {
     pub type_: String,
     ///The call ID of the program item that produced this tool call.
     pub caller_id: String,
+}
+impl schematic_define::Registration for ProgramToolCallCallerParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProgramToolCallCallerParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
@@ -13419,6 +20836,14 @@ impl Default for ToolCallCallerParam {
         Self::DirectToolCallCallerParam(Default::default())
     }
 }
+impl schematic_define::Registration for ToolCallCallerParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolCallCallerParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum FunctionCallOutputStatusEnum {
@@ -13429,6 +20854,16 @@ pub enum FunctionCallOutputStatusEnum {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for FunctionCallOutputStatusEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionCallOutputStatusEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13445,6 +20880,14 @@ pub enum ClickButtonType {
     #[serde(rename = "forward")]
     Forward,
 }
+impl schematic_define::Registration for ClickButtonType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ClickButtonType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A click action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13460,6 +20903,14 @@ pub struct ClickParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ClickParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ClickParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A double click action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13473,6 +20924,14 @@ pub struct DoubleClickAction {
     pub y: i64,
     pub keys: serde_json::Value,
 }
+impl schematic_define::Registration for DoubleClickAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DoubleClickAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An x/y coordinate pair, e.g. `{ x: 100, y: 200 }`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13481,6 +20940,14 @@ pub struct CoordParam {
     pub x: i64,
     ///The y-coordinate.
     pub y: i64,
+}
+impl schematic_define::Registration for CoordParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CoordParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A drag action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13500,6 +20967,14 @@ pub struct DragParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for DragParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DragParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A collection of keypresses the model would like to perform.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13509,6 +20984,14 @@ pub struct KeyPressAction {
     pub type_: String,
     ///The combination of keys the model is requesting to be pressed. This is an array of strings, each representing a key.
     pub keys: Vec<String>,
+}
+impl schematic_define::Registration for KeyPressAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(KeyPressAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A mouse move action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13524,6 +21007,14 @@ pub struct MoveParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MoveParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MoveParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A screenshot action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13531,6 +21022,14 @@ pub struct ScreenshotParam {
     ///Specifies the event type. For a screenshot action, this property is always set to `screenshot`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ScreenshotParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ScreenshotParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A scroll action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13550,6 +21049,14 @@ pub struct ScrollParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ScrollParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ScrollParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An action to type in text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13560,6 +21067,14 @@ pub struct TypeParam {
     ///The text to type.
     pub text: String,
 }
+impl schematic_define::Registration for TypeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TypeParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A wait action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13567,6 +21082,14 @@ pub struct WaitParam {
     ///Specifies the event type. For a wait action, this property is always set to `wait`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for WaitParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WaitParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A pending safety check for the computer call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13579,6 +21102,16 @@ pub struct ComputerCallSafetyCheckParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ComputerCallSafetyCheckParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerCallSafetyCheckParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ComputerCallOutputStatus {
@@ -13590,6 +21123,16 @@ pub enum ComputerCallOutputStatus {
     #[serde(rename = "failed")]
     Failed,
 }
+impl schematic_define::Registration for ComputerCallOutputStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerCallOutputStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ToolSearchExecutionType {
@@ -13598,6 +21141,16 @@ pub enum ToolSearchExecutionType {
     Server,
     #[serde(rename = "client")]
     Client,
+}
+impl schematic_define::Registration for ToolSearchExecutionType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ToolSearchExecutionType),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13616,6 +21169,14 @@ pub struct ToolSearchCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for ToolSearchCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolSearchCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum CallableToolAllowedCaller {
@@ -13624,6 +21185,16 @@ pub enum CallableToolAllowedCaller {
     Direct,
     #[serde(rename = "programmatic")]
     Programmatic,
+}
+impl schematic_define::Registration for CallableToolAllowedCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CallableToolAllowedCaller),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Defines a function in your own code the model can choose to call. Learn more about [function calling](https://platform.openai.com/docs/guides/function-calling).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13646,6 +21217,14 @@ pub struct FunctionTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FunctionTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum RankerVersionType {
@@ -13655,6 +21234,14 @@ pub enum RankerVersionType {
     #[serde(rename = "default-2024-11-15")]
     Default20241115,
 }
+impl schematic_define::Registration for RankerVersionType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RankerVersionType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct HybridSearchOptions {
@@ -13662,6 +21249,14 @@ pub struct HybridSearchOptions {
     pub embedding_weight: f64,
     ///The weight of the text in the reciprocal ranking fusion.
     pub text_weight: f64,
+}
+impl schematic_define::Registration for HybridSearchOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(HybridSearchOptions));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13674,6 +21269,14 @@ pub struct RankingOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hybrid_search: Option<HybridSearchOptions>,
 }
+impl schematic_define::Registration for RankingOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RankingOptions));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13685,6 +21288,14 @@ pub enum Filters {
 impl Default for Filters {
     fn default() -> Self {
         Self::ComparisonFilter(Default::default())
+    }
+}
+impl schematic_define::Registration for Filters {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Filters));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A tool that searches for relevant content from uploaded files. Learn more about the [file search tool](https://platform.openai.com/docs/guides/tools-file-search).
@@ -13704,6 +21315,14 @@ pub struct FileSearchTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FileSearchTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileSearchTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool that controls a virtual computer. Learn more about the [computer tool](https://platform.openai.com/docs/guides/tools-computer-use).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13711,6 +21330,14 @@ pub struct ComputerTool {
     ///The type of the computer tool. Always `computer`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ComputerTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ComputerTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13727,6 +21354,14 @@ pub enum ComputerEnvironment {
     #[serde(rename = "browser")]
     Browser,
 }
+impl schematic_define::Registration for ComputerEnvironment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ComputerEnvironment));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool that controls a virtual computer. Learn more about the [computer tool](https://platform.openai.com/docs/guides/tools-computer-use).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13740,6 +21375,16 @@ pub struct ComputerUsePreviewTool {
     ///The height of the computer display.
     pub display_height: i64,
 }
+impl schematic_define::Registration for ComputerUsePreviewTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerUsePreviewTool),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ContainerMemoryLimit {
@@ -13752,6 +21397,14 @@ pub enum ContainerMemoryLimit {
     G3,
     #[serde(rename = "64g")]
     G4,
+}
+impl schematic_define::Registration for ContainerMemoryLimit {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ContainerMemoryLimit));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Configuration for a code interpreter container. Optionally specify the IDs of the files to run the code on.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13769,12 +21422,32 @@ pub struct AutoCodeInterpreterToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_policy: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for AutoCodeInterpreterToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AutoCodeInterpreterToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProgrammaticToolCallingParam {
     ///The type of the tool. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ProgrammaticToolCallingParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProgrammaticToolCallingParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Control how much effort the model will exert to match the style and features, especially facial features, of input images. This parameter is only supported for `gpt-image-1` and `gpt-image-1.5` and later models, unsupported for `gpt-image-1-mini`. Supports `high` and `low`. Defaults to `low`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13785,6 +21458,14 @@ pub enum InputFidelity {
     High,
     #[serde(rename = "low")]
     Low,
+}
+impl schematic_define::Registration for InputFidelity {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InputFidelity));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13797,6 +21478,14 @@ pub enum ImageGenActionEnum {
     #[serde(rename = "auto")]
     Auto,
 }
+impl schematic_define::Registration for ImageGenActionEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageGenActionEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool that allows the model to execute shell commands in a local environment.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13804,6 +21493,14 @@ pub struct LocalShellToolParam {
     ///The type of the local shell tool. Always `local_shell`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for LocalShellToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(LocalShellToolParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13823,6 +21520,14 @@ pub struct ContainerAutoParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<serde_json::Value>>,
 }
+impl schematic_define::Registration for ContainerAutoParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ContainerAutoParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct LocalSkillParam {
@@ -13832,6 +21537,14 @@ pub struct LocalSkillParam {
     pub description: String,
     ///The path to the directory containing the skill.
     pub path: String,
+}
+impl schematic_define::Registration for LocalSkillParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(LocalSkillParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13843,6 +21556,16 @@ pub struct LocalEnvironmentParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<LocalSkillParam>>,
 }
+impl schematic_define::Registration for LocalEnvironmentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(LocalEnvironmentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ContainerReferenceParam {
@@ -13851,6 +21574,16 @@ pub struct ContainerReferenceParam {
     pub type_: String,
     ///The ID of the referenced container.
     pub container_id: String,
+}
+impl schematic_define::Registration for ContainerReferenceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerReferenceParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool that allows the model to execute shell commands.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13864,6 +21597,16 @@ pub struct FunctionShellToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FunctionShellToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Unconstrained free-form text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13871,6 +21614,16 @@ pub struct CustomTextFormatParam {
     ///Unconstrained text format. Always `text`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for CustomTextFormatParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CustomTextFormatParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13880,6 +21633,14 @@ pub enum GrammarSyntax1 {
     Lark,
     #[serde(rename = "regex")]
     Regex,
+}
+impl schematic_define::Registration for GrammarSyntax1 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GrammarSyntax1));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A grammar defined by the user.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13891,6 +21652,16 @@ pub struct CustomGrammarFormatParam {
     pub syntax: GrammarSyntax1,
     ///The grammar definition.
     pub definition: String,
+}
+impl schematic_define::Registration for CustomGrammarFormatParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CustomGrammarFormatParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A custom tool that processes input using a specified format. Learn more about   [custom tools](/docs/guides/function-calling#custom-tools)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13913,9 +21684,25 @@ pub struct CustomToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for CustomToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CustomToolParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct EmptyModelParam {}
+impl schematic_define::Registration for EmptyModelParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(EmptyModelParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FunctionToolParam {
@@ -13936,6 +21723,14 @@ pub struct FunctionToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FunctionToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionToolParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Groups function/custom tools under a shared namespace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13950,6 +21745,14 @@ pub struct NamespaceToolParam {
     ///The function/custom tools available inside this namespace.
     pub tools: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for NamespaceToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(NamespaceToolParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Hosted or BYOT tool search configuration for deferred tools.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13963,6 +21766,14 @@ pub struct ToolSearchToolParam {
     pub description: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ToolSearchToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolSearchToolParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -13979,6 +21790,14 @@ pub struct ApproximateLocation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ApproximateLocation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ApproximateLocation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum SearchContextSize {
@@ -13990,6 +21809,14 @@ pub enum SearchContextSize {
     #[serde(rename = "high")]
     High,
 }
+impl schematic_define::Registration for SearchContextSize {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SearchContextSize));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum SearchContentType {
@@ -13998,6 +21825,14 @@ pub enum SearchContentType {
     Text,
     #[serde(rename = "image")]
     Image,
+}
+impl schematic_define::Registration for SearchContentType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SearchContentType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///This tool searches the web for relevant results to use in a response. Learn more about the [web search tool](https://platform.openai.com/docs/guides/tools-web-search).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14013,6 +21848,14 @@ pub struct WebSearchPreviewTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_content_types: Option<Vec<SearchContentType>>,
 }
+impl schematic_define::Registration for WebSearchPreviewTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WebSearchPreviewTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Allows the assistant to create, delete, or update files using unified diffs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14022,6 +21865,14 @@ pub struct ApplyPatchToolParam {
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ApplyPatchToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ApplyPatchToolParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14040,6 +21891,14 @@ pub struct ToolSearchOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for ToolSearchOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolSearchOutput));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct AdditionalTools {
@@ -14051,6 +21910,14 @@ pub struct AdditionalTools {
     pub role: MessageRole,
     ///The additional tool definitions made available at this item.
     pub tools: Vec<Tool>,
+}
+impl schematic_define::Registration for AdditionalTools {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AdditionalTools));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14067,6 +21934,14 @@ pub struct Program {
     ///Opaque program replay fingerprint that must be round-tripped.
     pub fingerprint: String,
 }
+impl schematic_define::Registration for Program {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Program));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ProgramOutputStatus {
@@ -14075,6 +21950,14 @@ pub enum ProgramOutputStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for ProgramOutputStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProgramOutputStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14089,6 +21972,14 @@ pub struct ProgramOutput {
     ///The result produced by the program item.
     pub result: String,
     pub status: ProgramOutputStatus,
+}
+impl schematic_define::Registration for ProgramOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProgramOutput));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A compaction item generated by the [`v1/responses/compact` API](/docs/api-reference/responses/compact).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14105,6 +21996,14 @@ pub struct CompactionBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for CompactionBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CompactionBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The logs output from the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14115,6 +22014,16 @@ pub struct CodeInterpreterOutputLogs {
     ///The logs output from the code interpreter.
     pub logs: String,
 }
+impl schematic_define::Registration for CodeInterpreterOutputLogs {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CodeInterpreterOutputLogs),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The image output from the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14124,6 +22033,16 @@ pub struct CodeInterpreterOutputImage {
     pub type_: String,
     ///The URL of the image output from the code interpreter.
     pub url: String,
+}
+impl schematic_define::Registration for CodeInterpreterOutputImage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CodeInterpreterOutputImage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Execute a shell command on the server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14143,6 +22062,14 @@ pub struct LocalShellExecAction {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for LocalShellExecAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(LocalShellExecAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Execute a shell command.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14150,6 +22077,14 @@ pub struct FunctionShellAction {
     pub commands: Vec<String>,
     pub timeout_ms: serde_json::Value,
     pub max_output_length: serde_json::Value,
+}
+impl schematic_define::Registration for FunctionShellAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionShellAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14162,6 +22097,16 @@ pub enum FunctionShellCallStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
+impl schematic_define::Registration for FunctionShellCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents the use of a local environment to perform shell actions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14169,6 +22114,16 @@ pub struct LocalEnvironmentResource {
     ///The environment type. Always `local`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for LocalEnvironmentResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(LocalEnvironmentResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a container created with /v1/containers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14178,6 +22133,16 @@ pub struct ContainerReferenceResource {
     #[serde(rename = "type")]
     pub type_: String,
     pub container_id: String,
+}
+impl schematic_define::Registration for ContainerReferenceResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerReferenceResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call that executes one or more shell commands in a managed environment.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14199,6 +22164,14 @@ pub struct FunctionShellCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for FunctionShellCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FunctionShellCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum FunctionShellCallOutputStatusEnum {
@@ -14210,6 +22183,16 @@ pub enum FunctionShellCallOutputStatusEnum {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
+impl schematic_define::Registration for FunctionShellCallOutputStatusEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputStatusEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that the shell call exceeded its configured time limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14217,6 +22200,16 @@ pub struct FunctionShellCallOutputTimeoutOutcome {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for FunctionShellCallOutputTimeoutOutcome {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputTimeoutOutcome),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Indicates that the shell commands finished and returned an exit code.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14227,6 +22220,16 @@ pub struct FunctionShellCallOutputExitOutcome {
     pub type_: String,
     ///Exit code from the shell process.
     pub exit_code: i64,
+}
+impl schematic_define::Registration for FunctionShellCallOutputExitOutcome {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputExitOutcome),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The content of a shell tool call output that was emitted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14241,6 +22244,16 @@ pub struct FunctionShellCallOutputContent {
     ///The identifier of the actor that created the item.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl schematic_define::Registration for FunctionShellCallOutputContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a shell tool call that was emitted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14263,6 +22276,16 @@ pub struct FunctionShellCallOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for FunctionShellCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ApplyPatchCallStatus {
@@ -14271,6 +22294,14 @@ pub enum ApplyPatchCallStatus {
     InProgress,
     #[serde(rename = "completed")]
     Completed,
+}
+impl schematic_define::Registration for ApplyPatchCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ApplyPatchCallStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Instruction describing how to create a file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14284,6 +22315,16 @@ pub struct ApplyPatchCreateFileOperation {
     ///Diff to apply.
     pub diff: String,
 }
+impl schematic_define::Registration for ApplyPatchCreateFileOperation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchCreateFileOperation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Instruction describing how to delete a file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14293,6 +22334,16 @@ pub struct ApplyPatchDeleteFileOperation {
     pub type_: String,
     ///Path of the file to delete.
     pub path: String,
+}
+impl schematic_define::Registration for ApplyPatchDeleteFileOperation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchDeleteFileOperation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Instruction describing how to update a file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14305,6 +22356,16 @@ pub struct ApplyPatchUpdateFileOperation {
     pub path: String,
     ///Diff to apply.
     pub diff: String,
+}
+impl schematic_define::Registration for ApplyPatchUpdateFileOperation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchUpdateFileOperation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call that applies file diffs by creating, deleting, or updating files.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14326,6 +22387,14 @@ pub struct ApplyPatchToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for ApplyPatchToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ApplyPatchToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ApplyPatchCallOutputStatus {
@@ -14334,6 +22403,16 @@ pub enum ApplyPatchCallOutputStatus {
     Completed,
     #[serde(rename = "failed")]
     Failed,
+}
+impl schematic_define::Registration for ApplyPatchCallOutputStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchCallOutputStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output emitted by an apply patch tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14355,6 +22434,16 @@ pub struct ApplyPatchToolCallOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for ApplyPatchToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum MCPToolCallStatus {
@@ -14370,6 +22459,14 @@ pub enum MCPToolCallStatus {
     #[serde(rename = "failed")]
     Failed,
 }
+impl schematic_define::Registration for MCPToolCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(MCPToolCallStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum DetailEnum {
@@ -14383,6 +22480,14 @@ pub enum DetailEnum {
     #[serde(rename = "original")]
     Original,
 }
+impl schematic_define::Registration for DetailEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DetailEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum FunctionCallItemStatus {
@@ -14393,6 +22498,16 @@ pub enum FunctionCallItemStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for FunctionCallItemStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionCallItemStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a computer tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14411,6 +22526,16 @@ pub struct ComputerCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ComputerCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ComputerCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A text input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14422,6 +22547,16 @@ pub struct InputTextContentParam {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for InputTextContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(InputTextContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An image input to the model. Learn about [image inputs](/docs/guides/vision)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14439,6 +22574,16 @@ pub struct InputImageContentParamAutoParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for InputImageContentParamAutoParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(InputImageContentParamAutoParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum FileDetailEnum {
@@ -14449,6 +22594,14 @@ pub enum FileDetailEnum {
     Low,
     #[serde(rename = "high")]
     High,
+}
+impl schematic_define::Registration for FileDetailEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileDetailEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A file input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14469,6 +22622,16 @@ pub struct InputFileContentParam {
     pub detail: Option<FileDetailEnum>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for InputFileContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(InputFileContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a function tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14492,6 +22655,16 @@ pub struct FunctionCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FunctionCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct FileCitationParam {
@@ -14504,6 +22677,14 @@ pub struct FileCitationParam {
     pub file_id: String,
     ///The filename of the file cited.
     pub filename: String,
+}
+impl schematic_define::Registration for FileCitationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileCitationParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14519,6 +22700,14 @@ pub struct UrlCitationParam {
     pub url: String,
     ///The title of the cited resource.
     pub title: String,
+}
+impl schematic_define::Registration for UrlCitationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UrlCitationParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14537,6 +22726,16 @@ pub struct ContainerFileCitationParam {
     ///The filename of the container file cited.
     pub filename: String,
 }
+impl schematic_define::Registration for ContainerFileCitationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContainerFileCitationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ToolSearchCallItemParam {
@@ -14552,6 +22751,16 @@ pub struct ToolSearchCallItemParam {
     pub arguments: EmptyModelParam,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for ToolSearchCallItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ToolSearchCallItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14570,6 +22779,16 @@ pub struct ToolSearchOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ToolSearchOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ToolSearchOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct AdditionalToolsItemParam {
@@ -14583,6 +22802,16 @@ pub struct AdditionalToolsItemParam {
     ///A list of additional tools made available at this item.
     pub tools: Vec<Tool>,
 }
+impl schematic_define::Registration for AdditionalToolsItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AdditionalToolsItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A compaction item generated by the [`v1/responses/compact` API](/docs/api-reference/responses/compact).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14595,6 +22824,16 @@ pub struct CompactionSummaryItemParam {
     ///The encrypted content of the compaction summary.
     pub encrypted_content: String,
 }
+impl schematic_define::Registration for CompactionSummaryItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CompactionSummaryItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Commands and limits describing how to run the shell tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14605,6 +22844,16 @@ pub struct FunctionShellActionParam {
     pub timeout_ms: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_length: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for FunctionShellActionParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellActionParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Status values reported for shell tool calls.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14617,6 +22866,16 @@ pub enum FunctionShellCallItemStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for FunctionShellCallItemStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallItemStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool representing a request to execute one or more shell commands.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14637,6 +22896,16 @@ pub struct FunctionShellCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FunctionShellCallItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that the shell call exceeded its configured time limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14644,6 +22913,16 @@ pub struct FunctionShellCallOutputTimeoutOutcomeParam {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for FunctionShellCallOutputTimeoutOutcomeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputTimeoutOutcomeParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Indicates that the shell commands finished and returned an exit code.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14654,6 +22933,16 @@ pub struct FunctionShellCallOutputExitOutcomeParam {
     pub type_: String,
     ///The exit code returned by the shell process.
     pub exit_code: i64,
+}
+impl schematic_define::Registration for FunctionShellCallOutputExitOutcomeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputExitOutcomeParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The exit or timeout outcome associated with this shell call.
 #[allow(clippy::large_enum_variant)]
@@ -14671,6 +22960,16 @@ impl Default for FunctionShellCallOutputOutcomeParam {
         Self::FunctionShellCallOutputTimeoutOutcomeParam(Default::default())
     }
 }
+impl schematic_define::Registration for FunctionShellCallOutputOutcomeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputOutcomeParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Captured stdout and stderr for a portion of a shell tool call output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14680,6 +22979,16 @@ pub struct FunctionShellCallOutputContentParam {
     ///Captured stderr output for the shell call.
     pub stderr: String,
     pub outcome: FunctionShellCallOutputOutcomeParam,
+}
+impl schematic_define::Registration for FunctionShellCallOutputContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The streamed output items emitted by a shell tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14701,6 +23010,16 @@ pub struct FunctionShellCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_length: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for FunctionShellCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(FunctionShellCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Status values reported for apply_patch tool calls.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14710,6 +23029,16 @@ pub enum ApplyPatchCallStatusParam {
     InProgress,
     #[serde(rename = "completed")]
     Completed,
+}
+impl schematic_define::Registration for ApplyPatchCallStatusParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchCallStatusParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Instruction for creating a new file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14723,6 +23052,16 @@ pub struct ApplyPatchCreateFileOperationParam {
     ///Unified diff content to apply when creating the file.
     pub diff: String,
 }
+impl schematic_define::Registration for ApplyPatchCreateFileOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchCreateFileOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Instruction for deleting an existing file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14732,6 +23071,16 @@ pub struct ApplyPatchDeleteFileOperationParam {
     pub type_: String,
     ///Path of the file to delete relative to the workspace root.
     pub path: String,
+}
+impl schematic_define::Registration for ApplyPatchDeleteFileOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchDeleteFileOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Instruction for updating an existing file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14744,6 +23093,16 @@ pub struct ApplyPatchUpdateFileOperationParam {
     pub path: String,
     ///Unified diff content to apply to the existing file.
     pub diff: String,
+}
+impl schematic_define::Registration for ApplyPatchUpdateFileOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchUpdateFileOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///One of the create_file, delete_file, or update_file operations supplied to the apply_patch tool.
 #[allow(clippy::large_enum_variant)]
@@ -14758,6 +23117,16 @@ pub enum ApplyPatchOperationParam {
 impl Default for ApplyPatchOperationParam {
     fn default() -> Self {
         Self::ApplyPatchCreateFileOperationParam(Default::default())
+    }
+}
+impl schematic_define::Registration for ApplyPatchOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A tool call representing a request to create, delete, or update files using diff patches.
@@ -14776,6 +23145,16 @@ pub struct ApplyPatchToolCallItemParam {
     pub status: ApplyPatchCallStatusParam,
     pub operation: ApplyPatchOperationParam,
 }
+impl schematic_define::Registration for ApplyPatchToolCallItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchToolCallItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Outcome values reported for apply_patch tool call outputs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14785,6 +23164,16 @@ pub enum ApplyPatchCallOutputStatusParam {
     Completed,
     #[serde(rename = "failed")]
     Failed,
+}
+impl schematic_define::Registration for ApplyPatchCallOutputStatusParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchCallOutputStatusParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The streamed output emitted by an apply patch tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14803,6 +23192,16 @@ pub struct ApplyPatchToolCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ApplyPatchToolCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ApplyPatchToolCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Compacts the current context. Must be the final input item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14810,6 +23209,16 @@ pub struct CompactionTriggerItemParam {
     ///The type of the item. Always `compaction_trigger`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for CompactionTriggerItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CompactionTriggerItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An internal identifier for an item to reference.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14820,6 +23229,14 @@ pub struct ItemReferenceParam {
     pub type_: Option<serde_json::Value>,
     ///The ID of the item to reference.
     pub id: String,
+}
+impl schematic_define::Registration for ItemReferenceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ItemReferenceParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14836,6 +23253,14 @@ pub struct ProgramItemParam {
     ///Opaque program replay fingerprint that must be round-tripped.
     pub fingerprint: String,
 }
+impl schematic_define::Registration for ProgramItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProgramItemParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ProgramOutputItemStatus {
@@ -14844,6 +23269,16 @@ pub enum ProgramOutputItemStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for ProgramOutputItemStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProgramOutputItemStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14859,6 +23294,16 @@ pub struct ProgramOutputItemParam {
     pub result: String,
     pub status: ProgramOutputItemStatus,
 }
+impl schematic_define::Registration for ProgramOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProgramOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ConversationResource {
@@ -14872,6 +23317,14 @@ pub struct ConversationResource {
     ///The time at which the conversation was created, measured in seconds since the Unix epoch.
     pub created_at: i64,
 }
+impl schematic_define::Registration for ConversationResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ConversationResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The output token details for the image generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14881,6 +23334,16 @@ pub struct ImageGenOutputTokensDetails {
     ///The number of text output tokens generated by the model.
     pub text_tokens: i64,
 }
+impl schematic_define::Registration for ImageGenOutputTokensDetails {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ImageGenOutputTokensDetails),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The input tokens detailed information for the image generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14889,6 +23352,16 @@ pub struct ImageGenInputUsageDetails {
     pub text_tokens: i64,
     ///The number of image tokens in the input prompt.
     pub image_tokens: i64,
+}
+impl schematic_define::Registration for ImageGenInputUsageDetails {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ImageGenInputUsageDetails),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///For `gpt-image-1` only, the token usage information for the image generation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14904,12 +23377,30 @@ pub struct ImageGenUsage {
     pub output_tokens_details: Option<ImageGenOutputTokensDetails>,
     pub input_tokens_details: ImageGenInputUsageDetails,
 }
+impl schematic_define::Registration for ImageGenUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageGenUsage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct SpecificProgrammaticToolCallingParam {
     ///The tool to call. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for SpecificProgrammaticToolCallingParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SpecificProgrammaticToolCallingParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Forces the model to call the apply_patch tool when executing a tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14919,6 +23410,16 @@ pub struct SpecificApplyPatchParam {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for SpecificApplyPatchParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SpecificApplyPatchParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Forces the model to call the shell tool when a tool call is required.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14926,6 +23427,16 @@ pub struct SpecificFunctionShellParam {
     ///The tool to call. Always `shell`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for SpecificFunctionShellParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SpecificFunctionShellParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14940,12 +23451,28 @@ impl Default for ReasoningModeEnum {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for ReasoningModeEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ReasoningModeEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The conversation that this response belongs to.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ConversationParam2 {
     ///The unique ID of the conversation.
     pub id: String,
+}
+impl schematic_define::Registration for ConversationParam2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ConversationParam2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14956,12 +23483,30 @@ pub struct ContextManagementParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compact_threshold: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for ContextManagementParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ContextManagementParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The prompt-caching options that were applied to the response. Supported for `gpt-5.6` and later models.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct PromptCacheOptions {
     pub ttl: PromptCacheTTLEnum,
     pub mode: PromptCacheModeEnum,
+}
+impl schematic_define::Registration for PromptCacheOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PromptCacheOptions));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An error produced while attempting moderation for the response input or output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -14975,6 +23520,14 @@ pub struct ModerationErrorBody {
     ///The error message.
     pub message: String,
 }
+impl schematic_define::Registration for ModerationErrorBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ModerationErrorBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Moderation results or errors for the response input and output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14984,12 +23537,28 @@ pub struct Moderation {
     ///Moderation for the response output.
     pub output: serde_json::Value,
 }
+impl schematic_define::Registration for Moderation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Moderation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The conversation that this response belonged to. Input items and output items from this response were automatically added to this conversation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ResponseConversation {
     ///The unique ID of the conversation that this response was associated with.
     pub id: String,
+}
+impl schematic_define::Registration for ResponseConversation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseConversation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -14999,10 +23568,30 @@ pub struct CreateConversationBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for CreateConversationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateConversationBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct UpdateConversationBody {
     pub metadata: Metadata,
+}
+impl schematic_define::Registration for UpdateConversationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateConversationBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15010,6 +23599,16 @@ pub struct DeletedConversationResource {
     pub object: String,
     pub deleted: bool,
     pub id: String,
+}
+impl schematic_define::Registration for DeletedConversationResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeletedConversationResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15022,6 +23621,14 @@ pub enum SpendLimitCurrency {
 impl Default for SpendLimitCurrency {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for SpendLimitCurrency {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SpendLimitCurrency));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[allow(clippy::large_enum_variant)]
@@ -15037,6 +23644,14 @@ impl Default for SpendLimitInterval {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for SpendLimitInterval {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SpendLimitInterval));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15050,11 +23665,31 @@ impl Default for SpendLimitEnforcementStatus {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for SpendLimitEnforcementStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SpendLimitEnforcementStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The current enforcement state of a hard spend limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct SpendLimitEnforcement {
     pub status: SpendLimitEnforcementStatus,
+}
+impl schematic_define::Registration for SpendLimitEnforcement {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SpendLimitEnforcement),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a hard spend limit configured at the organization level.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15068,6 +23703,16 @@ pub struct OrganizationSpendLimitResource {
     pub interval: SpendLimitInterval,
     pub enforcement: SpendLimitEnforcement,
 }
+impl schematic_define::Registration for OrganizationSpendLimitResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationSpendLimitResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Parameters for the hard spend limit you want to create or replace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15079,6 +23724,16 @@ pub struct UpdateOrganizationSpendLimitBody {
     ///The time interval for evaluating spend against the threshold. Currently, only `month` is supported.
     pub interval: String,
 }
+impl schematic_define::Registration for UpdateOrganizationSpendLimitBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateOrganizationSpendLimitBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting an organization hard spend limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15087,6 +23742,16 @@ pub struct OrganizationSpendLimitDeletedResource {
     pub object: String,
     ///Whether the hard spend limit was deleted.
     pub deleted: bool,
+}
+impl schematic_define::Registration for OrganizationSpendLimitDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(OrganizationSpendLimitDeletedResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a hard spend limit configured at the project level.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15100,6 +23765,16 @@ pub struct ProjectSpendLimitResource {
     pub interval: SpendLimitInterval,
     pub enforcement: SpendLimitEnforcement,
 }
+impl schematic_define::Registration for ProjectSpendLimitResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectSpendLimitResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Parameters for the hard spend limit you want to create or replace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15111,6 +23786,16 @@ pub struct UpdateProjectSpendLimitBody {
     ///The time interval for evaluating spend against the threshold. Currently, only `month` is supported.
     pub interval: String,
 }
+impl schematic_define::Registration for UpdateProjectSpendLimitBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UpdateProjectSpendLimitBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting a project hard spend limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15119,6 +23804,16 @@ pub struct ProjectSpendLimitDeletedResource {
     pub object: String,
     ///Whether the hard spend limit was deleted.
     pub deleted: bool,
+}
+impl schematic_define::Registration for ProjectSpendLimitDeletedResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProjectSpendLimitDeletedResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The service account API key create request payload.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15130,6 +23825,16 @@ pub struct CreateProjectServiceAccountApiKeyBody {
     ///API key scopes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scopes: Option<Vec<String>>,
+}
+impl schematic_define::Registration for CreateProjectServiceAccountApiKeyBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateProjectServiceAccountApiKeyBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15145,11 +23850,31 @@ pub struct ServiceAccountApiKeyBody {
     ///The identifier of the API key.
     pub id: String,
 }
+impl schematic_define::Registration for ServiceAccountApiKeyBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ServiceAccountApiKeyBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateContentProvenanceBody {
     ///The image or audio file to check for supported OpenAI provenance signals.
     pub file: String,
+}
+impl schematic_define::Registration for CreateContentProvenanceBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateContentProvenanceBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15157,6 +23882,16 @@ pub enum ProvenanceCheckObject {
     #[serde(rename = "content_provenance_check")]
     #[default]
     ContentProvenanceCheck,
+}
+impl schematic_define::Registration for ProvenanceCheckObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProvenanceCheckObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15166,6 +23901,16 @@ pub enum ProvenanceDetectionResultApi {
     Detected,
     #[serde(rename = "not_detected")]
     NotDetected,
+}
+impl schematic_define::Registration for ProvenanceDetectionResultApi {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ProvenanceDetectionResultApi),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15180,6 +23925,16 @@ pub enum C2PAValidationStateApi {
     #[serde(rename = "not_present")]
     NotPresent,
 }
+impl schematic_define::Registration for C2PAValidationStateApi {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(C2PAValidationStateApi),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct C2PAProvenanceResult {
@@ -15192,6 +23947,14 @@ pub struct C2PAProvenanceResult {
     pub model: serde_json::Value,
     pub generated_at: serde_json::Value,
 }
+impl schematic_define::Registration for C2PAProvenanceResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(C2PAProvenanceResult));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct SynthIDProvenanceResult {
@@ -15202,6 +23965,16 @@ pub struct SynthIDProvenanceResult {
     pub model: serde_json::Value,
     pub generated_at: serde_json::Value,
 }
+impl schematic_define::Registration for SynthIDProvenanceResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SynthIDProvenanceResult),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ProvenanceResource {
@@ -15211,6 +23984,14 @@ pub struct ProvenanceResource {
     ///The provenance results that apply to the uploaded file. Image results include C2PA and SynthID; audio results include SynthID.
     pub results: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for ProvenanceResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ProvenanceResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum OrderEnum {
@@ -15219,6 +24000,14 @@ pub enum OrderEnum {
     Asc,
     #[serde(rename = "desc")]
     Desc,
+}
+impl schematic_define::Registration for OrderEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(OrderEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15231,6 +24020,14 @@ pub enum VideoModel {
 impl Default for VideoModel {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for VideoModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VideoModel));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15246,6 +24043,14 @@ pub enum VideoStatus {
     #[serde(rename = "failed")]
     Failed,
 }
+impl schematic_define::Registration for VideoStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VideoStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum VideoSize {
@@ -15259,6 +24064,14 @@ pub enum VideoSize {
     #[serde(rename = "1792x1024")]
     X1024,
 }
+impl schematic_define::Registration for VideoSize {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VideoSize));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An error that occurred while generating the response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15267,6 +24080,14 @@ pub struct Error2 {
     pub code: String,
     ///A human-readable description of the error that was returned.
     pub message: String,
+}
+impl schematic_define::Registration for Error2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Error2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Structured information describing a generated video job.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15291,6 +24112,14 @@ pub struct VideoResource {
     pub remixed_from_video_id: serde_json::Value,
     pub error: serde_json::Value,
 }
+impl schematic_define::Registration for VideoResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VideoResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VideoListResource {
@@ -15303,6 +24132,14 @@ pub struct VideoListResource {
     ///Whether there are more items available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for VideoListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VideoListResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ImageRefParam2 {
@@ -15311,6 +24148,14 @@ pub struct ImageRefParam2 {
     pub image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<String>,
+}
+impl schematic_define::Registration for ImageRefParam2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ImageRefParam2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15322,6 +24167,14 @@ pub enum VideoSeconds {
     Unknown2,
     #[serde(rename = "12")]
     Unknown3,
+}
+impl schematic_define::Registration for VideoSeconds {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VideoSeconds));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Multipart parameters for creating a new video generation job.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15338,6 +24191,16 @@ pub struct CreateVideoMultipartBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<VideoSize>,
 }
+impl schematic_define::Registration for CreateVideoMultipartBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVideoMultipartBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///JSON parameters for creating a new video generation job.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15353,6 +24216,14 @@ pub struct CreateVideoJsonBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<VideoSize>,
 }
+impl schematic_define::Registration for CreateVideoJsonBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateVideoJsonBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Parameters for creating a character from an uploaded video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15362,6 +24233,16 @@ pub struct CreateVideoCharacterBody {
     ///Display name for this API character.
     pub name: String,
 }
+impl schematic_define::Registration for CreateVideoCharacterBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVideoCharacterBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VideoCharacterResource {
@@ -15370,12 +24251,32 @@ pub struct VideoCharacterResource {
     ///Unix timestamp (in seconds) when the character was created.
     pub created_at: i64,
 }
+impl schematic_define::Registration for VideoCharacterResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VideoCharacterResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Reference to the completed video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct VideoReferenceInputParam {
     ///The identifier of the completed video.
     pub id: String,
+}
+impl schematic_define::Registration for VideoReferenceInputParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(VideoReferenceInputParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Parameters for editing an existing generated video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15385,6 +24286,16 @@ pub struct CreateVideoEditMultipartBody {
     ///Text prompt that describes how to edit the source video.
     pub prompt: String,
 }
+impl schematic_define::Registration for CreateVideoEditMultipartBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVideoEditMultipartBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///JSON parameters for editing an existing generated video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15392,6 +24303,16 @@ pub struct CreateVideoEditJsonBody {
     pub video: VideoReferenceInputParam,
     ///Text prompt that describes how to edit the source video.
     pub prompt: String,
+}
+impl schematic_define::Registration for CreateVideoEditJsonBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVideoEditJsonBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Multipart parameters for extending an existing generated video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15402,6 +24323,16 @@ pub struct CreateVideoExtendMultipartBody {
     pub prompt: String,
     pub seconds: VideoSeconds,
 }
+impl schematic_define::Registration for CreateVideoExtendMultipartBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVideoExtendMultipartBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///JSON parameters for extending an existing generated video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15410,6 +24341,16 @@ pub struct CreateVideoExtendJsonBody {
     ///Updated text prompt that directs the extension generation.
     pub prompt: String,
     pub seconds: VideoSeconds,
+}
+impl schematic_define::Registration for CreateVideoExtendJsonBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateVideoExtendJsonBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Confirmation payload returned after deleting a video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15422,6 +24363,14 @@ pub struct DeletedVideoResource {
     ///Identifier of the deleted video.
     pub id: String,
 }
+impl schematic_define::Registration for DeletedVideoResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DeletedVideoResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum VideoContentVariant {
@@ -15433,12 +24382,28 @@ pub enum VideoContentVariant {
     #[serde(rename = "spritesheet")]
     Spritesheet,
 }
+impl schematic_define::Registration for VideoContentVariant {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(VideoContentVariant));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Parameters for remixing an existing generated video.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateVideoRemixBody {
     ///Updated text prompt that directs the remix generation.
     pub prompt: String,
+}
+impl schematic_define::Registration for CreateVideoRemixBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateVideoRemixBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15448,6 +24413,14 @@ pub enum TruncationEnum {
     Auto,
     #[serde(rename = "disabled")]
     Disabled,
+}
+impl schematic_define::Registration for TruncationEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TruncationEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15460,6 +24433,14 @@ pub enum PersonalityEnum {
 impl Default for PersonalityEnum {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for PersonalityEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PersonalityEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15490,11 +24471,27 @@ pub struct TokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for TokenCountsBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TokenCountsBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct TokenCountsResource {
     pub object: String,
     pub input_tokens: i64,
+}
+impl schematic_define::Registration for TokenCountsResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TokenCountsResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15504,6 +24501,16 @@ pub enum PromptCacheRetentionEnum {
     InMemory,
     #[serde(rename = "24h")]
     H,
+}
+impl schematic_define::Registration for PromptCacheRetentionEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(PromptCacheRetentionEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15519,6 +24526,14 @@ pub enum ServiceTierEnum {
     Flex,
     #[serde(rename = "priority")]
     Priority,
+}
+impl schematic_define::Registration for ServiceTierEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ServiceTierEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15538,6 +24553,16 @@ pub struct CompactResponseMethodPublicBody {
     pub prompt_cache_options: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for CompactResponseMethodPublicBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CompactResponseMethodPublicBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An item representing a message, tool call, tool output, reasoning, or other response element.
 #[allow(clippy::large_enum_variant)]
@@ -15579,6 +24604,14 @@ impl Default for ItemField {
         Self::Message(Default::default())
     }
 }
+impl schematic_define::Registration for ItemField {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ItemField));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CompactResource {
@@ -15591,6 +24624,14 @@ pub struct CompactResource {
     ///Unix timestamp (in seconds) when the compacted conversation was created.
     pub created_at: i64,
     pub usage: ResponseUsage,
+}
+impl schematic_define::Registration for CompactResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CompactResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15610,6 +24651,14 @@ pub struct SkillResource {
     ///Latest version for the skill.
     pub latest_version: String,
 }
+impl schematic_define::Registration for SkillResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SkillResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct SkillListResource {
@@ -15622,11 +24671,27 @@ pub struct SkillListResource {
     ///Whether there are more items available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for SkillListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SkillListResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Uploads a skill either as a directory (multipart `files[]`) or as a single zip file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct CreateSkillBody {
     pub files: serde_json::Value,
+}
+impl schematic_define::Registration for CreateSkillBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(CreateSkillBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Updates the default version pointer for a skill.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15635,12 +24700,30 @@ pub struct SetDefaultSkillVersionBody {
     ///The skill version number to set as default.
     pub default_version: String,
 }
+impl schematic_define::Registration for SetDefaultSkillVersionBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SetDefaultSkillVersionBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct DeletedSkillResource {
     pub object: String,
     pub deleted: bool,
     pub id: String,
+}
+impl schematic_define::Registration for DeletedSkillResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DeletedSkillResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15660,6 +24743,14 @@ pub struct SkillVersionResource {
     ///Description of the skill version.
     pub description: String,
 }
+impl schematic_define::Registration for SkillVersionResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(SkillVersionResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct SkillVersionListResource {
@@ -15672,6 +24763,16 @@ pub struct SkillVersionListResource {
     ///Whether there are more items available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for SkillVersionListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(SkillVersionListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Uploads a new immutable version of a skill.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15680,6 +24781,16 @@ pub struct CreateSkillVersionBody {
     ///Whether to set this version as the default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<bool>,
+}
+impl schematic_define::Registration for CreateSkillVersionBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateSkillVersionBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15690,12 +24801,32 @@ pub struct DeletedSkillVersionResource {
     ///The deleted skill version.
     pub version: String,
 }
+impl schematic_define::Registration for DeletedSkillVersionResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeletedSkillVersionResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Controls diagnostic tracing during the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatkitWorkflowTracing {
     ///Indicates whether tracing is enabled.
     pub enabled: bool,
+}
+impl schematic_define::Registration for ChatkitWorkflowTracing {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatkitWorkflowTracing),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Workflow metadata and state returned for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15707,12 +24838,30 @@ pub struct ChatkitWorkflow {
     pub state_variables: serde_json::Value,
     pub tracing: ChatkitWorkflowTracing,
 }
+impl schematic_define::Registration for ChatkitWorkflow {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ChatkitWorkflow));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Active per-minute request limit for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatSessionRateLimits {
     ///Maximum allowed requests per one-minute window.
     pub max_requests_per_1_minute: i64,
+}
+impl schematic_define::Registration for ChatSessionRateLimits {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatSessionRateLimits),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15725,12 +24874,30 @@ pub enum ChatSessionStatus {
     #[serde(rename = "cancelled")]
     Cancelled,
 }
+impl schematic_define::Registration for ChatSessionStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ChatSessionStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Automatic thread title preferences for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct ChatSessionAutomaticThreadTitling {
     ///Whether automatic thread titling is enabled.
     pub enabled: bool,
+}
+impl schematic_define::Registration for ChatSessionAutomaticThreadTitling {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatSessionAutomaticThreadTitling),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Upload permissions and limits applied to the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15741,6 +24908,16 @@ pub struct ChatSessionFileUpload {
     pub max_file_size: serde_json::Value,
     pub max_files: serde_json::Value,
 }
+impl schematic_define::Registration for ChatSessionFileUpload {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatSessionFileUpload),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///History retention preferences returned for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15749,6 +24926,14 @@ pub struct ChatSessionHistory {
     pub enabled: bool,
     pub recent_threads: serde_json::Value,
 }
+impl schematic_define::Registration for ChatSessionHistory {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ChatSessionHistory));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///ChatKit configuration for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15756,6 +24941,16 @@ pub struct ChatSessionChatkitConfiguration {
     pub automatic_thread_titling: ChatSessionAutomaticThreadTitling,
     pub file_upload: ChatSessionFileUpload,
     pub history: ChatSessionHistory,
+}
+impl schematic_define::Registration for ChatSessionChatkitConfiguration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatSessionChatkitConfiguration),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a ChatKit session and its resolved configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15778,6 +24973,14 @@ pub struct ChatSessionResource {
     pub status: ChatSessionStatus,
     pub chatkit_configuration: ChatSessionChatkitConfiguration,
 }
+impl schematic_define::Registration for ChatSessionResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ChatSessionResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Controls diagnostic tracing during the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15785,6 +24988,14 @@ pub struct WorkflowTracingParam {
     ///Whether tracing is enabled during the session. Defaults to true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+}
+impl schematic_define::Registration for WorkflowTracingParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WorkflowTracingParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Workflow reference and overrides applied to the chat session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15801,6 +25012,14 @@ pub struct WorkflowParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tracing: Option<WorkflowTracingParam>,
 }
+impl schematic_define::Registration for WorkflowParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WorkflowParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Controls when the session expires relative to an anchor timestamp.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15810,6 +25029,14 @@ pub struct ExpiresAfterParam {
     ///Number of seconds after the anchor when the session expires.
     pub seconds: i64,
 }
+impl schematic_define::Registration for ExpiresAfterParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ExpiresAfterParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Controls request rate limits for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15818,6 +25045,14 @@ pub struct RateLimitsParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_requests_per_1_minute: Option<i64>,
 }
+impl schematic_define::Registration for RateLimitsParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RateLimitsParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Controls whether ChatKit automatically generates thread titles.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15825,6 +25060,16 @@ pub struct AutomaticThreadTitlingParam {
     ///Enable automatic thread title generation. Defaults to true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+}
+impl schematic_define::Registration for AutomaticThreadTitlingParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(AutomaticThreadTitlingParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Controls whether users can upload files.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15840,6 +25085,14 @@ pub struct FileUploadParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_files: Option<i64>,
 }
+impl schematic_define::Registration for FileUploadParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileUploadParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Controls how much historical context is retained for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15851,6 +25104,14 @@ pub struct HistoryParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recent_threads: Option<i64>,
 }
+impl schematic_define::Registration for HistoryParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(HistoryParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Optional per-session configuration settings for ChatKit behavior.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15861,6 +25122,16 @@ pub struct ChatkitConfigurationParam {
     pub file_upload: Option<FileUploadParam>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<HistoryParam>,
+}
+impl schematic_define::Registration for ChatkitConfigurationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ChatkitConfigurationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Parameters for provisioning a new ChatKit session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15876,6 +25147,16 @@ pub struct CreateChatSessionBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chatkit_configuration: Option<ChatkitConfigurationParam>,
 }
+impl schematic_define::Registration for CreateChatSessionBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(CreateChatSessionBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Text block that a user contributed to the thread.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15885,6 +25166,14 @@ pub struct UserMessageInputText {
     pub type_: String,
     ///Plain-text content supplied by the user.
     pub text: String,
+}
+impl schematic_define::Registration for UserMessageInputText {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UserMessageInputText));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Quoted snippet that the user referenced in their message.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15896,6 +25185,16 @@ pub struct UserMessageQuotedText {
     ///Quoted text content.
     pub text: String,
 }
+impl schematic_define::Registration for UserMessageQuotedText {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(UserMessageQuotedText),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum AttachmentType {
@@ -15904,6 +25203,14 @@ pub enum AttachmentType {
     Image,
     #[serde(rename = "file")]
     File,
+}
+impl schematic_define::Registration for AttachmentType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AttachmentType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Attachment metadata included on thread items.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15919,6 +25226,14 @@ pub struct Attachment {
     pub mime_type: String,
     pub preview_url: serde_json::Value,
 }
+impl schematic_define::Registration for Attachment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Attachment));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Tool selection that the assistant should honor when executing the item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15926,12 +25241,28 @@ pub struct ToolChoice {
     ///Identifier of the requested tool.
     pub id: String,
 }
+impl schematic_define::Registration for ToolChoice {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ToolChoice));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Model and tool overrides applied when generating the assistant response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct InferenceOptions {
     pub tool_choice: serde_json::Value,
     pub model: serde_json::Value,
+}
+impl schematic_define::Registration for InferenceOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(InferenceOptions));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///User-authored messages within a thread.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15953,6 +25284,14 @@ pub struct UserMessageItem {
     pub attachments: Vec<Attachment>,
     pub inference_options: serde_json::Value,
 }
+impl schematic_define::Registration for UserMessageItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UserMessageItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Attachment source referenced by an annotation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15963,6 +25302,14 @@ pub struct FileAnnotationSource {
     ///Filename referenced by the annotation.
     pub filename: String,
 }
+impl schematic_define::Registration for FileAnnotationSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileAnnotationSource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Annotation that references an uploaded file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15971,6 +25318,14 @@ pub struct FileAnnotation {
     #[serde(rename = "type")]
     pub type_: String,
     pub source: FileAnnotationSource,
+}
+impl schematic_define::Registration for FileAnnotation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileAnnotation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///URL backing an annotation entry.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -15982,6 +25337,14 @@ pub struct UrlAnnotationSource {
     ///URL referenced by the annotation.
     pub url: String,
 }
+impl schematic_define::Registration for UrlAnnotationSource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UrlAnnotationSource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Annotation that references a URL.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -15990,6 +25353,14 @@ pub struct UrlAnnotation {
     #[serde(rename = "type")]
     pub type_: String,
     pub source: UrlAnnotationSource,
+}
+impl schematic_define::Registration for UrlAnnotation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(UrlAnnotation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Assistant response text accompanied by optional annotations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16002,6 +25373,14 @@ pub struct ResponseOutputText {
     pub text: String,
     ///Ordered list of annotations attached to the response text.
     pub annotations: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for ResponseOutputText {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ResponseOutputText));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Assistant-authored message within a thread.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16021,6 +25400,14 @@ pub struct AssistantMessageItem {
     ///Ordered assistant response segments.
     pub content: Vec<ResponseOutputText>,
 }
+impl schematic_define::Registration for AssistantMessageItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AssistantMessageItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Thread item that renders a widget payload.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16039,6 +25426,14 @@ pub struct WidgetMessageItem {
     ///Serialized widget payload rendered in the UI.
     pub widget: String,
 }
+impl schematic_define::Registration for WidgetMessageItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(WidgetMessageItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum ClientToolCallStatus {
@@ -16047,6 +25442,14 @@ pub enum ClientToolCallStatus {
     InProgress,
     #[serde(rename = "completed")]
     Completed,
+}
+impl schematic_define::Registration for ClientToolCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ClientToolCallStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Record of a client side tool invocation initiated by the assistant.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16072,6 +25475,14 @@ pub struct ClientToolCallItem {
     pub arguments: String,
     pub output: serde_json::Value,
 }
+impl schematic_define::Registration for ClientToolCallItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ClientToolCallItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum TaskType {
@@ -16080,6 +25491,14 @@ pub enum TaskType {
     Custom,
     #[serde(rename = "thought")]
     Thought,
+}
+impl schematic_define::Registration for TaskType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TaskType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Task emitted by the workflow to show progress and status updates.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16100,6 +25519,14 @@ pub struct TaskItem {
     pub heading: serde_json::Value,
     pub summary: serde_json::Value,
 }
+impl schematic_define::Registration for TaskItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TaskItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Task entry that appears within a TaskGroup.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16108,6 +25535,14 @@ pub struct TaskGroupTask {
     pub type_: TaskType,
     pub heading: serde_json::Value,
     pub summary: serde_json::Value,
+}
+impl schematic_define::Registration for TaskGroupTask {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TaskGroupTask));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Collection of workflow tasks grouped together in the thread.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16127,6 +25562,14 @@ pub struct TaskGroupItem {
     ///Tasks included in the group.
     pub tasks: Vec<TaskGroupTask>,
 }
+impl schematic_define::Registration for TaskGroupItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TaskGroupItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16144,6 +25587,14 @@ impl Default for ThreadItem {
         Self::UserMessageItem(Default::default())
     }
 }
+impl schematic_define::Registration for ThreadItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ThreadItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A paginated list of thread items rendered for the ChatKit API.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16157,6 +25608,16 @@ pub struct ThreadItemListResource {
     ///Whether there are more items available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for ThreadItemListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(ThreadItemListResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that a thread is active.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16164,6 +25625,14 @@ pub struct ActiveStatus {
     ///Status discriminator that is always `active`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for ActiveStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ActiveStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Indicates that a thread is locked and cannot accept new input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16174,6 +25643,14 @@ pub struct LockedStatus {
     pub type_: String,
     pub reason: serde_json::Value,
 }
+impl schematic_define::Registration for LockedStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(LockedStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that a thread has been closed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16182,6 +25659,14 @@ pub struct ClosedStatus {
     #[serde(rename = "type")]
     pub type_: String,
     pub reason: serde_json::Value,
+}
+impl schematic_define::Registration for ClosedStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ClosedStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Represents a ChatKit thread and its current status.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16199,6 +25684,14 @@ pub struct ThreadResource {
     ///Free-form string that identifies your end user who owns the thread.
     pub user: String,
 }
+impl schematic_define::Registration for ThreadResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ThreadResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Confirmation payload returned after deleting a thread.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16209,6 +25702,16 @@ pub struct DeletedThreadResource {
     pub object: String,
     ///Indicates that the thread has been deleted.
     pub deleted: bool,
+}
+impl schematic_define::Registration for DeletedThreadResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(DeletedThreadResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A paginated list of ChatKit threads.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16223,6 +25726,14 @@ pub struct ThreadListResource {
     ///Whether there are more items available.
     pub has_more: bool,
 }
+impl schematic_define::Registration for ThreadListResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(ThreadListResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An x/y coordinate pair, e.g. `{ x: 100, y: 200 }`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16232,11 +25743,29 @@ pub struct DragPoint {
     ///The y-coordinate.
     pub y: i64,
 }
+impl schematic_define::Registration for DragPoint {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(DragPoint));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaTokenCountsResource {
     pub object: String,
     pub input_tokens: i64,
+}
+impl schematic_define::Registration for BetaTokenCountsResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaTokenCountsResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16266,6 +25795,14 @@ pub struct BetaTokenCountsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaTokenCountsBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaTokenCountsBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**How the model should select which tool (or tools) to use when generating
 a response. See the `tools` parameter to see how to specify which tools
 the model can call.*/
@@ -16289,6 +25826,14 @@ impl Default for BetaToolChoiceParam {
         Self::BetaToolChoiceOptions(Default::default())
     }
 }
+impl schematic_define::Registration for BetaToolChoiceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaToolChoiceParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Forces the model to call the shell tool when a tool call is required.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16296,6 +25841,16 @@ pub struct BetaSpecificFunctionShellParam {
     ///The tool to call. Always `shell`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaSpecificFunctionShellParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaSpecificFunctionShellParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Forces the model to call the apply_patch tool when executing a tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16305,12 +25860,32 @@ pub struct BetaSpecificApplyPatchParam {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for BetaSpecificApplyPatchParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaSpecificApplyPatchParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaSpecificProgrammaticToolCallingParam {
     ///The tool to call. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaSpecificProgrammaticToolCallingParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaSpecificProgrammaticToolCallingParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Use this option to force the model to call a specific custom tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16321,6 +25896,14 @@ pub struct BetaToolChoiceCustom {
     pub type_: String,
     ///The name of the custom tool to call.
     pub name: String,
+}
+impl schematic_define::Registration for BetaToolChoiceCustom {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaToolChoiceCustom));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Use this option to force the model to call a specific tool on a remote MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16334,6 +25917,14 @@ pub struct BetaToolChoiceMCP {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaToolChoiceMCP {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaToolChoiceMCP));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Use this option to force the model to call a specific function.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16343,6 +25934,16 @@ pub struct BetaToolChoiceFunction {
     pub type_: String,
     ///The name of the function to call.
     pub name: String,
+}
+impl schematic_define::Registration for BetaToolChoiceFunction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolChoiceFunction),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Indicates that the model should use a built-in tool to generate a response.
 [Learn more about built-in tools](/docs/guides/tools).*/
@@ -16362,6 +25963,14 @@ Allowed values are:
 - `image_generation`*/
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaToolChoiceTypes {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaToolChoiceTypes));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Constrains the tools available to the model to a pre-defined set.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16389,6 +25998,16 @@ For the Responses API, the list of tool definitions might look like:
 ```*/
     pub tools: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaToolChoiceAllowed {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolChoiceAllowed),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Controls which (if any) tool is called by the model.
 
 `none` means the model will not call any tool and instead generates a message.
@@ -16408,6 +26027,16 @@ pub enum BetaToolChoiceOptions {
     #[serde(rename = "required")]
     Required,
 }
+impl schematic_define::Registration for BetaToolChoiceOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolChoiceOptions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**The conversation that this response belongs to. Items from this conversation are prepended to `input_items` for this response request.
 Input items and output items from this response are automatically added to this conversation after this response completes.*/
 #[allow(clippy::large_enum_variant)]
@@ -16423,12 +26052,32 @@ impl Default for BetaConversationParam {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for BetaConversationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaConversationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The conversation that this response belongs to.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaConversationParam2 {
     ///The unique ID of the conversation.
     pub id: String,
+}
+impl schematic_define::Registration for BetaConversationParam2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaConversationParam2),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16443,6 +26092,14 @@ impl Default for BetaPersonalityEnum {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for BetaPersonalityEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaPersonalityEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaTruncationEnum {
@@ -16451,6 +26108,14 @@ pub enum BetaTruncationEnum {
     Auto,
     #[serde(rename = "disabled")]
     Disabled,
+}
+impl schematic_define::Registration for BetaTruncationEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaTruncationEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[doc = "**gpt-5 and o-series models only**\n\nConfiguration options for\n[reasoning models](https://platform.openai.com/docs/guides/reasoning)."]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16467,6 +26132,14 @@ pub struct BetaReasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generate_summary: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaReasoning {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaReasoning));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16478,6 +26151,14 @@ pub enum BetaReasoningEffort {
 impl Default for BetaReasoningEffort {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaReasoningEffort {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaReasoningEffort));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[allow(clippy::large_enum_variant)]
@@ -16493,6 +26174,16 @@ impl Default for BetaReasoningModeEnum {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for BetaReasoningModeEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaReasoningModeEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Configuration options for a text response from the model. Can be plain
 text or structured JSON data. Learn more:
 - [Text inputs and outputs](/docs/guides/text)
@@ -16505,6 +26196,16 @@ pub struct BetaResponseTextParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verbosity: Option<BetaVerbosity>,
 }
+impl schematic_define::Registration for BetaResponseTextParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseTextParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16516,6 +26217,14 @@ pub enum BetaVerbosity {
 impl Default for BetaVerbosity {
     fn default() -> Self {
         Self::Text(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaVerbosity {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaVerbosity));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**An object specifying the format that the model must output.
@@ -16545,6 +26254,16 @@ impl Default for BetaTextResponseFormatConfiguration {
         Self::BetaResponseFormatText(Default::default())
     }
 }
+impl schematic_define::Registration for BetaTextResponseFormatConfiguration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaTextResponseFormatConfiguration),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**JSON object response format. An older method of generating JSON responses.
 Using `json_schema` is recommended for models that support it. Note that the
 model will not generate JSON without a system or user message instructing it
@@ -16555,6 +26274,16 @@ pub struct BetaResponseFormatJsonObject {
     ///The type of response format being defined. Always `json_object`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaResponseFormatJsonObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFormatJsonObject),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**JSON Schema response format. Used to generate structured JSON responses.
 Learn more about [Structured Outputs](/docs/guides/structured-outputs).*/
@@ -16575,6 +26304,16 @@ underscores and dashes, with a maximum length of 64.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaTextResponseFormatJsonSchema {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaTextResponseFormatJsonSchema),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**The schema for the response format, described as a JSON Schema object.
 Learn how to build JSON schemas [here](https://json-schema.org/).*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16584,6 +26323,16 @@ pub struct BetaResponseFormatJsonSchemaSchema {
     #[serde(flatten)]
     pub additional_properties: HashMap<String, serde_json::Value>,
 }
+impl schematic_define::Registration for BetaResponseFormatJsonSchemaSchema {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFormatJsonSchemaSchema),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Default response format. Used to generate text responses.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16591,6 +26340,16 @@ pub struct BetaResponseFormatText {
     ///The type of response format being defined. Always `text`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaResponseFormatText {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFormatText),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool that can be used to generate a response.
 #[allow(clippy::large_enum_variant)]
@@ -16620,6 +26379,14 @@ impl Default for BetaTool {
         Self::BetaFunctionTool(Default::default())
     }
 }
+impl schematic_define::Registration for BetaTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Allows the assistant to create, delete, or update files using unified diffs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16630,6 +26397,16 @@ pub struct BetaApplyPatchToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaApplyPatchToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaCallableToolAllowedCaller {
@@ -16638,6 +26415,16 @@ pub enum BetaCallableToolAllowedCaller {
     Direct,
     #[serde(rename = "programmatic")]
     Programmatic,
+}
+impl schematic_define::Registration for BetaCallableToolAllowedCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCallableToolAllowedCaller),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///This tool searches the web for relevant results to use in a response. Learn more about the [web search tool](https://platform.openai.com/docs/guides/tools-web-search).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16653,6 +26440,16 @@ pub struct BetaWebSearchPreviewTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_content_types: Option<Vec<BetaSearchContentType>>,
 }
+impl schematic_define::Registration for BetaWebSearchPreviewTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaWebSearchPreviewTool),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaSearchContentType {
@@ -16661,6 +26458,16 @@ pub enum BetaSearchContentType {
     Text,
     #[serde(rename = "image")]
     Image,
+}
+impl schematic_define::Registration for BetaSearchContentType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaSearchContentType),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16672,6 +26479,16 @@ pub enum BetaSearchContextSize {
     Medium,
     #[serde(rename = "high")]
     High,
+}
+impl schematic_define::Registration for BetaSearchContextSize {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaSearchContextSize),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16688,6 +26505,16 @@ pub struct BetaApproximateLocation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaApproximateLocation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApproximateLocation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Hosted or BYOT tool search configuration for deferred tools.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16702,9 +26529,27 @@ pub struct BetaToolSearchToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaToolSearchToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolSearchToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaEmptyModelParam {}
+impl schematic_define::Registration for BetaEmptyModelParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaEmptyModelParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaToolSearchExecutionType {
@@ -16713,6 +26558,16 @@ pub enum BetaToolSearchExecutionType {
     Server,
     #[serde(rename = "client")]
     Client,
+}
+impl schematic_define::Registration for BetaToolSearchExecutionType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolSearchExecutionType),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Groups function/custom tools under a shared namespace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16727,6 +26582,16 @@ pub struct BetaNamespaceToolParam {
     pub description: String,
     ///The function/custom tools available inside this namespace.
     pub tools: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaNamespaceToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaNamespaceToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A custom tool that processes input using a specified format. Learn more about   [custom tools](/docs/guides/function-calling#custom-tools)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16749,6 +26614,14 @@ pub struct BetaCustomToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaCustomToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCustomToolParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A grammar defined by the user.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16760,6 +26633,16 @@ pub struct BetaCustomGrammarFormatParam {
     ///The grammar definition.
     pub definition: String,
 }
+impl schematic_define::Registration for BetaCustomGrammarFormatParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCustomGrammarFormatParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaGrammarSyntax1 {
@@ -16769,6 +26652,14 @@ pub enum BetaGrammarSyntax1 {
     #[serde(rename = "regex")]
     Regex,
 }
+impl schematic_define::Registration for BetaGrammarSyntax1 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaGrammarSyntax1));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Unconstrained free-form text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16776,6 +26667,16 @@ pub struct BetaCustomTextFormatParam {
     ///Unconstrained text format. Always `text`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaCustomTextFormatParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCustomTextFormatParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16797,6 +26698,16 @@ pub struct BetaFunctionToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFunctionToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool that allows the model to execute shell commands.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16809,6 +26720,16 @@ pub struct BetaFunctionShellToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFunctionShellToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaContainerReferenceParam {
@@ -16817,6 +26738,16 @@ pub struct BetaContainerReferenceParam {
     pub type_: String,
     ///The ID of the referenced container.
     pub container_id: String,
+}
+impl schematic_define::Registration for BetaContainerReferenceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerReferenceParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16828,6 +26759,16 @@ pub struct BetaLocalEnvironmentParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<BetaLocalSkillParam>>,
 }
+impl schematic_define::Registration for BetaLocalEnvironmentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaLocalEnvironmentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaLocalSkillParam {
@@ -16837,6 +26778,14 @@ pub struct BetaLocalSkillParam {
     pub description: String,
     ///The path to the directory containing the skill.
     pub path: String,
+}
+impl schematic_define::Registration for BetaLocalSkillParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaLocalSkillParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16856,6 +26805,16 @@ pub struct BetaContainerAutoParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<serde_json::Value>>,
 }
+impl schematic_define::Registration for BetaContainerAutoParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerAutoParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaInlineSkillParam {
@@ -16867,6 +26826,14 @@ pub struct BetaInlineSkillParam {
     ///The description of the skill.
     pub description: String,
     pub source: BetaInlineSkillSourceParam,
+}
+impl schematic_define::Registration for BetaInlineSkillParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInlineSkillParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Inline skill payload
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16880,6 +26847,16 @@ pub struct BetaInlineSkillSourceParam {
     ///Base64-encoded skill zip bundle.
     pub data: String,
 }
+impl schematic_define::Registration for BetaInlineSkillSourceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaInlineSkillSourceParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaSkillReferenceParam {
@@ -16891,6 +26868,16 @@ pub struct BetaSkillReferenceParam {
     ///Optional skill version. Use a positive integer or 'latest'. Omit for default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+}
+impl schematic_define::Registration for BetaSkillReferenceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaSkillReferenceParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16904,6 +26891,16 @@ pub struct BetaContainerNetworkPolicyAllowlistParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain_secrets: Option<Vec<BetaContainerNetworkPolicyDomainSecretParam>>,
 }
+impl schematic_define::Registration for BetaContainerNetworkPolicyAllowlistParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerNetworkPolicyAllowlistParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaContainerNetworkPolicyDomainSecretParam {
@@ -16914,12 +26911,32 @@ pub struct BetaContainerNetworkPolicyDomainSecretParam {
     ///The secret value to inject for the domain.
     pub value: String,
 }
+impl schematic_define::Registration for BetaContainerNetworkPolicyDomainSecretParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerNetworkPolicyDomainSecretParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaContainerNetworkPolicyDisabledParam {
     ///Disable outbound network access. Always `disabled`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaContainerNetworkPolicyDisabledParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerNetworkPolicyDisabledParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16934,6 +26951,16 @@ pub enum BetaContainerMemoryLimit {
     #[serde(rename = "64g")]
     G4,
 }
+impl schematic_define::Registration for BetaContainerMemoryLimit {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerMemoryLimit),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool that allows the model to execute shell commands in a local environment.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -16941,6 +26968,16 @@ pub struct BetaLocalShellToolParam {
     ///The type of the local shell tool. Always `local_shell`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaLocalShellToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaLocalShellToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool that generates images using the GPT image models.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -16984,6 +27021,14 @@ or `auto`. Default: `auto`.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<BetaImageGenActionEnum>,
 }
+impl schematic_define::Registration for BetaImageGenTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaImageGenTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaImageGenActionEnum {
@@ -16995,6 +27040,16 @@ pub enum BetaImageGenActionEnum {
     #[serde(rename = "auto")]
     Auto,
 }
+impl schematic_define::Registration for BetaImageGenActionEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaImageGenActionEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Control how much effort the model will exert to match the style and features, especially facial features, of input images. This parameter is only supported for `gpt-image-1` and `gpt-image-1.5` and later models, unsupported for `gpt-image-1-mini`. Supports `high` and `low`. Defaults to `low`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17005,12 +27060,30 @@ pub enum BetaInputFidelity {
     #[serde(rename = "low")]
     Low,
 }
+impl schematic_define::Registration for BetaInputFidelity {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputFidelity));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaProgrammaticToolCallingParam {
     ///The type of the tool. Always `programmatic_tool_calling`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaProgrammaticToolCallingParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaProgrammaticToolCallingParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool that runs Python code to help generate a response to a prompt.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17025,6 +27098,16 @@ optional `memory_limit` setting.*/
     pub container: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaCodeInterpreterTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCodeInterpreterTool),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Configuration for a code interpreter container. Optionally specify the IDs of the files to run the code on.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17041,6 +27124,16 @@ pub struct BetaAutoCodeInterpreterToolParam {
     ///Network access policy for the container.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network_policy: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaAutoCodeInterpreterToolParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaAutoCodeInterpreterToolParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Give the model access to additional tools via remote Model Context Protocol
 (MCP) servers. [Learn more about MCP](/docs/guides/tools-remote-mcp).*/
@@ -17096,6 +27189,14 @@ must handle the OAuth authorization flow and provide the token here.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defer_loading: Option<bool>,
 }
+impl schematic_define::Registration for BetaMCPTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMCPTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A filter object to specify which tools are allowed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17108,6 +27209,14 @@ MCP server is [annotated with `readOnlyHint`](https://modelcontextprotocol.io/sp
 it will match this filter.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_only: Option<bool>,
+}
+impl schematic_define::Registration for BetaMCPToolFilter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMCPToolFilter));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Search the Internet for sources related to the prompt. Learn more about the
 [web search tool](/docs/guides/tools-web-search).*/
@@ -17125,6 +27234,14 @@ pub struct BetaWebSearchTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_context_size: Option<String>,
 }
+impl schematic_define::Registration for BetaWebSearchTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaWebSearchTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17136,6 +27253,16 @@ pub enum BetaWebSearchApproximateLocation {
 impl Default for BetaWebSearchApproximateLocation {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaWebSearchApproximateLocation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaWebSearchApproximateLocation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A tool that controls a virtual computer. Learn more about the [computer tool](https://platform.openai.com/docs/guides/tools-computer-use).
@@ -17150,6 +27277,16 @@ pub struct BetaComputerUsePreviewTool {
     pub display_width: i64,
     ///The height of the computer display.
     pub display_height: i64,
+}
+impl schematic_define::Registration for BetaComputerUsePreviewTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerUsePreviewTool),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17166,6 +27303,16 @@ pub enum BetaComputerEnvironment {
     #[serde(rename = "browser")]
     Browser,
 }
+impl schematic_define::Registration for BetaComputerEnvironment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerEnvironment),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool that controls a virtual computer. Learn more about the [computer tool](https://platform.openai.com/docs/guides/tools-computer-use).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17173,6 +27320,14 @@ pub struct BetaComputerTool {
     ///The type of the computer tool. Always `computer`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaComputerTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaComputerTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool that searches for relevant content from uploaded files. Learn more about the [file search tool](https://platform.openai.com/docs/guides/tools-file-search).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17191,6 +27346,14 @@ pub struct BetaFileSearchTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFileSearchTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFileSearchTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17204,6 +27367,14 @@ impl Default for BetaFilters {
         Self::BetaComparisonFilter(Default::default())
     }
 }
+impl schematic_define::Registration for BetaFilters {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFilters));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Combine multiple filters using `and` or `or`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17213,6 +27384,14 @@ pub struct BetaCompoundFilter {
     pub type_: String,
     ///Array of filters to combine. Items can be `ComparisonFilter` or `CompoundFilter`.
     pub filters: Vec<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaCompoundFilter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCompoundFilter));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A filter used to compare a specified attribute key to a given value using a defined comparison operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17234,6 +27413,14 @@ pub struct BetaComparisonFilter {
     ///The value to compare against the attribute key; supports string, number, or boolean types.
     pub value: serde_json::Value,
 }
+impl schematic_define::Registration for BetaComparisonFilter {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaComparisonFilter));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaRankingOptions {
@@ -17245,6 +27432,14 @@ pub struct BetaRankingOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hybrid_search: Option<BetaHybridSearchOptions>,
 }
+impl schematic_define::Registration for BetaRankingOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaRankingOptions));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaHybridSearchOptions {
@@ -17252,6 +27447,16 @@ pub struct BetaHybridSearchOptions {
     pub embedding_weight: f64,
     ///The weight of the text in the reciprocal ranking fusion.
     pub text_weight: f64,
+}
+impl schematic_define::Registration for BetaHybridSearchOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaHybridSearchOptions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17261,6 +27466,16 @@ pub enum BetaRankerVersionType {
     Auto,
     #[serde(rename = "default-2024-11-15")]
     Default20241115,
+}
+impl schematic_define::Registration for BetaRankerVersionType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaRankerVersionType),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Defines a function in your own code the model can choose to call. Learn more about [function calling](https://platform.openai.com/docs/guides/function-calling).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17283,6 +27498,14 @@ pub struct BetaFunctionTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_callers: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFunctionTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFunctionTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17298,6 +27521,14 @@ pub enum BetaInputItem {
 impl Default for BetaInputItem {
     fn default() -> Self {
         Self::BetaEasyInputMessage(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaInputItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17316,6 +27547,16 @@ pub struct BetaProgramOutputItemParam {
     pub result: String,
     pub status: BetaProgramOutputItemStatus,
 }
+impl schematic_define::Registration for BetaProgramOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaProgramOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaProgramOutputItemStatus {
@@ -17325,12 +27566,30 @@ pub enum BetaProgramOutputItemStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
+impl schematic_define::Registration for BetaProgramOutputItemStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaProgramOutputItemStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The agent that produced this item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaAgentTagParam {
     ///The canonical name of the agent that produced this item.
     pub agent_name: String,
+}
+impl schematic_define::Registration for BetaAgentTagParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaAgentTagParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17349,6 +27608,14 @@ pub struct BetaProgramItemParam {
     ///Opaque program replay fingerprint that must be round-tripped.
     pub fingerprint: String,
 }
+impl schematic_define::Registration for BetaProgramItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaProgramItemParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An internal identifier for an item to reference.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17361,6 +27628,16 @@ pub struct BetaItemReferenceParam {
     ///The ID of the item to reference.
     pub id: String,
 }
+impl schematic_define::Registration for BetaItemReferenceParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaItemReferenceParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Compacts the current context. Must be the final input item.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17370,6 +27647,16 @@ pub struct BetaCompactionTriggerItemParam {
     ///The type of the item. Always `compaction_trigger`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaCompactionTriggerItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCompactionTriggerItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Content item used to generate a response.
 pub type BetaItem = serde_json::Value;
@@ -17398,6 +27685,14 @@ pub struct BetaCustomToolCall {
     ///The input for the custom tool call generated by the model.
     pub input: String,
 }
+impl schematic_define::Registration for BetaCustomToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCustomToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17412,6 +27707,14 @@ impl Default for BetaToolCallCaller {
         Self::BetaDirectToolCallCaller(Default::default())
     }
 }
+impl schematic_define::Registration for BetaToolCallCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaToolCallCaller));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaProgramToolCallCaller {
@@ -17420,17 +27723,45 @@ pub struct BetaProgramToolCallCaller {
     ///The call ID of the program item that produced this tool call.
     pub caller_id: String,
 }
+impl schematic_define::Registration for BetaProgramToolCallCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaProgramToolCallCaller),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaDirectToolCallCaller {
     #[serde(rename = "type")]
     pub type_: String,
 }
+impl schematic_define::Registration for BetaDirectToolCallCaller {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaDirectToolCallCaller),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaAgentTag {
     ///The canonical name of the agent that produced this item.
     pub agent_name: String,
+}
+impl schematic_define::Registration for BetaAgentTag {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaAgentTag));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a custom tool call from your code, being sent back to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17453,6 +27784,16 @@ pub struct BetaCustomToolCallOutput {
 Can be a string or an list of output content.*/
     pub output: serde_json::Value,
 }
+impl schematic_define::Registration for BetaCustomToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCustomToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17465,6 +27806,16 @@ pub enum BetaFunctionAndCustomToolCallOutput {
 impl Default for BetaFunctionAndCustomToolCallOutput {
     fn default() -> Self {
         Self::BetaInputTextContent(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaFunctionAndCustomToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionAndCustomToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///A file input to the model.
@@ -17490,6 +27841,14 @@ pub struct BetaInputFileContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<BetaFileInputDetail>,
 }
+impl schematic_define::Registration for BetaInputFileContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputFileContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaFileInputDetail {
@@ -17501,12 +27860,30 @@ pub enum BetaFileInputDetail {
     #[serde(rename = "high")]
     High,
 }
+impl schematic_define::Registration for BetaFileInputDetail {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFileInputDetail));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Marks the exact end of a reusable prompt prefix. The breakpoint inherits its TTL from the request's `prompt_cache_options.ttl`; the boundary is not rounded to a token block.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaPromptCacheBreakpointConfig {
     ///The breakpoint mode. Always `explicit`.
     pub mode: String,
+}
+impl schematic_define::Registration for BetaPromptCacheBreakpointConfig {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaPromptCacheBreakpointConfig),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An image input to the model. Learn about [image inputs](/docs/guides/vision).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17523,6 +27900,16 @@ pub struct BetaInputImageContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<BetaPromptCacheBreakpointConfig>,
 }
+impl schematic_define::Registration for BetaInputImageContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaInputImageContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaImageDetail {
@@ -17536,6 +27923,14 @@ pub enum BetaImageDetail {
     #[serde(rename = "original")]
     Original,
 }
+impl schematic_define::Registration for BetaImageDetail {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaImageDetail));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A text input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17547,6 +27942,14 @@ pub struct BetaInputTextContent {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<BetaPromptCacheBreakpointConfig>,
+}
+impl schematic_define::Registration for BetaInputTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputTextContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The execution context that produced this tool call.
 #[allow(clippy::large_enum_variant)]
@@ -17562,6 +27965,16 @@ impl Default for BetaToolCallCallerParam {
         Self::BetaDirectToolCallCallerParam(Default::default())
     }
 }
+impl schematic_define::Registration for BetaToolCallCallerParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolCallCallerParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaProgramToolCallCallerParam {
@@ -17571,12 +27984,32 @@ pub struct BetaProgramToolCallCallerParam {
     ///The call ID of the program item that produced this tool call.
     pub caller_id: String,
 }
+impl schematic_define::Registration for BetaProgramToolCallCallerParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaProgramToolCallCallerParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaDirectToolCallCallerParam {
     ///The caller type. Always `direct`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaDirectToolCallCallerParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaDirectToolCallCallerParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An invocation of a tool on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17605,6 +28038,14 @@ pub struct BetaMCPToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_request_id: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaMCPToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMCPToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaMCPToolCallStatus {
@@ -17619,6 +28060,16 @@ pub enum BetaMCPToolCallStatus {
     Calling,
     #[serde(rename = "failed")]
     Failed,
+}
+impl schematic_define::Registration for BetaMCPToolCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMCPToolCallStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A response to an MCP approval request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17639,6 +28090,16 @@ pub struct BetaMCPApprovalResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaMCPApprovalResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMCPApprovalResponse),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A request for human approval of a tool invocation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17657,6 +28118,16 @@ pub struct BetaMCPApprovalRequest {
     pub name: String,
     ///A JSON string of arguments for the tool.
     pub arguments: String,
+}
+impl schematic_define::Registration for BetaMCPApprovalRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMCPApprovalRequest),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A list of tools available on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17677,6 +28148,14 @@ pub struct BetaMCPListTools {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaMCPListTools {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMCPListTools));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A tool available on an MCP server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17689,6 +28168,14 @@ pub struct BetaMCPListToolsTool {
     pub input_schema: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaMCPListToolsTool {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMCPListToolsTool));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The streamed output emitted by an apply patch tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17709,6 +28196,16 @@ pub struct BetaApplyPatchToolCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaApplyPatchToolCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchToolCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Outcome values reported for apply_patch tool call outputs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17718,6 +28215,16 @@ pub enum BetaApplyPatchCallOutputStatusParam {
     Completed,
     #[serde(rename = "failed")]
     Failed,
+}
+impl schematic_define::Registration for BetaApplyPatchCallOutputStatusParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchCallOutputStatusParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call representing a request to create, delete, or update files using diff patches.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17737,6 +28244,16 @@ pub struct BetaApplyPatchToolCallItemParam {
     pub status: BetaApplyPatchCallStatusParam,
     pub operation: BetaApplyPatchOperationParam,
 }
+impl schematic_define::Registration for BetaApplyPatchToolCallItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchToolCallItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///One of the create_file, delete_file, or update_file operations supplied to the apply_patch tool.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17752,6 +28269,16 @@ impl Default for BetaApplyPatchOperationParam {
         Self::BetaApplyPatchCreateFileOperationParam(Default::default())
     }
 }
+impl schematic_define::Registration for BetaApplyPatchOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Instruction for updating an existing file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17764,6 +28291,16 @@ pub struct BetaApplyPatchUpdateFileOperationParam {
     ///Unified diff content to apply to the existing file.
     pub diff: String,
 }
+impl schematic_define::Registration for BetaApplyPatchUpdateFileOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchUpdateFileOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Instruction for deleting an existing file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17773,6 +28310,16 @@ pub struct BetaApplyPatchDeleteFileOperationParam {
     pub type_: String,
     ///Path of the file to delete relative to the workspace root.
     pub path: String,
+}
+impl schematic_define::Registration for BetaApplyPatchDeleteFileOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchDeleteFileOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Instruction for creating a new file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17786,6 +28333,16 @@ pub struct BetaApplyPatchCreateFileOperationParam {
     ///Unified diff content to apply when creating the file.
     pub diff: String,
 }
+impl schematic_define::Registration for BetaApplyPatchCreateFileOperationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchCreateFileOperationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Status values reported for apply_patch tool calls.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17795,6 +28352,16 @@ pub enum BetaApplyPatchCallStatusParam {
     InProgress,
     #[serde(rename = "completed")]
     Completed,
+}
+impl schematic_define::Registration for BetaApplyPatchCallStatusParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchCallStatusParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The streamed output items emitted by a shell tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17818,6 +28385,16 @@ pub struct BetaFunctionShellCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_length: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFunctionShellCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Status values reported for shell tool calls.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17830,6 +28407,16 @@ pub enum BetaFunctionShellCallItemStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
+impl schematic_define::Registration for BetaFunctionShellCallItemStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallItemStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Captured stdout and stderr for a portion of a shell tool call output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17839,6 +28426,16 @@ pub struct BetaFunctionShellCallOutputContentParam {
     ///Captured stderr output for the shell call.
     pub stderr: String,
     pub outcome: BetaFunctionShellCallOutputOutcomeParam,
+}
+impl schematic_define::Registration for BetaFunctionShellCallOutputContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The exit or timeout outcome associated with this shell call.
 #[allow(clippy::large_enum_variant)]
@@ -17858,6 +28455,16 @@ impl Default for BetaFunctionShellCallOutputOutcomeParam {
         Self::BetaFunctionShellCallOutputTimeoutOutcomeParam(Default::default())
     }
 }
+impl schematic_define::Registration for BetaFunctionShellCallOutputOutcomeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputOutcomeParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that the shell commands finished and returned an exit code.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17868,6 +28475,16 @@ pub struct BetaFunctionShellCallOutputExitOutcomeParam {
     ///The exit code returned by the shell process.
     pub exit_code: i64,
 }
+impl schematic_define::Registration for BetaFunctionShellCallOutputExitOutcomeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputExitOutcomeParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that the shell call exceeded its configured time limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17875,6 +28492,16 @@ pub struct BetaFunctionShellCallOutputTimeoutOutcomeParam {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaFunctionShellCallOutputTimeoutOutcomeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputTimeoutOutcomeParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool representing a request to execute one or more shell commands.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17897,6 +28524,16 @@ pub struct BetaFunctionShellCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFunctionShellCallItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Commands and limits describing how to run the shell tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17907,6 +28544,16 @@ pub struct BetaFunctionShellActionParam {
     pub timeout_ms: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_length: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaFunctionShellActionParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellActionParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a local shell tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17924,6 +28571,16 @@ pub struct BetaLocalShellToolCallOutput {
     pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaLocalShellToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaLocalShellToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call to run a command on the local shell.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17943,6 +28600,16 @@ pub struct BetaLocalShellToolCall {
     ///The status of the local shell call.
     pub status: String,
 }
+impl schematic_define::Registration for BetaLocalShellToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaLocalShellToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Execute a shell command on the server.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17960,6 +28627,16 @@ pub struct BetaLocalShellExecAction {
     pub env: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaLocalShellExecAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaLocalShellExecAction),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call to run code.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -17980,6 +28657,16 @@ pub struct BetaCodeInterpreterToolCall {
     pub code: serde_json::Value,
     pub outputs: serde_json::Value,
 }
+impl schematic_define::Registration for BetaCodeInterpreterToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCodeInterpreterToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The image output from the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17990,6 +28677,16 @@ pub struct BetaCodeInterpreterOutputImage {
     ///The URL of the image output from the code interpreter.
     pub url: String,
 }
+impl schematic_define::Registration for BetaCodeInterpreterOutputImage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCodeInterpreterOutputImage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The logs output from the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -17999,6 +28696,16 @@ pub struct BetaCodeInterpreterOutputLogs {
     pub type_: String,
     ///The logs output from the code interpreter.
     pub logs: String,
+}
+impl schematic_define::Registration for BetaCodeInterpreterOutputLogs {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCodeInterpreterOutputLogs),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An image generation request made by the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18016,6 +28723,14 @@ pub struct BetaImageGenToolCall {
     pub status: String,
     pub result: serde_json::Value,
 }
+impl schematic_define::Registration for BetaImageGenToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaImageGenToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A compaction item generated by the [`v1/responses/compact` API](/docs/api-reference/responses/compact).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18029,6 +28744,16 @@ pub struct BetaCompactionSummaryItemParam {
     pub type_: String,
     ///The encrypted content of the compaction summary.
     pub encrypted_content: String,
+}
+impl schematic_define::Registration for BetaCompactionSummaryItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCompactionSummaryItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A description of the chain of thought used by a reasoning model while generating
 a response. Be sure to include these items in your `input` to the Responses API
@@ -18057,6 +28782,14 @@ pub struct BetaReasoningItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
+impl schematic_define::Registration for BetaReasoningItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaReasoningItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Reasoning text from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18067,6 +28800,16 @@ pub struct BetaReasoningTextContent {
     ///The reasoning text from the model.
     pub text: String,
 }
+impl schematic_define::Registration for BetaReasoningTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaReasoningTextContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A summary text from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18076,6 +28819,16 @@ pub struct BetaSummaryTextContent {
     pub type_: String,
     ///A summary of the reasoning output from the model so far.
     pub text: String,
+}
+impl schematic_define::Registration for BetaSummaryTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaSummaryTextContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18091,6 +28844,16 @@ pub struct BetaAdditionalToolsItemParam {
     pub role: String,
     ///A list of additional tools made available at this item.
     pub tools: Vec<BetaTool>,
+}
+impl schematic_define::Registration for BetaAdditionalToolsItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaAdditionalToolsItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18111,6 +28874,16 @@ pub struct BetaToolSearchOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaToolSearchOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolSearchOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaFunctionCallItemStatus {
@@ -18121,6 +28894,16 @@ pub enum BetaFunctionCallItemStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for BetaFunctionCallItemStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionCallItemStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18140,6 +28923,16 @@ pub struct BetaToolSearchCallItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaToolSearchCallItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaToolSearchCallItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaMultiAgentCallOutputItemParam {
@@ -18156,6 +28949,16 @@ pub struct BetaMultiAgentCallOutputItemParam {
     ///Text output returned by the multi-agent action.
     pub output: Vec<BetaOutputTextContentParam>,
 }
+impl schematic_define::Registration for BetaMultiAgentCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMultiAgentCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaOutputTextContentParam {
@@ -18167,6 +28970,16 @@ pub struct BetaOutputTextContentParam {
     ///Citations associated with the text content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<Vec<serde_json::Value>>,
+}
+impl schematic_define::Registration for BetaOutputTextContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaOutputTextContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18185,6 +28998,16 @@ pub struct BetaContainerFileCitationParam {
     ///The filename of the container file cited.
     pub filename: String,
 }
+impl schematic_define::Registration for BetaContainerFileCitationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerFileCitationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaUrlCitationParam {
@@ -18200,6 +29023,14 @@ pub struct BetaUrlCitationParam {
     ///The title of the cited resource.
     pub title: String,
 }
+impl schematic_define::Registration for BetaUrlCitationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaUrlCitationParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaFileCitationParam {
@@ -18212,6 +29043,16 @@ pub struct BetaFileCitationParam {
     pub file_id: String,
     ///The filename of the file cited.
     pub filename: String,
+}
+impl schematic_define::Registration for BetaFileCitationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFileCitationParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18230,6 +29071,16 @@ pub enum BetaMultiAgentAction1 {
     #[serde(rename = "wait_agent")]
     WaitAgent,
 }
+impl schematic_define::Registration for BetaMultiAgentAction1 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMultiAgentAction1),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaMultiAgentCallItemParam {
@@ -18245,6 +29096,16 @@ pub struct BetaMultiAgentCallItemParam {
     pub action: BetaMultiAgentAction1,
     ///The action arguments as a JSON string.
     pub arguments: String,
+}
+impl schematic_define::Registration for BetaMultiAgentCallItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMultiAgentCallItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A message routed between agents.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18264,6 +29125,16 @@ pub struct BetaAgentMessageItemParam {
     ///Plaintext, image, or encrypted content sent between agents.
     pub content: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaAgentMessageItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaAgentMessageItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Opaque encrypted content that Responses API decrypts inside trusted model execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18273,6 +29144,16 @@ pub struct BetaEncryptedContentParam {
     pub type_: String,
     ///Opaque encrypted content.
     pub encrypted_content: String,
+}
+impl schematic_define::Registration for BetaEncryptedContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaEncryptedContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An image input to the model. Learn about [image inputs](/docs/guides/vision)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18290,12 +29171,32 @@ pub struct BetaInputImageContentParamAutoParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaInputImageContentParamAutoParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaInputImageContentParamAutoParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Marks the exact end of a reusable prompt prefix. The breakpoint inherits its TTL from the request's `prompt_cache_options.ttl`; the boundary is not rounded to a token block.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaPromptCacheBreakpointParam {
     ///The breakpoint mode. Always `explicit`.
     pub mode: String,
+}
+impl schematic_define::Registration for BetaPromptCacheBreakpointParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaPromptCacheBreakpointParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18310,6 +29211,14 @@ pub enum BetaDetailEnum {
     #[serde(rename = "original")]
     Original,
 }
+impl schematic_define::Registration for BetaDetailEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaDetailEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A text input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18321,6 +29230,16 @@ pub struct BetaInputTextContentParam {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaInputTextContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaInputTextContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a function tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18346,6 +29265,16 @@ pub struct BetaFunctionCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFunctionCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A file input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18366,6 +29295,16 @@ pub struct BetaInputFileContentParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaInputFileContentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaInputFileContentParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaFileDetailEnum {
@@ -18376,6 +29315,14 @@ pub enum BetaFileDetailEnum {
     Low,
     #[serde(rename = "high")]
     High,
+}
+impl schematic_define::Registration for BetaFileDetailEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFileDetailEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A tool call to run a function. See the
 [function calling guide](/docs/guides/function-calling) for more information.*/
@@ -18407,6 +29354,14 @@ pub struct BetaFunctionToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
+impl schematic_define::Registration for BetaFunctionToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFunctionToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**The results of a web search tool call. See the
 [web search guide](/docs/guides/tools-web-search) for more information.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18426,6 +29381,16 @@ pub struct BetaWebSearchToolCall {
 Includes details on how the model used the web (search, open_page, find_in_page).*/
     pub action: serde_json::Value,
 }
+impl schematic_define::Registration for BetaWebSearchToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaWebSearchToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Action type "find_in_page": Searches for a pattern within a loaded page.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18438,6 +29403,16 @@ pub struct BetaWebSearchActionFind {
     ///The pattern or text to search for within the page.
     pub pattern: String,
 }
+impl schematic_define::Registration for BetaWebSearchActionFind {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaWebSearchActionFind),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Action type "open_page" - Opens a specific URL from search results.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18448,6 +29423,16 @@ pub struct BetaWebSearchActionOpenPage {
     ///The URL opened by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaWebSearchActionOpenPage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaWebSearchActionOpenPage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Action type "search" - Performs a web search query.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18465,6 +29450,16 @@ pub struct BetaWebSearchActionSearch {
     ///The sources used in the search.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<serde_json::Value>>,
+}
+impl schematic_define::Registration for BetaWebSearchActionSearch {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaWebSearchActionSearch),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a computer tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18485,6 +29480,16 @@ pub struct BetaComputerCallOutputItemParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaComputerCallOutputItemParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerCallOutputItemParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A pending safety check for the computer call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18495,6 +29500,16 @@ pub struct BetaComputerCallSafetyCheckParam {
     pub code: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaComputerCallSafetyCheckParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerCallSafetyCheckParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A computer screenshot image used with the computer use tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18510,6 +29525,16 @@ always set to `computer_screenshot`.*/
     ///The identifier of an uploaded file that contains the screenshot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_id: Option<String>,
+}
+impl schematic_define::Registration for BetaComputerScreenshotImage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerScreenshotImage),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A tool call to a computer use tool. See the
 [computer use guide](/docs/guides/tools-computer-use) for more information.*/
@@ -18536,6 +29561,14 @@ pub struct BetaComputerToolCall {
 `incomplete`. Populated when items are returned via API.*/
     pub status: String,
 }
+impl schematic_define::Registration for BetaComputerToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaComputerToolCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Flattened batched actions for `computer_use`. Each action includes an
 `type` discriminator and action-specific fields.*/
 pub type BetaComputerActionList = Vec<BetaComputerAction>;
@@ -18559,6 +29592,14 @@ impl Default for BetaComputerAction {
         Self::BetaClickParam(Default::default())
     }
 }
+impl schematic_define::Registration for BetaComputerAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaComputerAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A wait action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18566,6 +29607,14 @@ pub struct BetaWaitParam {
     ///Specifies the event type. For a wait action, this property is always set to `wait`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaWaitParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaWaitParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An action to type in text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18576,6 +29625,14 @@ pub struct BetaTypeParam {
     pub type_: String,
     ///The text to type.
     pub text: String,
+}
+impl schematic_define::Registration for BetaTypeParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaTypeParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A scroll action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18595,6 +29652,14 @@ pub struct BetaScrollParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaScrollParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaScrollParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A screenshot action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18602,6 +29667,14 @@ pub struct BetaScreenshotParam {
     ///Specifies the event type. For a screenshot action, this property is always set to `screenshot`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaScreenshotParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaScreenshotParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A mouse move action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18617,6 +29690,14 @@ pub struct BetaMoveParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaMoveParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMoveParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A collection of keypresses the model would like to perform.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18626,6 +29707,14 @@ pub struct BetaKeyPressAction {
     pub type_: String,
     ///The combination of keys the model is requesting to be pressed. This is an array of strings, each representing a key.
     pub keys: Vec<String>,
+}
+impl schematic_define::Registration for BetaKeyPressAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaKeyPressAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A drag action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18645,6 +29734,14 @@ pub struct BetaDragParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaDragParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaDragParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An x/y coordinate pair, e.g. `{ x: 100, y: 200 }`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18653,6 +29750,14 @@ pub struct BetaCoordParam {
     pub x: i64,
     ///The y-coordinate.
     pub y: i64,
+}
+impl schematic_define::Registration for BetaCoordParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCoordParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A double click action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18666,6 +29771,16 @@ pub struct BetaDoubleClickAction {
     ///The y-coordinate where the double click occurred.
     pub y: i64,
     pub keys: serde_json::Value,
+}
+impl schematic_define::Registration for BetaDoubleClickAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaDoubleClickAction),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A click action.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18682,6 +29797,14 @@ pub struct BetaClickParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keys: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaClickParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaClickParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaClickButtonType {
@@ -18696,6 +29819,14 @@ pub enum BetaClickButtonType {
     Back,
     #[serde(rename = "forward")]
     Forward,
+}
+impl schematic_define::Registration for BetaClickButtonType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaClickButtonType));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**The results of a file search tool call. See the
 [file search guide](/docs/guides/tools-file-search) for more information.*/
@@ -18718,6 +29849,16 @@ pub struct BetaFileSearchToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaFileSearchToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFileSearchToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18729,6 +29870,16 @@ pub enum BetaVectorStoreFileAttributes {
 impl Default for BetaVectorStoreFileAttributes {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaVectorStoreFileAttributes {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaVectorStoreFileAttributes),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///An output message from the model.
@@ -18753,6 +29904,14 @@ pub struct BetaOutputMessage {
 `incomplete`. Populated when input items are returned via API.*/
     pub status: String,
 }
+impl schematic_define::Registration for BetaOutputMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaOutputMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Labels an `assistant` message as intermediate commentary (`commentary`) or the final answer (`final_answer`).
 For models like `gpt-5.3-codex` and beyond, when sending follow-up requests, preserve and resend
 phase on all assistant messages — dropping it can degrade performance. Not used for user messages.*/
@@ -18764,6 +29923,14 @@ pub enum BetaMessagePhase {
     Commentary,
     #[serde(rename = "final_answer")]
     FinalAnswer,
+}
+impl schematic_define::Registration for BetaMessagePhase {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMessagePhase));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18778,6 +29945,16 @@ impl Default for BetaOutputMessageContent {
         Self::BetaOutputTextContent(Default::default())
     }
 }
+impl schematic_define::Registration for BetaOutputMessageContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaOutputMessageContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A refusal from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18787,6 +29964,14 @@ pub struct BetaRefusalContent {
     pub type_: String,
     ///The refusal explanation from the model.
     pub refusal: String,
+}
+impl schematic_define::Registration for BetaRefusalContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaRefusalContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A text output from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18801,6 +29986,16 @@ pub struct BetaOutputTextContent {
     pub annotations: Vec<BetaAnnotation>,
     pub logprobs: Vec<BetaLogProb>,
 }
+impl schematic_define::Registration for BetaOutputTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaOutputTextContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The log probability of a token.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18810,6 +30005,14 @@ pub struct BetaLogProb {
     pub bytes: Vec<i64>,
     pub top_logprobs: Vec<BetaTopLogProb>,
 }
+impl schematic_define::Registration for BetaLogProb {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaLogProb));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The top log probability of a token.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18817,6 +30020,14 @@ pub struct BetaTopLogProb {
     pub token: String,
     pub logprob: f64,
     pub bytes: Vec<i64>,
+}
+impl schematic_define::Registration for BetaTopLogProb {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaTopLogProb));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An annotation that applies to a span of output text.
 #[allow(clippy::large_enum_variant)]
@@ -18834,6 +30045,14 @@ impl Default for BetaAnnotation {
         Self::BetaFileCitationBody(Default::default())
     }
 }
+impl schematic_define::Registration for BetaAnnotation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaAnnotation));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A path to a file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18845,6 +30064,14 @@ pub struct BetaFilePath {
     pub file_id: String,
     ///The index of the file in the list of files.
     pub index: i64,
+}
+impl schematic_define::Registration for BetaFilePath {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFilePath));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A citation for a container file used to generate a model response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18864,6 +30091,16 @@ pub struct BetaContainerFileCitationBody {
     ///The filename of the container file cited.
     pub filename: String,
 }
+impl schematic_define::Registration for BetaContainerFileCitationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerFileCitationBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A citation for a web resource used to generate a model response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18880,6 +30117,14 @@ pub struct BetaUrlCitationBody {
     ///The title of the web resource.
     pub title: String,
 }
+impl schematic_define::Registration for BetaUrlCitationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaUrlCitationBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A citation to a file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18893,6 +30138,14 @@ pub struct BetaFileCitationBody {
     pub index: i64,
     ///The filename of the file cited.
     pub filename: String,
+}
+impl schematic_define::Registration for BetaFileCitationBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaFileCitationBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**A message input to the model with a role indicating instruction following
 hierarchy. Instructions given with the `developer` or `system` role take
@@ -18915,6 +30168,14 @@ pub struct BetaInputMessage {
     pub status: Option<String>,
     pub content: BetaInputMessageContentList,
 }
+impl schematic_define::Registration for BetaInputMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A list of one or many input items to the model, containing different content
 types.*/
 pub type BetaInputMessageContentList = Vec<BetaInputContent>;
@@ -18930,6 +30191,14 @@ pub enum BetaInputContent {
 impl Default for BetaInputContent {
     fn default() -> Self {
         Self::BetaInputTextContent(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaInputContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**A message input to the model with a role indicating instruction following
@@ -18953,6 +30222,14 @@ Can also contain previous assistant responses.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
 }
+impl schematic_define::Registration for BetaEasyInputMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaEasyInputMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaCompactResponseMethodPublicBody {
@@ -18972,6 +30249,16 @@ pub struct BetaCompactResponseMethodPublicBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaCompactResponseMethodPublicBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCompactResponseMethodPublicBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaServiceTierEnum {
@@ -18987,6 +30274,14 @@ pub enum BetaServiceTierEnum {
     #[serde(rename = "priority")]
     Priority,
 }
+impl schematic_define::Registration for BetaServiceTierEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaServiceTierEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Options for prompt caching. Supported for `gpt-5.6` and later models. By default, OpenAI automatically chooses one implicit cache breakpoint. You can add explicit breakpoints to content blocks with `prompt_cache_breakpoint`. Each request can write up to four breakpoints. For cache matching, OpenAI considers up to the latest 80 breakpoints in the conversation, without a content-block lookback limit. Set `mode` to `explicit` to disable the implicit breakpoint. The `ttl` defaults to `30m`, which is currently the only supported value. See the [prompt caching guide](/docs/guides/prompt-caching) for current details.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -18995,6 +30290,16 @@ pub struct BetaPromptCacheOptionsParam {
     pub ttl: Option<BetaPromptCacheTTLEnum>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<BetaPromptCacheModeEnum>,
+}
+impl schematic_define::Registration for BetaPromptCacheOptionsParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaPromptCacheOptionsParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19005,12 +30310,32 @@ pub enum BetaPromptCacheModeEnum {
     #[serde(rename = "explicit")]
     Explicit,
 }
+impl schematic_define::Registration for BetaPromptCacheModeEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaPromptCacheModeEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaPromptCacheTTLEnum {
     #[serde(rename = "30m")]
     #[default]
     M,
+}
+impl schematic_define::Registration for BetaPromptCacheTTLEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaPromptCacheTTLEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19020,6 +30345,16 @@ pub enum BetaPromptCacheRetentionEnum {
     InMemory,
     #[serde(rename = "24h")]
     H,
+}
+impl schematic_define::Registration for BetaPromptCacheRetentionEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaPromptCacheRetentionEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Model ID used to generate the response, like `gpt-5` or `o3`. OpenAI offers a wide range of models with different capabilities, performance characteristics, and price points. Refer to the [model guide](/docs/models) to browse and compare available models.
 #[allow(clippy::large_enum_variant)]
@@ -19036,6 +30371,16 @@ impl Default for BetaModelIdsCompaction {
         Self::BetaModelIdsResponses(Default::default())
     }
 }
+impl schematic_define::Registration for BetaModelIdsCompaction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModelIdsCompaction),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19047,6 +30392,16 @@ pub enum BetaModelIdsResponses {
 impl Default for BetaModelIdsResponses {
     fn default() -> Self {
         Self::BetaModelIdsShared(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaModelIdsResponses {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModelIdsResponses),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 #[allow(clippy::large_enum_variant)]
@@ -19062,6 +30417,14 @@ impl Default for BetaModelIdsShared {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for BetaModelIdsShared {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaModelIdsShared));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaError {
@@ -19070,6 +30433,14 @@ pub struct BetaError {
     pub param: serde_json::Value,
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaError));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A list of Response items.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19085,6 +30456,14 @@ pub struct BetaResponseItemList {
     pub first_id: String,
     ///The ID of the last item in the list.
     pub last_id: String,
+}
+impl schematic_define::Registration for BetaResponseItemList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaResponseItemList));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Content item used to generate a response.
 #[allow(clippy::large_enum_variant)]
@@ -19130,6 +30509,14 @@ impl Default for BetaItemResource {
         Self::BetaInputMessageResource(Default::default())
     }
 }
+impl schematic_define::Registration for BetaItemResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaItemResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaCustomToolCallOutputResource {
@@ -19137,6 +30524,16 @@ pub struct BetaCustomToolCallOutputResource {
     pub beta_custom_tool_call_output: BetaCustomToolCallOutput,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for BetaCustomToolCallOutputResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCustomToolCallOutputResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19149,6 +30546,16 @@ pub enum BetaFunctionCallOutputStatusEnum {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
+impl schematic_define::Registration for BetaFunctionCallOutputStatusEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionCallOutputStatusEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaCustomToolCallResource {
@@ -19156,6 +30563,16 @@ pub struct BetaCustomToolCallResource {
     pub beta_custom_tool_call: BetaCustomToolCall,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for BetaCustomToolCallResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCustomToolCallResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19167,6 +30584,16 @@ pub enum BetaFunctionCallStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for BetaFunctionCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionCallStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A response to an MCP approval request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19186,6 +30613,16 @@ pub struct BetaMCPApprovalResponseResource {
     pub approve: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaMCPApprovalResponseResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMCPApprovalResponseResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output emitted by an apply patch tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19209,6 +30646,16 @@ pub struct BetaApplyPatchToolCallOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for BetaApplyPatchToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaApplyPatchCallOutputStatus {
@@ -19217,6 +30664,16 @@ pub enum BetaApplyPatchCallOutputStatus {
     Completed,
     #[serde(rename = "failed")]
     Failed,
+}
+impl schematic_define::Registration for BetaApplyPatchCallOutputStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchCallOutputStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call that applies file diffs by creating, deleting, or updating files.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19240,6 +30697,16 @@ pub struct BetaApplyPatchToolCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for BetaApplyPatchToolCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchToolCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Instruction describing how to update a file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19252,6 +30719,16 @@ pub struct BetaApplyPatchUpdateFileOperation {
     ///Diff to apply.
     pub diff: String,
 }
+impl schematic_define::Registration for BetaApplyPatchUpdateFileOperation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchUpdateFileOperation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Instruction describing how to delete a file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19261,6 +30738,16 @@ pub struct BetaApplyPatchDeleteFileOperation {
     pub type_: String,
     ///Path of the file to delete.
     pub path: String,
+}
+impl schematic_define::Registration for BetaApplyPatchDeleteFileOperation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchDeleteFileOperation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Instruction describing how to create a file via the apply_patch tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19274,6 +30761,16 @@ pub struct BetaApplyPatchCreateFileOperation {
     ///Diff to apply.
     pub diff: String,
 }
+impl schematic_define::Registration for BetaApplyPatchCreateFileOperation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchCreateFileOperation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaApplyPatchCallStatus {
@@ -19282,6 +30779,16 @@ pub enum BetaApplyPatchCallStatus {
     InProgress,
     #[serde(rename = "completed")]
     Completed,
+}
+impl schematic_define::Registration for BetaApplyPatchCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaApplyPatchCallStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a shell tool call that was emitted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19306,6 +30813,16 @@ pub struct BetaFunctionShellCallOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for BetaFunctionShellCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The content of a shell tool call output that was emitted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19320,6 +30837,16 @@ pub struct BetaFunctionShellCallOutputContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for BetaFunctionShellCallOutputContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that the shell commands finished and returned an exit code.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19330,6 +30857,16 @@ pub struct BetaFunctionShellCallOutputExitOutcome {
     ///Exit code from the shell process.
     pub exit_code: i64,
 }
+impl schematic_define::Registration for BetaFunctionShellCallOutputExitOutcome {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputExitOutcome),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Indicates that the shell call exceeded its configured time limit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19337,6 +30874,16 @@ pub struct BetaFunctionShellCallOutputTimeoutOutcome {
     ///The outcome type. Always `timeout`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaFunctionShellCallOutputTimeoutOutcome {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputTimeoutOutcome),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19348,6 +30895,16 @@ pub enum BetaFunctionShellCallOutputStatusEnum {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for BetaFunctionShellCallOutputStatusEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallOutputStatusEnum),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A tool call that executes one or more shell commands in a managed environment.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19371,6 +30928,16 @@ pub struct BetaFunctionShellCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for BetaFunctionShellCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCall),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents a container created with /v1/containers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19380,6 +30947,16 @@ pub struct BetaContainerReferenceResource {
     pub type_: String,
     pub container_id: String,
 }
+impl schematic_define::Registration for BetaContainerReferenceResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContainerReferenceResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Represents the use of a local environment to perform shell actions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19387,6 +30964,16 @@ pub struct BetaLocalEnvironmentResource {
     ///The environment type. Always `local`.
     #[serde(rename = "type")]
     pub type_: String,
+}
+impl schematic_define::Registration for BetaLocalEnvironmentResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaLocalEnvironmentResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19399,6 +30986,16 @@ pub enum BetaFunctionShellCallStatus {
     #[serde(rename = "incomplete")]
     Incomplete,
 }
+impl schematic_define::Registration for BetaFunctionShellCallStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellCallStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Execute a shell command.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19406,6 +31003,16 @@ pub struct BetaFunctionShellAction {
     pub commands: Vec<String>,
     pub timeout_ms: serde_json::Value,
     pub max_output_length: serde_json::Value,
+}
+impl schematic_define::Registration for BetaFunctionShellAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionShellAction),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A compaction item generated by the [`v1/responses/compact` API](/docs/api-reference/responses/compact).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19424,6 +31031,14 @@ pub struct BetaCompactionBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for BetaCompactionBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCompactionBody));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaProgramOutput {
@@ -19440,6 +31055,14 @@ pub struct BetaProgramOutput {
     pub result: String,
     pub status: BetaProgramOutputStatus,
 }
+impl schematic_define::Registration for BetaProgramOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaProgramOutput));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaProgramOutputStatus {
@@ -19448,6 +31071,16 @@ pub enum BetaProgramOutputStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for BetaProgramOutputStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaProgramOutputStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19466,6 +31099,14 @@ pub struct BetaProgram {
     ///Opaque program replay fingerprint that must be round-tripped.
     pub fingerprint: String,
 }
+impl schematic_define::Registration for BetaProgram {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaProgram));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaAdditionalTools {
@@ -19479,6 +31120,14 @@ pub struct BetaAdditionalTools {
     pub role: BetaMessageRole,
     ///The additional tool definitions made available at this item.
     pub tools: Vec<BetaTool>,
+}
+impl schematic_define::Registration for BetaAdditionalTools {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaAdditionalTools));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19501,6 +31150,14 @@ pub enum BetaMessageRole {
     #[serde(rename = "tool")]
     Tool,
 }
+impl schematic_define::Registration for BetaMessageRole {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMessageRole));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaToolSearchOutput {
@@ -19519,6 +31176,14 @@ pub struct BetaToolSearchOutput {
     ///The identifier of the actor that created the item.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
+}
+impl schematic_define::Registration for BetaToolSearchOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaToolSearchOutput));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19539,6 +31204,14 @@ pub struct BetaToolSearchCall {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
 }
+impl schematic_define::Registration for BetaToolSearchCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaToolSearchCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaMultiAgentCallOutput {
@@ -19554,6 +31227,16 @@ pub struct BetaMultiAgentCallOutput {
     pub action: BetaMultiAgentAction,
     ///Text output returned by the multi-agent action.
     pub output: Vec<BetaOutputTextContent>,
+}
+impl schematic_define::Registration for BetaMultiAgentCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaMultiAgentCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19572,6 +31255,14 @@ pub enum BetaMultiAgentAction {
     #[serde(rename = "wait_agent")]
     WaitAgent,
 }
+impl schematic_define::Registration for BetaMultiAgentAction {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMultiAgentAction));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaMultiAgentCall {
@@ -19587,6 +31278,14 @@ pub struct BetaMultiAgentCall {
     pub action: BetaMultiAgentAction,
     ///The JSON string of arguments generated for the action.
     pub arguments: String,
+}
+impl schematic_define::Registration for BetaMultiAgentCall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMultiAgentCall));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19605,6 +31304,14 @@ pub struct BetaAgentMessage {
     ///Encrypted content sent between agents.
     pub content: Vec<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaAgentMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaAgentMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Opaque encrypted content that Responses API decrypts inside trusted model execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19614,6 +31321,14 @@ pub struct BetaEncryptedContent {
     pub type_: String,
     ///Opaque encrypted content.
     pub encrypted_content: String,
+}
+impl schematic_define::Registration for BetaEncryptedContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaEncryptedContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A screenshot of a computer.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19628,6 +31343,16 @@ pub struct BetaComputerScreenshotContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_breakpoint: Option<BetaPromptCacheBreakpointConfig>,
 }
+impl schematic_define::Registration for BetaComputerScreenshotContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerScreenshotContent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A text content.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19636,6 +31361,14 @@ pub struct BetaTextContent {
     pub type_: String,
     pub text: String,
 }
+impl schematic_define::Registration for BetaTextContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaTextContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaFunctionToolCallOutputResource {
@@ -19643,6 +31376,16 @@ pub struct BetaFunctionToolCallOutputResource {
     pub beta_function_tool_call_output: BetaFunctionToolCallOutput,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for BetaFunctionToolCallOutputResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionToolCallOutputResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a function tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19676,6 +31419,16 @@ Can be a string or an list of output content.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
+impl schematic_define::Registration for BetaFunctionToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaFunctionToolCallResource {
@@ -19684,6 +31437,16 @@ pub struct BetaFunctionToolCallResource {
     #[serde(flatten)]
     pub json: serde_json::Value,
 }
+impl schematic_define::Registration for BetaFunctionToolCallResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaFunctionToolCallResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaComputerToolCallOutputResource {
@@ -19691,6 +31454,16 @@ pub struct BetaComputerToolCallOutputResource {
     pub beta_computer_tool_call_output: BetaComputerToolCallOutput,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for BetaComputerToolCallOutputResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerToolCallOutputResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19702,6 +31475,16 @@ pub enum BetaComputerCallOutputStatus {
     Incomplete,
     #[serde(rename = "failed")]
     Failed,
+}
+impl schematic_define::Registration for BetaComputerCallOutputStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerCallOutputStatus),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The output of a computer tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19728,6 +31511,16 @@ developer.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
+impl schematic_define::Registration for BetaComputerToolCallOutput {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaComputerToolCallOutput),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaInputMessageResource {
@@ -19735,6 +31528,16 @@ pub struct BetaInputMessageResource {
     pub beta_input_message: BetaInputMessage,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for BetaInputMessageResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaInputMessageResource),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19748,6 +31551,14 @@ pub struct BetaCompactResource {
     ///Unix timestamp (in seconds) when the compacted conversation was created.
     pub created_at: i64,
     pub usage: BetaResponseUsage,
+}
+impl schematic_define::Registration for BetaCompactResource {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCompactResource));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Represents token usage details including input tokens, output tokens,
 a breakdown of output tokens, and the total tokens used.*/
@@ -19764,6 +31575,14 @@ pub struct BetaResponseUsage {
     pub output_tokens_details: serde_json::Value,
     ///The total number of tokens used.
     pub total_tokens: i64,
+}
+impl schematic_define::Registration for BetaResponseUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaResponseUsage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An item representing a message, tool call, tool output, reasoning, or other response element.
 #[allow(clippy::large_enum_variant)]
@@ -19808,6 +31627,14 @@ impl Default for BetaItemField {
         Self::BetaMessage(Default::default())
     }
 }
+impl schematic_define::Registration for BetaItemField {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaItemField));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///A message to or from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19826,6 +31653,14 @@ pub struct BetaMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMessage));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaMessagePhase2 {
@@ -19834,6 +31669,14 @@ pub enum BetaMessagePhase2 {
     Commentary,
     #[serde(rename = "final_answer")]
     FinalAnswer,
+}
+impl schematic_define::Registration for BetaMessagePhase2 {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMessagePhase2));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19845,6 +31688,14 @@ pub enum BetaMessageStatus {
     Completed,
     #[serde(rename = "incomplete")]
     Incomplete,
+}
+impl schematic_define::Registration for BetaMessageStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMessageStatus));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Event indicating that input for a custom tool call is complete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19865,6 +31716,16 @@ pub struct BetaResponseCustomToolCallInputDoneEvent {
     ///The complete input data for the custom tool call.
     pub input: String,
 }
+impl schematic_define::Registration for BetaResponseCustomToolCallInputDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCustomToolCallInputDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Event representing a delta (partial update) to the input of a custom tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19884,6 +31745,16 @@ pub struct BetaResponseCustomToolCallInputDeltaEvent {
     ///The incremental input data (delta) for the custom tool call.
     pub delta: String,
 }
+impl schematic_define::Registration for BetaResponseCustomToolCallInputDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCustomToolCallInputDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a response is queued and waiting to be processed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -19898,6 +31769,16 @@ pub struct BetaResponseQueuedEvent {
     ///The sequence number for this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseQueuedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseQueuedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaResponse {
@@ -19908,12 +31789,30 @@ pub struct BetaResponse {
     #[serde(flatten)]
     pub json: serde_json::Value,
 }
+impl schematic_define::Registration for BetaResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The conversation that this response belonged to. Input items and output items from this response were automatically added to this conversation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaResponseConversation {
     ///The unique ID of the conversation that this response was associated with.
     pub id: String,
+}
+impl schematic_define::Registration for BetaResponseConversation {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseConversation),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Moderation results or errors for the response input and output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19923,6 +31822,14 @@ pub struct BetaModeration {
     pub input: serde_json::Value,
     ///Moderation for the response output.
     pub output: serde_json::Value,
+}
+impl schematic_define::Registration for BetaModeration {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaModeration));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///An error produced while attempting moderation for the response input or output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19935,6 +31842,16 @@ pub struct BetaModerationErrorBody {
     pub code: String,
     ///The error message.
     pub message: String,
+}
+impl schematic_define::Registration for BetaModerationErrorBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModerationErrorBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///A moderation result produced for the response input or output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19954,6 +31871,16 @@ pub struct BetaModerationResultBody {
     ///Which modalities of input are reflected by the score for each category.
     pub category_applied_input_types: serde_json::Value,
 }
+impl schematic_define::Registration for BetaModerationResultBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModerationResultBody),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub enum BetaModerationInputType {
@@ -19963,12 +31890,32 @@ pub enum BetaModerationInputType {
     #[serde(rename = "image")]
     Image,
 }
+impl schematic_define::Registration for BetaModerationInputType {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModerationInputType),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The prompt-caching options that were applied to the response. Supported for `gpt-5.6` and later models.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaPromptCacheOptions {
     pub ttl: BetaPromptCacheTTLEnum,
     pub mode: BetaPromptCacheModeEnum,
+}
+impl schematic_define::Registration for BetaPromptCacheOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaPromptCacheOptions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20012,6 +31959,14 @@ impl Default for BetaOutputItem {
         Self::BetaOutputMessage(Default::default())
     }
 }
+impl schematic_define::Registration for BetaOutputItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaOutputItem));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20023,6 +31978,14 @@ pub enum BetaResponseError {
 impl Default for BetaResponseError {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaResponseError {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaResponseError));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///The error code for the response.
@@ -20071,6 +32034,16 @@ pub enum BetaResponseErrorCode {
     #[serde(rename = "image_file_not_found")]
     ImageFileNotFound,
 }
+impl schematic_define::Registration for BetaResponseErrorCode {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseErrorCode),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaResponseProperties {
@@ -20091,6 +32064,16 @@ pub struct BetaResponseProperties {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<BetaPrompt>,
 }
+impl schematic_define::Registration for BetaResponseProperties {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseProperties),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20104,6 +32087,14 @@ impl Default for BetaPrompt {
         Self::Json(Default::default())
     }
 }
+impl schematic_define::Registration for BetaPrompt {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaPrompt));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20115,6 +32106,16 @@ pub enum BetaResponsePromptVariables {
 impl Default for BetaResponsePromptVariables {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaResponsePromptVariables {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponsePromptVariables),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**An array of tools the model may call while generating a response. You
@@ -20159,6 +32160,16 @@ Used to boost cache hit rates by better bucketing similar requests and  to help 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_retention: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaModelResponseProperties {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModelResponseProperties),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20172,6 +32183,14 @@ impl Default for BetaServiceTier {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for BetaServiceTier {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaServiceTier));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20183,6 +32202,14 @@ pub enum BetaMetadata {
 impl Default for BetaMetadata {
     fn default() -> Self {
         Self::Json(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaMetadata {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMetadata));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Emitted when an annotation is added to output text content.
@@ -20208,6 +32235,16 @@ pub struct BetaResponseOutputTextAnnotationAddedEvent {
     ///The annotation object being added. (See annotation schema for details.)
     pub annotation: serde_json::Value,
 }
+impl schematic_define::Registration for BetaResponseOutputTextAnnotationAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseOutputTextAnnotationAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the system is in the process of retrieving the list of available MCP tools.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20224,6 +32261,16 @@ pub struct BetaResponseMCPListToolsInProgressEvent {
     pub output_index: i64,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseMCPListToolsInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPListToolsInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when the attempt to list available MCP tools has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20242,6 +32289,16 @@ pub struct BetaResponseMCPListToolsFailedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseMCPListToolsFailedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPListToolsFailedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the list of available MCP tools has been successfully retrieved.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20258,6 +32315,16 @@ pub struct BetaResponseMCPListToolsCompletedEvent {
     pub output_index: i64,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseMCPListToolsCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPListToolsCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when an MCP  tool call is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20276,6 +32343,16 @@ pub struct BetaResponseMCPCallInProgressEvent {
     ///The unique identifier of the MCP tool call item being processed.
     pub item_id: String,
 }
+impl schematic_define::Registration for BetaResponseMCPCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an MCP  tool call has failed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20293,6 +32370,16 @@ pub struct BetaResponseMCPCallFailedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseMCPCallFailedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPCallFailedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an MCP  tool call has completed successfully.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20309,6 +32396,16 @@ pub struct BetaResponseMCPCallCompletedEvent {
     pub output_index: i64,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseMCPCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when the arguments for an MCP tool call are finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20329,6 +32426,16 @@ pub struct BetaResponseMCPCallArgumentsDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseMCPCallArgumentsDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPCallArgumentsDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when there is a delta (partial update) to the arguments of an MCP tool call.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20347,6 +32454,16 @@ pub struct BetaResponseMCPCallArgumentsDeltaEvent {
     pub delta: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseMCPCallArgumentsDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseMCPCallArgumentsDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a partial image is available during image generation streaming.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20369,6 +32486,16 @@ pub struct BetaResponseImageGenCallPartialImageEvent {
     ///Base64-encoded partial image data, suitable for rendering as an image.
     pub partial_image_b64: String,
 }
+impl schematic_define::Registration for BetaResponseImageGenCallPartialImageEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseImageGenCallPartialImageEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an image generation tool call is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20385,6 +32512,16 @@ pub struct BetaResponseImageGenCallInProgressEvent {
     pub item_id: String,
     ///The sequence number of the image generation item being processed.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseImageGenCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseImageGenCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when an image generation tool call is actively generating an image (intermediate state).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20403,6 +32540,16 @@ pub struct BetaResponseImageGenCallGeneratingEvent {
     ///The sequence number of the image generation item being processed.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseImageGenCallGeneratingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseImageGenCallGeneratingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an image generation tool call has completed and the final image is available.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20419,6 +32566,16 @@ pub struct BetaResponseImageGenCallCompletedEvent {
     pub sequence_number: i64,
     ///The unique identifier of the image generation item being processed.
     pub item_id: String,
+}
+impl schematic_define::Registration for BetaResponseImageGenCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseImageGenCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a reasoning text is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20441,6 +32598,16 @@ pub struct BetaResponseReasoningTextDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseReasoningTextDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseReasoningTextDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a delta is added to a reasoning text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20461,6 +32628,16 @@ pub struct BetaResponseReasoningTextDeltaEvent {
     pub delta: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseReasoningTextDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseReasoningTextDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a reasoning summary text is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20483,6 +32660,16 @@ pub struct BetaResponseReasoningSummaryTextDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseReasoningSummaryTextDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseReasoningSummaryTextDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a delta is added to a reasoning summary text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20503,6 +32690,16 @@ pub struct BetaResponseReasoningSummaryTextDeltaEvent {
     pub delta: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseReasoningSummaryTextDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseReasoningSummaryTextDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a reasoning summary part is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20529,6 +32726,16 @@ normally and set to `incomplete` when generation was interrupted.*/
     ///The completed summary part.
     pub part: serde_json::Value,
 }
+impl schematic_define::Registration for BetaResponseReasoningSummaryPartDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseReasoningSummaryPartDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a new reasoning summary part is added.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20549,6 +32756,16 @@ pub struct BetaResponseReasoningSummaryPartAddedEvent {
     pub sequence_number: i64,
     ///The summary part that was added.
     pub part: serde_json::Value,
+}
+impl schematic_define::Registration for BetaResponseReasoningSummaryPartAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseReasoningSummaryPartAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when text content is finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20573,6 +32790,16 @@ pub struct BetaResponseTextDoneEvent {
     ///The log probabilities of the tokens in the delta.
     pub logprobs: Vec<BetaResponseLogProb>,
 }
+impl schematic_define::Registration for BetaResponseTextDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseTextDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**A logprob is the logarithmic probability that the model assigns to producing
 a particular token at a given position in the sequence. Less-negative (higher)
 logprob values indicate greater model confidence in that token choice.*/
@@ -20586,6 +32813,14 @@ pub struct BetaResponseLogProb {
     ///The log probabilities of up to 20 of the most likely tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_logprobs: Option<Vec<serde_json::Value>>,
+}
+impl schematic_define::Registration for BetaResponseLogProb {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaResponseLogProb));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is an additional text delta.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20610,6 +32845,16 @@ pub struct BetaResponseTextDeltaEvent {
     ///The log probabilities of the tokens in the delta.
     pub logprobs: Vec<BetaResponseLogProb>,
 }
+impl schematic_define::Registration for BetaResponseTextDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseTextDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when refusal text is finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20630,6 +32875,16 @@ pub struct BetaResponseRefusalDoneEvent {
     pub refusal: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseRefusalDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseRefusalDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is a partial refusal text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20652,6 +32907,16 @@ pub struct BetaResponseRefusalDeltaEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseRefusalDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseRefusalDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when an output item is marked done.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20667,6 +32932,16 @@ pub struct BetaResponseOutputItemDoneEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
     pub item: BetaOutputItem,
+}
+impl schematic_define::Registration for BetaResponseOutputItemDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseOutputItemDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a new output item is added.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20684,6 +32959,16 @@ pub struct BetaResponseOutputItemAddedEvent {
     pub sequence_number: i64,
     pub item: BetaOutputItem,
 }
+impl schematic_define::Registration for BetaResponseOutputItemAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseOutputItemAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the response is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20697,6 +32982,16 @@ pub struct BetaResponseInProgressEvent {
     pub response: BetaResponse,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when function-call arguments are finalized.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20718,6 +33013,16 @@ pub struct BetaResponseFunctionCallArgumentsDoneEvent {
     ///The function-call arguments.
     pub arguments: String,
 }
+impl schematic_define::Registration for BetaResponseFunctionCallArgumentsDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFunctionCallArgumentsDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when there is a partial function-call arguments delta.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20737,6 +33042,16 @@ pub struct BetaResponseFunctionCallArgumentsDeltaEvent {
     ///The function-call arguments delta that is added.
     pub delta: String,
 }
+impl schematic_define::Registration for BetaResponseFunctionCallArgumentsDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFunctionCallArgumentsDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a file search is currently searching.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20753,6 +33068,16 @@ pub struct BetaResponseFileSearchCallSearchingEvent {
     pub item_id: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseFileSearchCallSearchingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFileSearchCallSearchingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a file search call is initiated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20771,6 +33096,16 @@ pub struct BetaResponseFileSearchCallInProgressEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseFileSearchCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFileSearchCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a file search call is completed (results found).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20787,6 +33122,16 @@ pub struct BetaResponseFileSearchCallCompletedEvent {
     pub item_id: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseFileSearchCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFileSearchCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when an error occurs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20805,6 +33150,16 @@ pub struct BetaResponseErrorEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseErrorEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseErrorEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An event that is emitted when a response is created.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20818,6 +33173,16 @@ pub struct BetaResponseCreatedEvent {
     pub response: BetaResponse,
     ///The sequence number for this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseCreatedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCreatedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a content part is done.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20839,6 +33204,16 @@ pub struct BetaResponseContentPartDoneEvent {
     pub sequence_number: i64,
     pub part: BetaOutputContent,
 }
+impl schematic_define::Registration for BetaResponseContentPartDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseContentPartDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20851,6 +33226,14 @@ pub enum BetaOutputContent {
 impl Default for BetaOutputContent {
     fn default() -> Self {
         Self::BetaOutputTextContent(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaOutputContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaOutputContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 ///Emitted when a new content part is added.
@@ -20873,6 +33256,16 @@ pub struct BetaResponseContentPartAddedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseContentPartAddedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseContentPartAddedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the model response is complete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20886,6 +33279,16 @@ pub struct BetaResponseCompletedEvent {
     pub response: BetaResponse,
     ///The sequence number for this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when the code interpreter is actively interpreting the code snippet.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20904,6 +33307,17 @@ pub struct BetaResponseCodeInterpreterCallInterpretingEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration
+for BetaResponseCodeInterpreterCallInterpretingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCodeInterpreterCallInterpretingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a code interpreter call is in progress.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20921,6 +33335,16 @@ pub struct BetaResponseCodeInterpreterCallInProgressEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseCodeInterpreterCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCodeInterpreterCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the code interpreter call is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20937,6 +33361,16 @@ pub struct BetaResponseCodeInterpreterCallCompletedEvent {
     pub item_id: String,
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseCodeInterpreterCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCodeInterpreterCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when the code snippet is finalized by the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -20957,6 +33391,16 @@ pub struct BetaResponseCodeInterpreterCallCodeDoneEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseCodeInterpreterCallCodeDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCodeInterpreterCallCodeDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a partial code snippet is streamed by the code interpreter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20976,6 +33420,16 @@ pub struct BetaResponseCodeInterpreterCallCodeDeltaEvent {
     ///The sequence number of this event, used to order streaming events.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseCodeInterpreterCallCodeDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseCodeInterpreterCallCodeDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the full audio transcript is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -20988,6 +33442,16 @@ pub struct BetaResponseAudioTranscriptDoneEvent {
     pub type_: String,
     ///The sequence number of this event.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseAudioTranscriptDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseAudioTranscriptDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is a partial transcript of audio.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21004,6 +33468,16 @@ pub struct BetaResponseAudioTranscriptDeltaEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseAudioTranscriptDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseAudioTranscriptDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when the audio response is complete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21016,6 +33490,16 @@ pub struct BetaResponseAudioDoneEvent {
     pub type_: String,
     ///The sequence number of the delta.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseAudioDoneEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseAudioDoneEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when there is a partial audio response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21032,6 +33516,16 @@ pub struct BetaResponseAudioDeltaEvent {
     ///A chunk of Base64 encoded response audio bytes.
     pub delta: String,
 }
+impl schematic_define::Registration for BetaResponseAudioDeltaEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseAudioDeltaEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An event that is emitted when a response finishes as incomplete.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21046,6 +33540,16 @@ pub struct BetaResponseIncompleteEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseIncompleteEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseIncompleteEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An event that is emitted when a response fails.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21059,6 +33563,16 @@ pub struct BetaResponseFailedEvent {
     ///The sequence number of this event.
     pub sequence_number: i64,
     pub response: BetaResponse,
+}
+impl schematic_define::Registration for BetaResponseFailedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseFailedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a web search call is completed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21077,6 +33591,16 @@ pub struct BetaResponseWebSearchCallCompletedEvent {
     ///The sequence number of the web search call being processed.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseWebSearchCallCompletedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseWebSearchCallCompletedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Emitted when a web search call is executing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21093,6 +33617,16 @@ pub struct BetaResponseWebSearchCallSearchingEvent {
     pub item_id: String,
     ///The sequence number of the web search call being processed.
     pub sequence_number: i64,
+}
+impl schematic_define::Registration for BetaResponseWebSearchCallSearchingEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseWebSearchCallSearchingEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Emitted when a web search call is initiated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21111,6 +33645,16 @@ pub struct BetaResponseWebSearchCallInProgressEvent {
     ///The sequence number of the web search call being processed.
     pub sequence_number: i64,
 }
+impl schematic_define::Registration for BetaResponseWebSearchCallInProgressEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseWebSearchCallInProgressEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An audio output from the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21123,6 +33667,14 @@ pub struct BetaOutputAudio {
     ///The transcript of the audio data from the model.
     pub transcript: String,
 }
+impl schematic_define::Registration for BetaOutputAudio {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaOutputAudio));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///An audio input to the model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21131,6 +33683,14 @@ pub struct BetaInputAudio {
     #[serde(rename = "type")]
     pub type_: String,
     pub input_audio: serde_json::Value,
+}
+impl schematic_define::Registration for BetaInputAudio {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputAudio));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 /**Text, image, or file inputs to the model, used to generate a response.
 
@@ -21153,6 +33713,14 @@ impl Default for BetaInputParam {
         Self::Text(Default::default())
     }
 }
+impl schematic_define::Registration for BetaInputParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaInputParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Multi-modal input and output contents.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21165,6 +33733,14 @@ pub enum BetaContent {
 impl Default for BetaContent {
     fn default() -> Self {
         Self::BetaInputContent(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaContent));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**Specify additional output data to include in the model response. Currently supported values are:
@@ -21197,6 +33773,14 @@ pub enum BetaIncludeEnum {
     #[serde(rename = "message.output_text.logprobs")]
     MessageOutputTextLogprobs,
 }
+impl schematic_define::Registration for BetaIncludeEnum {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaIncludeEnum));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Server events emitted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21210,6 +33794,16 @@ pub enum BetaResponsesServerEvent {
 impl Default for BetaResponsesServerEvent {
     fn default() -> Self {
         Self::BetaResponseStreamEvent(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaResponsesServerEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponsesServerEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**Emitted when injected input could not be committed to a response. The event
@@ -21234,6 +33828,16 @@ present only when WebSocket multiplexing is enabled separately.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_id: Option<String>,
 }
+impl schematic_define::Registration for BetaResponseInjectFailedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseInjectFailedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Emitted when all injected input items were validated and committed to the
 active response.*/
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21250,6 +33854,16 @@ pub struct BetaResponseInjectCreatedEvent {
 present only when WebSocket multiplexing is enabled separately.*/
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_id: Option<String>,
+}
+impl schematic_define::Registration for BetaResponseInjectCreatedEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseInjectCreatedEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21335,6 +33949,16 @@ impl Default for BetaResponseStreamEvent {
         Self::BetaResponseAudioDeltaEvent(Default::default())
     }
 }
+impl schematic_define::Registration for BetaResponseStreamEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseStreamEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Client events accepted by the Responses WebSocket server.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21347,6 +33971,16 @@ pub enum BetaResponsesClientEvent {
 impl Default for BetaResponsesClientEvent {
     fn default() -> Self {
         Self::BetaResponsesClientEventResponseCreate(Default::default())
+    }
+}
+impl schematic_define::Registration for BetaResponsesClientEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponsesClientEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
     }
 }
 /**Injects input items into an active response over a WebSocket connection.
@@ -21363,6 +33997,16 @@ pub struct BetaResponseInjectEvent {
     ///Input items to inject into the active response.
     pub input: Vec<BetaInputItem>,
 }
+impl schematic_define::Registration for BetaResponseInjectEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseInjectEvent),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 /**Client event for creating a response over a persistent WebSocket connection.
 This payload uses the same top-level fields as `POST /v1/responses`.
 
@@ -21377,6 +34021,16 @@ pub struct BetaResponsesClientEventResponseCreate {
     #[serde(flatten)]
     pub beta_create_response: BetaCreateResponse,
 }
+impl schematic_define::Registration for BetaResponsesClientEventResponseCreate {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponsesClientEventResponseCreate),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaCreateResponse {
@@ -21386,6 +34040,14 @@ pub struct BetaCreateResponse {
     pub beta_response_properties: BetaResponseProperties,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for BetaCreateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaCreateResponse));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///Configuration for server-hosted multi-agent execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21398,6 +34060,14 @@ The API does not impose a fixed upper bound on this setting. The default is `3`,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_subagents: Option<i64>,
 }
+impl schematic_define::Registration for BetaMultiAgentParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaMultiAgentParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaContextManagementParam {
@@ -21406,6 +34076,16 @@ pub struct BetaContextManagementParam {
     pub type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compact_threshold: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaContextManagementParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaContextManagementParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21420,6 +34100,16 @@ impl Default for BetaResponseStreamOptions {
         Self::Json(Default::default())
     }
 }
+impl schematic_define::Registration for BetaResponseStreamOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaResponseStreamOptions),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///Configuration for running moderation on the input and output of this response.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21428,6 +34118,14 @@ pub struct BetaModerationParam {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<serde_json::Value>,
+}
+impl schematic_define::Registration for BetaModerationParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaModerationParam));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 ///The policy to apply to moderated response input and output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21438,11 +34136,31 @@ pub struct BetaModerationPolicyParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for BetaModerationPolicyParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModerationPolicyParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 ///The moderation policy for the response input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaModerationConfigParam {
     pub mode: BetaModerationMode,
+}
+impl schematic_define::Registration for BetaModerationConfigParam {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaModerationConfigParam),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
@@ -21453,6 +34171,14 @@ pub enum BetaModerationMode {
     #[serde(rename = "block")]
     Block,
 }
+impl schematic_define::Registration for BetaModerationMode {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(BetaModerationMode));
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[derive(JsonSchema)]
 pub struct BetaCreateModelResponseProperties {
@@ -21460,4 +34186,14 @@ pub struct BetaCreateModelResponseProperties {
     pub beta_model_response_properties: BetaModelResponseProperties,
     #[serde(flatten)]
     pub json: serde_json::Value,
+}
+impl schematic_define::Registration for BetaCreateModelResponseProperties {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(
+        stringify!(BetaCreateModelResponseProperties),
+    );
+    fn register(
+        ctx: &mut schematic_define::DefinitionContext,
+    ) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

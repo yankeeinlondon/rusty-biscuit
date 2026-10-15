@@ -12,7 +12,7 @@ pub fn client_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListClientsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetClient".to_string(),
@@ -23,7 +23,7 @@ pub fn client_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ClientInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "DisconnectClient".to_string(),
@@ -34,7 +34,7 @@ pub fn client_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SubscribeClient".to_string(),
@@ -45,7 +45,7 @@ pub fn client_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "UnsubscribeClient".to_string(),
@@ -56,7 +56,7 @@ pub fn client_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }

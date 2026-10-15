@@ -6,25 +6,29 @@
 //! import-openai` regenerates `openai/` but never writes this file.
 //!
 //! Every OpenAI list replies with a wrapper whose items are at `data`, so each
-//! list, paginated or not, has an exception row; none inherits by being a root
-//! array. A row without its own strategy inherits the API default.
+//! list, paginated or not, has an endpoint collection; none inherits by being a root
+//! array. A collection without its own strategy inherits the API default.
 //!
 //! The API-default page size has no maximum: OpenAI's `limit` bounds differ per
-//! endpoint, and some depend on `bucket_width`. A row authors a maximum only
+//! endpoint, and some depend on `bucket_width`. A collection authors a maximum only
 //! where the vendored `specs/openai/openapi.yaml` states one that holds for every
 //! request. Where the provider documents a minimum of 0, the minimum stays at 1,
 //! the lowest the pagination model accepts.
 
 use schematic_define::RestApi;
 use schematic_define::pagination::{
-    Collection, CursorSource, MoreSignal, PageSize, PaginationException, Strategy,
+    Collection, CursorSource, MoreSignal, PageSize, Strategy,
 };
 
-/// Sets the OpenAI default strategy and one exception row per list endpoint.
+/// Sets the OpenAI default strategy and a collection on each list endpoint.
 #[must_use]
 pub fn apply(mut api: RestApi) -> RestApi {
     api.default_pagination = Some(last_id_cursor(limit()));
-    api.pagination_exceptions = exceptions();
+    for (id, collection) in collections() {
+        let endpoint = api.endpoints.iter_mut().find(|endpoint| endpoint.id == id)
+            .unwrap_or_else(|| panic!("OpenAI pagination overlay names unknown endpoint `{id}`"));
+        endpoint.pagination = Some(collection);
+    }
     api
 }
 
@@ -78,22 +82,22 @@ fn next_page_cursor(size: PageSize) -> Strategy {
         .build()
 }
 
-fn inherit(endpoint: &str, item_type: &str) -> PaginationException {
-    PaginationException::new(endpoint, Collection::at("data").item_type(item_type))
+fn inherit(endpoint: &str, item_type: &str) -> (String, Collection) {
+    (endpoint.to_owned(), Collection::at("data").item_type(item_type))
 }
 
-fn paged(endpoint: &str, item_type: &str, strategy: Strategy) -> PaginationException {
-    PaginationException::new(
-        endpoint,
+fn paged(endpoint: &str, item_type: &str, strategy: Strategy) -> (String, Collection) {
+    (
+        endpoint.to_owned(),
         Collection::at("data").item_type(item_type).paginate(strategy),
     )
 }
 
-fn unpaged(endpoint: &str, item_type: &str) -> PaginationException {
-    PaginationException::new(endpoint, Collection::at("data").item_type(item_type).unpaginated())
+fn unpaged(endpoint: &str, item_type: &str) -> (String, Collection) {
+    (endpoint.to_owned(), Collection::at("data").item_type(item_type).unpaginated())
 }
 
-fn exceptions() -> Vec<PaginationException> {
+fn collections() -> Vec<(String, Collection)> {
     // "Limit can range between 1 and 100, and the default is 20."
     let one_to_hundred = || limit().max(100).server_default(20);
     // Schema `minimum: 0, maximum: 100`; the default is stated where known.
@@ -136,8 +140,7 @@ fn exceptions() -> Vec<PaginationException> {
         ),
         paged("ListProjectUsers", "ProjectUser", last_id_cursor(one_to_hundred())),
         paged("ListUsers", "User", last_id_cursor(one_to_hundred())),
-        paged("ListInputItems", "ItemResource", last_id_cursor(one_to_hundred())),
-        paged("BetaListInputItems", "BetaItemResource", last_id_cursor(one_to_hundred())),
+        paged("ListInputItems", "BetaItemResource", last_id_cursor(one_to_hundred())),
         paged(
             "ListFiles",
             "OpenAIFile",
@@ -237,4 +240,16 @@ fn exceptions() -> Vec<PaginationException> {
         unpaged("RetrieveVectorStoreFileContent", "serde_json::Value"),
         unpaged("SearchVectorStore", "VectorStoreSearchResultItem"),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[should_panic(expected = "OpenAI pagination overlay names unknown endpoint `ListChatCompletions`")]
+    fn overlay_rejects_unknown_endpoint_id() {
+        let ctx = schematic_define::DefinitionContext::types_in("::models");
+        let api = schematic_define::RestApi::builder(&ctx, "OverlayFixture", "https://example.test")
+            .describes("An imported API missing the overlay endpoint").no_auth().build().unwrap();
+        let _ = super::apply(api);
+    }
 }

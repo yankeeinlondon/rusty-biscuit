@@ -28,7 +28,7 @@ pub fn all() -> Vec<Endpoint> {
                         Some("Filter by issue state"),
                     ),
             ),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetIssue".to_string(),
@@ -39,7 +39,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("Issue"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "ListIssueNotes".to_string(),
@@ -50,7 +50,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("Note"),
             headers: vec![],
             params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "ListIssueParticipants".to_string(),
@@ -61,7 +61,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("User"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }

@@ -16,7 +16,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("Tag"),
             headers: vec![],
             params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetTag".to_string(),
@@ -27,7 +27,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("Tag"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "ListReleases".to_string(),
@@ -38,7 +38,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("Release"),
             headers: vec![],
             params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetRelease".to_string(),
@@ -49,7 +49,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("Release"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetLatestRelease".to_string(),
@@ -60,7 +60,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("Release"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }

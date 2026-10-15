@@ -8,28 +8,26 @@ use super::{OpenAI, OpenAIApi};
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateSpeechRequest, CreateSpeechRequest2};
+/// use schematic_schema::openai::CreateSpeechRequest;
 ///
-/// let body = CreateSpeechRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateSpeechRequest2 = Default::default();
 /// let request = CreateSpeechRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechRequest {
     /// Request body
-    pub body: CreateSpeechRequest2,
+    pub body: ::schematic_definitions::openai::CreateSpeechRequest2,
 }
 impl CreateSpeechRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateSpeechRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateSpeechRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateSpeechRequest2> for CreateSpeechRequest {
-    fn from(body: CreateSpeechRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateSpeechRequest2>
+for CreateSpeechRequest {
+    fn from(body: ::schematic_definitions::openai::CreateSpeechRequest2) -> Self {
         Self { body }
     }
 }
@@ -232,9 +230,9 @@ impl From<CreateTranscriptionForm> for CreateTranscriptionRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateTranscriptionRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "CreateTranscription";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -338,9 +336,9 @@ impl From<CreateTranslationForm> for CreateTranslationRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateTranslationRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "CreateTranslation";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -372,9 +370,11 @@ impl schematic_runtime::EndpointSpec for CreateTranslationRequest {
 pub struct ListVoiceConsentsRequest {}
 impl schematic_runtime::EndpointSpec for ListVoiceConsentsRequest {
     type Api = OpenAIApi;
-    type Success = VoiceConsentListResource;
+    type Success = ::schematic_definitions::openai::VoiceConsentListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceConsentListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VoiceConsentListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListVoiceConsents";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -464,9 +464,11 @@ impl From<CreateVoiceConsentForm> for CreateVoiceConsentRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateVoiceConsentRequest {
     type Api = OpenAIApi;
-    type Success = VoiceConsentResource;
+    type Success = ::schematic_definitions::openai::VoiceConsentResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceConsentResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VoiceConsentResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVoiceConsent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -521,9 +523,11 @@ impl From<String> for GetVoiceConsentRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVoiceConsentRequest {
     type Api = OpenAIApi;
-    type Success = VoiceConsentResource;
+    type Success = ::schematic_definitions::openai::VoiceConsentResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceConsentResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VoiceConsentResource,
+    >;
     const ENDPOINT_ID: &'static str = "GetVoiceConsent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -549,12 +553,9 @@ impl schematic_runtime::EndpointSpec for GetVoiceConsentRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateVoiceConsentRequest, UpdateVoiceConsentRequest2};
+/// use schematic_schema::openai::UpdateVoiceConsentRequest;
 ///
-/// let body = UpdateVoiceConsentRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateVoiceConsentRequest2 = Default::default();
 /// let request = UpdateVoiceConsentRequest::new("consent_id_value", body)
 ///;
 /// ```
@@ -563,11 +564,14 @@ pub struct UpdateVoiceConsentRequest {
     /// Path parameter: consent_id
     pub consent_id: String,
     /// Request body
-    pub body: UpdateVoiceConsentRequest2,
+    pub body: ::schematic_definitions::openai::UpdateVoiceConsentRequest2,
 }
 impl UpdateVoiceConsentRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(consent_id: impl Into<String>, body: UpdateVoiceConsentRequest2) -> Self {
+    pub fn new(
+        consent_id: impl Into<String>,
+        body: ::schematic_definitions::openai::UpdateVoiceConsentRequest2,
+    ) -> Self {
         Self {
             consent_id: consent_id.into(),
             body,
@@ -576,9 +580,11 @@ impl UpdateVoiceConsentRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateVoiceConsentRequest {
     type Api = OpenAIApi;
-    type Success = VoiceConsentResource;
+    type Success = ::schematic_definitions::openai::VoiceConsentResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceConsentResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VoiceConsentResource,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateVoiceConsent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -643,9 +649,11 @@ impl From<String> for DeleteVoiceConsentRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteVoiceConsentRequest {
     type Api = OpenAIApi;
-    type Success = VoiceConsentDeletedResource;
+    type Success = ::schematic_definitions::openai::VoiceConsentDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceConsentDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VoiceConsentDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteVoiceConsent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -738,9 +746,11 @@ impl From<CreateVoiceForm> for CreateVoiceRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateVoiceRequest {
     type Api = OpenAIApi;
-    type Success = VoiceResource;
+    type Success = ::schematic_definitions::openai::VoiceResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VoiceResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVoice";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -772,9 +782,11 @@ impl schematic_runtime::EndpointSpec for CreateVoiceRequest {
 pub struct ListBatchesRequest {}
 impl schematic_runtime::EndpointSpec for ListBatchesRequest {
     type Api = OpenAIApi;
-    type Success = ListBatchesResponse;
+    type Success = ::schematic_definitions::openai::ListBatchesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListBatchesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListBatchesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListBatches";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -797,36 +809,33 @@ impl schematic_runtime::EndpointSpec for ListBatchesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateBatchRequest, CreateBatchRequest2};
+/// use schematic_schema::openai::CreateBatchRequest;
 ///
-/// let body = CreateBatchRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateBatchRequest2 = Default::default();
 /// let request = CreateBatchRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateBatchRequest {
     /// Request body
-    pub body: CreateBatchRequest2,
+    pub body: ::schematic_definitions::openai::CreateBatchRequest2,
 }
 impl CreateBatchRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateBatchRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateBatchRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateBatchRequest2> for CreateBatchRequest {
-    fn from(body: CreateBatchRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateBatchRequest2> for CreateBatchRequest {
+    fn from(body: ::schematic_definitions::openai::CreateBatchRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateBatchRequest {
     type Api = OpenAIApi;
-    type Success = Batch;
+    type Success = ::schematic_definitions::openai::Batch;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Batch>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Batch>;
     const ENDPOINT_ID: &'static str = "CreateBatch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -886,9 +895,9 @@ impl From<String> for RetrieveBatchRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveBatchRequest {
     type Api = OpenAIApi;
-    type Success = Batch;
+    type Success = ::schematic_definitions::openai::Batch;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Batch>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Batch>;
     const ENDPOINT_ID: &'static str = "RetrieveBatch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -943,9 +952,9 @@ impl From<String> for CancelBatchRequest {
 }
 impl schematic_runtime::EndpointSpec for CancelBatchRequest {
     type Api = OpenAIApi;
-    type Success = Batch;
+    type Success = ::schematic_definitions::openai::Batch;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Batch>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Batch>;
     const ENDPOINT_ID: &'static str = "CancelBatch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1017,9 +1026,11 @@ impl ListChatCompletionsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
     type Api = OpenAIApi;
-    type Success = ChatCompletionList;
+    type Success = ::schematic_definitions::openai::ChatCompletionList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ChatCompletionList>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ChatCompletionList,
+    >;
     const ENDPOINT_ID: &'static str = "ListChatCompletions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1051,36 +1062,40 @@ impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateChatCompletionRequest, CreateChatCompletionRequest2};
+/// use schematic_schema::openai::CreateChatCompletionRequest;
 ///
-/// let body = CreateChatCompletionRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateChatCompletionRequest2 = Default::default();
 /// let request = CreateChatCompletionRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateChatCompletionRequest {
     /// Request body
-    pub body: CreateChatCompletionRequest2,
+    pub body: ::schematic_definitions::openai::CreateChatCompletionRequest2,
 }
 impl CreateChatCompletionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateChatCompletionRequest2) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::CreateChatCompletionRequest2,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<CreateChatCompletionRequest2> for CreateChatCompletionRequest {
-    fn from(body: CreateChatCompletionRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateChatCompletionRequest2>
+for CreateChatCompletionRequest {
+    fn from(
+        body: ::schematic_definitions::openai::CreateChatCompletionRequest2,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateChatCompletionRequest {
     type Api = OpenAIApi;
-    type Success = CreateChatCompletionResponse;
+    type Success = ::schematic_definitions::openai::CreateChatCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateChatCompletionResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::CreateChatCompletionResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateChatCompletion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1142,9 +1157,11 @@ impl From<String> for GetChatCompletionRequest {
 }
 impl schematic_runtime::EndpointSpec for GetChatCompletionRequest {
     type Api = OpenAIApi;
-    type Success = CreateChatCompletionResponse;
+    type Success = ::schematic_definitions::openai::CreateChatCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateChatCompletionResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::CreateChatCompletionResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetChatCompletion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1169,12 +1186,9 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateChatCompletionRequest, serde_json::Value};
+/// use schematic_schema::openai::UpdateChatCompletionRequest;
 ///
-/// let body = serde_json::Value {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::serde_json::Value = Default::default();
 /// let request = UpdateChatCompletionRequest::new("completion_id_value", body)
 ///;
 /// ```
@@ -1183,11 +1197,11 @@ pub struct UpdateChatCompletionRequest {
     /// Path parameter: completion_id
     pub completion_id: String,
     /// Request body
-    pub body: serde_json::Value,
+    pub body: ::serde_json::Value,
 }
 impl UpdateChatCompletionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(completion_id: impl Into<String>, body: serde_json::Value) -> Self {
+    pub fn new(completion_id: impl Into<String>, body: ::serde_json::Value) -> Self {
         Self {
             completion_id: completion_id.into(),
             body,
@@ -1196,9 +1210,11 @@ impl UpdateChatCompletionRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateChatCompletionRequest {
     type Api = OpenAIApi;
-    type Success = CreateChatCompletionResponse;
+    type Success = ::schematic_definitions::openai::CreateChatCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateChatCompletionResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::CreateChatCompletionResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateChatCompletion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1262,9 +1278,11 @@ impl From<String> for DeleteChatCompletionRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteChatCompletionRequest {
     type Api = OpenAIApi;
-    type Success = ChatCompletionDeleted;
+    type Success = ::schematic_definitions::openai::ChatCompletionDeleted;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ChatCompletionDeleted>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ChatCompletionDeleted,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteChatCompletion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -1334,9 +1352,11 @@ impl From<String> for GetChatCompletionMessagesRequest {
 }
 impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
     type Api = OpenAIApi;
-    type Success = ChatCompletionMessageList;
+    type Success = ::schematic_definitions::openai::ChatCompletionMessageList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ChatCompletionMessageList>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ChatCompletionMessageList,
+    >;
     const ENDPOINT_ID: &'static str = "GetChatCompletionMessages";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1365,36 +1385,36 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateCompletionRequest, CreateCompletionRequest2};
+/// use schematic_schema::openai::CreateCompletionRequest;
 ///
-/// let body = CreateCompletionRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateCompletionRequest2 = Default::default();
 /// let request = CreateCompletionRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateCompletionRequest {
     /// Request body
-    pub body: CreateCompletionRequest2,
+    pub body: ::schematic_definitions::openai::CreateCompletionRequest2,
 }
 impl CreateCompletionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateCompletionRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateCompletionRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateCompletionRequest2> for CreateCompletionRequest {
-    fn from(body: CreateCompletionRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateCompletionRequest2>
+for CreateCompletionRequest {
+    fn from(body: ::schematic_definitions::openai::CreateCompletionRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
     type Api = OpenAIApi;
-    type Success = CreateCompletionResponse;
+    type Success = ::schematic_definitions::openai::CreateCompletionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateCompletionResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::CreateCompletionResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateCompletion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1457,9 +1477,11 @@ impl ListContainersRequest {
 }
 impl schematic_runtime::EndpointSpec for ListContainersRequest {
     type Api = OpenAIApi;
-    type Success = ContainerListResource;
+    type Success = ::schematic_definitions::openai::ContainerListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ContainerListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ContainerListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListContainers";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1488,36 +1510,36 @@ impl schematic_runtime::EndpointSpec for ListContainersRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateContainerRequest, CreateContainerBody};
+/// use schematic_schema::openai::CreateContainerRequest;
 ///
-/// let body = CreateContainerBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateContainerBody = Default::default();
 /// let request = CreateContainerRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateContainerRequest {
     /// Request body
-    pub body: CreateContainerBody,
+    pub body: ::schematic_definitions::openai::CreateContainerBody,
 }
 impl CreateContainerRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateContainerBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateContainerBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateContainerBody> for CreateContainerRequest {
-    fn from(body: CreateContainerBody) -> Self {
+impl From<::schematic_definitions::openai::CreateContainerBody>
+for CreateContainerRequest {
+    fn from(body: ::schematic_definitions::openai::CreateContainerBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateContainerRequest {
     type Api = OpenAIApi;
-    type Success = ContainerResource;
+    type Success = ::schematic_definitions::openai::ContainerResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ContainerResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ContainerResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateContainer";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1579,9 +1601,11 @@ impl From<String> for RetrieveContainerRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveContainerRequest {
     type Api = OpenAIApi;
-    type Success = ContainerResource;
+    type Success = ::schematic_definitions::openai::ContainerResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ContainerResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ContainerResource,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveContainer";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1711,9 +1735,11 @@ impl From<String> for ListContainerFilesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListContainerFilesRequest {
     type Api = OpenAIApi;
-    type Success = ContainerFileListResource;
+    type Success = ::schematic_definitions::openai::ContainerFileListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ContainerFileListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ContainerFileListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListContainerFiles";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1741,12 +1767,9 @@ impl schematic_runtime::EndpointSpec for ListContainerFilesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateContainerFileRequest, CreateContainerFileBody};
+/// use schematic_schema::openai::CreateContainerFileRequest;
 ///
-/// let body = CreateContainerFileBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateContainerFileBody = Default::default();
 /// let request = CreateContainerFileRequest::new("container_id_value", body)
 ///;
 /// ```
@@ -1755,11 +1778,14 @@ pub struct CreateContainerFileRequest {
     /// Path parameter: container_id
     pub container_id: String,
     /// Request body
-    pub body: CreateContainerFileBody,
+    pub body: ::schematic_definitions::openai::CreateContainerFileBody,
 }
 impl CreateContainerFileRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(container_id: impl Into<String>, body: CreateContainerFileBody) -> Self {
+    pub fn new(
+        container_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CreateContainerFileBody,
+    ) -> Self {
         Self {
             container_id: container_id.into(),
             body,
@@ -1768,9 +1794,11 @@ impl CreateContainerFileRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateContainerFileRequest {
     type Api = OpenAIApi;
-    type Success = ContainerFileResource;
+    type Success = ::schematic_definitions::openai::ContainerFileResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ContainerFileResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ContainerFileResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateContainerFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1825,9 +1853,11 @@ impl RetrieveContainerFileRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveContainerFileRequest {
     type Api = OpenAIApi;
-    type Success = ContainerFileResource;
+    type Success = ::schematic_definitions::openai::ContainerFileResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ContainerFileResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ContainerFileResource,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveContainerFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2021,9 +2051,11 @@ impl From<String> for ListConversationItemsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListConversationItemsRequest {
     type Api = OpenAIApi;
-    type Success = ConversationItemList;
+    type Success = ::schematic_definitions::openai::ConversationItemList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ConversationItemList>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ConversationItemList,
+    >;
     const ENDPOINT_ID: &'static str = "ListConversationItems";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2057,12 +2089,9 @@ impl schematic_runtime::EndpointSpec for ListConversationItemsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateConversationItemsRequest, serde_json::Value};
+/// use schematic_schema::openai::CreateConversationItemsRequest;
 ///
-/// let body = serde_json::Value {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::serde_json::Value = Default::default();
 /// let request = CreateConversationItemsRequest::new("conversation_id_value", body)
 ///     .with_include(/* value */)
 ///;
@@ -2076,11 +2105,11 @@ parameter for [listing Conversation items above](/docs/api-reference/conversatio
 */
     pub include: Option<Vec<serde_json::Value>>,
     /// Request body
-    pub body: serde_json::Value,
+    pub body: ::serde_json::Value,
 }
 impl CreateConversationItemsRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(conversation_id: impl Into<String>, body: serde_json::Value) -> Self {
+    pub fn new(conversation_id: impl Into<String>, body: ::serde_json::Value) -> Self {
         Self {
             conversation_id: conversation_id.into(),
             include: None,
@@ -2095,9 +2124,11 @@ impl CreateConversationItemsRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateConversationItemsRequest {
     type Api = OpenAIApi;
-    type Success = ConversationItemList;
+    type Success = ::schematic_definitions::openai::ConversationItemList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ConversationItemList>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ConversationItemList,
+    >;
     const ENDPOINT_ID: &'static str = "CreateConversationItems";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -2169,9 +2200,11 @@ impl GetConversationItemRequest {
 }
 impl schematic_runtime::EndpointSpec for GetConversationItemRequest {
     type Api = OpenAIApi;
-    type Success = ConversationItem;
+    type Success = ::schematic_definitions::openai::ConversationItem;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ConversationItem>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ConversationItem,
+    >;
     const ENDPOINT_ID: &'static str = "GetConversationItem";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2225,9 +2258,11 @@ impl DeleteConversationItemRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteConversationItemRequest {
     type Api = OpenAIApi;
-    type Success = ConversationResource;
+    type Success = ::schematic_definitions::openai::ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ConversationResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ConversationResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteConversationItem";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -2253,36 +2288,36 @@ impl schematic_runtime::EndpointSpec for DeleteConversationItemRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateEmbeddingRequest, CreateEmbeddingRequest2};
+/// use schematic_schema::openai::CreateEmbeddingRequest;
 ///
-/// let body = CreateEmbeddingRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateEmbeddingRequest2 = Default::default();
 /// let request = CreateEmbeddingRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateEmbeddingRequest {
     /// Request body
-    pub body: CreateEmbeddingRequest2,
+    pub body: ::schematic_definitions::openai::CreateEmbeddingRequest2,
 }
 impl CreateEmbeddingRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateEmbeddingRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateEmbeddingRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateEmbeddingRequest2> for CreateEmbeddingRequest {
-    fn from(body: CreateEmbeddingRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateEmbeddingRequest2>
+for CreateEmbeddingRequest {
+    fn from(body: ::schematic_definitions::openai::CreateEmbeddingRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
     type Api = OpenAIApi;
-    type Success = CreateEmbeddingResponse;
+    type Success = ::schematic_definitions::openai::CreateEmbeddingResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateEmbeddingResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::CreateEmbeddingResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateEmbedding";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -2349,9 +2384,9 @@ impl ListEvalsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListEvalsRequest {
     type Api = OpenAIApi;
-    type Success = EvalList;
+    type Success = ::schematic_definitions::openai::EvalList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EvalList>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::EvalList>;
     const ENDPOINT_ID: &'static str = "ListEvals";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2380,36 +2415,33 @@ impl schematic_runtime::EndpointSpec for ListEvalsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateEvalRequest, CreateEvalRequest2};
+/// use schematic_schema::openai::CreateEvalRequest;
 ///
-/// let body = CreateEvalRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateEvalRequest2 = Default::default();
 /// let request = CreateEvalRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateEvalRequest {
     /// Request body
-    pub body: CreateEvalRequest2,
+    pub body: ::schematic_definitions::openai::CreateEvalRequest2,
 }
 impl CreateEvalRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateEvalRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateEvalRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateEvalRequest2> for CreateEvalRequest {
-    fn from(body: CreateEvalRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateEvalRequest2> for CreateEvalRequest {
+    fn from(body: ::schematic_definitions::openai::CreateEvalRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateEvalRequest {
     type Api = OpenAIApi;
-    type Success = Eval;
+    type Success = ::schematic_definitions::openai::Eval;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Eval>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Eval>;
     const ENDPOINT_ID: &'static str = "CreateEval";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -2467,9 +2499,9 @@ impl From<String> for GetEvalRequest {
 }
 impl schematic_runtime::EndpointSpec for GetEvalRequest {
     type Api = OpenAIApi;
-    type Success = Eval;
+    type Success = ::schematic_definitions::openai::Eval;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Eval>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Eval>;
     const ENDPOINT_ID: &'static str = "GetEval";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2492,12 +2524,9 @@ impl schematic_runtime::EndpointSpec for GetEvalRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateEvalRequest, serde_json::Value};
+/// use schematic_schema::openai::UpdateEvalRequest;
 ///
-/// let body = serde_json::Value {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::serde_json::Value = Default::default();
 /// let request = UpdateEvalRequest::new("eval_id_value", body)
 ///;
 /// ```
@@ -2506,11 +2535,11 @@ pub struct UpdateEvalRequest {
     /// Path parameter: eval_id
     pub eval_id: String,
     /// Request body
-    pub body: serde_json::Value,
+    pub body: ::serde_json::Value,
 }
 impl UpdateEvalRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(eval_id: impl Into<String>, body: serde_json::Value) -> Self {
+    pub fn new(eval_id: impl Into<String>, body: ::serde_json::Value) -> Self {
         Self {
             eval_id: eval_id.into(),
             body,
@@ -2519,9 +2548,9 @@ impl UpdateEvalRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateEvalRequest {
     type Api = OpenAIApi;
-    type Success = Eval;
+    type Success = ::schematic_definitions::openai::Eval;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Eval>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Eval>;
     const ENDPOINT_ID: &'static str = "UpdateEval";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -2579,9 +2608,9 @@ impl From<String> for DeleteEvalRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteEvalRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "DeleteEval";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -2660,9 +2689,9 @@ impl From<String> for GetEvalRunsRequest {
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunsRequest {
     type Api = OpenAIApi;
-    type Success = EvalRunList;
+    type Success = ::schematic_definitions::openai::EvalRunList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EvalRunList>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::EvalRunList>;
     const ENDPOINT_ID: &'static str = "GetEvalRuns";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2693,12 +2722,9 @@ impl schematic_runtime::EndpointSpec for GetEvalRunsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateEvalRunRequest, CreateEvalRunRequest2};
+/// use schematic_schema::openai::CreateEvalRunRequest;
 ///
-/// let body = CreateEvalRunRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateEvalRunRequest2 = Default::default();
 /// let request = CreateEvalRunRequest::new("eval_id_value", body)
 ///;
 /// ```
@@ -2707,11 +2733,14 @@ pub struct CreateEvalRunRequest {
     /// Path parameter: eval_id
     pub eval_id: String,
     /// Request body
-    pub body: CreateEvalRunRequest2,
+    pub body: ::schematic_definitions::openai::CreateEvalRunRequest2,
 }
 impl CreateEvalRunRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(eval_id: impl Into<String>, body: CreateEvalRunRequest2) -> Self {
+    pub fn new(
+        eval_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CreateEvalRunRequest2,
+    ) -> Self {
         Self {
             eval_id: eval_id.into(),
             body,
@@ -2720,9 +2749,9 @@ impl CreateEvalRunRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateEvalRunRequest {
     type Api = OpenAIApi;
-    type Success = EvalRun;
+    type Success = ::schematic_definitions::openai::EvalRun;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EvalRun>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::EvalRun>;
     const ENDPOINT_ID: &'static str = "CreateEvalRun";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -2777,9 +2806,9 @@ impl GetEvalRunRequest {
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunRequest {
     type Api = OpenAIApi;
-    type Success = EvalRun;
+    type Success = ::schematic_definitions::openai::EvalRun;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EvalRun>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::EvalRun>;
     const ENDPOINT_ID: &'static str = "GetEvalRun";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2828,9 +2857,9 @@ impl CancelEvalRunRequest {
 }
 impl schematic_runtime::EndpointSpec for CancelEvalRunRequest {
     type Api = OpenAIApi;
-    type Success = EvalRun;
+    type Success = ::schematic_definitions::openai::EvalRun;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EvalRun>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::EvalRun>;
     const ENDPOINT_ID: &'static str = "CancelEvalRun";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -2879,9 +2908,9 @@ impl DeleteEvalRunRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteEvalRunRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "DeleteEvalRun";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -2950,9 +2979,11 @@ impl GetEvalRunOutputItemsRequest {
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemsRequest {
     type Api = OpenAIApi;
-    type Success = EvalRunOutputItemList;
+    type Success = ::schematic_definitions::openai::EvalRunOutputItemList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EvalRunOutputItemList>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::EvalRunOutputItemList,
+    >;
     const ENDPOINT_ID: &'static str = "GetEvalRunOutputItems";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3014,9 +3045,11 @@ impl GetEvalRunOutputItemRequest {
 }
 impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemRequest {
     type Api = OpenAIApi;
-    type Success = EvalRunOutputItem;
+    type Success = ::schematic_definitions::openai::EvalRunOutputItem;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EvalRunOutputItem>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::EvalRunOutputItem,
+    >;
     const ENDPOINT_ID: &'static str = "GetEvalRunOutputItem";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3076,9 +3109,11 @@ impl ListFilesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListFilesRequest {
     type Api = OpenAIApi;
-    type Success = ListFilesResponse;
+    type Success = ::schematic_definitions::openai::ListFilesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListFilesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListFilesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListFiles";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3176,9 +3211,9 @@ impl From<CreateFileForm> for CreateFileRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateFileRequest {
     type Api = OpenAIApi;
-    type Success = OpenAIFile;
+    type Success = ::schematic_definitions::openai::OpenAIFile;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OpenAIFile>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::OpenAIFile>;
     const ENDPOINT_ID: &'static str = "CreateFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -3229,9 +3264,9 @@ impl From<String> for RetrieveFileRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveFileRequest {
     type Api = OpenAIApi;
-    type Success = OpenAIFile;
+    type Success = ::schematic_definitions::openai::OpenAIFile;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OpenAIFile>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::OpenAIFile>;
     const ENDPOINT_ID: &'static str = "RetrieveFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3282,9 +3317,11 @@ impl From<String> for DeleteFileRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteFileRequest {
     type Api = OpenAIApi;
-    type Success = DeleteFileResponse;
+    type Success = ::schematic_definitions::openai::DeleteFileResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeleteFileResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeleteFileResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -3335,9 +3372,9 @@ impl From<String> for DownloadFileRequest {
 }
 impl schematic_runtime::EndpointSpec for DownloadFileRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "DownloadFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3362,36 +3399,35 @@ impl schematic_runtime::EndpointSpec for DownloadFileRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{RunGraderRequest, RunGraderRequest2};
+/// use schematic_schema::openai::RunGraderRequest;
 ///
-/// let body = RunGraderRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RunGraderRequest2 = Default::default();
 /// let request = RunGraderRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RunGraderRequest {
     /// Request body
-    pub body: RunGraderRequest2,
+    pub body: ::schematic_definitions::openai::RunGraderRequest2,
 }
 impl RunGraderRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: RunGraderRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::RunGraderRequest2) -> Self {
         Self { body }
     }
 }
-impl From<RunGraderRequest2> for RunGraderRequest {
-    fn from(body: RunGraderRequest2) -> Self {
+impl From<::schematic_definitions::openai::RunGraderRequest2> for RunGraderRequest {
+    fn from(body: ::schematic_definitions::openai::RunGraderRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for RunGraderRequest {
     type Api = OpenAIApi;
-    type Success = RunGraderResponse;
+    type Success = ::schematic_definitions::openai::RunGraderResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RunGraderResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RunGraderResponse,
+    >;
     const ENDPOINT_ID: &'static str = "RunGrader";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -3421,36 +3457,36 @@ impl schematic_runtime::EndpointSpec for RunGraderRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ValidateGraderRequest, ValidateGraderRequest2};
+/// use schematic_schema::openai::ValidateGraderRequest;
 ///
-/// let body = ValidateGraderRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ValidateGraderRequest2 = Default::default();
 /// let request = ValidateGraderRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ValidateGraderRequest {
     /// Request body
-    pub body: ValidateGraderRequest2,
+    pub body: ::schematic_definitions::openai::ValidateGraderRequest2,
 }
 impl ValidateGraderRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ValidateGraderRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::ValidateGraderRequest2) -> Self {
         Self { body }
     }
 }
-impl From<ValidateGraderRequest2> for ValidateGraderRequest {
-    fn from(body: ValidateGraderRequest2) -> Self {
+impl From<::schematic_definitions::openai::ValidateGraderRequest2>
+for ValidateGraderRequest {
+    fn from(body: ::schematic_definitions::openai::ValidateGraderRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for ValidateGraderRequest {
     type Api = OpenAIApi;
-    type Success = ValidateGraderResponse;
+    type Success = ::schematic_definitions::openai::ValidateGraderResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ValidateGraderResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ValidateGraderResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ValidateGrader";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -3536,9 +3572,11 @@ impl From<String> for ListFineTuningCheckpointPermissionsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningCheckpointPermissionsRequest {
     type Api = OpenAIApi;
-    type Success = ListFineTuningCheckpointPermissionResponse;
+    type Success = ::schematic_definitions::openai::ListFineTuningCheckpointPermissionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListFineTuningCheckpointPermissionResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListFineTuningCheckpointPermissionResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListFineTuningCheckpointPermissions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3570,12 +3608,9 @@ impl schematic_runtime::EndpointSpec for ListFineTuningCheckpointPermissionsRequ
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateFineTuningCheckpointPermissionRequest, CreateFineTuningCheckpointPermissionRequest2};
+/// use schematic_schema::openai::CreateFineTuningCheckpointPermissionRequest;
 ///
-/// let body = CreateFineTuningCheckpointPermissionRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateFineTuningCheckpointPermissionRequest2 = Default::default();
 /// let request = CreateFineTuningCheckpointPermissionRequest::new("fine_tuned_model_checkpoint_value", body)
 ///;
 /// ```
@@ -3584,13 +3619,13 @@ pub struct CreateFineTuningCheckpointPermissionRequest {
     /// Path parameter: fine_tuned_model_checkpoint
     pub fine_tuned_model_checkpoint: String,
     /// Request body
-    pub body: CreateFineTuningCheckpointPermissionRequest2,
+    pub body: ::schematic_definitions::openai::CreateFineTuningCheckpointPermissionRequest2,
 }
 impl CreateFineTuningCheckpointPermissionRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         fine_tuned_model_checkpoint: impl Into<String>,
-        body: CreateFineTuningCheckpointPermissionRequest2,
+        body: ::schematic_definitions::openai::CreateFineTuningCheckpointPermissionRequest2,
     ) -> Self {
         Self {
             fine_tuned_model_checkpoint: fine_tuned_model_checkpoint.into(),
@@ -3600,9 +3635,11 @@ impl CreateFineTuningCheckpointPermissionRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateFineTuningCheckpointPermissionRequest {
     type Api = OpenAIApi;
-    type Success = ListFineTuningCheckpointPermissionResponse;
+    type Success = ::schematic_definitions::openai::ListFineTuningCheckpointPermissionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListFineTuningCheckpointPermissionResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListFineTuningCheckpointPermissionResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateFineTuningCheckpointPermission";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -3661,9 +3698,11 @@ impl DeleteFineTuningCheckpointPermissionRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteFineTuningCheckpointPermissionRequest {
     type Api = OpenAIApi;
-    type Success = DeleteFineTuningCheckpointPermissionResponse;
+    type Success = ::schematic_definitions::openai::DeleteFineTuningCheckpointPermissionResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeleteFineTuningCheckpointPermissionResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeleteFineTuningCheckpointPermissionResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteFineTuningCheckpointPermission";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -3715,9 +3754,11 @@ impl ListPaginatedFineTuningJobsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
     type Api = OpenAIApi;
-    type Success = ListPaginatedFineTuningJobsResponse;
+    type Success = ::schematic_definitions::openai::ListPaginatedFineTuningJobsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListPaginatedFineTuningJobsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListPaginatedFineTuningJobsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListPaginatedFineTuningJobs";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3743,36 +3784,38 @@ impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateFineTuningJobRequest, CreateFineTuningJobRequest2};
+/// use schematic_schema::openai::CreateFineTuningJobRequest;
 ///
-/// let body = CreateFineTuningJobRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateFineTuningJobRequest2 = Default::default();
 /// let request = CreateFineTuningJobRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateFineTuningJobRequest {
     /// Request body
-    pub body: CreateFineTuningJobRequest2,
+    pub body: ::schematic_definitions::openai::CreateFineTuningJobRequest2,
 }
 impl CreateFineTuningJobRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateFineTuningJobRequest2) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::CreateFineTuningJobRequest2,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<CreateFineTuningJobRequest2> for CreateFineTuningJobRequest {
-    fn from(body: CreateFineTuningJobRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateFineTuningJobRequest2>
+for CreateFineTuningJobRequest {
+    fn from(body: ::schematic_definitions::openai::CreateFineTuningJobRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateFineTuningJobRequest {
     type Api = OpenAIApi;
-    type Success = FineTuningJob;
+    type Success = ::schematic_definitions::openai::FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<FineTuningJob>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::FineTuningJob,
+    >;
     const ENDPOINT_ID: &'static str = "CreateFineTuningJob";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -3834,9 +3877,11 @@ impl From<String> for RetrieveFineTuningJobRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveFineTuningJobRequest {
     type Api = OpenAIApi;
-    type Success = FineTuningJob;
+    type Success = ::schematic_definitions::openai::FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<FineTuningJob>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::FineTuningJob,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveFineTuningJob";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -3894,9 +3939,11 @@ impl From<String> for CancelFineTuningJobRequest {
 }
 impl schematic_runtime::EndpointSpec for CancelFineTuningJobRequest {
     type Api = OpenAIApi;
-    type Success = FineTuningJob;
+    type Success = ::schematic_definitions::openai::FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<FineTuningJob>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::FineTuningJob,
+    >;
     const ENDPOINT_ID: &'static str = "CancelFineTuningJob";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -3954,9 +4001,11 @@ impl From<String> for ListFineTuningJobCheckpointsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningJobCheckpointsRequest {
     type Api = OpenAIApi;
-    type Success = ListFineTuningJobCheckpointsResponse;
+    type Success = ::schematic_definitions::openai::ListFineTuningJobCheckpointsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListFineTuningJobCheckpointsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListFineTuningJobCheckpointsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListFineTuningJobCheckpoints";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -4014,9 +4063,11 @@ impl From<String> for ListFineTuningEventsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningEventsRequest {
     type Api = OpenAIApi;
-    type Success = ListFineTuningJobEventsResponse;
+    type Success = ::schematic_definitions::openai::ListFineTuningJobEventsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListFineTuningJobEventsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListFineTuningJobEventsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListFineTuningEvents";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -4074,9 +4125,11 @@ impl From<String> for PauseFineTuningJobRequest {
 }
 impl schematic_runtime::EndpointSpec for PauseFineTuningJobRequest {
     type Api = OpenAIApi;
-    type Success = FineTuningJob;
+    type Success = ::schematic_definitions::openai::FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<FineTuningJob>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::FineTuningJob,
+    >;
     const ENDPOINT_ID: &'static str = "PauseFineTuningJob";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -4134,9 +4187,11 @@ impl From<String> for ResumeFineTuningJobRequest {
 }
 impl schematic_runtime::EndpointSpec for ResumeFineTuningJobRequest {
     type Api = OpenAIApi;
-    type Success = FineTuningJob;
+    type Success = ::schematic_definitions::openai::FineTuningJob;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<FineTuningJob>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::FineTuningJob,
+    >;
     const ENDPOINT_ID: &'static str = "ResumeFineTuningJob";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -4162,36 +4217,36 @@ impl schematic_runtime::EndpointSpec for ResumeFineTuningJobRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateImageEditRequest, EditImageBodyJsonParam};
+/// use schematic_schema::openai::CreateImageEditRequest;
 ///
-/// let body = EditImageBodyJsonParam {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::EditImageBodyJsonParam = Default::default();
 /// let request = CreateImageEditRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateImageEditRequest {
     /// Request body
-    pub body: EditImageBodyJsonParam,
+    pub body: ::schematic_definitions::openai::EditImageBodyJsonParam,
 }
 impl CreateImageEditRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: EditImageBodyJsonParam) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::EditImageBodyJsonParam) -> Self {
         Self { body }
     }
 }
-impl From<EditImageBodyJsonParam> for CreateImageEditRequest {
-    fn from(body: EditImageBodyJsonParam) -> Self {
+impl From<::schematic_definitions::openai::EditImageBodyJsonParam>
+for CreateImageEditRequest {
+    fn from(body: ::schematic_definitions::openai::EditImageBodyJsonParam) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
     type Api = OpenAIApi;
-    type Success = ImagesResponse;
+    type Success = ::schematic_definitions::openai::ImagesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ImagesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ImagesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateImageEdit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -4221,36 +4276,35 @@ impl schematic_runtime::EndpointSpec for CreateImageEditRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateImageRequest, CreateImageRequest2};
+/// use schematic_schema::openai::CreateImageRequest;
 ///
-/// let body = CreateImageRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateImageRequest2 = Default::default();
 /// let request = CreateImageRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateImageRequest {
     /// Request body
-    pub body: CreateImageRequest2,
+    pub body: ::schematic_definitions::openai::CreateImageRequest2,
 }
 impl CreateImageRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateImageRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateImageRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateImageRequest2> for CreateImageRequest {
-    fn from(body: CreateImageRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateImageRequest2> for CreateImageRequest {
+    fn from(body: ::schematic_definitions::openai::CreateImageRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateImageRequest {
     type Api = OpenAIApi;
-    type Success = ImagesResponse;
+    type Success = ::schematic_definitions::openai::ImagesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ImagesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ImagesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateImage";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -4369,9 +4423,11 @@ impl From<CreateImageVariationForm> for CreateImageVariationRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateImageVariationRequest {
     type Api = OpenAIApi;
-    type Success = ImagesResponse;
+    type Success = ::schematic_definitions::openai::ImagesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ImagesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ImagesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateImageVariation";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -4403,9 +4459,11 @@ impl schematic_runtime::EndpointSpec for CreateImageVariationRequest {
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
     type Api = OpenAIApi;
-    type Success = ListModelsResponse;
+    type Success = ::schematic_definitions::openai::ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -4456,9 +4514,9 @@ impl From<String> for RetrieveModelRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
     type Api = OpenAIApi;
-    type Success = Model;
+    type Success = ::schematic_definitions::openai::Model;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Model>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Model>;
     const ENDPOINT_ID: &'static str = "RetrieveModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -4509,9 +4567,11 @@ impl From<String> for DeleteModelRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteModelRequest {
     type Api = OpenAIApi;
-    type Success = DeleteModelResponse;
+    type Success = ::schematic_definitions::openai::DeleteModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeleteModelResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeleteModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -4534,36 +4594,36 @@ impl schematic_runtime::EndpointSpec for DeleteModelRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateModerationRequest, CreateModerationRequest2};
+/// use schematic_schema::openai::CreateModerationRequest;
 ///
-/// let body = CreateModerationRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateModerationRequest2 = Default::default();
 /// let request = CreateModerationRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateModerationRequest {
     /// Request body
-    pub body: CreateModerationRequest2,
+    pub body: ::schematic_definitions::openai::CreateModerationRequest2,
 }
 impl CreateModerationRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateModerationRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateModerationRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateModerationRequest2> for CreateModerationRequest {
-    fn from(body: CreateModerationRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateModerationRequest2>
+for CreateModerationRequest {
+    fn from(body: ::schematic_definitions::openai::CreateModerationRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateModerationRequest {
     type Api = OpenAIApi;
-    type Success = CreateModerationResponse;
+    type Success = ::schematic_definitions::openai::CreateModerationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateModerationResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::CreateModerationResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateModeration";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -4617,9 +4677,9 @@ impl AdminApiKeysListRequest {
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysListRequest {
     type Api = OpenAIApi;
-    type Success = ApiKeyList;
+    type Success = ::schematic_definitions::openai::ApiKeyList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ApiKeyList>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::ApiKeyList>;
     const ENDPOINT_ID: &'static str = "AdminApiKeysList";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -4645,36 +4705,35 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysListRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AdminApiKeysCreateRequest, serde_json::Value};
+/// use schematic_schema::openai::AdminApiKeysCreateRequest;
 ///
-/// let body = serde_json::Value {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::serde_json::Value = Default::default();
 /// let request = AdminApiKeysCreateRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminApiKeysCreateRequest {
     /// Request body
-    pub body: serde_json::Value,
+    pub body: ::serde_json::Value,
 }
 impl AdminApiKeysCreateRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: serde_json::Value) -> Self {
+    pub fn new(body: ::serde_json::Value) -> Self {
         Self { body }
     }
 }
-impl From<serde_json::Value> for AdminApiKeysCreateRequest {
-    fn from(body: serde_json::Value) -> Self {
+impl From<::serde_json::Value> for AdminApiKeysCreateRequest {
+    fn from(body: ::serde_json::Value) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysCreateRequest {
     type Api = OpenAIApi;
-    type Success = AdminApiKeyCreateResponse;
+    type Success = ::schematic_definitions::openai::AdminApiKeyCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AdminApiKeyCreateResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::AdminApiKeyCreateResponse,
+    >;
     const ENDPOINT_ID: &'static str = "AdminApiKeysCreate";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -4732,9 +4791,9 @@ impl From<String> for AdminApiKeysGetRequest {
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysGetRequest {
     type Api = OpenAIApi;
-    type Success = AdminApiKey;
+    type Success = ::schematic_definitions::openai::AdminApiKey;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AdminApiKey>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::AdminApiKey>;
     const ENDPOINT_ID: &'static str = "AdminApiKeysGet";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -4788,9 +4847,9 @@ impl From<String> for AdminApiKeysDeleteRequest {
 }
 impl schematic_runtime::EndpointSpec for AdminApiKeysDeleteRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "AdminApiKeysDelete";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -4901,9 +4960,11 @@ impl ListAuditLogsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListAuditLogsRequest {
     type Api = OpenAIApi;
-    type Success = ListAuditLogsResponse;
+    type Success = ::schematic_definitions::openai::ListAuditLogsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListAuditLogsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListAuditLogsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListAuditLogs";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -4982,9 +5043,11 @@ impl ListOrganizationCertificatesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListOrganizationCertificatesRequest {
     type Api = OpenAIApi;
-    type Success = ListCertificatesResponse;
+    type Success = ::schematic_definitions::openai::ListCertificatesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListCertificatesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListCertificatesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListOrganizationCertificates";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -5010,36 +5073,36 @@ impl schematic_runtime::EndpointSpec for ListOrganizationCertificatesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UploadCertificateRequest, UploadCertificateRequest2};
+/// use schematic_schema::openai::UploadCertificateRequest;
 ///
-/// let body = UploadCertificateRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UploadCertificateRequest2 = Default::default();
 /// let request = UploadCertificateRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadCertificateRequest {
     /// Request body
-    pub body: UploadCertificateRequest2,
+    pub body: ::schematic_definitions::openai::UploadCertificateRequest2,
 }
 impl UploadCertificateRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: UploadCertificateRequest2) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::UploadCertificateRequest2,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<UploadCertificateRequest2> for UploadCertificateRequest {
-    fn from(body: UploadCertificateRequest2) -> Self {
+impl From<::schematic_definitions::openai::UploadCertificateRequest2>
+for UploadCertificateRequest {
+    fn from(body: ::schematic_definitions::openai::UploadCertificateRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for UploadCertificateRequest {
     type Api = OpenAIApi;
-    type Success = Certificate;
+    type Success = ::schematic_definitions::openai::Certificate;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Certificate>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Certificate>;
     const ENDPOINT_ID: &'static str = "UploadCertificate";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -5069,36 +5132,38 @@ impl schematic_runtime::EndpointSpec for UploadCertificateRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ActivateOrganizationCertificatesRequest, ToggleCertificatesRequest};
+/// use schematic_schema::openai::ActivateOrganizationCertificatesRequest;
 ///
-/// let body = ToggleCertificatesRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
 /// let request = ActivateOrganizationCertificatesRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActivateOrganizationCertificatesRequest {
     /// Request body
-    pub body: ToggleCertificatesRequest,
+    pub body: ::schematic_definitions::openai::ToggleCertificatesRequest,
 }
 impl ActivateOrganizationCertificatesRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ToggleCertificatesRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<ToggleCertificatesRequest> for ActivateOrganizationCertificatesRequest {
-    fn from(body: ToggleCertificatesRequest) -> Self {
+impl From<::schematic_definitions::openai::ToggleCertificatesRequest>
+for ActivateOrganizationCertificatesRequest {
+    fn from(body: ::schematic_definitions::openai::ToggleCertificatesRequest) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationCertificateActivationResponse;
+    type Success = ::schematic_definitions::openai::OrganizationCertificateActivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationCertificateActivationResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationCertificateActivationResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ActivateOrganizationCertificates";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -5128,36 +5193,38 @@ impl schematic_runtime::EndpointSpec for ActivateOrganizationCertificatesRequest
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{DeactivateOrganizationCertificatesRequest, ToggleCertificatesRequest};
+/// use schematic_schema::openai::DeactivateOrganizationCertificatesRequest;
 ///
-/// let body = ToggleCertificatesRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
 /// let request = DeactivateOrganizationCertificatesRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeactivateOrganizationCertificatesRequest {
     /// Request body
-    pub body: ToggleCertificatesRequest,
+    pub body: ::schematic_definitions::openai::ToggleCertificatesRequest,
 }
 impl DeactivateOrganizationCertificatesRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ToggleCertificatesRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<ToggleCertificatesRequest> for DeactivateOrganizationCertificatesRequest {
-    fn from(body: ToggleCertificatesRequest) -> Self {
+impl From<::schematic_definitions::openai::ToggleCertificatesRequest>
+for DeactivateOrganizationCertificatesRequest {
+    fn from(body: ::schematic_definitions::openai::ToggleCertificatesRequest) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for DeactivateOrganizationCertificatesRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationCertificateDeactivationResponse;
+    type Success = ::schematic_definitions::openai::OrganizationCertificateDeactivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationCertificateDeactivationResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationCertificateDeactivationResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeactivateOrganizationCertificates";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -5232,9 +5299,9 @@ impl From<String> for GetCertificateRequest {
 }
 impl schematic_runtime::EndpointSpec for GetCertificateRequest {
     type Api = OpenAIApi;
-    type Success = Certificate;
+    type Success = ::schematic_definitions::openai::Certificate;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Certificate>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Certificate>;
     const ENDPOINT_ID: &'static str = "GetCertificate";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -5265,12 +5332,9 @@ impl schematic_runtime::EndpointSpec for GetCertificateRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ModifyCertificateRequest, ModifyCertificateRequest2};
+/// use schematic_schema::openai::ModifyCertificateRequest;
 ///
-/// let body = ModifyCertificateRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ModifyCertificateRequest2 = Default::default();
 /// let request = ModifyCertificateRequest::new("certificate_id_value", body)
 ///;
 /// ```
@@ -5279,13 +5343,13 @@ pub struct ModifyCertificateRequest {
     /// Path parameter: certificate_id
     pub certificate_id: String,
     /// Request body
-    pub body: ModifyCertificateRequest2,
+    pub body: ::schematic_definitions::openai::ModifyCertificateRequest2,
 }
 impl ModifyCertificateRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         certificate_id: impl Into<String>,
-        body: ModifyCertificateRequest2,
+        body: ::schematic_definitions::openai::ModifyCertificateRequest2,
     ) -> Self {
         Self {
             certificate_id: certificate_id.into(),
@@ -5295,9 +5359,9 @@ impl ModifyCertificateRequest {
 }
 impl schematic_runtime::EndpointSpec for ModifyCertificateRequest {
     type Api = OpenAIApi;
-    type Success = Certificate;
+    type Success = ::schematic_definitions::openai::Certificate;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Certificate>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Certificate>;
     const ENDPOINT_ID: &'static str = "ModifyCertificate";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -5362,9 +5426,11 @@ impl From<String> for DeleteCertificateRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteCertificateRequest {
     type Api = OpenAIApi;
-    type Success = DeleteCertificateResponse;
+    type Success = ::schematic_definitions::openai::DeleteCertificateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeleteCertificateResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeleteCertificateResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteCertificate";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -5461,9 +5527,11 @@ impl UsageCostsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageCostsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageCosts";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -5519,9 +5587,11 @@ impl schematic_runtime::EndpointSpec for UsageCostsRequest {
 pub struct RetrieveOrganizationDataRetentionRequest {}
 impl schematic_runtime::EndpointSpec for RetrieveOrganizationDataRetentionRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationDataRetention;
+    type Success = ::schematic_definitions::openai::OrganizationDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationDataRetention>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationDataRetention,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveOrganizationDataRetention";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -5544,37 +5614,40 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationDataRetentionReques
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateOrganizationDataRetentionRequest, UpdateOrganizationDataRetentionBody};
+/// use schematic_schema::openai::UpdateOrganizationDataRetentionRequest;
 ///
-/// let body = UpdateOrganizationDataRetentionBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody = Default::default();
 /// let request = UpdateOrganizationDataRetentionRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateOrganizationDataRetentionRequest {
     /// Request body
-    pub body: UpdateOrganizationDataRetentionBody,
+    pub body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody,
 }
 impl UpdateOrganizationDataRetentionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: UpdateOrganizationDataRetentionBody) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<UpdateOrganizationDataRetentionBody>
+impl From<::schematic_definitions::openai::UpdateOrganizationDataRetentionBody>
 for UpdateOrganizationDataRetentionRequest {
-    fn from(body: UpdateOrganizationDataRetentionBody) -> Self {
+    fn from(
+        body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationDataRetention;
+    type Success = ::schematic_definitions::openai::OrganizationDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationDataRetention>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationDataRetention,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateOrganizationDataRetention";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -5628,9 +5701,11 @@ impl ListGroupsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListGroupsRequest {
     type Api = OpenAIApi;
-    type Success = GroupListResource;
+    type Success = ::schematic_definitions::openai::GroupListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListGroups";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -5656,36 +5731,35 @@ impl schematic_runtime::EndpointSpec for ListGroupsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateGroupRequest, CreateGroupBody};
+/// use schematic_schema::openai::CreateGroupRequest;
 ///
-/// let body = CreateGroupBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateGroupBody = Default::default();
 /// let request = CreateGroupRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateGroupRequest {
     /// Request body
-    pub body: CreateGroupBody,
+    pub body: ::schematic_definitions::openai::CreateGroupBody,
 }
 impl CreateGroupRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateGroupBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateGroupBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateGroupBody> for CreateGroupRequest {
-    fn from(body: CreateGroupBody) -> Self {
+impl From<::schematic_definitions::openai::CreateGroupBody> for CreateGroupRequest {
+    fn from(body: ::schematic_definitions::openai::CreateGroupBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateGroupRequest {
     type Api = OpenAIApi;
-    type Success = GroupResponse;
+    type Success = ::schematic_definitions::openai::GroupResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateGroup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -5745,9 +5819,11 @@ impl From<String> for RetrieveGroupRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveGroupRequest {
     type Api = OpenAIApi;
-    type Success = GroupResponse;
+    type Success = ::schematic_definitions::openai::GroupResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupResponse,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveGroup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -5772,12 +5848,9 @@ impl schematic_runtime::EndpointSpec for RetrieveGroupRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateGroupRequest, UpdateGroupBody};
+/// use schematic_schema::openai::UpdateGroupRequest;
 ///
-/// let body = UpdateGroupBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateGroupBody = Default::default();
 /// let request = UpdateGroupRequest::new("group_id_value", body)
 ///;
 /// ```
@@ -5786,11 +5859,14 @@ pub struct UpdateGroupRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Request body
-    pub body: UpdateGroupBody,
+    pub body: ::schematic_definitions::openai::UpdateGroupBody,
 }
 impl UpdateGroupRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(group_id: impl Into<String>, body: UpdateGroupBody) -> Self {
+    pub fn new(
+        group_id: impl Into<String>,
+        body: ::schematic_definitions::openai::UpdateGroupBody,
+    ) -> Self {
         Self {
             group_id: group_id.into(),
             body,
@@ -5799,9 +5875,11 @@ impl UpdateGroupRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateGroupRequest {
     type Api = OpenAIApi;
-    type Success = GroupResourceWithSuccess;
+    type Success = ::schematic_definitions::openai::GroupResourceWithSuccess;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupResourceWithSuccess>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupResourceWithSuccess,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateGroup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -5863,9 +5941,11 @@ impl From<String> for DeleteGroupRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteGroupRequest {
     type Api = OpenAIApi;
-    type Success = GroupDeletedResource;
+    type Success = ::schematic_definitions::openai::GroupDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteGroup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -5935,9 +6015,11 @@ impl From<String> for ListGroupRoleAssignmentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListGroupRoleAssignmentsRequest {
     type Api = OpenAIApi;
-    type Success = RoleListResource;
+    type Success = ::schematic_definitions::openai::RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RoleListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RoleListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListGroupRoleAssignments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -5966,12 +6048,9 @@ impl schematic_runtime::EndpointSpec for ListGroupRoleAssignmentsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AssignGroupRoleRequest, PublicAssignOrganizationGroupRoleBody};
+/// use schematic_schema::openai::AssignGroupRoleRequest;
 ///
-/// let body = PublicAssignOrganizationGroupRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
 /// let request = AssignGroupRoleRequest::new("group_id_value", body)
 ///;
 /// ```
@@ -5980,13 +6059,13 @@ pub struct AssignGroupRoleRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Request body
-    pub body: PublicAssignOrganizationGroupRoleBody,
+    pub body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
 }
 impl AssignGroupRoleRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         group_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> Self {
         Self {
             group_id: group_id.into(),
@@ -5996,9 +6075,11 @@ impl AssignGroupRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for AssignGroupRoleRequest {
     type Api = OpenAIApi;
-    type Success = GroupRoleAssignment;
+    type Success = ::schematic_definitions::openai::GroupRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupRoleAssignment>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupRoleAssignment,
+    >;
     const ENDPOINT_ID: &'static str = "AssignGroupRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -6054,9 +6135,11 @@ impl RetrieveGroupRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveGroupRoleRequest {
     type Api = OpenAIApi;
-    type Success = AssignedRoleDetails;
+    type Success = ::schematic_definitions::openai::AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::AssignedRoleDetails,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveGroupRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6105,9 +6188,11 @@ impl UnassignGroupRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for UnassignGroupRoleRequest {
     type Api = OpenAIApi;
-    type Success = DeletedRoleAssignmentResource;
+    type Success = ::schematic_definitions::openai::DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedRoleAssignmentResource,
+    >;
     const ENDPOINT_ID: &'static str = "UnassignGroupRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -6178,9 +6263,11 @@ impl From<String> for ListGroupUsersRequest {
 }
 impl schematic_runtime::EndpointSpec for ListGroupUsersRequest {
     type Api = OpenAIApi;
-    type Success = UserListResource;
+    type Success = ::schematic_definitions::openai::UserListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UserListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UserListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListGroupUsers";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6209,12 +6296,9 @@ impl schematic_runtime::EndpointSpec for ListGroupUsersRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AddGroupUserRequest, CreateGroupUserBody};
+/// use schematic_schema::openai::AddGroupUserRequest;
 ///
-/// let body = CreateGroupUserBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateGroupUserBody = Default::default();
 /// let request = AddGroupUserRequest::new("group_id_value", body)
 ///;
 /// ```
@@ -6223,11 +6307,14 @@ pub struct AddGroupUserRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Request body
-    pub body: CreateGroupUserBody,
+    pub body: ::schematic_definitions::openai::CreateGroupUserBody,
 }
 impl AddGroupUserRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(group_id: impl Into<String>, body: CreateGroupUserBody) -> Self {
+    pub fn new(
+        group_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CreateGroupUserBody,
+    ) -> Self {
         Self {
             group_id: group_id.into(),
             body,
@@ -6236,9 +6323,11 @@ impl AddGroupUserRequest {
 }
 impl schematic_runtime::EndpointSpec for AddGroupUserRequest {
     type Api = OpenAIApi;
-    type Success = GroupUserAssignment;
+    type Success = ::schematic_definitions::openai::GroupUserAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupUserAssignment>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupUserAssignment,
+    >;
     const ENDPOINT_ID: &'static str = "AddGroupUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -6294,9 +6383,11 @@ impl RetrieveGroupUserRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveGroupUserRequest {
     type Api = OpenAIApi;
-    type Success = GroupMemberUser;
+    type Success = ::schematic_definitions::openai::GroupMemberUser;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupMemberUser>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupMemberUser,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveGroupUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6345,9 +6436,11 @@ impl RemoveGroupUserRequest {
 }
 impl schematic_runtime::EndpointSpec for RemoveGroupUserRequest {
     type Api = OpenAIApi;
-    type Success = GroupUserDeletedResource;
+    type Success = ::schematic_definitions::openai::GroupUserDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupUserDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupUserDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "RemoveGroupUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -6382,9 +6475,11 @@ impl schematic_runtime::EndpointSpec for RemoveGroupUserRequest {
 pub struct ListInvitesRequest {}
 impl schematic_runtime::EndpointSpec for ListInvitesRequest {
     type Api = OpenAIApi;
-    type Success = InviteListResponse;
+    type Success = ::schematic_definitions::openai::InviteListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<InviteListResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::InviteListResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListInvites";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6407,36 +6502,33 @@ impl schematic_runtime::EndpointSpec for ListInvitesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{InviteUserRequest, InviteRequest};
+/// use schematic_schema::openai::InviteUserRequest;
 ///
-/// let body = InviteRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::InviteRequest = Default::default();
 /// let request = InviteUserRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InviteUserRequest {
     /// Request body
-    pub body: InviteRequest,
+    pub body: ::schematic_definitions::openai::InviteRequest,
 }
 impl InviteUserRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: InviteRequest) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::InviteRequest) -> Self {
         Self { body }
     }
 }
-impl From<InviteRequest> for InviteUserRequest {
-    fn from(body: InviteRequest) -> Self {
+impl From<::schematic_definitions::openai::InviteRequest> for InviteUserRequest {
+    fn from(body: ::schematic_definitions::openai::InviteRequest) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for InviteUserRequest {
     type Api = OpenAIApi;
-    type Success = Invite;
+    type Success = ::schematic_definitions::openai::Invite;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Invite>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Invite>;
     const ENDPOINT_ID: &'static str = "InviteUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -6498,9 +6590,9 @@ impl From<String> for RetrieveInviteRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveInviteRequest {
     type Api = OpenAIApi;
-    type Success = Invite;
+    type Success = ::schematic_definitions::openai::Invite;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Invite>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Invite>;
     const ENDPOINT_ID: &'static str = "RetrieveInvite";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6557,9 +6649,11 @@ impl From<String> for DeleteInviteRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteInviteRequest {
     type Api = OpenAIApi;
-    type Success = InviteDeleteResponse;
+    type Success = ::schematic_definitions::openai::InviteDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<InviteDeleteResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::InviteDeleteResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteInvite";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -6608,9 +6702,11 @@ impl ListProjectsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectListResponse;
+    type Success = ::schematic_definitions::openai::ProjectListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectListResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectListResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjects";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6636,36 +6732,34 @@ impl schematic_runtime::EndpointSpec for ListProjectsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateProjectRequest, ProjectCreateRequest};
+/// use schematic_schema::openai::CreateProjectRequest;
 ///
-/// let body = ProjectCreateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectCreateRequest = Default::default();
 /// let request = CreateProjectRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateProjectRequest {
     /// Request body
-    pub body: ProjectCreateRequest,
+    pub body: ::schematic_definitions::openai::ProjectCreateRequest,
 }
 impl CreateProjectRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ProjectCreateRequest) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::ProjectCreateRequest) -> Self {
         Self { body }
     }
 }
-impl From<ProjectCreateRequest> for CreateProjectRequest {
-    fn from(body: ProjectCreateRequest) -> Self {
+impl From<::schematic_definitions::openai::ProjectCreateRequest>
+for CreateProjectRequest {
+    fn from(body: ::schematic_definitions::openai::ProjectCreateRequest) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateProjectRequest {
     type Api = OpenAIApi;
-    type Success = Project;
+    type Success = ::schematic_definitions::openai::Project;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Project>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Project>;
     const ENDPOINT_ID: &'static str = "CreateProject";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -6727,9 +6821,9 @@ impl From<String> for RetrieveProjectRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectRequest {
     type Api = OpenAIApi;
-    type Success = Project;
+    type Success = ::schematic_definitions::openai::Project;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Project>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Project>;
     const ENDPOINT_ID: &'static str = "RetrieveProject";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6755,12 +6849,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ModifyProjectRequest, ProjectUpdateRequest};
+/// use schematic_schema::openai::ModifyProjectRequest;
 ///
-/// let body = ProjectUpdateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectUpdateRequest = Default::default();
 /// let request = ModifyProjectRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -6769,11 +6860,14 @@ pub struct ModifyProjectRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: ProjectUpdateRequest,
+    pub body: ::schematic_definitions::openai::ProjectUpdateRequest,
 }
 impl ModifyProjectRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(project_id: impl Into<String>, body: ProjectUpdateRequest) -> Self {
+    pub fn new(
+        project_id: impl Into<String>,
+        body: ::schematic_definitions::openai::ProjectUpdateRequest,
+    ) -> Self {
         Self {
             project_id: project_id.into(),
             body,
@@ -6782,9 +6876,9 @@ impl ModifyProjectRequest {
 }
 impl schematic_runtime::EndpointSpec for ModifyProjectRequest {
     type Api = OpenAIApi;
-    type Success = Project;
+    type Success = ::schematic_definitions::openai::Project;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Project>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Project>;
     const ENDPOINT_ID: &'static str = "ModifyProject";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -6863,9 +6957,11 @@ impl From<String> for ListProjectApiKeysRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectApiKeysRequest {
     type Api = OpenAIApi;
-    type Success = ProjectApiKeyListResponse;
+    type Success = ::schematic_definitions::openai::ProjectApiKeyListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectApiKeyListResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectApiKeyListResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectApiKeys";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6917,9 +7013,11 @@ impl RetrieveProjectApiKeyRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectApiKeyRequest {
     type Api = OpenAIApi;
-    type Success = ProjectApiKey;
+    type Success = ::schematic_definitions::openai::ProjectApiKey;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectApiKey>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectApiKey,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectApiKey";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -6968,9 +7066,11 @@ impl DeleteProjectApiKeyRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectApiKeyRequest {
     type Api = OpenAIApi;
-    type Success = ProjectApiKeyDeleteResponse;
+    type Success = ::schematic_definitions::openai::ProjectApiKeyDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectApiKeyDeleteResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectApiKeyDeleteResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteProjectApiKey";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -7028,9 +7128,9 @@ impl From<String> for ArchiveProjectRequest {
 }
 impl schematic_runtime::EndpointSpec for ArchiveProjectRequest {
     type Api = OpenAIApi;
-    type Success = Project;
+    type Success = ::schematic_definitions::openai::Project;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Project>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Project>;
     const ENDPOINT_ID: &'static str = "ArchiveProject";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -7102,9 +7202,11 @@ impl From<String> for ListProjectCertificatesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectCertificatesRequest {
     type Api = OpenAIApi;
-    type Success = ListProjectCertificatesResponse;
+    type Success = ::schematic_definitions::openai::ListProjectCertificatesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListProjectCertificatesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListProjectCertificatesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectCertificates";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -7133,12 +7235,9 @@ impl schematic_runtime::EndpointSpec for ListProjectCertificatesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ActivateProjectCertificatesRequest, ToggleCertificatesRequest};
+/// use schematic_schema::openai::ActivateProjectCertificatesRequest;
 ///
-/// let body = ToggleCertificatesRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
 /// let request = ActivateProjectCertificatesRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -7147,11 +7246,14 @@ pub struct ActivateProjectCertificatesRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: ToggleCertificatesRequest,
+    pub body: ::schematic_definitions::openai::ToggleCertificatesRequest,
 }
 impl ActivateProjectCertificatesRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(project_id: impl Into<String>, body: ToggleCertificatesRequest) -> Self {
+    pub fn new(
+        project_id: impl Into<String>,
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
+    ) -> Self {
         Self {
             project_id: project_id.into(),
             body,
@@ -7160,10 +7262,10 @@ impl ActivateProjectCertificatesRequest {
 }
 impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationProjectCertificateActivationResponse;
+    type Success = ::schematic_definitions::openai::OrganizationProjectCertificateActivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<
-        OrganizationProjectCertificateActivationResponse,
+        ::schematic_definitions::openai::OrganizationProjectCertificateActivationResponse,
     >;
     const ENDPOINT_ID: &'static str = "ActivateProjectCertificates";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
@@ -7197,12 +7299,9 @@ impl schematic_runtime::EndpointSpec for ActivateProjectCertificatesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{DeactivateProjectCertificatesRequest, ToggleCertificatesRequest};
+/// use schematic_schema::openai::DeactivateProjectCertificatesRequest;
 ///
-/// let body = ToggleCertificatesRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ToggleCertificatesRequest = Default::default();
 /// let request = DeactivateProjectCertificatesRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -7211,11 +7310,14 @@ pub struct DeactivateProjectCertificatesRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: ToggleCertificatesRequest,
+    pub body: ::schematic_definitions::openai::ToggleCertificatesRequest,
 }
 impl DeactivateProjectCertificatesRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(project_id: impl Into<String>, body: ToggleCertificatesRequest) -> Self {
+    pub fn new(
+        project_id: impl Into<String>,
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
+    ) -> Self {
         Self {
             project_id: project_id.into(),
             body,
@@ -7224,10 +7326,10 @@ impl DeactivateProjectCertificatesRequest {
 }
 impl schematic_runtime::EndpointSpec for DeactivateProjectCertificatesRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationProjectCertificateDeactivationResponse;
+    type Success = ::schematic_definitions::openai::OrganizationProjectCertificateDeactivationResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<
-        OrganizationProjectCertificateDeactivationResponse,
+        ::schematic_definitions::openai::OrganizationProjectCertificateDeactivationResponse,
     >;
     const ENDPOINT_ID: &'static str = "DeactivateProjectCertificates";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
@@ -7293,9 +7395,11 @@ impl From<String> for RetrieveProjectDataRetentionRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectDataRetentionRequest {
     type Api = OpenAIApi;
-    type Success = ProjectDataRetention;
+    type Success = ::schematic_definitions::openai::ProjectDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectDataRetention>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectDataRetention,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectDataRetention";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -7321,12 +7425,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectDataRetentionRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateProjectDataRetentionRequest, UpdateProjectDataRetentionBody};
+/// use schematic_schema::openai::UpdateProjectDataRetentionRequest;
 ///
-/// let body = UpdateProjectDataRetentionBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateProjectDataRetentionBody = Default::default();
 /// let request = UpdateProjectDataRetentionRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -7335,13 +7436,13 @@ pub struct UpdateProjectDataRetentionRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: UpdateProjectDataRetentionBody,
+    pub body: ::schematic_definitions::openai::UpdateProjectDataRetentionBody,
 }
 impl UpdateProjectDataRetentionRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
-        body: UpdateProjectDataRetentionBody,
+        body: ::schematic_definitions::openai::UpdateProjectDataRetentionBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -7351,9 +7452,11 @@ impl UpdateProjectDataRetentionRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
     type Api = OpenAIApi;
-    type Success = ProjectDataRetention;
+    type Success = ::schematic_definitions::openai::ProjectDataRetention;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectDataRetention>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectDataRetention,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateProjectDataRetention";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -7431,9 +7534,11 @@ impl From<String> for ListProjectGroupsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectGroupsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectGroupListResource;
+    type Success = ::schematic_definitions::openai::ProjectGroupListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectGroupListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectGroupListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectGroups";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -7462,12 +7567,9 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AddProjectGroupRequest, InviteProjectGroupBody};
+/// use schematic_schema::openai::AddProjectGroupRequest;
 ///
-/// let body = InviteProjectGroupBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::InviteProjectGroupBody = Default::default();
 /// let request = AddProjectGroupRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -7476,11 +7578,14 @@ pub struct AddProjectGroupRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: InviteProjectGroupBody,
+    pub body: ::schematic_definitions::openai::InviteProjectGroupBody,
 }
 impl AddProjectGroupRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(project_id: impl Into<String>, body: InviteProjectGroupBody) -> Self {
+    pub fn new(
+        project_id: impl Into<String>,
+        body: ::schematic_definitions::openai::InviteProjectGroupBody,
+    ) -> Self {
         Self {
             project_id: project_id.into(),
             body,
@@ -7489,9 +7594,11 @@ impl AddProjectGroupRequest {
 }
 impl schematic_runtime::EndpointSpec for AddProjectGroupRequest {
     type Api = OpenAIApi;
-    type Success = ProjectGroup;
+    type Success = ::schematic_definitions::openai::ProjectGroup;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectGroup>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectGroup,
+    >;
     const ENDPOINT_ID: &'static str = "AddProjectGroup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -7556,9 +7663,11 @@ impl RetrieveProjectGroupRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRequest {
     type Api = OpenAIApi;
-    type Success = ProjectGroup;
+    type Success = ::schematic_definitions::openai::ProjectGroup;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectGroup>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectGroup,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectGroup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -7610,9 +7719,11 @@ impl RemoveProjectGroupRequest {
 }
 impl schematic_runtime::EndpointSpec for RemoveProjectGroupRequest {
     type Api = OpenAIApi;
-    type Success = ProjectGroupDeletedResource;
+    type Success = ::schematic_definitions::openai::ProjectGroupDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectGroupDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectGroupDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "RemoveProjectGroup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -7670,9 +7781,11 @@ impl From<String> for RetrieveProjectHostedToolPermissionsRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectHostedToolPermissionsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectHostedToolPermissions;
+    type Success = ::schematic_definitions::openai::ProjectHostedToolPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectHostedToolPermissions>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectHostedToolPermissions,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectHostedToolPermissions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -7698,12 +7811,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectHostedToolPermissionsReq
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateProjectHostedToolPermissionsRequest, ProjectHostedToolPermissionsUpdateRequest};
+/// use schematic_schema::openai::UpdateProjectHostedToolPermissionsRequest;
 ///
-/// let body = ProjectHostedToolPermissionsUpdateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectHostedToolPermissionsUpdateRequest = Default::default();
 /// let request = UpdateProjectHostedToolPermissionsRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -7712,13 +7822,13 @@ pub struct UpdateProjectHostedToolPermissionsRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: ProjectHostedToolPermissionsUpdateRequest,
+    pub body: ::schematic_definitions::openai::ProjectHostedToolPermissionsUpdateRequest,
 }
 impl UpdateProjectHostedToolPermissionsRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
-        body: ProjectHostedToolPermissionsUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectHostedToolPermissionsUpdateRequest,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -7728,9 +7838,11 @@ impl UpdateProjectHostedToolPermissionsRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectHostedToolPermissionsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectHostedToolPermissions;
+    type Success = ::schematic_definitions::openai::ProjectHostedToolPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectHostedToolPermissions>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectHostedToolPermissions,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateProjectHostedToolPermissions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -7795,9 +7907,11 @@ impl From<String> for RetrieveProjectModelPermissionsRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectModelPermissionsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectModelPermissions;
+    type Success = ::schematic_definitions::openai::ProjectModelPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectModelPermissions>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectModelPermissions,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectModelPermissions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -7823,12 +7937,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectModelPermissionsRequest 
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateProjectModelPermissionsRequest, ProjectModelPermissionsUpdateRequest};
+/// use schematic_schema::openai::UpdateProjectModelPermissionsRequest;
 ///
-/// let body = ProjectModelPermissionsUpdateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectModelPermissionsUpdateRequest = Default::default();
 /// let request = UpdateProjectModelPermissionsRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -7837,13 +7948,13 @@ pub struct UpdateProjectModelPermissionsRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: ProjectModelPermissionsUpdateRequest,
+    pub body: ::schematic_definitions::openai::ProjectModelPermissionsUpdateRequest,
 }
 impl UpdateProjectModelPermissionsRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
-        body: ProjectModelPermissionsUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectModelPermissionsUpdateRequest,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -7853,9 +7964,11 @@ impl UpdateProjectModelPermissionsRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectModelPermissionsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectModelPermissions;
+    type Success = ::schematic_definitions::openai::ProjectModelPermissions;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectModelPermissions>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectModelPermissions,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateProjectModelPermissions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -7920,9 +8033,11 @@ impl From<String> for DeleteProjectModelPermissionsRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectModelPermissionsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectModelPermissionsDeleteResponse;
+    type Success = ::schematic_definitions::openai::ProjectModelPermissionsDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectModelPermissionsDeleteResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectModelPermissionsDeleteResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteProjectModelPermissions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -7980,9 +8095,11 @@ impl From<String> for ListProjectRateLimitsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectRateLimitsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectRateLimitListResponse;
+    type Success = ::schematic_definitions::openai::ProjectRateLimitListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectRateLimitListResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectRateLimitListResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectRateLimits";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -8008,12 +8125,9 @@ impl schematic_runtime::EndpointSpec for ListProjectRateLimitsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateProjectRateLimitsRequest, ProjectRateLimitUpdateRequest};
+/// use schematic_schema::openai::UpdateProjectRateLimitsRequest;
 ///
-/// let body = ProjectRateLimitUpdateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectRateLimitUpdateRequest = Default::default();
 /// let request = UpdateProjectRateLimitsRequest::new("project_id_value", "rate_limit_id_value", body)
 ///;
 /// ```
@@ -8024,14 +8138,14 @@ pub struct UpdateProjectRateLimitsRequest {
     /// Path parameter: rate_limit_id
     pub rate_limit_id: String,
     /// Request body
-    pub body: ProjectRateLimitUpdateRequest,
+    pub body: ::schematic_definitions::openai::ProjectRateLimitUpdateRequest,
 }
 impl UpdateProjectRateLimitsRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         rate_limit_id: impl Into<String>,
-        body: ProjectRateLimitUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectRateLimitUpdateRequest,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -8042,9 +8156,11 @@ impl UpdateProjectRateLimitsRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectRateLimitsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectRateLimit;
+    type Success = ::schematic_definitions::openai::ProjectRateLimit;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectRateLimit>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectRateLimit,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateProjectRateLimits";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -8110,9 +8226,11 @@ impl From<String> for ListProjectServiceAccountsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectServiceAccountsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectServiceAccountListResponse;
+    type Success = ::schematic_definitions::openai::ProjectServiceAccountListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectServiceAccountListResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectServiceAccountListResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectServiceAccounts";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -8138,12 +8256,9 @@ impl schematic_runtime::EndpointSpec for ListProjectServiceAccountsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateProjectServiceAccountRequest, ProjectServiceAccountCreateRequest};
+/// use schematic_schema::openai::CreateProjectServiceAccountRequest;
 ///
-/// let body = ProjectServiceAccountCreateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectServiceAccountCreateRequest = Default::default();
 /// let request = CreateProjectServiceAccountRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -8152,13 +8267,13 @@ pub struct CreateProjectServiceAccountRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: ProjectServiceAccountCreateRequest,
+    pub body: ::schematic_definitions::openai::ProjectServiceAccountCreateRequest,
 }
 impl CreateProjectServiceAccountRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
-        body: ProjectServiceAccountCreateRequest,
+        body: ::schematic_definitions::openai::ProjectServiceAccountCreateRequest,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -8168,9 +8283,11 @@ impl CreateProjectServiceAccountRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateProjectServiceAccountRequest {
     type Api = OpenAIApi;
-    type Success = ProjectServiceAccountCreateResponse;
+    type Success = ::schematic_definitions::openai::ProjectServiceAccountCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectServiceAccountCreateResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectServiceAccountCreateResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateProjectServiceAccount";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -8229,9 +8346,11 @@ impl RetrieveProjectServiceAccountRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectServiceAccountRequest {
     type Api = OpenAIApi;
-    type Success = ProjectServiceAccount;
+    type Success = ::schematic_definitions::openai::ProjectServiceAccount;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectServiceAccount>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectServiceAccount,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectServiceAccount";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -8258,12 +8377,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectServiceAccountRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateProjectServiceAccountRequest, UpdateProjectServiceAccountBody};
+/// use schematic_schema::openai::UpdateProjectServiceAccountRequest;
 ///
-/// let body = UpdateProjectServiceAccountBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateProjectServiceAccountBody = Default::default();
 /// let request = UpdateProjectServiceAccountRequest::new("project_id_value", "service_account_id_value", body)
 ///;
 /// ```
@@ -8274,14 +8390,14 @@ pub struct UpdateProjectServiceAccountRequest {
     /// Path parameter: service_account_id
     pub service_account_id: String,
     /// Request body
-    pub body: UpdateProjectServiceAccountBody,
+    pub body: ::schematic_definitions::openai::UpdateProjectServiceAccountBody,
 }
 impl UpdateProjectServiceAccountRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         service_account_id: impl Into<String>,
-        body: UpdateProjectServiceAccountBody,
+        body: ::schematic_definitions::openai::UpdateProjectServiceAccountBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -8292,9 +8408,11 @@ impl UpdateProjectServiceAccountRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectServiceAccountRequest {
     type Api = OpenAIApi;
-    type Success = ProjectServiceAccount;
+    type Success = ::schematic_definitions::openai::ProjectServiceAccount;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectServiceAccount>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectServiceAccount,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateProjectServiceAccount";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -8354,9 +8472,11 @@ impl DeleteProjectServiceAccountRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectServiceAccountRequest {
     type Api = OpenAIApi;
-    type Success = ProjectServiceAccountDeleteResponse;
+    type Success = ::schematic_definitions::openai::ProjectServiceAccountDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectServiceAccountDeleteResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectServiceAccountDeleteResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteProjectServiceAccount";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -8428,9 +8548,11 @@ impl From<String> for ListProjectSpendAlertsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectSpendAlertsRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendAlertListResource;
+    type Success = ::schematic_definitions::openai::ProjectSpendAlertListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendAlertListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendAlertListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectSpendAlerts";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -8459,12 +8581,9 @@ impl schematic_runtime::EndpointSpec for ListProjectSpendAlertsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateProjectSpendAlertRequest, CreateSpendAlertBody};
+/// use schematic_schema::openai::CreateProjectSpendAlertRequest;
 ///
-/// let body = CreateSpendAlertBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
 /// let request = CreateProjectSpendAlertRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -8473,11 +8592,14 @@ pub struct CreateProjectSpendAlertRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: CreateSpendAlertBody,
+    pub body: ::schematic_definitions::openai::CreateSpendAlertBody,
 }
 impl CreateProjectSpendAlertRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(project_id: impl Into<String>, body: CreateSpendAlertBody) -> Self {
+    pub fn new(
+        project_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CreateSpendAlertBody,
+    ) -> Self {
         Self {
             project_id: project_id.into(),
             body,
@@ -8486,9 +8608,11 @@ impl CreateProjectSpendAlertRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateProjectSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendAlert;
+    type Success = ::schematic_definitions::openai::ProjectSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendAlert>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendAlert,
+    >;
     const ENDPOINT_ID: &'static str = "CreateProjectSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -8544,9 +8668,11 @@ impl RetrieveProjectSpendAlertRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendAlert;
+    type Success = ::schematic_definitions::openai::ProjectSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendAlert>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendAlert,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -8572,12 +8698,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectSpendAlertRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateProjectSpendAlertRequest, CreateSpendAlertBody};
+/// use schematic_schema::openai::UpdateProjectSpendAlertRequest;
 ///
-/// let body = CreateSpendAlertBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
 /// let request = UpdateProjectSpendAlertRequest::new("project_id_value", "alert_id_value", body)
 ///;
 /// ```
@@ -8588,14 +8711,14 @@ pub struct UpdateProjectSpendAlertRequest {
     /// Path parameter: alert_id
     pub alert_id: String,
     /// Request body
-    pub body: CreateSpendAlertBody,
+    pub body: ::schematic_definitions::openai::CreateSpendAlertBody,
 }
 impl UpdateProjectSpendAlertRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         alert_id: impl Into<String>,
-        body: CreateSpendAlertBody,
+        body: ::schematic_definitions::openai::CreateSpendAlertBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -8606,9 +8729,11 @@ impl UpdateProjectSpendAlertRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendAlert;
+    type Success = ::schematic_definitions::openai::ProjectSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendAlert>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendAlert,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateProjectSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -8664,9 +8789,11 @@ impl DeleteProjectSpendAlertRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendAlertDeletedResource;
+    type Success = ::schematic_definitions::openai::ProjectSpendAlertDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendAlertDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendAlertDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteProjectSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -8724,9 +8851,11 @@ impl From<String> for ListProjectUsersRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectUsersRequest {
     type Api = OpenAIApi;
-    type Success = ProjectUserListResponse;
+    type Success = ::schematic_definitions::openai::ProjectUserListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectUserListResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectUserListResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectUsers";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -8752,12 +8881,9 @@ impl schematic_runtime::EndpointSpec for ListProjectUsersRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateProjectUserRequest, ProjectUserCreateRequest};
+/// use schematic_schema::openai::CreateProjectUserRequest;
 ///
-/// let body = ProjectUserCreateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectUserCreateRequest = Default::default();
 /// let request = CreateProjectUserRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -8766,11 +8892,14 @@ pub struct CreateProjectUserRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: ProjectUserCreateRequest,
+    pub body: ::schematic_definitions::openai::ProjectUserCreateRequest,
 }
 impl CreateProjectUserRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(project_id: impl Into<String>, body: ProjectUserCreateRequest) -> Self {
+    pub fn new(
+        project_id: impl Into<String>,
+        body: ::schematic_definitions::openai::ProjectUserCreateRequest,
+    ) -> Self {
         Self {
             project_id: project_id.into(),
             body,
@@ -8779,9 +8908,9 @@ impl CreateProjectUserRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateProjectUserRequest {
     type Api = OpenAIApi;
-    type Success = ProjectUser;
+    type Success = ::schematic_definitions::openai::ProjectUser;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectUser>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::ProjectUser>;
     const ENDPOINT_ID: &'static str = "CreateProjectUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -8837,9 +8966,9 @@ impl RetrieveProjectUserRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectUserRequest {
     type Api = OpenAIApi;
-    type Success = ProjectUser;
+    type Success = ::schematic_definitions::openai::ProjectUser;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectUser>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::ProjectUser>;
     const ENDPOINT_ID: &'static str = "RetrieveProjectUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -8865,12 +8994,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectUserRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ModifyProjectUserRequest, ProjectUserUpdateRequest};
+/// use schematic_schema::openai::ModifyProjectUserRequest;
 ///
-/// let body = ProjectUserUpdateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::ProjectUserUpdateRequest = Default::default();
 /// let request = ModifyProjectUserRequest::new("project_id_value", "user_id_value", body)
 ///;
 /// ```
@@ -8881,14 +9007,14 @@ pub struct ModifyProjectUserRequest {
     /// Path parameter: user_id
     pub user_id: String,
     /// Request body
-    pub body: ProjectUserUpdateRequest,
+    pub body: ::schematic_definitions::openai::ProjectUserUpdateRequest,
 }
 impl ModifyProjectUserRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         user_id: impl Into<String>,
-        body: ProjectUserUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectUserUpdateRequest,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -8899,9 +9025,9 @@ impl ModifyProjectUserRequest {
 }
 impl schematic_runtime::EndpointSpec for ModifyProjectUserRequest {
     type Api = OpenAIApi;
-    type Success = ProjectUser;
+    type Success = ::schematic_definitions::openai::ProjectUser;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectUser>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::ProjectUser>;
     const ENDPOINT_ID: &'static str = "ModifyProjectUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -8957,9 +9083,11 @@ impl DeleteProjectUserRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectUserRequest {
     type Api = OpenAIApi;
-    type Success = ProjectUserDeleteResponse;
+    type Success = ::schematic_definitions::openai::ProjectUserDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectUserDeleteResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectUserDeleteResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteProjectUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -9009,9 +9137,11 @@ impl ListRolesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListRolesRequest {
     type Api = OpenAIApi;
-    type Success = PublicRoleListResource;
+    type Success = ::schematic_definitions::openai::PublicRoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PublicRoleListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::PublicRoleListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListRoles";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -9037,36 +9167,38 @@ impl schematic_runtime::EndpointSpec for ListRolesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateRoleRequest, PublicCreateOrganizationRoleBody};
+/// use schematic_schema::openai::CreateRoleRequest;
 ///
-/// let body = PublicCreateOrganizationRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody = Default::default();
 /// let request = CreateRoleRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRoleRequest {
     /// Request body
-    pub body: PublicCreateOrganizationRoleBody,
+    pub body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody,
 }
 impl CreateRoleRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: PublicCreateOrganizationRoleBody) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<PublicCreateOrganizationRoleBody> for CreateRoleRequest {
-    fn from(body: PublicCreateOrganizationRoleBody) -> Self {
+impl From<::schematic_definitions::openai::PublicCreateOrganizationRoleBody>
+for CreateRoleRequest {
+    fn from(
+        body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRoleRequest {
     type Api = OpenAIApi;
-    type Success = Role;
+    type Success = ::schematic_definitions::openai::Role;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Role>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Role>;
     const ENDPOINT_ID: &'static str = "CreateRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -9124,9 +9256,9 @@ impl From<String> for RetrieveRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveRoleRequest {
     type Api = OpenAIApi;
-    type Success = Role;
+    type Success = ::schematic_definitions::openai::Role;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Role>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Role>;
     const ENDPOINT_ID: &'static str = "RetrieveRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -9151,12 +9283,9 @@ impl schematic_runtime::EndpointSpec for RetrieveRoleRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateRoleRequest, PublicUpdateOrganizationRoleBody};
+/// use schematic_schema::openai::UpdateRoleRequest;
 ///
-/// let body = PublicUpdateOrganizationRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody = Default::default();
 /// let request = UpdateRoleRequest::new("role_id_value", body)
 ///;
 /// ```
@@ -9165,13 +9294,13 @@ pub struct UpdateRoleRequest {
     /// Path parameter: role_id
     pub role_id: String,
     /// Request body
-    pub body: PublicUpdateOrganizationRoleBody,
+    pub body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody,
 }
 impl UpdateRoleRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         role_id: impl Into<String>,
-        body: PublicUpdateOrganizationRoleBody,
+        body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody,
     ) -> Self {
         Self {
             role_id: role_id.into(),
@@ -9181,9 +9310,9 @@ impl UpdateRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateRoleRequest {
     type Api = OpenAIApi;
-    type Success = Role;
+    type Success = ::schematic_definitions::openai::Role;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Role>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Role>;
     const ENDPOINT_ID: &'static str = "UpdateRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -9243,9 +9372,11 @@ impl From<String> for DeleteRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteRoleRequest {
     type Api = OpenAIApi;
-    type Success = RoleDeletedResource;
+    type Success = ::schematic_definitions::openai::RoleDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RoleDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RoleDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -9294,9 +9425,11 @@ impl ListOrganizationSpendAlertsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListOrganizationSpendAlertsRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendAlertListResource;
+    type Success = ::schematic_definitions::openai::OrganizationSpendAlertListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendAlertListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendAlertListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListOrganizationSpendAlerts";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -9322,36 +9455,36 @@ impl schematic_runtime::EndpointSpec for ListOrganizationSpendAlertsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateOrganizationSpendAlertRequest, CreateSpendAlertBody};
+/// use schematic_schema::openai::CreateOrganizationSpendAlertRequest;
 ///
-/// let body = CreateSpendAlertBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
 /// let request = CreateOrganizationSpendAlertRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateOrganizationSpendAlertRequest {
     /// Request body
-    pub body: CreateSpendAlertBody,
+    pub body: ::schematic_definitions::openai::CreateSpendAlertBody,
 }
 impl CreateOrganizationSpendAlertRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateSpendAlertBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateSpendAlertBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateSpendAlertBody> for CreateOrganizationSpendAlertRequest {
-    fn from(body: CreateSpendAlertBody) -> Self {
+impl From<::schematic_definitions::openai::CreateSpendAlertBody>
+for CreateOrganizationSpendAlertRequest {
+    fn from(body: ::schematic_definitions::openai::CreateSpendAlertBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateOrganizationSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendAlert;
+    type Success = ::schematic_definitions::openai::OrganizationSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendAlert>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendAlert,
+    >;
     const ENDPOINT_ID: &'static str = "CreateOrganizationSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -9411,9 +9544,11 @@ impl From<String> for RetrieveOrganizationSpendAlertRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveOrganizationSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendAlert;
+    type Success = ::schematic_definitions::openai::OrganizationSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendAlert>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendAlert,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveOrganizationSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -9439,12 +9574,9 @@ impl schematic_runtime::EndpointSpec for RetrieveOrganizationSpendAlertRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateOrganizationSpendAlertRequest, CreateSpendAlertBody};
+/// use schematic_schema::openai::UpdateOrganizationSpendAlertRequest;
 ///
-/// let body = CreateSpendAlertBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateSpendAlertBody = Default::default();
 /// let request = UpdateOrganizationSpendAlertRequest::new("alert_id_value", body)
 ///;
 /// ```
@@ -9453,11 +9585,14 @@ pub struct UpdateOrganizationSpendAlertRequest {
     /// Path parameter: alert_id
     pub alert_id: String,
     /// Request body
-    pub body: CreateSpendAlertBody,
+    pub body: ::schematic_definitions::openai::CreateSpendAlertBody,
 }
 impl UpdateOrganizationSpendAlertRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(alert_id: impl Into<String>, body: CreateSpendAlertBody) -> Self {
+    pub fn new(
+        alert_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CreateSpendAlertBody,
+    ) -> Self {
         Self {
             alert_id: alert_id.into(),
             body,
@@ -9466,9 +9601,11 @@ impl UpdateOrganizationSpendAlertRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateOrganizationSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendAlert;
+    type Success = ::schematic_definitions::openai::OrganizationSpendAlert;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendAlert>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendAlert,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateOrganizationSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -9531,9 +9668,11 @@ impl From<String> for DeleteOrganizationSpendAlertRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteOrganizationSpendAlertRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendAlertDeletedResource;
+    type Success = ::schematic_definitions::openai::OrganizationSpendAlertDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendAlertDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendAlertDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteOrganizationSpendAlert";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -9648,9 +9787,11 @@ impl UsageAudioSpeechesRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageAudioSpeeches";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -9796,9 +9937,11 @@ impl UsageAudioTranscriptionsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageAudioTranscriptions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -9917,9 +10060,11 @@ impl UsageCodeInterpreterSessionsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageCodeInterpreterSessions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -10060,9 +10205,11 @@ impl UsageCompletionsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageCompletions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -10211,9 +10358,11 @@ impl UsageEmbeddingsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageEmbeddings";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -10359,9 +10508,11 @@ impl UsageFileSearchCallsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageFileSearchCalls";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -10525,9 +10676,11 @@ impl UsageImagesRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageImagesRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageImages";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -10683,9 +10836,11 @@ impl UsageModerationsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageModerations";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -10804,9 +10959,11 @@ impl UsageVectorStoresRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageVectorStores";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -10946,9 +11103,11 @@ impl UsageWebSearchCallsRequest {
 }
 impl schematic_runtime::EndpointSpec for UsageWebSearchCallsRequest {
     type Api = OpenAIApi;
-    type Success = UsageResponse;
+    type Success = ::schematic_definitions::openai::UsageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UsageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UsageWebSearchCalls";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11034,9 +11193,11 @@ impl ListUsersRequest {
 }
 impl schematic_runtime::EndpointSpec for ListUsersRequest {
     type Api = OpenAIApi;
-    type Success = UserListResponse;
+    type Success = ::schematic_definitions::openai::UserListResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UserListResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UserListResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListUsers";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11092,9 +11253,9 @@ impl From<String> for RetrieveUserRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveUserRequest {
     type Api = OpenAIApi;
-    type Success = User;
+    type Success = ::schematic_definitions::openai::User;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<User>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::User>;
     const ENDPOINT_ID: &'static str = "RetrieveUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11119,12 +11280,9 @@ impl schematic_runtime::EndpointSpec for RetrieveUserRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ModifyUserRequest, UserRoleUpdateRequest};
+/// use schematic_schema::openai::ModifyUserRequest;
 ///
-/// let body = UserRoleUpdateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UserRoleUpdateRequest = Default::default();
 /// let request = ModifyUserRequest::new("user_id_value", body)
 ///;
 /// ```
@@ -11133,11 +11291,14 @@ pub struct ModifyUserRequest {
     /// Path parameter: user_id
     pub user_id: String,
     /// Request body
-    pub body: UserRoleUpdateRequest,
+    pub body: ::schematic_definitions::openai::UserRoleUpdateRequest,
 }
 impl ModifyUserRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(user_id: impl Into<String>, body: UserRoleUpdateRequest) -> Self {
+    pub fn new(
+        user_id: impl Into<String>,
+        body: ::schematic_definitions::openai::UserRoleUpdateRequest,
+    ) -> Self {
         Self {
             user_id: user_id.into(),
             body,
@@ -11146,9 +11307,9 @@ impl ModifyUserRequest {
 }
 impl schematic_runtime::EndpointSpec for ModifyUserRequest {
     type Api = OpenAIApi;
-    type Success = User;
+    type Success = ::schematic_definitions::openai::User;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<User>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::User>;
     const ENDPOINT_ID: &'static str = "ModifyUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -11208,9 +11369,11 @@ impl From<String> for DeleteUserRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteUserRequest {
     type Api = OpenAIApi;
-    type Success = UserDeleteResponse;
+    type Success = ::schematic_definitions::openai::UserDeleteResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UserDeleteResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UserDeleteResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -11280,9 +11443,11 @@ impl From<String> for ListUserRoleAssignmentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListUserRoleAssignmentsRequest {
     type Api = OpenAIApi;
-    type Success = RoleListResource;
+    type Success = ::schematic_definitions::openai::RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RoleListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RoleListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListUserRoleAssignments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11311,12 +11476,9 @@ impl schematic_runtime::EndpointSpec for ListUserRoleAssignmentsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AssignUserRoleRequest, PublicAssignOrganizationGroupRoleBody};
+/// use schematic_schema::openai::AssignUserRoleRequest;
 ///
-/// let body = PublicAssignOrganizationGroupRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
 /// let request = AssignUserRoleRequest::new("user_id_value", body)
 ///;
 /// ```
@@ -11325,13 +11487,13 @@ pub struct AssignUserRoleRequest {
     /// Path parameter: user_id
     pub user_id: String,
     /// Request body
-    pub body: PublicAssignOrganizationGroupRoleBody,
+    pub body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
 }
 impl AssignUserRoleRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         user_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> Self {
         Self {
             user_id: user_id.into(),
@@ -11341,9 +11503,11 @@ impl AssignUserRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for AssignUserRoleRequest {
     type Api = OpenAIApi;
-    type Success = UserRoleAssignment;
+    type Success = ::schematic_definitions::openai::UserRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UserRoleAssignment>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UserRoleAssignment,
+    >;
     const ENDPOINT_ID: &'static str = "AssignUserRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -11399,9 +11563,11 @@ impl RetrieveUserRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveUserRoleRequest {
     type Api = OpenAIApi;
-    type Success = AssignedRoleDetails;
+    type Success = ::schematic_definitions::openai::AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::AssignedRoleDetails,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveUserRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11450,9 +11616,11 @@ impl UnassignUserRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for UnassignUserRoleRequest {
     type Api = OpenAIApi;
-    type Success = DeletedRoleAssignmentResource;
+    type Success = ::schematic_definitions::openai::DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedRoleAssignmentResource,
+    >;
     const ENDPOINT_ID: &'static str = "UnassignUserRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -11510,9 +11678,11 @@ impl ListProjectGroupRoleAssignmentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectGroupRoleAssignmentsRequest {
     type Api = OpenAIApi;
-    type Success = RoleListResource;
+    type Success = ::schematic_definitions::openai::RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RoleListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RoleListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectGroupRoleAssignments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11541,12 +11711,9 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupRoleAssignmentsRequest 
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AssignProjectGroupRoleRequest, PublicAssignOrganizationGroupRoleBody};
+/// use schematic_schema::openai::AssignProjectGroupRoleRequest;
 ///
-/// let body = PublicAssignOrganizationGroupRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
 /// let request = AssignProjectGroupRoleRequest::new("project_id_value", "group_id_value", body)
 ///;
 /// ```
@@ -11557,14 +11724,14 @@ pub struct AssignProjectGroupRoleRequest {
     /// Path parameter: group_id
     pub group_id: String,
     /// Request body
-    pub body: PublicAssignOrganizationGroupRoleBody,
+    pub body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
 }
 impl AssignProjectGroupRoleRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         group_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -11575,9 +11742,11 @@ impl AssignProjectGroupRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for AssignProjectGroupRoleRequest {
     type Api = OpenAIApi;
-    type Success = GroupRoleAssignment;
+    type Success = ::schematic_definitions::openai::GroupRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GroupRoleAssignment>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::GroupRoleAssignment,
+    >;
     const ENDPOINT_ID: &'static str = "AssignProjectGroupRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -11640,9 +11809,11 @@ impl RetrieveProjectGroupRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectGroupRoleRequest {
     type Api = OpenAIApi;
-    type Success = AssignedRoleDetails;
+    type Success = ::schematic_definitions::openai::AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::AssignedRoleDetails,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectGroupRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11699,9 +11870,11 @@ impl UnassignProjectGroupRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for UnassignProjectGroupRoleRequest {
     type Api = OpenAIApi;
-    type Success = DeletedRoleAssignmentResource;
+    type Success = ::schematic_definitions::openai::DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedRoleAssignmentResource,
+    >;
     const ENDPOINT_ID: &'static str = "UnassignProjectGroupRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -11773,9 +11946,11 @@ impl From<String> for ListProjectRolesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectRolesRequest {
     type Api = OpenAIApi;
-    type Success = PublicRoleListResource;
+    type Success = ::schematic_definitions::openai::PublicRoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PublicRoleListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::PublicRoleListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectRoles";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11803,12 +11978,9 @@ impl schematic_runtime::EndpointSpec for ListProjectRolesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateProjectRoleRequest, PublicCreateOrganizationRoleBody};
+/// use schematic_schema::openai::CreateProjectRoleRequest;
 ///
-/// let body = PublicCreateOrganizationRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody = Default::default();
 /// let request = CreateProjectRoleRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -11817,13 +11989,13 @@ pub struct CreateProjectRoleRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: PublicCreateOrganizationRoleBody,
+    pub body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody,
 }
 impl CreateProjectRoleRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
-        body: PublicCreateOrganizationRoleBody,
+        body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -11833,9 +12005,9 @@ impl CreateProjectRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateProjectRoleRequest {
     type Api = OpenAIApi;
-    type Success = Role;
+    type Success = ::schematic_definitions::openai::Role;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Role>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Role>;
     const ENDPOINT_ID: &'static str = "CreateProjectRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -11890,9 +12062,9 @@ impl RetrieveProjectRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectRoleRequest {
     type Api = OpenAIApi;
-    type Success = Role;
+    type Success = ::schematic_definitions::openai::Role;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Role>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Role>;
     const ENDPOINT_ID: &'static str = "RetrieveProjectRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -11918,12 +12090,9 @@ impl schematic_runtime::EndpointSpec for RetrieveProjectRoleRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateProjectRoleRequest, PublicUpdateOrganizationRoleBody};
+/// use schematic_schema::openai::UpdateProjectRoleRequest;
 ///
-/// let body = PublicUpdateOrganizationRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody = Default::default();
 /// let request = UpdateProjectRoleRequest::new("project_id_value", "role_id_value", body)
 ///;
 /// ```
@@ -11934,14 +12103,14 @@ pub struct UpdateProjectRoleRequest {
     /// Path parameter: role_id
     pub role_id: String,
     /// Request body
-    pub body: PublicUpdateOrganizationRoleBody,
+    pub body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody,
 }
 impl UpdateProjectRoleRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         role_id: impl Into<String>,
-        body: PublicUpdateOrganizationRoleBody,
+        body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -11952,9 +12121,9 @@ impl UpdateProjectRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateProjectRoleRequest {
     type Api = OpenAIApi;
-    type Success = Role;
+    type Success = ::schematic_definitions::openai::Role;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Role>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Role>;
     const ENDPOINT_ID: &'static str = "UpdateProjectRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -12010,9 +12179,11 @@ impl DeleteProjectRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteProjectRoleRequest {
     type Api = OpenAIApi;
-    type Success = RoleDeletedResource;
+    type Success = ::schematic_definitions::openai::RoleDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RoleDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RoleDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteProjectRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -12070,9 +12241,11 @@ impl ListProjectUserRoleAssignmentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListProjectUserRoleAssignmentsRequest {
     type Api = OpenAIApi;
-    type Success = RoleListResource;
+    type Success = ::schematic_definitions::openai::RoleListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RoleListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RoleListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListProjectUserRoleAssignments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -12101,12 +12274,9 @@ impl schematic_runtime::EndpointSpec for ListProjectUserRoleAssignmentsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AssignProjectUserRoleRequest, PublicAssignOrganizationGroupRoleBody};
+/// use schematic_schema::openai::AssignProjectUserRoleRequest;
 ///
-/// let body = PublicAssignOrganizationGroupRoleBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody = Default::default();
 /// let request = AssignProjectUserRoleRequest::new("project_id_value", "user_id_value", body)
 ///;
 /// ```
@@ -12117,14 +12287,14 @@ pub struct AssignProjectUserRoleRequest {
     /// Path parameter: user_id
     pub user_id: String,
     /// Request body
-    pub body: PublicAssignOrganizationGroupRoleBody,
+    pub body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
 }
 impl AssignProjectUserRoleRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         user_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -12135,9 +12305,11 @@ impl AssignProjectUserRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for AssignProjectUserRoleRequest {
     type Api = OpenAIApi;
-    type Success = UserRoleAssignment;
+    type Success = ::schematic_definitions::openai::UserRoleAssignment;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UserRoleAssignment>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::UserRoleAssignment,
+    >;
     const ENDPOINT_ID: &'static str = "AssignProjectUserRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -12200,9 +12372,11 @@ impl RetrieveProjectUserRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveProjectUserRoleRequest {
     type Api = OpenAIApi;
-    type Success = AssignedRoleDetails;
+    type Success = ::schematic_definitions::openai::AssignedRoleDetails;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AssignedRoleDetails>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::AssignedRoleDetails,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveProjectUserRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -12259,9 +12433,11 @@ impl UnassignProjectUserRoleRequest {
 }
 impl schematic_runtime::EndpointSpec for UnassignProjectUserRoleRequest {
     type Api = OpenAIApi;
-    type Success = DeletedRoleAssignmentResource;
+    type Success = ::schematic_definitions::openai::DeletedRoleAssignmentResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedRoleAssignmentResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedRoleAssignmentResource,
+    >;
     const ENDPOINT_ID: &'static str = "UnassignProjectUserRole";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -12372,12 +12548,9 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeCallRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{AcceptRealtimeCallRequest, RealtimeSessionCreateRequestGA};
+/// use schematic_schema::openai::AcceptRealtimeCallRequest;
 ///
-/// let body = RealtimeSessionCreateRequestGA {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RealtimeSessionCreateRequestGA = Default::default();
 /// let request = AcceptRealtimeCallRequest::new("call_id_value", body)
 ///;
 /// ```
@@ -12386,13 +12559,13 @@ pub struct AcceptRealtimeCallRequest {
     /// Path parameter: call_id
     pub call_id: String,
     /// Request body
-    pub body: RealtimeSessionCreateRequestGA,
+    pub body: ::schematic_definitions::openai::RealtimeSessionCreateRequestGA,
 }
 impl AcceptRealtimeCallRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         call_id: impl Into<String>,
-        body: RealtimeSessionCreateRequestGA,
+        body: ::schematic_definitions::openai::RealtimeSessionCreateRequestGA,
     ) -> Self {
         Self {
             call_id: call_id.into(),
@@ -12491,12 +12664,9 @@ impl schematic_runtime::EndpointSpec for HangupRealtimeCallRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ReferRealtimeCallRequest, RealtimeCallReferRequest};
+/// use schematic_schema::openai::ReferRealtimeCallRequest;
 ///
-/// let body = RealtimeCallReferRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RealtimeCallReferRequest = Default::default();
 /// let request = ReferRealtimeCallRequest::new("call_id_value", body)
 ///;
 /// ```
@@ -12505,11 +12675,14 @@ pub struct ReferRealtimeCallRequest {
     /// Path parameter: call_id
     pub call_id: String,
     /// Request body
-    pub body: RealtimeCallReferRequest,
+    pub body: ::schematic_definitions::openai::RealtimeCallReferRequest,
 }
 impl ReferRealtimeCallRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(call_id: impl Into<String>, body: RealtimeCallReferRequest) -> Self {
+    pub fn new(
+        call_id: impl Into<String>,
+        body: ::schematic_definitions::openai::RealtimeCallReferRequest,
+    ) -> Self {
         Self {
             call_id: call_id.into(),
             body,
@@ -12552,12 +12725,9 @@ impl schematic_runtime::EndpointSpec for ReferRealtimeCallRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{RejectRealtimeCallRequest, RealtimeCallRejectRequest};
+/// use schematic_schema::openai::RejectRealtimeCallRequest;
 ///
-/// let body = RealtimeCallRejectRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RealtimeCallRejectRequest = Default::default();
 /// let request = RejectRealtimeCallRequest::new("call_id_value", body)
 ///;
 /// ```
@@ -12566,11 +12736,14 @@ pub struct RejectRealtimeCallRequest {
     /// Path parameter: call_id
     pub call_id: String,
     /// Request body
-    pub body: RealtimeCallRejectRequest,
+    pub body: ::schematic_definitions::openai::RealtimeCallRejectRequest,
 }
 impl RejectRealtimeCallRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(call_id: impl Into<String>, body: RealtimeCallRejectRequest) -> Self {
+    pub fn new(
+        call_id: impl Into<String>,
+        body: ::schematic_definitions::openai::RealtimeCallRejectRequest,
+    ) -> Self {
         Self {
             call_id: call_id.into(),
             body,
@@ -12613,36 +12786,40 @@ impl schematic_runtime::EndpointSpec for RejectRealtimeCallRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateRealtimeClientSecretRequest, RealtimeCreateClientSecretRequest};
+/// use schematic_schema::openai::CreateRealtimeClientSecretRequest;
 ///
-/// let body = RealtimeCreateClientSecretRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest = Default::default();
 /// let request = CreateRealtimeClientSecretRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeClientSecretRequest {
     /// Request body
-    pub body: RealtimeCreateClientSecretRequest,
+    pub body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest,
 }
 impl CreateRealtimeClientSecretRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: RealtimeCreateClientSecretRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<RealtimeCreateClientSecretRequest> for CreateRealtimeClientSecretRequest {
-    fn from(body: RealtimeCreateClientSecretRequest) -> Self {
+impl From<::schematic_definitions::openai::RealtimeCreateClientSecretRequest>
+for CreateRealtimeClientSecretRequest {
+    fn from(
+        body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
     type Api = OpenAIApi;
-    type Success = RealtimeCreateClientSecretResponse;
+    type Success = ::schematic_definitions::openai::RealtimeCreateClientSecretResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RealtimeCreateClientSecretResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RealtimeCreateClientSecretResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateRealtimeClientSecret";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -12672,36 +12849,40 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeClientSecretRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateRealtimeSessionRequest, RealtimeSessionCreateRequest};
+/// use schematic_schema::openai::CreateRealtimeSessionRequest;
 ///
-/// let body = RealtimeSessionCreateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RealtimeSessionCreateRequest = Default::default();
 /// let request = CreateRealtimeSessionRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeSessionRequest {
     /// Request body
-    pub body: RealtimeSessionCreateRequest,
+    pub body: ::schematic_definitions::openai::RealtimeSessionCreateRequest,
 }
 impl CreateRealtimeSessionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: RealtimeSessionCreateRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::RealtimeSessionCreateRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<RealtimeSessionCreateRequest> for CreateRealtimeSessionRequest {
-    fn from(body: RealtimeSessionCreateRequest) -> Self {
+impl From<::schematic_definitions::openai::RealtimeSessionCreateRequest>
+for CreateRealtimeSessionRequest {
+    fn from(
+        body: ::schematic_definitions::openai::RealtimeSessionCreateRequest,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
     type Api = OpenAIApi;
-    type Success = RealtimeSessionCreateResponse;
+    type Success = ::schematic_definitions::openai::RealtimeSessionCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RealtimeSessionCreateResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RealtimeSessionCreateResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateRealtimeSession";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -12731,37 +12912,40 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeSessionRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateRealtimeTranscriptionSessionRequest, RealtimeTranscriptionSessionCreateRequest};
+/// use schematic_schema::openai::CreateRealtimeTranscriptionSessionRequest;
 ///
-/// let body = RealtimeTranscriptionSessionCreateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest = Default::default();
 /// let request = CreateRealtimeTranscriptionSessionRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeTranscriptionSessionRequest {
     /// Request body
-    pub body: RealtimeTranscriptionSessionCreateRequest,
+    pub body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest,
 }
 impl CreateRealtimeTranscriptionSessionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: RealtimeTranscriptionSessionCreateRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<RealtimeTranscriptionSessionCreateRequest>
+impl From<::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest>
 for CreateRealtimeTranscriptionSessionRequest {
-    fn from(body: RealtimeTranscriptionSessionCreateRequest) -> Self {
+    fn from(
+        body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionRequest {
     type Api = OpenAIApi;
-    type Success = RealtimeTranscriptionSessionCreateResponse;
+    type Success = ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RealtimeTranscriptionSessionCreateResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateRealtimeTranscriptionSession";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -12791,38 +12975,39 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranscriptionSessionReque
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateRealtimeTranslationClientSecretRequest, RealtimeTranslationClientSecretCreateRequest};
+/// use schematic_schema::openai::CreateRealtimeTranslationClientSecretRequest;
 ///
-/// let body = RealtimeTranslationClientSecretCreateRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest = Default::default();
 /// let request = CreateRealtimeTranslationClientSecretRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRealtimeTranslationClientSecretRequest {
     /// Request body
-    pub body: RealtimeTranslationClientSecretCreateRequest,
+    pub body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest,
 }
 impl CreateRealtimeTranslationClientSecretRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: RealtimeTranslationClientSecretCreateRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<RealtimeTranslationClientSecretCreateRequest>
+impl From<::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest>
 for CreateRealtimeTranslationClientSecretRequest {
-    fn from(body: RealtimeTranslationClientSecretCreateRequest) -> Self {
+    fn from(
+        body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRequest {
     type Api = OpenAIApi;
-    type Success = RealtimeTranslationClientSecretCreateResponse;
+    type Success = ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
     type Decoder = schematic_runtime::Json<
-        RealtimeTranslationClientSecretCreateResponse,
+        ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateResponse,
     >;
     const ENDPOINT_ID: &'static str = "CreateRealtimeTranslationClientSecret";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
@@ -12853,44 +13038,81 @@ impl schematic_runtime::EndpointSpec for CreateRealtimeTranslationClientSecretRe
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateResponseRequest, CreateResponse};
+/// use schematic_schema::openai::CreateResponseRequest;
 ///
-/// let body = CreateResponse {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::BetaCreateResponse = Default::default();
 /// let request = CreateResponseRequest::new(body)
+///     .with_beta(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateResponseRequest {
+    /// Query parameter: beta
+    pub beta: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
     /// Request body
-    pub body: CreateResponse,
+    pub body: ::schematic_definitions::openai::BetaCreateResponse,
 }
 impl CreateResponseRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateResponse) -> Self {
-        Self { body }
+    pub fn new(body: ::schematic_definitions::openai::BetaCreateResponse) -> Self {
+        Self {
+            beta: None,
+            openai_beta: None,
+            body,
+        }
+    }
+    /// Sets the `beta` query parameter.
+    pub fn with_beta(mut self, value: bool) -> Self {
+        self.beta = Some(value);
+        self
+    }
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
     }
 }
-impl From<CreateResponse> for CreateResponseRequest {
-    fn from(body: CreateResponse) -> Self {
-        Self { body }
+impl From<::schematic_definitions::openai::BetaCreateResponse>
+for CreateResponseRequest {
+    fn from(body: ::schematic_definitions::openai::BetaCreateResponse) -> Self {
+        Self {
+            beta: None,
+            openai_beta: None,
+            body,
+        }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateResponseRequest {
     type Api = OpenAIApi;
-    type Success = Response;
+    type Success = ::schematic_definitions::openai::BetaResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Response>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::BetaResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateResponse";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/responses".to_string();
-        let query: Vec<(String, String)> = Vec::new();
-        let headers: Vec<(String, String)> = vec![];
+        let mut query: Vec<(String, String)> = Vec::new();
+        if let Some(ref value) = self.beta {
+            query.push(("beta".to_string(), value.to_string()));
+        }
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -12919,6 +13141,8 @@ impl schematic_runtime::EndpointSpec for CreateResponseRequest {
 ///     .with_stream(/* value */)
 ///     .with_starting_after(/* value */)
 ///     .with_include_obfuscation(/* value */)
+///     .with_beta(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12947,6 +13171,11 @@ small amount of overhead to the data stream. You can set
 the network links between your application and the OpenAI API.
 */
     pub include_obfuscation: Option<bool>,
+    /// Query parameter: beta
+    pub beta: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl GetResponseRequest {
     /// Creates a new request with the required path parameters.
@@ -12957,6 +13186,8 @@ impl GetResponseRequest {
             stream: None,
             starting_after: None,
             include_obfuscation: None,
+            beta: None,
+            openai_beta: None,
         }
     }
     /// Sets the `include` query parameter.
@@ -12979,6 +13210,16 @@ impl GetResponseRequest {
         self.include_obfuscation = Some(value);
         self
     }
+    /// Sets the `beta` query parameter.
+    pub fn with_beta(mut self, value: bool) -> Self {
+        self.beta = Some(value);
+        self
+    }
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
 }
 impl From<&str> for GetResponseRequest {
     fn from(param: &str) -> Self {
@@ -12988,6 +13229,8 @@ impl From<&str> for GetResponseRequest {
             stream: None,
             starting_after: None,
             include_obfuscation: None,
+            beta: None,
+            openai_beta: None,
         }
     }
 }
@@ -12999,14 +13242,18 @@ impl From<String> for GetResponseRequest {
             stream: None,
             starting_after: None,
             include_obfuscation: None,
+            beta: None,
+            openai_beta: None,
         }
     }
 }
 impl schematic_runtime::EndpointSpec for GetResponseRequest {
     type Api = OpenAIApi;
-    type Success = Response;
+    type Success = ::schematic_definitions::openai::BetaResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Response>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::BetaResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetResponse";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -13030,7 +13277,19 @@ impl schematic_runtime::EndpointSpec for GetResponseRequest {
         if let Some(ref value) = self.include_obfuscation {
             query.push(("include_obfuscation".to_string(), value.to_string()));
         }
-        let headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.beta {
+            query.push(("beta".to_string(), value.to_string()));
+        }
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -13048,31 +13307,56 @@ impl schematic_runtime::EndpointSpec for GetResponseRequest {
 /// use schematic_schema::openai::DeleteResponseRequest;
 ///
 /// let request = DeleteResponseRequest::new("response_id_value")
+///     .with_beta(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteResponseRequest {
     /// Path parameter: response_id
     pub response_id: String,
+    /// Query parameter: beta
+    pub beta: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl DeleteResponseRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(response_id: impl Into<String>) -> Self {
         Self {
             response_id: response_id.into(),
+            beta: None,
+            openai_beta: None,
         }
+    }
+    /// Sets the `beta` query parameter.
+    pub fn with_beta(mut self, value: bool) -> Self {
+        self.beta = Some(value);
+        self
+    }
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
     }
 }
 impl From<&str> for DeleteResponseRequest {
     fn from(param: &str) -> Self {
         Self {
             response_id: param.to_string(),
+            beta: None,
+            openai_beta: None,
         }
     }
 }
 impl From<String> for DeleteResponseRequest {
     fn from(param: String) -> Self {
-        Self { response_id: param }
+        Self {
+            response_id: param,
+            beta: None,
+            openai_beta: None,
+        }
     }
 }
 impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
@@ -13088,8 +13372,20 @@ impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
         let path = format!(
             "/responses/{}", urlencoding::encode(& self.response_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
-        let headers: Vec<(String, String)> = vec![];
+        let mut query: Vec<(String, String)> = Vec::new();
+        if let Some(ref value) = self.beta {
+            query.push(("beta".to_string(), value.to_string()));
+        }
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -13107,38 +13403,65 @@ impl schematic_runtime::EndpointSpec for DeleteResponseRequest {
 /// use schematic_schema::openai::CancelResponseRequest;
 ///
 /// let request = CancelResponseRequest::new("response_id_value")
+///     .with_beta(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CancelResponseRequest {
     /// Path parameter: response_id
     pub response_id: String,
+    /// Query parameter: beta
+    pub beta: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl CancelResponseRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(response_id: impl Into<String>) -> Self {
         Self {
             response_id: response_id.into(),
+            beta: None,
+            openai_beta: None,
         }
+    }
+    /// Sets the `beta` query parameter.
+    pub fn with_beta(mut self, value: bool) -> Self {
+        self.beta = Some(value);
+        self
+    }
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
     }
 }
 impl From<&str> for CancelResponseRequest {
     fn from(param: &str) -> Self {
         Self {
             response_id: param.to_string(),
+            beta: None,
+            openai_beta: None,
         }
     }
 }
 impl From<String> for CancelResponseRequest {
     fn from(param: String) -> Self {
-        Self { response_id: param }
+        Self {
+            response_id: param,
+            beta: None,
+            openai_beta: None,
+        }
     }
 }
 impl schematic_runtime::EndpointSpec for CancelResponseRequest {
     type Api = OpenAIApi;
-    type Success = Response;
+    type Success = ::schematic_definitions::openai::BetaResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Response>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::BetaResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CancelResponse";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13147,8 +13470,20 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
         let path = format!(
             "/responses/{}/cancel", urlencoding::encode(& self.response_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
-        let headers: Vec<(String, String)> = vec![];
+        let mut query: Vec<(String, String)> = Vec::new();
+        if let Some(ref value) = self.beta {
+            query.push(("beta".to_string(), value.to_string()));
+        }
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -13168,6 +13503,8 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
 /// let request = ListInputItemsRequest::new("response_id_value")
 ///     .with_order(/* value */)
 ///     .with_include(/* value */)
+///     .with_beta(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13183,6 +13520,11 @@ pub struct ListInputItemsRequest {
 parameter for Response creation above for more information.
 */
     pub include: Option<Vec<serde_json::Value>>,
+    /// Query parameter: beta
+    pub beta: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
 }
 impl ListInputItemsRequest {
     /// Creates a new request with the required path parameters.
@@ -13191,6 +13533,8 @@ impl ListInputItemsRequest {
             response_id: response_id.into(),
             order: None,
             include: None,
+            beta: None,
+            openai_beta: None,
         }
     }
     /// Sets the `order` query parameter.
@@ -13203,6 +13547,16 @@ impl ListInputItemsRequest {
         self.include = Some(value);
         self
     }
+    /// Sets the `beta` query parameter.
+    pub fn with_beta(mut self, value: bool) -> Self {
+        self.beta = Some(value);
+        self
+    }
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
+    }
 }
 impl From<&str> for ListInputItemsRequest {
     fn from(param: &str) -> Self {
@@ -13210,6 +13564,8 @@ impl From<&str> for ListInputItemsRequest {
             response_id: param.to_string(),
             order: None,
             include: None,
+            beta: None,
+            openai_beta: None,
         }
     }
 }
@@ -13219,14 +13575,18 @@ impl From<String> for ListInputItemsRequest {
             response_id: param,
             order: None,
             include: None,
+            beta: None,
+            openai_beta: None,
         }
     }
 }
 impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
     type Api = OpenAIApi;
-    type Success = ResponseItemList;
+    type Success = ::schematic_definitions::openai::BetaResponseItemList;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ResponseItemList>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::BetaResponseItemList,
+    >;
     const ENDPOINT_ID: &'static str = "ListInputItems";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -13245,7 +13605,19 @@ impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
                 query.push(("include".to_string(), value.to_string()));
             }
         }
-        let headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.beta {
+            query.push(("beta".to_string(), value.to_string()));
+        }
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -13260,36 +13632,34 @@ impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateUploadRequest, CreateUploadRequest2};
+/// use schematic_schema::openai::CreateUploadRequest;
 ///
-/// let body = CreateUploadRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateUploadRequest2 = Default::default();
 /// let request = CreateUploadRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateUploadRequest {
     /// Request body
-    pub body: CreateUploadRequest2,
+    pub body: ::schematic_definitions::openai::CreateUploadRequest2,
 }
 impl CreateUploadRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateUploadRequest2) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateUploadRequest2) -> Self {
         Self { body }
     }
 }
-impl From<CreateUploadRequest2> for CreateUploadRequest {
-    fn from(body: CreateUploadRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateUploadRequest2>
+for CreateUploadRequest {
+    fn from(body: ::schematic_definitions::openai::CreateUploadRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateUploadRequest {
     type Api = OpenAIApi;
-    type Success = Upload;
+    type Success = ::schematic_definitions::openai::Upload;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Upload>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Upload>;
     const ENDPOINT_ID: &'static str = "CreateUpload";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13351,9 +13721,9 @@ impl From<String> for CancelUploadRequest {
 }
 impl schematic_runtime::EndpointSpec for CancelUploadRequest {
     type Api = OpenAIApi;
-    type Success = Upload;
+    type Success = ::schematic_definitions::openai::Upload;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Upload>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Upload>;
     const ENDPOINT_ID: &'static str = "CancelUpload";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13378,12 +13748,9 @@ impl schematic_runtime::EndpointSpec for CancelUploadRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CompleteUploadRequest, CompleteUploadRequest2};
+/// use schematic_schema::openai::CompleteUploadRequest;
 ///
-/// let body = CompleteUploadRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CompleteUploadRequest2 = Default::default();
 /// let request = CompleteUploadRequest::new("upload_id_value", body)
 ///;
 /// ```
@@ -13392,11 +13759,14 @@ pub struct CompleteUploadRequest {
     /// Path parameter: upload_id
     pub upload_id: String,
     /// Request body
-    pub body: CompleteUploadRequest2,
+    pub body: ::schematic_definitions::openai::CompleteUploadRequest2,
 }
 impl CompleteUploadRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(upload_id: impl Into<String>, body: CompleteUploadRequest2) -> Self {
+    pub fn new(
+        upload_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CompleteUploadRequest2,
+    ) -> Self {
         Self {
             upload_id: upload_id.into(),
             body,
@@ -13405,9 +13775,9 @@ impl CompleteUploadRequest {
 }
 impl schematic_runtime::EndpointSpec for CompleteUploadRequest {
     type Api = OpenAIApi;
-    type Success = Upload;
+    type Success = ::schematic_definitions::openai::Upload;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Upload>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::Upload>;
     const ENDPOINT_ID: &'static str = "CompleteUpload";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13483,9 +13853,9 @@ impl AddUploadPartRequest {
 }
 impl schematic_runtime::EndpointSpec for AddUploadPartRequest {
     type Api = OpenAIApi;
-    type Success = UploadPart;
+    type Success = ::schematic_definitions::openai::UploadPart;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UploadPart>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::openai::UploadPart>;
     const ENDPOINT_ID: &'static str = "AddUploadPart";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13535,9 +13905,11 @@ impl ListVectorStoresRequest {
 }
 impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
     type Api = OpenAIApi;
-    type Success = ListVectorStoresResponse;
+    type Success = ::schematic_definitions::openai::ListVectorStoresResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListVectorStoresResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListVectorStoresResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListVectorStores";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -13563,36 +13935,38 @@ impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateVectorStoreRequest, CreateVectorStoreRequest2};
+/// use schematic_schema::openai::CreateVectorStoreRequest;
 ///
-/// let body = CreateVectorStoreRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateVectorStoreRequest2 = Default::default();
 /// let request = CreateVectorStoreRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVectorStoreRequest {
     /// Request body
-    pub body: CreateVectorStoreRequest2,
+    pub body: ::schematic_definitions::openai::CreateVectorStoreRequest2,
 }
 impl CreateVectorStoreRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateVectorStoreRequest2) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::CreateVectorStoreRequest2,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<CreateVectorStoreRequest2> for CreateVectorStoreRequest {
-    fn from(body: CreateVectorStoreRequest2) -> Self {
+impl From<::schematic_definitions::openai::CreateVectorStoreRequest2>
+for CreateVectorStoreRequest {
+    fn from(body: ::schematic_definitions::openai::CreateVectorStoreRequest2) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVectorStoreRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreObject;
+    type Success = ::schematic_definitions::openai::VectorStoreObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreObject,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVectorStore";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13654,9 +14028,11 @@ impl From<String> for GetVectorStoreRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVectorStoreRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreObject;
+    type Success = ::schematic_definitions::openai::VectorStoreObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreObject,
+    >;
     const ENDPOINT_ID: &'static str = "GetVectorStore";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -13681,12 +14057,9 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{ModifyVectorStoreRequest, UpdateVectorStoreRequest};
+/// use schematic_schema::openai::ModifyVectorStoreRequest;
 ///
-/// let body = UpdateVectorStoreRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateVectorStoreRequest = Default::default();
 /// let request = ModifyVectorStoreRequest::new("vector_store_id_value", body)
 ///;
 /// ```
@@ -13695,13 +14068,13 @@ pub struct ModifyVectorStoreRequest {
     /// Path parameter: vector_store_id
     pub vector_store_id: String,
     /// Request body
-    pub body: UpdateVectorStoreRequest,
+    pub body: ::schematic_definitions::openai::UpdateVectorStoreRequest,
 }
 impl ModifyVectorStoreRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         vector_store_id: impl Into<String>,
-        body: UpdateVectorStoreRequest,
+        body: ::schematic_definitions::openai::UpdateVectorStoreRequest,
     ) -> Self {
         Self {
             vector_store_id: vector_store_id.into(),
@@ -13711,9 +14084,11 @@ impl ModifyVectorStoreRequest {
 }
 impl schematic_runtime::EndpointSpec for ModifyVectorStoreRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreObject;
+    type Success = ::schematic_definitions::openai::VectorStoreObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreObject,
+    >;
     const ENDPOINT_ID: &'static str = "ModifyVectorStore";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13777,9 +14152,11 @@ impl From<String> for DeleteVectorStoreRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteVectorStoreRequest {
     type Api = OpenAIApi;
-    type Success = DeleteVectorStoreResponse;
+    type Success = ::schematic_definitions::openai::DeleteVectorStoreResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeleteVectorStoreResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeleteVectorStoreResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteVectorStore";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -13804,12 +14181,9 @@ impl schematic_runtime::EndpointSpec for DeleteVectorStoreRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateVectorStoreFileBatchRequest, CreateVectorStoreFileBatchRequest2};
+/// use schematic_schema::openai::CreateVectorStoreFileBatchRequest;
 ///
-/// let body = CreateVectorStoreFileBatchRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateVectorStoreFileBatchRequest2 = Default::default();
 /// let request = CreateVectorStoreFileBatchRequest::new("vector_store_id_value", body)
 ///;
 /// ```
@@ -13818,13 +14192,13 @@ pub struct CreateVectorStoreFileBatchRequest {
     /// Path parameter: vector_store_id
     pub vector_store_id: String,
     /// Request body
-    pub body: CreateVectorStoreFileBatchRequest2,
+    pub body: ::schematic_definitions::openai::CreateVectorStoreFileBatchRequest2,
 }
 impl CreateVectorStoreFileBatchRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         vector_store_id: impl Into<String>,
-        body: CreateVectorStoreFileBatchRequest2,
+        body: ::schematic_definitions::openai::CreateVectorStoreFileBatchRequest2,
     ) -> Self {
         Self {
             vector_store_id: vector_store_id.into(),
@@ -13834,9 +14208,11 @@ impl CreateVectorStoreFileBatchRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateVectorStoreFileBatchRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreFileBatchObject;
+    type Success = ::schematic_definitions::openai::VectorStoreFileBatchObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreFileBatchObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreFileBatchObject,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVectorStoreFileBatch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -13892,9 +14268,11 @@ impl GetVectorStoreFileBatchRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVectorStoreFileBatchRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreFileBatchObject;
+    type Success = ::schematic_definitions::openai::VectorStoreFileBatchObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreFileBatchObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreFileBatchObject,
+    >;
     const ENDPOINT_ID: &'static str = "GetVectorStoreFileBatch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -13944,9 +14322,11 @@ impl CancelVectorStoreFileBatchRequest {
 }
 impl schematic_runtime::EndpointSpec for CancelVectorStoreFileBatchRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreFileBatchObject;
+    type Success = ::schematic_definitions::openai::VectorStoreFileBatchObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreFileBatchObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreFileBatchObject,
+    >;
     const ENDPOINT_ID: &'static str = "CancelVectorStoreFileBatch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14015,9 +14395,11 @@ impl ListFilesInVectorStoreBatchRequest {
 }
 impl schematic_runtime::EndpointSpec for ListFilesInVectorStoreBatchRequest {
     type Api = OpenAIApi;
-    type Success = ListVectorStoreFilesResponse;
+    type Success = ::schematic_definitions::openai::ListVectorStoreFilesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListVectorStoreFilesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListVectorStoreFilesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListFilesInVectorStoreBatch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -14107,9 +14489,11 @@ impl From<String> for ListVectorStoreFilesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListVectorStoreFilesRequest {
     type Api = OpenAIApi;
-    type Success = ListVectorStoreFilesResponse;
+    type Success = ::schematic_definitions::openai::ListVectorStoreFilesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListVectorStoreFilesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ListVectorStoreFilesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListVectorStoreFiles";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -14141,12 +14525,9 @@ impl schematic_runtime::EndpointSpec for ListVectorStoreFilesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateVectorStoreFileRequest, CreateVectorStoreFileRequest2};
+/// use schematic_schema::openai::CreateVectorStoreFileRequest;
 ///
-/// let body = CreateVectorStoreFileRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateVectorStoreFileRequest2 = Default::default();
 /// let request = CreateVectorStoreFileRequest::new("vector_store_id_value", body)
 ///;
 /// ```
@@ -14155,13 +14536,13 @@ pub struct CreateVectorStoreFileRequest {
     /// Path parameter: vector_store_id
     pub vector_store_id: String,
     /// Request body
-    pub body: CreateVectorStoreFileRequest2,
+    pub body: ::schematic_definitions::openai::CreateVectorStoreFileRequest2,
 }
 impl CreateVectorStoreFileRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         vector_store_id: impl Into<String>,
-        body: CreateVectorStoreFileRequest2,
+        body: ::schematic_definitions::openai::CreateVectorStoreFileRequest2,
     ) -> Self {
         Self {
             vector_store_id: vector_store_id.into(),
@@ -14171,9 +14552,11 @@ impl CreateVectorStoreFileRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateVectorStoreFileRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreFileObject;
+    type Success = ::schematic_definitions::openai::VectorStoreFileObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreFileObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreFileObject,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVectorStoreFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14229,9 +14612,11 @@ impl GetVectorStoreFileRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVectorStoreFileRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreFileObject;
+    type Success = ::schematic_definitions::openai::VectorStoreFileObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreFileObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreFileObject,
+    >;
     const ENDPOINT_ID: &'static str = "GetVectorStoreFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -14257,12 +14642,9 @@ impl schematic_runtime::EndpointSpec for GetVectorStoreFileRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateVectorStoreFileAttributesRequest, UpdateVectorStoreFileAttributesRequest2};
+/// use schematic_schema::openai::UpdateVectorStoreFileAttributesRequest;
 ///
-/// let body = UpdateVectorStoreFileAttributesRequest2 {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateVectorStoreFileAttributesRequest2 = Default::default();
 /// let request = UpdateVectorStoreFileAttributesRequest::new("vector_store_id_value", "file_id_value", body)
 ///;
 /// ```
@@ -14273,14 +14655,14 @@ pub struct UpdateVectorStoreFileAttributesRequest {
     /// Path parameter: file_id
     pub file_id: String,
     /// Request body
-    pub body: UpdateVectorStoreFileAttributesRequest2,
+    pub body: ::schematic_definitions::openai::UpdateVectorStoreFileAttributesRequest2,
 }
 impl UpdateVectorStoreFileAttributesRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         vector_store_id: impl Into<String>,
         file_id: impl Into<String>,
-        body: UpdateVectorStoreFileAttributesRequest2,
+        body: ::schematic_definitions::openai::UpdateVectorStoreFileAttributesRequest2,
     ) -> Self {
         Self {
             vector_store_id: vector_store_id.into(),
@@ -14291,9 +14673,11 @@ impl UpdateVectorStoreFileAttributesRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateVectorStoreFileAttributesRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreFileObject;
+    type Success = ::schematic_definitions::openai::VectorStoreFileObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreFileObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreFileObject,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateVectorStoreFileAttributes";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14349,9 +14733,11 @@ impl DeleteVectorStoreFileRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteVectorStoreFileRequest {
     type Api = OpenAIApi;
-    type Success = DeleteVectorStoreFileResponse;
+    type Success = ::schematic_definitions::openai::DeleteVectorStoreFileResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeleteVectorStoreFileResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeleteVectorStoreFileResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteVectorStoreFile";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -14400,9 +14786,11 @@ impl RetrieveVectorStoreFileContentRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveVectorStoreFileContentRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreFileContentResponse;
+    type Success = ::schematic_definitions::openai::VectorStoreFileContentResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreFileContentResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreFileContentResponse,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveVectorStoreFileContent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -14429,12 +14817,9 @@ impl schematic_runtime::EndpointSpec for RetrieveVectorStoreFileContentRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{SearchVectorStoreRequest, VectorStoreSearchRequest};
+/// use schematic_schema::openai::SearchVectorStoreRequest;
 ///
-/// let body = VectorStoreSearchRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::VectorStoreSearchRequest = Default::default();
 /// let request = SearchVectorStoreRequest::new("vector_store_id_value", body)
 ///;
 /// ```
@@ -14443,13 +14828,13 @@ pub struct SearchVectorStoreRequest {
     /// Path parameter: vector_store_id
     pub vector_store_id: String,
     /// Request body
-    pub body: VectorStoreSearchRequest,
+    pub body: ::schematic_definitions::openai::VectorStoreSearchRequest,
 }
 impl SearchVectorStoreRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         vector_store_id: impl Into<String>,
-        body: VectorStoreSearchRequest,
+        body: ::schematic_definitions::openai::VectorStoreSearchRequest,
     ) -> Self {
         Self {
             vector_store_id: vector_store_id.into(),
@@ -14459,9 +14844,11 @@ impl SearchVectorStoreRequest {
 }
 impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
     type Api = OpenAIApi;
-    type Success = VectorStoreSearchResultsPage;
+    type Success = ::schematic_definitions::openai::VectorStoreSearchResultsPage;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VectorStoreSearchResultsPage>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VectorStoreSearchResultsPage,
+    >;
     const ENDPOINT_ID: &'static str = "SearchVectorStore";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14494,36 +14881,36 @@ impl schematic_runtime::EndpointSpec for SearchVectorStoreRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateConversationRequest, CreateConversationBody};
+/// use schematic_schema::openai::CreateConversationRequest;
 ///
-/// let body = CreateConversationBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateConversationBody = Default::default();
 /// let request = CreateConversationRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateConversationRequest {
     /// Request body
-    pub body: CreateConversationBody,
+    pub body: ::schematic_definitions::openai::CreateConversationBody,
 }
 impl CreateConversationRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateConversationBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateConversationBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateConversationBody> for CreateConversationRequest {
-    fn from(body: CreateConversationBody) -> Self {
+impl From<::schematic_definitions::openai::CreateConversationBody>
+for CreateConversationRequest {
+    fn from(body: ::schematic_definitions::openai::CreateConversationBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateConversationRequest {
     type Api = OpenAIApi;
-    type Success = ConversationResource;
+    type Success = ::schematic_definitions::openai::ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ConversationResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ConversationResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateConversation";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14585,9 +14972,11 @@ impl From<String> for GetConversationRequest {
 }
 impl schematic_runtime::EndpointSpec for GetConversationRequest {
     type Api = OpenAIApi;
-    type Success = ConversationResource;
+    type Success = ::schematic_definitions::openai::ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ConversationResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ConversationResource,
+    >;
     const ENDPOINT_ID: &'static str = "GetConversation";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -14612,12 +15001,9 @@ impl schematic_runtime::EndpointSpec for GetConversationRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateConversationRequest, UpdateConversationBody};
+/// use schematic_schema::openai::UpdateConversationRequest;
 ///
-/// let body = UpdateConversationBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateConversationBody = Default::default();
 /// let request = UpdateConversationRequest::new("conversation_id_value", body)
 ///;
 /// ```
@@ -14626,13 +15012,13 @@ pub struct UpdateConversationRequest {
     /// Path parameter: conversation_id
     pub conversation_id: String,
     /// Request body
-    pub body: UpdateConversationBody,
+    pub body: ::schematic_definitions::openai::UpdateConversationBody,
 }
 impl UpdateConversationRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         conversation_id: impl Into<String>,
-        body: UpdateConversationBody,
+        body: ::schematic_definitions::openai::UpdateConversationBody,
     ) -> Self {
         Self {
             conversation_id: conversation_id.into(),
@@ -14642,9 +15028,11 @@ impl UpdateConversationRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateConversationRequest {
     type Api = OpenAIApi;
-    type Success = ConversationResource;
+    type Success = ::schematic_definitions::openai::ConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ConversationResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ConversationResource,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateConversation";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14708,9 +15096,11 @@ impl From<String> for DeleteConversationRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteConversationRequest {
     type Api = OpenAIApi;
-    type Success = DeletedConversationResource;
+    type Success = ::schematic_definitions::openai::DeletedConversationResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedConversationResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedConversationResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteConversation";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -14744,9 +15134,11 @@ impl schematic_runtime::EndpointSpec for DeleteConversationRequest {
 pub struct GetorganizationspendlimitRequest {}
 impl schematic_runtime::EndpointSpec for GetorganizationspendlimitRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendLimitResource;
+    type Success = ::schematic_definitions::openai::OrganizationSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendLimitResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendLimitResource,
+    >;
     const ENDPOINT_ID: &'static str = "Getorganizationspendlimit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -14769,36 +15161,40 @@ impl schematic_runtime::EndpointSpec for GetorganizationspendlimitRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateorganizationspendlimitRequest, UpdateOrganizationSpendLimitBody};
+/// use schematic_schema::openai::UpdateorganizationspendlimitRequest;
 ///
-/// let body = UpdateOrganizationSpendLimitBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody = Default::default();
 /// let request = UpdateorganizationspendlimitRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateorganizationspendlimitRequest {
     /// Request body
-    pub body: UpdateOrganizationSpendLimitBody,
+    pub body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody,
 }
 impl UpdateorganizationspendlimitRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: UpdateOrganizationSpendLimitBody) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<UpdateOrganizationSpendLimitBody> for UpdateorganizationspendlimitRequest {
-    fn from(body: UpdateOrganizationSpendLimitBody) -> Self {
+impl From<::schematic_definitions::openai::UpdateOrganizationSpendLimitBody>
+for UpdateorganizationspendlimitRequest {
+    fn from(
+        body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendLimitResource;
+    type Success = ::schematic_definitions::openai::OrganizationSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendLimitResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendLimitResource,
+    >;
     const ENDPOINT_ID: &'static str = "Updateorganizationspendlimit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -14837,9 +15233,11 @@ impl schematic_runtime::EndpointSpec for UpdateorganizationspendlimitRequest {
 pub struct DeleteorganizationspendlimitRequest {}
 impl schematic_runtime::EndpointSpec for DeleteorganizationspendlimitRequest {
     type Api = OpenAIApi;
-    type Success = OrganizationSpendLimitDeletedResource;
+    type Success = ::schematic_definitions::openai::OrganizationSpendLimitDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OrganizationSpendLimitDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::OrganizationSpendLimitDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "Deleteorganizationspendlimit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -14894,9 +15292,11 @@ impl From<String> for GetprojectspendlimitRequest {
 }
 impl schematic_runtime::EndpointSpec for GetprojectspendlimitRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendLimitResource;
+    type Success = ::schematic_definitions::openai::ProjectSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendLimitResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendLimitResource,
+    >;
     const ENDPOINT_ID: &'static str = "Getprojectspendlimit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -14922,12 +15322,9 @@ impl schematic_runtime::EndpointSpec for GetprojectspendlimitRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateprojectspendlimitRequest, UpdateProjectSpendLimitBody};
+/// use schematic_schema::openai::UpdateprojectspendlimitRequest;
 ///
-/// let body = UpdateProjectSpendLimitBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::UpdateProjectSpendLimitBody = Default::default();
 /// let request = UpdateprojectspendlimitRequest::new("project_id_value", body)
 ///;
 /// ```
@@ -14936,13 +15333,13 @@ pub struct UpdateprojectspendlimitRequest {
     /// Path parameter: project_id
     pub project_id: String,
     /// Request body
-    pub body: UpdateProjectSpendLimitBody,
+    pub body: ::schematic_definitions::openai::UpdateProjectSpendLimitBody,
 }
 impl UpdateprojectspendlimitRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
-        body: UpdateProjectSpendLimitBody,
+        body: ::schematic_definitions::openai::UpdateProjectSpendLimitBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -14952,9 +15349,11 @@ impl UpdateprojectspendlimitRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateprojectspendlimitRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendLimitResource;
+    type Success = ::schematic_definitions::openai::ProjectSpendLimitResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendLimitResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendLimitResource,
+    >;
     const ENDPOINT_ID: &'static str = "Updateprojectspendlimit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15019,9 +15418,11 @@ impl From<String> for DeleteprojectspendlimitRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteprojectspendlimitRequest {
     type Api = OpenAIApi;
-    type Success = ProjectSpendLimitDeletedResource;
+    type Success = ::schematic_definitions::openai::ProjectSpendLimitDeletedResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProjectSpendLimitDeletedResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProjectSpendLimitDeletedResource,
+    >;
     const ENDPOINT_ID: &'static str = "Deleteprojectspendlimit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -15047,12 +15448,9 @@ impl schematic_runtime::EndpointSpec for DeleteprojectspendlimitRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateanAPIkeyforaserviceaccountRequest, CreateProjectServiceAccountApiKeyBody};
+/// use schematic_schema::openai::CreateanAPIkeyforaserviceaccountRequest;
 ///
-/// let body = CreateProjectServiceAccountApiKeyBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateProjectServiceAccountApiKeyBody = Default::default();
 /// let request = CreateanAPIkeyforaserviceaccountRequest::new("project_id_value", "service_account_id_value", body)
 ///;
 /// ```
@@ -15063,14 +15461,14 @@ pub struct CreateanAPIkeyforaserviceaccountRequest {
     /// Path parameter: service_account_id
     pub service_account_id: String,
     /// Request body
-    pub body: CreateProjectServiceAccountApiKeyBody,
+    pub body: ::schematic_definitions::openai::CreateProjectServiceAccountApiKeyBody,
 }
 impl CreateanAPIkeyforaserviceaccountRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         project_id: impl Into<String>,
         service_account_id: impl Into<String>,
-        body: CreateProjectServiceAccountApiKeyBody,
+        body: ::schematic_definitions::openai::CreateProjectServiceAccountApiKeyBody,
     ) -> Self {
         Self {
             project_id: project_id.into(),
@@ -15081,9 +15479,11 @@ impl CreateanAPIkeyforaserviceaccountRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateanAPIkeyforaserviceaccountRequest {
     type Api = OpenAIApi;
-    type Success = ServiceAccountApiKeyBody;
+    type Success = ::schematic_definitions::openai::ServiceAccountApiKeyBody;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ServiceAccountApiKeyBody>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ServiceAccountApiKeyBody,
+    >;
     const ENDPOINT_ID: &'static str = "CreateanAPIkeyforaserviceaccount";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15161,9 +15561,11 @@ impl From<CreatecontentprovenancecheckForm> for CreatecontentprovenancecheckRequ
 }
 impl schematic_runtime::EndpointSpec for CreatecontentprovenancecheckRequest {
     type Api = OpenAIApi;
-    type Success = ProvenanceResource;
+    type Success = ::schematic_definitions::openai::ProvenanceResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ProvenanceResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ProvenanceResource,
+    >;
     const ENDPOINT_ID: &'static str = "Createcontentprovenancecheck";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15210,9 +15612,11 @@ impl ListVideosRequest {
 }
 impl schematic_runtime::EndpointSpec for ListVideosRequest {
     type Api = OpenAIApi;
-    type Success = VideoListResource;
+    type Success = ::schematic_definitions::openai::VideoListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListVideos";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -15238,36 +15642,35 @@ impl schematic_runtime::EndpointSpec for ListVideosRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateVideoRequest, CreateVideoJsonBody};
+/// use schematic_schema::openai::CreateVideoRequest;
 ///
-/// let body = CreateVideoJsonBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateVideoJsonBody = Default::default();
 /// let request = CreateVideoRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoRequest {
     /// Request body
-    pub body: CreateVideoJsonBody,
+    pub body: ::schematic_definitions::openai::CreateVideoJsonBody,
 }
 impl CreateVideoRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateVideoJsonBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateVideoJsonBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateVideoJsonBody> for CreateVideoRequest {
-    fn from(body: CreateVideoJsonBody) -> Self {
+impl From<::schematic_definitions::openai::CreateVideoJsonBody> for CreateVideoRequest {
+    fn from(body: ::schematic_definitions::openai::CreateVideoJsonBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoRequest {
     type Api = OpenAIApi;
-    type Success = VideoResource;
+    type Success = ::schematic_definitions::openai::VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVideo";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15351,9 +15754,11 @@ impl From<CreateVideoCharacterForm> for CreateVideoCharacterRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateVideoCharacterRequest {
     type Api = OpenAIApi;
-    type Success = VideoCharacterResource;
+    type Success = ::schematic_definitions::openai::VideoCharacterResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoCharacterResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoCharacterResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVideoCharacter";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15408,9 +15813,11 @@ impl From<String> for GetVideoCharacterRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVideoCharacterRequest {
     type Api = OpenAIApi;
-    type Success = VideoCharacterResource;
+    type Success = ::schematic_definitions::openai::VideoCharacterResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoCharacterResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoCharacterResource,
+    >;
     const ENDPOINT_ID: &'static str = "GetVideoCharacter";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -15435,36 +15842,36 @@ impl schematic_runtime::EndpointSpec for GetVideoCharacterRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateVideoEditRequest, CreateVideoEditJsonBody};
+/// use schematic_schema::openai::CreateVideoEditRequest;
 ///
-/// let body = CreateVideoEditJsonBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateVideoEditJsonBody = Default::default();
 /// let request = CreateVideoEditRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoEditRequest {
     /// Request body
-    pub body: CreateVideoEditJsonBody,
+    pub body: ::schematic_definitions::openai::CreateVideoEditJsonBody,
 }
 impl CreateVideoEditRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateVideoEditJsonBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateVideoEditJsonBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateVideoEditJsonBody> for CreateVideoEditRequest {
-    fn from(body: CreateVideoEditJsonBody) -> Self {
+impl From<::schematic_definitions::openai::CreateVideoEditJsonBody>
+for CreateVideoEditRequest {
+    fn from(body: ::schematic_definitions::openai::CreateVideoEditJsonBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
     type Api = OpenAIApi;
-    type Success = VideoResource;
+    type Success = ::schematic_definitions::openai::VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVideoEdit";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15494,36 +15901,38 @@ impl schematic_runtime::EndpointSpec for CreateVideoEditRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateVideoExtendRequest, CreateVideoExtendJsonBody};
+/// use schematic_schema::openai::CreateVideoExtendRequest;
 ///
-/// let body = CreateVideoExtendJsonBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateVideoExtendJsonBody = Default::default();
 /// let request = CreateVideoExtendRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateVideoExtendRequest {
     /// Request body
-    pub body: CreateVideoExtendJsonBody,
+    pub body: ::schematic_definitions::openai::CreateVideoExtendJsonBody,
 }
 impl CreateVideoExtendRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateVideoExtendJsonBody) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::openai::CreateVideoExtendJsonBody,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<CreateVideoExtendJsonBody> for CreateVideoExtendRequest {
-    fn from(body: CreateVideoExtendJsonBody) -> Self {
+impl From<::schematic_definitions::openai::CreateVideoExtendJsonBody>
+for CreateVideoExtendRequest {
+    fn from(body: ::schematic_definitions::openai::CreateVideoExtendJsonBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateVideoExtendRequest {
     type Api = OpenAIApi;
-    type Success = VideoResource;
+    type Success = ::schematic_definitions::openai::VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVideoExtend";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15583,9 +15992,11 @@ impl From<String> for GetVideoRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVideoRequest {
     type Api = OpenAIApi;
-    type Success = VideoResource;
+    type Success = ::schematic_definitions::openai::VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoResource,
+    >;
     const ENDPOINT_ID: &'static str = "GetVideo";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -15640,9 +16051,11 @@ impl From<String> for DeleteVideoRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteVideoRequest {
     type Api = OpenAIApi;
-    type Success = DeletedVideoResource;
+    type Success = ::schematic_definitions::openai::DeletedVideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedVideoResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedVideoResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteVideo";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -15712,9 +16125,9 @@ impl From<String> for RetrieveVideoContentRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveVideoContentRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "RetrieveVideoContent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -15742,12 +16155,9 @@ impl schematic_runtime::EndpointSpec for RetrieveVideoContentRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateVideoRemixRequest, CreateVideoRemixBody};
+/// use schematic_schema::openai::CreateVideoRemixRequest;
 ///
-/// let body = CreateVideoRemixBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateVideoRemixBody = Default::default();
 /// let request = CreateVideoRemixRequest::new("video_id_value", body)
 ///;
 /// ```
@@ -15756,11 +16166,14 @@ pub struct CreateVideoRemixRequest {
     /// Path parameter: video_id
     pub video_id: String,
     /// Request body
-    pub body: CreateVideoRemixBody,
+    pub body: ::schematic_definitions::openai::CreateVideoRemixBody,
 }
 impl CreateVideoRemixRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(video_id: impl Into<String>, body: CreateVideoRemixBody) -> Self {
+    pub fn new(
+        video_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CreateVideoRemixBody,
+    ) -> Self {
         Self {
             video_id: video_id.into(),
             body,
@@ -15769,9 +16182,11 @@ impl CreateVideoRemixRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
     type Api = OpenAIApi;
-    type Success = VideoResource;
+    type Success = ::schematic_definitions::openai::VideoResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VideoResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::VideoResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateVideoRemix";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -15803,44 +16218,81 @@ impl schematic_runtime::EndpointSpec for CreateVideoRemixRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{GetinputtokencountsRequest, TokenCountsBody};
+/// use schematic_schema::openai::GetinputtokencountsRequest;
 ///
-/// let body = TokenCountsBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::BetaTokenCountsBody = Default::default();
 /// let request = GetinputtokencountsRequest::new(body)
+///     .with_beta(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetinputtokencountsRequest {
+    /// Query parameter: beta
+    pub beta: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
     /// Request body
-    pub body: TokenCountsBody,
+    pub body: ::schematic_definitions::openai::BetaTokenCountsBody,
 }
 impl GetinputtokencountsRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: TokenCountsBody) -> Self {
-        Self { body }
+    pub fn new(body: ::schematic_definitions::openai::BetaTokenCountsBody) -> Self {
+        Self {
+            beta: None,
+            openai_beta: None,
+            body,
+        }
+    }
+    /// Sets the `beta` query parameter.
+    pub fn with_beta(mut self, value: bool) -> Self {
+        self.beta = Some(value);
+        self
+    }
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
     }
 }
-impl From<TokenCountsBody> for GetinputtokencountsRequest {
-    fn from(body: TokenCountsBody) -> Self {
-        Self { body }
+impl From<::schematic_definitions::openai::BetaTokenCountsBody>
+for GetinputtokencountsRequest {
+    fn from(body: ::schematic_definitions::openai::BetaTokenCountsBody) -> Self {
+        Self {
+            beta: None,
+            openai_beta: None,
+            body,
+        }
     }
 }
 impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
     type Api = OpenAIApi;
-    type Success = TokenCountsResource;
+    type Success = ::schematic_definitions::openai::BetaTokenCountsResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<TokenCountsResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::BetaTokenCountsResource,
+    >;
     const ENDPOINT_ID: &'static str = "Getinputtokencounts";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/responses/input_tokens".to_string();
-        let query: Vec<(String, String)> = Vec::new();
-        let headers: Vec<(String, String)> = vec![];
+        let mut query: Vec<(String, String)> = Vec::new();
+        if let Some(ref value) = self.beta {
+            query.push(("beta".to_string(), value.to_string()));
+        }
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -15862,44 +16314,85 @@ impl schematic_runtime::EndpointSpec for GetinputtokencountsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CompactconversationRequest, CompactResponseMethodPublicBody};
+/// use schematic_schema::openai::CompactconversationRequest;
 ///
-/// let body = CompactResponseMethodPublicBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::BetaCompactResponseMethodPublicBody = Default::default();
 /// let request = CompactconversationRequest::new(body)
+///     .with_beta(/* value */)
+///     .with_openai_beta(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompactconversationRequest {
+    /// Query parameter: beta
+    pub beta: Option<bool>,
+    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
+    #[serde(rename = "openai-beta")]
+    pub openai_beta: Option<Vec<String>>,
     /// Request body
-    pub body: CompactResponseMethodPublicBody,
+    pub body: ::schematic_definitions::openai::BetaCompactResponseMethodPublicBody,
 }
 impl CompactconversationRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CompactResponseMethodPublicBody) -> Self {
-        Self { body }
+    pub fn new(
+        body: ::schematic_definitions::openai::BetaCompactResponseMethodPublicBody,
+    ) -> Self {
+        Self {
+            beta: None,
+            openai_beta: None,
+            body,
+        }
+    }
+    /// Sets the `beta` query parameter.
+    pub fn with_beta(mut self, value: bool) -> Self {
+        self.beta = Some(value);
+        self
+    }
+    /// Sets the `openai-beta` header parameter.
+    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
+        self.openai_beta = Some(value);
+        self
     }
 }
-impl From<CompactResponseMethodPublicBody> for CompactconversationRequest {
-    fn from(body: CompactResponseMethodPublicBody) -> Self {
-        Self { body }
+impl From<::schematic_definitions::openai::BetaCompactResponseMethodPublicBody>
+for CompactconversationRequest {
+    fn from(
+        body: ::schematic_definitions::openai::BetaCompactResponseMethodPublicBody,
+    ) -> Self {
+        Self {
+            beta: None,
+            openai_beta: None,
+            body,
+        }
     }
 }
 impl schematic_runtime::EndpointSpec for CompactconversationRequest {
     type Api = OpenAIApi;
-    type Success = CompactResource;
+    type Success = ::schematic_definitions::openai::BetaCompactResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CompactResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::BetaCompactResource,
+    >;
     const ENDPOINT_ID: &'static str = "Compactconversation";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/responses/compact".to_string();
-        let query: Vec<(String, String)> = Vec::new();
-        let headers: Vec<(String, String)> = vec![];
+        let mut query: Vec<(String, String)> = Vec::new();
+        if let Some(ref value) = self.beta {
+            query.push(("beta".to_string(), value.to_string()));
+        }
+        let mut headers: Vec<(String, String)> = vec![];
+        if let Some(ref value) = self.openai_beta {
+            let value = value
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
+            headers.push(("openai-beta".to_string(), value));
+        }
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -15945,9 +16438,11 @@ impl ListSkillsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListSkillsRequest {
     type Api = OpenAIApi;
-    type Success = SkillListResource;
+    type Success = ::schematic_definitions::openai::SkillListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SkillListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::SkillListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListSkills";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -15973,36 +16468,35 @@ impl schematic_runtime::EndpointSpec for ListSkillsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateSkillRequest, CreateSkillBody};
+/// use schematic_schema::openai::CreateSkillRequest;
 ///
-/// let body = CreateSkillBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateSkillBody = Default::default();
 /// let request = CreateSkillRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSkillRequest {
     /// Request body
-    pub body: CreateSkillBody,
+    pub body: ::schematic_definitions::openai::CreateSkillBody,
 }
 impl CreateSkillRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateSkillBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateSkillBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateSkillBody> for CreateSkillRequest {
-    fn from(body: CreateSkillBody) -> Self {
+impl From<::schematic_definitions::openai::CreateSkillBody> for CreateSkillRequest {
+    fn from(body: ::schematic_definitions::openai::CreateSkillBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateSkillRequest {
     type Api = OpenAIApi;
-    type Success = SkillResource;
+    type Success = ::schematic_definitions::openai::SkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SkillResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::SkillResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateSkill";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -16062,9 +16556,11 @@ impl From<String> for GetSkillRequest {
 }
 impl schematic_runtime::EndpointSpec for GetSkillRequest {
     type Api = OpenAIApi;
-    type Success = SkillResource;
+    type Success = ::schematic_definitions::openai::SkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SkillResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::SkillResource,
+    >;
     const ENDPOINT_ID: &'static str = "GetSkill";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16089,12 +16585,9 @@ impl schematic_runtime::EndpointSpec for GetSkillRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{UpdateSkillDefaultVersionRequest, SetDefaultSkillVersionBody};
+/// use schematic_schema::openai::UpdateSkillDefaultVersionRequest;
 ///
-/// let body = SetDefaultSkillVersionBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::SetDefaultSkillVersionBody = Default::default();
 /// let request = UpdateSkillDefaultVersionRequest::new("skill_id_value", body)
 ///;
 /// ```
@@ -16103,11 +16596,14 @@ pub struct UpdateSkillDefaultVersionRequest {
     /// Path parameter: skill_id
     pub skill_id: String,
     /// Request body
-    pub body: SetDefaultSkillVersionBody,
+    pub body: ::schematic_definitions::openai::SetDefaultSkillVersionBody,
 }
 impl UpdateSkillDefaultVersionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(skill_id: impl Into<String>, body: SetDefaultSkillVersionBody) -> Self {
+    pub fn new(
+        skill_id: impl Into<String>,
+        body: ::schematic_definitions::openai::SetDefaultSkillVersionBody,
+    ) -> Self {
         Self {
             skill_id: skill_id.into(),
             body,
@@ -16116,9 +16612,11 @@ impl UpdateSkillDefaultVersionRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateSkillDefaultVersionRequest {
     type Api = OpenAIApi;
-    type Success = SkillResource;
+    type Success = ::schematic_definitions::openai::SkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SkillResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::SkillResource,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateSkillDefaultVersion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -16180,9 +16678,11 @@ impl From<String> for DeleteSkillRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteSkillRequest {
     type Api = OpenAIApi;
-    type Success = DeletedSkillResource;
+    type Success = ::schematic_definitions::openai::DeletedSkillResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedSkillResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedSkillResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteSkill";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -16237,9 +16737,9 @@ impl From<String> for GetSkillContentRequest {
 }
 impl schematic_runtime::EndpointSpec for GetSkillContentRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "GetSkillContent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16309,9 +16809,11 @@ impl From<String> for ListSkillVersionsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
     type Api = OpenAIApi;
-    type Success = SkillVersionListResource;
+    type Success = ::schematic_definitions::openai::SkillVersionListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SkillVersionListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::SkillVersionListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListSkillVersions";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16339,12 +16841,9 @@ impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateSkillVersionRequest, CreateSkillVersionBody};
+/// use schematic_schema::openai::CreateSkillVersionRequest;
 ///
-/// let body = CreateSkillVersionBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateSkillVersionBody = Default::default();
 /// let request = CreateSkillVersionRequest::new("skill_id_value", body)
 ///;
 /// ```
@@ -16353,11 +16852,14 @@ pub struct CreateSkillVersionRequest {
     /// Path parameter: skill_id
     pub skill_id: String,
     /// Request body
-    pub body: CreateSkillVersionBody,
+    pub body: ::schematic_definitions::openai::CreateSkillVersionBody,
 }
 impl CreateSkillVersionRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(skill_id: impl Into<String>, body: CreateSkillVersionBody) -> Self {
+    pub fn new(
+        skill_id: impl Into<String>,
+        body: ::schematic_definitions::openai::CreateSkillVersionBody,
+    ) -> Self {
         Self {
             skill_id: skill_id.into(),
             body,
@@ -16366,9 +16868,11 @@ impl CreateSkillVersionRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateSkillVersionRequest {
     type Api = OpenAIApi;
-    type Success = SkillVersionResource;
+    type Success = ::schematic_definitions::openai::SkillVersionResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SkillVersionResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::SkillVersionResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateSkillVersion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -16423,9 +16927,11 @@ impl GetSkillVersionRequest {
 }
 impl schematic_runtime::EndpointSpec for GetSkillVersionRequest {
     type Api = OpenAIApi;
-    type Success = SkillVersionResource;
+    type Success = ::schematic_definitions::openai::SkillVersionResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SkillVersionResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::SkillVersionResource,
+    >;
     const ENDPOINT_ID: &'static str = "GetSkillVersion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16474,9 +16980,11 @@ impl DeleteSkillVersionRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteSkillVersionRequest {
     type Api = OpenAIApi;
-    type Success = DeletedSkillVersionResource;
+    type Success = ::schematic_definitions::openai::DeletedSkillVersionResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedSkillVersionResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedSkillVersionResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteSkillVersion";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -16525,9 +17033,9 @@ impl GetSkillVersionContentRequest {
 }
 impl schematic_runtime::EndpointSpec for GetSkillVersionContentRequest {
     type Api = OpenAIApi;
-    type Success = serde_json::Value;
+    type Success = ::serde_json::Value;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<serde_json::Value>;
+    type Decoder = schematic_runtime::Json<::serde_json::Value>;
     const ENDPOINT_ID: &'static str = "GetSkillVersionContent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16585,9 +17093,11 @@ impl From<String> for CancelChatSessionMethodRequest {
 }
 impl schematic_runtime::EndpointSpec for CancelChatSessionMethodRequest {
     type Api = OpenAIApi;
-    type Success = ChatSessionResource;
+    type Success = ::schematic_definitions::openai::ChatSessionResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ChatSessionResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ChatSessionResource,
+    >;
     const ENDPOINT_ID: &'static str = "CancelChatSessionMethod";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -16613,36 +17123,36 @@ impl schematic_runtime::EndpointSpec for CancelChatSessionMethodRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::openai::{CreateChatSessionMethodRequest, CreateChatSessionBody};
+/// use schematic_schema::openai::CreateChatSessionMethodRequest;
 ///
-/// let body = CreateChatSessionBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::openai::CreateChatSessionBody = Default::default();
 /// let request = CreateChatSessionMethodRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateChatSessionMethodRequest {
     /// Request body
-    pub body: CreateChatSessionBody,
+    pub body: ::schematic_definitions::openai::CreateChatSessionBody,
 }
 impl CreateChatSessionMethodRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateChatSessionBody) -> Self {
+    pub fn new(body: ::schematic_definitions::openai::CreateChatSessionBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateChatSessionBody> for CreateChatSessionMethodRequest {
-    fn from(body: CreateChatSessionBody) -> Self {
+impl From<::schematic_definitions::openai::CreateChatSessionBody>
+for CreateChatSessionMethodRequest {
+    fn from(body: ::schematic_definitions::openai::CreateChatSessionBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
     type Api = OpenAIApi;
-    type Success = ChatSessionResource;
+    type Success = ::schematic_definitions::openai::ChatSessionResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ChatSessionResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ChatSessionResource,
+    >;
     const ENDPOINT_ID: &'static str = "CreateChatSessionMethod";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -16717,9 +17227,11 @@ impl From<String> for ListThreadItemsMethodRequest {
 }
 impl schematic_runtime::EndpointSpec for ListThreadItemsMethodRequest {
     type Api = OpenAIApi;
-    type Success = ThreadItemListResource;
+    type Success = ::schematic_definitions::openai::ThreadItemListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ThreadItemListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ThreadItemListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListThreadItemsMethod";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16780,9 +17292,11 @@ impl From<String> for GetThreadMethodRequest {
 }
 impl schematic_runtime::EndpointSpec for GetThreadMethodRequest {
     type Api = OpenAIApi;
-    type Success = ThreadResource;
+    type Success = ::schematic_definitions::openai::ThreadResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ThreadResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ThreadResource,
+    >;
     const ENDPOINT_ID: &'static str = "GetThreadMethod";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16839,9 +17353,11 @@ impl From<String> for DeleteThreadMethodRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
     type Api = OpenAIApi;
-    type Success = DeletedThreadResource;
+    type Success = ::schematic_definitions::openai::DeletedThreadResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DeletedThreadResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::DeletedThreadResource,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteThreadMethod";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -16898,9 +17414,11 @@ impl ListThreadsMethodRequest {
 }
 impl schematic_runtime::EndpointSpec for ListThreadsMethodRequest {
     type Api = OpenAIApi;
-    type Success = ThreadListResource;
+    type Success = ::schematic_definitions::openai::ThreadListResource;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ThreadListResource>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::openai::ThreadListResource,
+    >;
     const ENDPOINT_ID: &'static str = "ListThreadsMethod";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -16921,676 +17439,6 @@ impl schematic_runtime::EndpointSpec for ListThreadsMethodRequest {
             query,
             headers,
             body: schematic_runtime::RequestBody::Empty,
-        })
-    }
-}
-/// Request for `BetaCreateResponse` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::openai::{BetaCreateResponseRequest, BetaCreateResponse};
-///
-/// let body = BetaCreateResponse {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = BetaCreateResponseRequest::new(body)
-///     .with_openai_beta(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BetaCreateResponseRequest {
-    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
-    #[serde(rename = "openai-beta")]
-    pub openai_beta: Option<Vec<String>>,
-    /// Request body
-    pub body: BetaCreateResponse,
-}
-impl BetaCreateResponseRequest {
-    /// Creates a new request with the required path parameters and body.
-    pub fn new(body: BetaCreateResponse) -> Self {
-        Self { openai_beta: None, body }
-    }
-    /// Sets the `openai-beta` header parameter.
-    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
-        self.openai_beta = Some(value);
-        self
-    }
-}
-impl From<BetaCreateResponse> for BetaCreateResponseRequest {
-    fn from(body: BetaCreateResponse) -> Self {
-        Self { openai_beta: None, body }
-    }
-}
-impl schematic_runtime::EndpointSpec for BetaCreateResponseRequest {
-    type Api = OpenAIApi;
-    type Success = BetaResponse;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BetaResponse>;
-    const ENDPOINT_ID: &'static str = "BetaCreateResponse";
-    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
-    fn into_parts(
-        self,
-    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
-        let path = "/responses?beta=true".to_string();
-        let query: Vec<(String, String)> = Vec::new();
-        let mut headers: Vec<(String, String)> = vec![];
-        if let Some(ref value) = self.openai_beta {
-            let value = value
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
-            headers.push(("openai-beta".to_string(), value));
-        }
-        Ok(schematic_runtime::RequestParts {
-            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
-            path,
-            query,
-            headers,
-            body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|_| {
-                        schematic_runtime::InvalidArgument::new(
-                            "the request body cannot be serialized as JSON",
-                        )
-                    })?,
-            ),
-        })
-    }
-}
-/// Request for `BetaGetResponse` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::openai::BetaGetResponseRequest;
-///
-/// let request = BetaGetResponseRequest::new("response_id_value")
-///     .with_include(/* value */)
-///     .with_stream(/* value */)
-///     .with_starting_after(/* value */)
-///     .with_include_obfuscation(/* value */)
-///     .with_openai_beta(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BetaGetResponseRequest {
-    /// Path parameter: response_id
-    pub response_id: String,
-    /** Query parameter: Additional fields to include in the response. See the `include`
-parameter for Response creation above for more information.
-*/
-    pub include: Option<Vec<serde_json::Value>>,
-    /** Query parameter: If set to true, the model response data will be streamed to the client
-as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).
-See the [Streaming section below](/docs/api-reference/responses-streaming)
-for more information.
-*/
-    pub stream: Option<bool>,
-    /** Query parameter: The sequence number of the event after which to start streaming.
-*/
-    pub starting_after: Option<i64>,
-    /** Query parameter: When true, stream obfuscation will be enabled. Stream obfuscation adds
-random characters to an `obfuscation` field on streaming delta events
-to normalize payload sizes as a mitigation to certain side-channel
-attacks. These obfuscation fields are included by default, but add a
-small amount of overhead to the data stream. You can set
-`include_obfuscation` to false to optimize for bandwidth if you trust
-the network links between your application and the OpenAI API.
-*/
-    pub include_obfuscation: Option<bool>,
-    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
-    #[serde(rename = "openai-beta")]
-    pub openai_beta: Option<Vec<String>>,
-}
-impl BetaGetResponseRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(response_id: impl Into<String>) -> Self {
-        Self {
-            response_id: response_id.into(),
-            include: None,
-            stream: None,
-            starting_after: None,
-            include_obfuscation: None,
-            openai_beta: None,
-        }
-    }
-    /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.include = Some(value);
-        self
-    }
-    /// Sets the `stream` query parameter.
-    pub fn with_stream(mut self, value: bool) -> Self {
-        self.stream = Some(value);
-        self
-    }
-    /// Sets the `starting_after` query parameter.
-    pub fn with_starting_after(mut self, value: i64) -> Self {
-        self.starting_after = Some(value);
-        self
-    }
-    /// Sets the `include_obfuscation` query parameter.
-    pub fn with_include_obfuscation(mut self, value: bool) -> Self {
-        self.include_obfuscation = Some(value);
-        self
-    }
-    /// Sets the `openai-beta` header parameter.
-    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
-        self.openai_beta = Some(value);
-        self
-    }
-}
-impl From<&str> for BetaGetResponseRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            response_id: param.to_string(),
-            include: None,
-            stream: None,
-            starting_after: None,
-            include_obfuscation: None,
-            openai_beta: None,
-        }
-    }
-}
-impl From<String> for BetaGetResponseRequest {
-    fn from(param: String) -> Self {
-        Self {
-            response_id: param,
-            include: None,
-            stream: None,
-            starting_after: None,
-            include_obfuscation: None,
-            openai_beta: None,
-        }
-    }
-}
-impl schematic_runtime::EndpointSpec for BetaGetResponseRequest {
-    type Api = OpenAIApi;
-    type Success = BetaResponse;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BetaResponse>;
-    const ENDPOINT_ID: &'static str = "BetaGetResponse";
-    const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
-    fn into_parts(
-        self,
-    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
-        let path = format!(
-            "/responses/{}?beta=true", urlencoding::encode(& self.response_id
-            .to_string())
-        );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
-            }
-        }
-        if let Some(ref value) = self.stream {
-            query.push(("stream".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.starting_after {
-            query.push(("starting_after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.include_obfuscation {
-            query.push(("include_obfuscation".to_string(), value.to_string()));
-        }
-        let mut headers: Vec<(String, String)> = vec![];
-        if let Some(ref value) = self.openai_beta {
-            let value = value
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
-            headers.push(("openai-beta".to_string(), value));
-        }
-        Ok(schematic_runtime::RequestParts {
-            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
-            path,
-            query,
-            headers,
-            body: schematic_runtime::RequestBody::Empty,
-        })
-    }
-}
-/// Request for `BetaDeleteResponse` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::openai::BetaDeleteResponseRequest;
-///
-/// let request = BetaDeleteResponseRequest::new("response_id_value")
-///     .with_openai_beta(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BetaDeleteResponseRequest {
-    /// Path parameter: response_id
-    pub response_id: String,
-    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
-    #[serde(rename = "openai-beta")]
-    pub openai_beta: Option<Vec<String>>,
-}
-impl BetaDeleteResponseRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(response_id: impl Into<String>) -> Self {
-        Self {
-            response_id: response_id.into(),
-            openai_beta: None,
-        }
-    }
-    /// Sets the `openai-beta` header parameter.
-    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
-        self.openai_beta = Some(value);
-        self
-    }
-}
-impl From<&str> for BetaDeleteResponseRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            response_id: param.to_string(),
-            openai_beta: None,
-        }
-    }
-}
-impl From<String> for BetaDeleteResponseRequest {
-    fn from(param: String) -> Self {
-        Self {
-            response_id: param,
-            openai_beta: None,
-        }
-    }
-}
-impl schematic_runtime::EndpointSpec for BetaDeleteResponseRequest {
-    type Api = OpenAIApi;
-    type Success = ();
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Empty;
-    const ENDPOINT_ID: &'static str = "BetaDeleteResponse";
-    const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
-    fn into_parts(
-        self,
-    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
-        let path = format!(
-            "/responses/{}?beta=true", urlencoding::encode(& self.response_id
-            .to_string())
-        );
-        let query: Vec<(String, String)> = Vec::new();
-        let mut headers: Vec<(String, String)> = vec![];
-        if let Some(ref value) = self.openai_beta {
-            let value = value
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
-            headers.push(("openai-beta".to_string(), value));
-        }
-        Ok(schematic_runtime::RequestParts {
-            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
-            path,
-            query,
-            headers,
-            body: schematic_runtime::RequestBody::Empty,
-        })
-    }
-}
-/// Request for `BetaCancelResponse` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::openai::BetaCancelResponseRequest;
-///
-/// let request = BetaCancelResponseRequest::new("response_id_value")
-///     .with_openai_beta(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BetaCancelResponseRequest {
-    /// Path parameter: response_id
-    pub response_id: String,
-    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
-    #[serde(rename = "openai-beta")]
-    pub openai_beta: Option<Vec<String>>,
-}
-impl BetaCancelResponseRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(response_id: impl Into<String>) -> Self {
-        Self {
-            response_id: response_id.into(),
-            openai_beta: None,
-        }
-    }
-    /// Sets the `openai-beta` header parameter.
-    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
-        self.openai_beta = Some(value);
-        self
-    }
-}
-impl From<&str> for BetaCancelResponseRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            response_id: param.to_string(),
-            openai_beta: None,
-        }
-    }
-}
-impl From<String> for BetaCancelResponseRequest {
-    fn from(param: String) -> Self {
-        Self {
-            response_id: param,
-            openai_beta: None,
-        }
-    }
-}
-impl schematic_runtime::EndpointSpec for BetaCancelResponseRequest {
-    type Api = OpenAIApi;
-    type Success = BetaResponse;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BetaResponse>;
-    const ENDPOINT_ID: &'static str = "BetaCancelResponse";
-    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
-    fn into_parts(
-        self,
-    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
-        let path = format!(
-            "/responses/{}/cancel?beta=true", urlencoding::encode(& self.response_id
-            .to_string())
-        );
-        let query: Vec<(String, String)> = Vec::new();
-        let mut headers: Vec<(String, String)> = vec![];
-        if let Some(ref value) = self.openai_beta {
-            let value = value
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
-            headers.push(("openai-beta".to_string(), value));
-        }
-        Ok(schematic_runtime::RequestParts {
-            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
-            path,
-            query,
-            headers,
-            body: schematic_runtime::RequestBody::Empty,
-        })
-    }
-}
-/// Request for `BetaCompactconversation` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::openai::{BetaCompactconversationRequest, BetaCompactResponseMethodPublicBody};
-///
-/// let body = BetaCompactResponseMethodPublicBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = BetaCompactconversationRequest::new(body)
-///     .with_openai_beta(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BetaCompactconversationRequest {
-    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
-    #[serde(rename = "openai-beta")]
-    pub openai_beta: Option<Vec<String>>,
-    /// Request body
-    pub body: BetaCompactResponseMethodPublicBody,
-}
-impl BetaCompactconversationRequest {
-    /// Creates a new request with the required path parameters and body.
-    pub fn new(body: BetaCompactResponseMethodPublicBody) -> Self {
-        Self { openai_beta: None, body }
-    }
-    /// Sets the `openai-beta` header parameter.
-    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
-        self.openai_beta = Some(value);
-        self
-    }
-}
-impl From<BetaCompactResponseMethodPublicBody> for BetaCompactconversationRequest {
-    fn from(body: BetaCompactResponseMethodPublicBody) -> Self {
-        Self { openai_beta: None, body }
-    }
-}
-impl schematic_runtime::EndpointSpec for BetaCompactconversationRequest {
-    type Api = OpenAIApi;
-    type Success = BetaCompactResource;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BetaCompactResource>;
-    const ENDPOINT_ID: &'static str = "BetaCompactconversation";
-    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
-    fn into_parts(
-        self,
-    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
-        let path = "/responses/compact?beta=true".to_string();
-        let query: Vec<(String, String)> = Vec::new();
-        let mut headers: Vec<(String, String)> = vec![];
-        if let Some(ref value) = self.openai_beta {
-            let value = value
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
-            headers.push(("openai-beta".to_string(), value));
-        }
-        Ok(schematic_runtime::RequestParts {
-            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
-            path,
-            query,
-            headers,
-            body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|_| {
-                        schematic_runtime::InvalidArgument::new(
-                            "the request body cannot be serialized as JSON",
-                        )
-                    })?,
-            ),
-        })
-    }
-}
-/// Request for `BetaListInputItems` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::openai::BetaListInputItemsRequest;
-///
-/// let request = BetaListInputItemsRequest::new("response_id_value")
-///     .with_order(/* value */)
-///     .with_include(/* value */)
-///     .with_openai_beta(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BetaListInputItemsRequest {
-    /// Path parameter: response_id
-    pub response_id: String,
-    /** Query parameter: The order to return the input items in. Default is `desc`.
-- `asc`: Return the input items in ascending order.
-- `desc`: Return the input items in descending order.
-*/
-    pub order: Option<String>,
-    /** Query parameter: Additional fields to include in the response. See the `include`
-parameter for Response creation above for more information.
-*/
-    pub include: Option<Vec<serde_json::Value>>,
-    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
-    #[serde(rename = "openai-beta")]
-    pub openai_beta: Option<Vec<String>>,
-}
-impl BetaListInputItemsRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(response_id: impl Into<String>) -> Self {
-        Self {
-            response_id: response_id.into(),
-            order: None,
-            include: None,
-            openai_beta: None,
-        }
-    }
-    /// Sets the `order` query parameter.
-    pub fn with_order(mut self, value: String) -> Self {
-        self.order = Some(value);
-        self
-    }
-    /// Sets the `include` query parameter.
-    pub fn with_include(mut self, value: Vec<serde_json::Value>) -> Self {
-        self.include = Some(value);
-        self
-    }
-    /// Sets the `openai-beta` header parameter.
-    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
-        self.openai_beta = Some(value);
-        self
-    }
-}
-impl From<&str> for BetaListInputItemsRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            response_id: param.to_string(),
-            order: None,
-            include: None,
-            openai_beta: None,
-        }
-    }
-}
-impl From<String> for BetaListInputItemsRequest {
-    fn from(param: String) -> Self {
-        Self {
-            response_id: param,
-            order: None,
-            include: None,
-            openai_beta: None,
-        }
-    }
-}
-impl schematic_runtime::EndpointSpec for BetaListInputItemsRequest {
-    type Api = OpenAIApi;
-    type Success = BetaResponseItemList;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BetaResponseItemList>;
-    const ENDPOINT_ID: &'static str = "BetaListInputItems";
-    const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
-    fn into_parts(
-        self,
-    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
-        let path = format!(
-            "/responses/{}/input_items?beta=true", urlencoding::encode(& self.response_id
-            .to_string())
-        );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.order {
-            query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref values) = self.include {
-            for value in values {
-                query.push(("include".to_string(), value.to_string()));
-            }
-        }
-        let mut headers: Vec<(String, String)> = vec![];
-        if let Some(ref value) = self.openai_beta {
-            let value = value
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
-            headers.push(("openai-beta".to_string(), value));
-        }
-        Ok(schematic_runtime::RequestParts {
-            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
-            path,
-            query,
-            headers,
-            body: schematic_runtime::RequestBody::Empty,
-        })
-    }
-}
-/// Request for `BetaGetinputtokencounts` endpoint.
-///
-/// ## Example
-///
-/// ```text
-/// use schematic_schema::openai::{BetaGetinputtokencountsRequest, BetaTokenCountsBody};
-///
-/// let body = BetaTokenCountsBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = BetaGetinputtokencountsRequest::new(body)
-///     .with_openai_beta(/* value */)
-///;
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BetaGetinputtokencountsRequest {
-    /// Header parameter `openai-beta`: Optional beta features to enable for this request.
-    #[serde(rename = "openai-beta")]
-    pub openai_beta: Option<Vec<String>>,
-    /// Request body
-    pub body: BetaTokenCountsBody,
-}
-impl BetaGetinputtokencountsRequest {
-    /// Creates a new request with the required path parameters and body.
-    pub fn new(body: BetaTokenCountsBody) -> Self {
-        Self { openai_beta: None, body }
-    }
-    /// Sets the `openai-beta` header parameter.
-    pub fn with_openai_beta(mut self, value: Vec<String>) -> Self {
-        self.openai_beta = Some(value);
-        self
-    }
-}
-impl From<BetaTokenCountsBody> for BetaGetinputtokencountsRequest {
-    fn from(body: BetaTokenCountsBody) -> Self {
-        Self { openai_beta: None, body }
-    }
-}
-impl schematic_runtime::EndpointSpec for BetaGetinputtokencountsRequest {
-    type Api = OpenAIApi;
-    type Success = BetaTokenCountsResource;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BetaTokenCountsResource>;
-    const ENDPOINT_ID: &'static str = "BetaGetinputtokencounts";
-    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
-    fn into_parts(
-        self,
-    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
-        let path = "/responses/input_tokens?beta=true".to_string();
-        let query: Vec<(String, String)> = Vec::new();
-        let mut headers: Vec<(String, String)> = vec![];
-        if let Some(ref value) = self.openai_beta {
-            let value = value
-                .iter()
-                .map(|item| item.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("openai-beta"));
-            headers.push(("openai-beta".to_string(), value));
-        }
-        Ok(schematic_runtime::RequestParts {
-            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
-            path,
-            query,
-            headers,
-            body: schematic_runtime::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|_| {
-                        schematic_runtime::InvalidArgument::new(
-                            "the request body cannot be serialized as JSON",
-                        )
-                    })?,
-            ),
         })
     }
 }
@@ -20149,7 +19997,7 @@ impl schematic_runtime::pager::ResumeAfter for ListProjectUserRoleAssignmentsReq
 }
 impl schematic_runtime::pager::PageSizeKnob for ListProjectUserRoleAssignmentsRequest {}
 impl schematic_runtime::pager::Paginated for ListInputItemsRequest {
-    type Item = ItemResource;
+    type Item = BetaItemResource;
     type Kind = schematic_runtime::pager::CursorKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -20686,58 +20534,6 @@ impl schematic_runtime::pager::ResumeBefore for ListThreadsMethodRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListThreadsMethodRequest {}
 impl schematic_runtime::pager::HasPrev for ListThreadsMethodRequest {}
-impl schematic_runtime::pager::Paginated for BetaListInputItemsRequest {
-    type Item = BetaItemResource;
-    type Kind = schematic_runtime::pager::CursorKind;
-    type Session = schematic_runtime::pager::NoSession;
-    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
-        kind: schematic_runtime::pager::spec::Kind::Cursor {
-            forward: schematic_runtime::pager::spec::CursorLeg {
-                parts: &[
-                    schematic_runtime::pager::spec::CursorPart {
-                        param: schematic_runtime::pager::spec::Input::Query("after"),
-                        source: schematic_runtime::pager::spec::CursorSource::Field(
-                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
-                        ),
-                    },
-                ],
-                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
-            },
-            backward: None,
-            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
-                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
-                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
-            }),
-            resumable: true,
-        },
-        size: Some(schematic_runtime::pager::spec::PageSize {
-            param: schematic_runtime::pager::spec::Input::Query("limit"),
-            server_default: Some(20),
-            sent_default: None,
-            min: 1,
-            max: Some(100),
-            adjustable: false,
-        }),
-        constants: &[],
-        total: None,
-        terminal_values: &[],
-        follow_up: None,
-        session: None,
-        partition: None,
-    };
-    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
-        record: &[
-            schematic_runtime::pager::spec::Step::Key("data"),
-            schematic_runtime::pager::spec::Step::Each,
-        ],
-        projection: &[],
-    };
-    const PATH: &'static str = "/responses/{response_id}/input_items?beta=true";
-}
-impl schematic_runtime::pager::ResumeAfter for BetaListInputItemsRequest {
-    type Cursor = String;
-}
-impl schematic_runtime::pager::PageSizeKnob for BetaListInputItemsRequest {}
 /// A call to the `CreateSpeech` endpoint, returned by [`OpenAI::create_speech`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
@@ -33897,6 +33693,14 @@ pub struct CreateResponseCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, CreateResponseRequest>,
 );
 impl<'a> CreateResponseCall<'a> {
+    /// Sets the `beta` query parameter (`bool`).
+    pub fn beta(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_beta(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -33964,6 +33768,14 @@ impl<'a> GetResponseCall<'a> {
     pub fn include_obfuscation(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_include_obfuscation(value)))
     }
+    /// Sets the `beta` query parameter (`bool`).
+    pub fn beta(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_beta(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -34013,6 +33825,14 @@ pub struct DeleteResponseCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, DeleteResponseRequest>,
 );
 impl<'a> DeleteResponseCall<'a> {
+    /// Sets the `beta` query parameter (`bool`).
+    pub fn beta(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_beta(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -34064,6 +33884,14 @@ pub struct CancelResponseCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, CancelResponseRequest>,
 );
 impl<'a> CancelResponseCall<'a> {
+    /// Sets the `beta` query parameter (`bool`).
+    pub fn beta(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_beta(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -34124,6 +33952,14 @@ impl<'a> ListInputItemsCall<'a> {
     /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
     pub fn include(self, value: Vec<serde_json::Value>) -> Self {
         Self(self.0.map_request(|request| request.with_include(value)))
+    }
+    /// Sets the `beta` query parameter (`bool`).
+    pub fn beta(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_beta(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -36676,6 +36512,14 @@ pub struct GetinputtokencountsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetinputtokencountsRequest>,
 );
 impl<'a> GetinputtokencountsCall<'a> {
+    /// Sets the `beta` query parameter (`bool`).
+    pub fn beta(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_beta(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -36727,6 +36571,14 @@ pub struct CompactconversationCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, CompactconversationRequest>,
 );
 impl<'a> CompactconversationCall<'a> {
+    /// Sets the `beta` query parameter (`bool`).
+    pub fn beta(self, value: bool) -> Self {
+        Self(self.0.map_request(|request| request.with_beta(value)))
+    }
+    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn openai_beta(self, value: Vec<String>) -> Self {
+        Self(self.0.map_request(|request| request.with_openai_beta(value)))
+    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -37880,469 +37732,6 @@ impl<'a> ::core::future::IntoFuture for ListThreadsMethodCall<'a> {
         ::core::future::IntoFuture::into_future(self.0)
     }
 }
-/// A call to the `BetaCreateResponse` endpoint, returned by [`OpenAI::beta_create_response`].
-///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
-#[derive(Clone, Debug)]
-#[must_use = "a call sends nothing until it is awaited"]
-pub struct BetaCreateResponseCall<'a>(
-    schematic_runtime::Call<'a, OpenAIApi, BetaCreateResponseRequest>,
-);
-impl<'a> BetaCreateResponseCall<'a> {
-    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn openai_beta(self, value: Vec<String>) -> Self {
-        Self(self.0.map_request(|request| request.with_openai_beta(value)))
-    }
-    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
-    pub fn anonymous(self) -> Self {
-        Self(self.0.anonymous())
-    }
-    /// See [`Call::credential`](schematic_runtime::Call::credential).
-    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
-        Self(self.0.credential(credential))
-    }
-    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
-    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
-        Self(self.0.deadline(deadline))
-    }
-    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
-    /// last: this call's setters are not available on the result.
-    pub fn full(
-        self,
-    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaCreateResponseRequest> {
-        self.0.full()
-    }
-    /// See [`Call::build`](schematic_runtime::Call::build).
-    ///
-    /// ## Errors
-    ///
-    /// Returns `InvalidArgument` when the send would refuse the call's
-    /// arguments: the request cannot be encoded, a header is invalid,
-    /// or the credential cannot be placed.
-    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
-        self.0.build().map(Self)
-    }
-}
-impl<'a> ::core::future::IntoFuture for BetaCreateResponseCall<'a> {
-    type Output = <schematic_runtime::Call<
-        'a,
-        OpenAIApi,
-        BetaCreateResponseRequest,
-    > as ::core::future::IntoFuture>::Output;
-    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
-    #[inline]
-    fn into_future(self) -> Self::IntoFuture {
-        ::core::future::IntoFuture::into_future(self.0)
-    }
-}
-/// A call to the `BetaGetResponse` endpoint, returned by [`OpenAI::beta_get_response`].
-///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
-#[derive(Clone, Debug)]
-#[must_use = "a call sends nothing until it is awaited"]
-pub struct BetaGetResponseCall<'a>(
-    schematic_runtime::Call<'a, OpenAIApi, BetaGetResponseRequest>,
-);
-impl<'a> BetaGetResponseCall<'a> {
-    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
-    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_include(value)))
-    }
-    /// Sets the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
-    pub fn stream(self, value: bool) -> Self {
-        Self(self.0.map_request(|request| request.with_stream(value)))
-    }
-    /// Sets the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
-    pub fn starting_after(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_starting_after(value)))
-    }
-    /// Sets the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
-    pub fn include_obfuscation(self, value: bool) -> Self {
-        Self(self.0.map_request(|request| request.with_include_obfuscation(value)))
-    }
-    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn openai_beta(self, value: Vec<String>) -> Self {
-        Self(self.0.map_request(|request| request.with_openai_beta(value)))
-    }
-    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
-    pub fn anonymous(self) -> Self {
-        Self(self.0.anonymous())
-    }
-    /// See [`Call::credential`](schematic_runtime::Call::credential).
-    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
-        Self(self.0.credential(credential))
-    }
-    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
-    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
-        Self(self.0.deadline(deadline))
-    }
-    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
-    /// last: this call's setters are not available on the result.
-    pub fn full(
-        self,
-    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaGetResponseRequest> {
-        self.0.full()
-    }
-    /// See [`Call::build`](schematic_runtime::Call::build).
-    ///
-    /// ## Errors
-    ///
-    /// Returns `InvalidArgument` when the send would refuse the call's
-    /// arguments: the request cannot be encoded, a header is invalid,
-    /// or the credential cannot be placed.
-    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
-        self.0.build().map(Self)
-    }
-}
-impl<'a> ::core::future::IntoFuture for BetaGetResponseCall<'a> {
-    type Output = <schematic_runtime::Call<
-        'a,
-        OpenAIApi,
-        BetaGetResponseRequest,
-    > as ::core::future::IntoFuture>::Output;
-    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
-    #[inline]
-    fn into_future(self) -> Self::IntoFuture {
-        ::core::future::IntoFuture::into_future(self.0)
-    }
-}
-/// A call to the `BetaDeleteResponse` endpoint, returned by [`OpenAI::beta_delete_response`].
-///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
-#[derive(Clone, Debug)]
-#[must_use = "a call sends nothing until it is awaited"]
-pub struct BetaDeleteResponseCall<'a>(
-    schematic_runtime::Call<'a, OpenAIApi, BetaDeleteResponseRequest>,
-);
-impl<'a> BetaDeleteResponseCall<'a> {
-    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn openai_beta(self, value: Vec<String>) -> Self {
-        Self(self.0.map_request(|request| request.with_openai_beta(value)))
-    }
-    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
-    pub fn anonymous(self) -> Self {
-        Self(self.0.anonymous())
-    }
-    /// See [`Call::credential`](schematic_runtime::Call::credential).
-    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
-        Self(self.0.credential(credential))
-    }
-    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
-    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
-        Self(self.0.deadline(deadline))
-    }
-    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
-    /// last: this call's setters are not available on the result.
-    pub fn full(
-        self,
-    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaDeleteResponseRequest> {
-        self.0.full()
-    }
-    /// See [`Call::build`](schematic_runtime::Call::build).
-    ///
-    /// ## Errors
-    ///
-    /// Returns `InvalidArgument` when the send would refuse the call's
-    /// arguments: the request cannot be encoded, a header is invalid,
-    /// or the credential cannot be placed.
-    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
-        self.0.build().map(Self)
-    }
-}
-impl<'a> ::core::future::IntoFuture for BetaDeleteResponseCall<'a> {
-    type Output = <schematic_runtime::Call<
-        'a,
-        OpenAIApi,
-        BetaDeleteResponseRequest,
-    > as ::core::future::IntoFuture>::Output;
-    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
-    #[inline]
-    fn into_future(self) -> Self::IntoFuture {
-        ::core::future::IntoFuture::into_future(self.0)
-    }
-}
-/// A call to the `BetaCancelResponse` endpoint, returned by [`OpenAI::beta_cancel_response`].
-///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
-#[derive(Clone, Debug)]
-#[must_use = "a call sends nothing until it is awaited"]
-pub struct BetaCancelResponseCall<'a>(
-    schematic_runtime::Call<'a, OpenAIApi, BetaCancelResponseRequest>,
-);
-impl<'a> BetaCancelResponseCall<'a> {
-    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn openai_beta(self, value: Vec<String>) -> Self {
-        Self(self.0.map_request(|request| request.with_openai_beta(value)))
-    }
-    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
-    pub fn anonymous(self) -> Self {
-        Self(self.0.anonymous())
-    }
-    /// See [`Call::credential`](schematic_runtime::Call::credential).
-    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
-        Self(self.0.credential(credential))
-    }
-    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
-    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
-        Self(self.0.deadline(deadline))
-    }
-    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
-    /// last: this call's setters are not available on the result.
-    pub fn full(
-        self,
-    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaCancelResponseRequest> {
-        self.0.full()
-    }
-    /// See [`Call::build`](schematic_runtime::Call::build).
-    ///
-    /// ## Errors
-    ///
-    /// Returns `InvalidArgument` when the send would refuse the call's
-    /// arguments: the request cannot be encoded, a header is invalid,
-    /// or the credential cannot be placed.
-    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
-        self.0.build().map(Self)
-    }
-}
-impl<'a> ::core::future::IntoFuture for BetaCancelResponseCall<'a> {
-    type Output = <schematic_runtime::Call<
-        'a,
-        OpenAIApi,
-        BetaCancelResponseRequest,
-    > as ::core::future::IntoFuture>::Output;
-    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
-    #[inline]
-    fn into_future(self) -> Self::IntoFuture {
-        ::core::future::IntoFuture::into_future(self.0)
-    }
-}
-/// A call to the `BetaCompactconversation` endpoint, returned by [`OpenAI::beta_compactconversation`].
-///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
-#[derive(Clone, Debug)]
-#[must_use = "a call sends nothing until it is awaited"]
-pub struct BetaCompactconversationCall<'a>(
-    schematic_runtime::Call<'a, OpenAIApi, BetaCompactconversationRequest>,
-);
-impl<'a> BetaCompactconversationCall<'a> {
-    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn openai_beta(self, value: Vec<String>) -> Self {
-        Self(self.0.map_request(|request| request.with_openai_beta(value)))
-    }
-    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
-    pub fn anonymous(self) -> Self {
-        Self(self.0.anonymous())
-    }
-    /// See [`Call::credential`](schematic_runtime::Call::credential).
-    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
-        Self(self.0.credential(credential))
-    }
-    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
-    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
-        Self(self.0.deadline(deadline))
-    }
-    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
-    /// last: this call's setters are not available on the result.
-    pub fn full(
-        self,
-    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaCompactconversationRequest> {
-        self.0.full()
-    }
-    /// See [`Call::build`](schematic_runtime::Call::build).
-    ///
-    /// ## Errors
-    ///
-    /// Returns `InvalidArgument` when the send would refuse the call's
-    /// arguments: the request cannot be encoded, a header is invalid,
-    /// or the credential cannot be placed.
-    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
-        self.0.build().map(Self)
-    }
-}
-impl<'a> ::core::future::IntoFuture for BetaCompactconversationCall<'a> {
-    type Output = <schematic_runtime::Call<
-        'a,
-        OpenAIApi,
-        BetaCompactconversationRequest,
-    > as ::core::future::IntoFuture>::Output;
-    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
-    #[inline]
-    fn into_future(self) -> Self::IntoFuture {
-        ::core::future::IntoFuture::into_future(self.0)
-    }
-}
-/// A call to the `BetaListInputItems` endpoint, returned by [`OpenAI::beta_list_input_items`].
-///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
-///
-/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
-#[derive(Clone, Debug)]
-#[must_use = "a call sends nothing until it is awaited"]
-pub struct BetaListInputItemsCall<'a>(
-    schematic_runtime::Call<'a, OpenAIApi, BetaListInputItemsRequest>,
-);
-impl<'a> BetaListInputItemsCall<'a> {
-    /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    pub fn order(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
-    pub fn include(self, value: Vec<serde_json::Value>) -> Self {
-        Self(self.0.map_request(|request| request.with_include(value)))
-    }
-    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn openai_beta(self, value: Vec<String>) -> Self {
-        Self(self.0.map_request(|request| request.with_openai_beta(value)))
-    }
-    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
-    pub fn anonymous(self) -> Self {
-        Self(self.0.anonymous())
-    }
-    /// See [`Call::credential`](schematic_runtime::Call::credential).
-    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
-        Self(self.0.credential(credential))
-    }
-    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
-    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
-        Self(self.0.deadline(deadline))
-    }
-    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
-    /// last: this call's setters are not available on the result.
-    pub fn full(
-        self,
-    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaListInputItemsRequest> {
-        self.0.full()
-    }
-    /// See [`Call::build`](schematic_runtime::Call::build).
-    ///
-    /// ## Errors
-    ///
-    /// Returns `InvalidArgument` when the send would refuse the call's
-    /// arguments: the request cannot be encoded, a header is invalid,
-    /// or the credential cannot be placed.
-    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
-        self.0.build().map(Self)
-    }
-    /// See [`Call::pager`](schematic_runtime::Call::pager).
-    #[inline]
-    pub fn pager(
-        self,
-    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, BetaListInputItemsRequest> {
-        self.0.pager()
-    }
-    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
-    #[inline]
-    pub fn after(
-        self,
-        cursor: impl Into<
-            <BetaListInputItemsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
-        >,
-    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, BetaListInputItemsRequest> {
-        self.0.pager().after(cursor)
-    }
-    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
-    #[inline]
-    pub fn page_size(
-        self,
-        size: u32,
-    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, BetaListInputItemsRequest> {
-        self.0.pager().page_size(size)
-    }
-    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
-    #[inline]
-    pub fn pages(
-        self,
-    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, BetaListInputItemsRequest> {
-        self.0.pager().pages()
-    }
-    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
-    #[inline]
-    pub fn fetch_page(
-        self,
-    ) -> schematic_runtime::CallFuture<
-        'a,
-        schematic_runtime::pager::PageResult<BetaListInputItemsRequest>,
-    > {
-        self.0.pager().fetch_page()
-    }
-    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
-    #[inline]
-    pub fn collect_all(
-        self,
-    ) -> schematic_runtime::CallFuture<
-        'a,
-        schematic_runtime::pager::CollectResult<BetaListInputItemsRequest>,
-    > {
-        self.0.pager().collect_all()
-    }
-}
-impl<'a> ::core::future::IntoFuture for BetaListInputItemsCall<'a> {
-    type Output = <schematic_runtime::Call<
-        'a,
-        OpenAIApi,
-        BetaListInputItemsRequest,
-    > as ::core::future::IntoFuture>::Output;
-    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
-    #[inline]
-    fn into_future(self) -> Self::IntoFuture {
-        ::core::future::IntoFuture::into_future(self.0)
-    }
-}
-/// A call to the `BetaGetinputtokencounts` endpoint, returned by [`OpenAI::beta_getinputtokencounts`].
-///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
-#[derive(Clone, Debug)]
-#[must_use = "a call sends nothing until it is awaited"]
-pub struct BetaGetinputtokencountsCall<'a>(
-    schematic_runtime::Call<'a, OpenAIApi, BetaGetinputtokencountsRequest>,
-);
-impl<'a> BetaGetinputtokencountsCall<'a> {
-    /// Sets the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn openai_beta(self, value: Vec<String>) -> Self {
-        Self(self.0.map_request(|request| request.with_openai_beta(value)))
-    }
-    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
-    pub fn anonymous(self) -> Self {
-        Self(self.0.anonymous())
-    }
-    /// See [`Call::credential`](schematic_runtime::Call::credential).
-    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
-        Self(self.0.credential(credential))
-    }
-    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
-    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
-        Self(self.0.deadline(deadline))
-    }
-    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
-    /// last: this call's setters are not available on the result.
-    pub fn full(
-        self,
-    ) -> schematic_runtime::FullCall<'a, OpenAIApi, BetaGetinputtokencountsRequest> {
-        self.0.full()
-    }
-    /// See [`Call::build`](schematic_runtime::Call::build).
-    ///
-    /// ## Errors
-    ///
-    /// Returns `InvalidArgument` when the send would refuse the call's
-    /// arguments: the request cannot be encoded, a header is invalid,
-    /// or the credential cannot be placed.
-    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
-        self.0.build().map(Self)
-    }
-}
-impl<'a> ::core::future::IntoFuture for BetaGetinputtokencountsCall<'a> {
-    type Output = <schematic_runtime::Call<
-        'a,
-        OpenAIApi,
-        BetaGetinputtokencountsRequest,
-    > as ::core::future::IntoFuture>::Output;
-    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
-    #[inline]
-    fn into_future(self) -> Self::IntoFuture {
-        ::core::future::IntoFuture::into_future(self.0)
-    }
-}
 impl OpenAI {
     /// Generates audio from the input text.
     ///
@@ -38354,8 +37743,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateSpeechRequest2`: the request body
-    pub fn create_speech(&self, body: CreateSpeechRequest2) -> CreateSpeechCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateSpeechRequest2`: the request body
+    pub fn create_speech(
+        &self,
+        body: ::schematic_definitions::openai::CreateSpeechRequest2,
+    ) -> CreateSpeechCall<'_> {
         CreateSpeechCall(self.0.send(CreateSpeechRequest::new(body)))
     }
     /// Transcribes audio into the input language.
@@ -38438,11 +37830,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `consent_id: impl Into<String>`: the `{consent_id}` path parameter
-    /// - `body: UpdateVoiceConsentRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateVoiceConsentRequest2`: the request body
     pub fn update_voice_consent(
         &self,
         consent_id: impl Into<String>,
-        body: UpdateVoiceConsentRequest2,
+        body: ::schematic_definitions::openai::UpdateVoiceConsentRequest2,
     ) -> UpdateVoiceConsentCall<'_> {
         UpdateVoiceConsentCall(
             self.0.send(UpdateVoiceConsentRequest::new(consent_id, body)),
@@ -38491,8 +37883,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateBatchRequest2`: the request body
-    pub fn create_batch(&self, body: CreateBatchRequest2) -> CreateBatchCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateBatchRequest2`: the request body
+    pub fn create_batch(
+        &self,
+        body: ::schematic_definitions::openai::CreateBatchRequest2,
+    ) -> CreateBatchCall<'_> {
         CreateBatchCall(self.0.send(CreateBatchRequest::new(body)))
     }
     /// Retrieves a batch.
@@ -38559,10 +37954,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateChatCompletionRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateChatCompletionRequest2`: the request body
     pub fn create_chat_completion(
         &self,
-        body: CreateChatCompletionRequest2,
+        body: ::schematic_definitions::openai::CreateChatCompletionRequest2,
     ) -> CreateChatCompletionCall<'_> {
         CreateChatCompletionCall(self.0.send(CreateChatCompletionRequest::new(body)))
     }
@@ -38593,11 +37988,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `completion_id: impl Into<String>`: the `{completion_id}` path parameter
-    /// - `body: serde_json::Value`: the request body
+    /// - `body: ::serde_json::Value`: the request body
     pub fn update_chat_completion(
         &self,
         completion_id: impl Into<String>,
-        body: serde_json::Value,
+        body: ::serde_json::Value,
     ) -> UpdateChatCompletionCall<'_> {
         UpdateChatCompletionCall(
             self.0.send(UpdateChatCompletionRequest::new(completion_id, body)),
@@ -38654,10 +38049,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateCompletionRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateCompletionRequest2`: the request body
     pub fn create_completion(
         &self,
-        body: CreateCompletionRequest2,
+        body: ::schematic_definitions::openai::CreateCompletionRequest2,
     ) -> CreateCompletionCall<'_> {
         CreateCompletionCall(self.0.send(CreateCompletionRequest::new(body)))
     }
@@ -38682,10 +38077,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateContainerBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateContainerBody`: the request body
     pub fn create_container(
         &self,
-        body: CreateContainerBody,
+        body: ::schematic_definitions::openai::CreateContainerBody,
     ) -> CreateContainerCall<'_> {
         CreateContainerCall(self.0.send(CreateContainerRequest::new(body)))
     }
@@ -38749,11 +38144,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `container_id: impl Into<String>`: the `{container_id}` path parameter
-    /// - `body: CreateContainerFileBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateContainerFileBody`: the request body
     pub fn create_container_file(
         &self,
         container_id: impl Into<String>,
-        body: CreateContainerFileBody,
+        body: ::schematic_definitions::openai::CreateContainerFileBody,
     ) -> CreateContainerFileCall<'_> {
         CreateContainerFileCall(
             self.0.send(CreateContainerFileRequest::new(container_id, body)),
@@ -38847,7 +38242,7 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
-    /// - `body: serde_json::Value`: the request body
+    /// - `body: ::serde_json::Value`: the request body
     ///
     /// ## Optional values
     ///
@@ -38855,7 +38250,7 @@ impl OpenAI {
     pub fn create_conversation_items(
         &self,
         conversation_id: impl Into<String>,
-        body: serde_json::Value,
+        body: ::serde_json::Value,
     ) -> CreateConversationItemsCall<'_> {
         CreateConversationItemsCall(
             self.0.send(CreateConversationItemsRequest::new(conversation_id, body)),
@@ -38911,10 +38306,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateEmbeddingRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateEmbeddingRequest2`: the request body
     pub fn create_embedding(
         &self,
-        body: CreateEmbeddingRequest2,
+        body: ::schematic_definitions::openai::CreateEmbeddingRequest2,
     ) -> CreateEmbeddingCall<'_> {
         CreateEmbeddingCall(self.0.send(CreateEmbeddingRequest::new(body)))
     }
@@ -38941,8 +38336,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateEvalRequest2`: the request body
-    pub fn create_eval(&self, body: CreateEvalRequest2) -> CreateEvalCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateEvalRequest2`: the request body
+    pub fn create_eval(
+        &self,
+        body: ::schematic_definitions::openai::CreateEvalRequest2,
+    ) -> CreateEvalCall<'_> {
         CreateEvalCall(self.0.send(CreateEvalRequest::new(body)))
     }
     /// Get an evaluation by ID.
@@ -38966,11 +38364,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
-    /// - `body: serde_json::Value`: the request body
+    /// - `body: ::serde_json::Value`: the request body
     pub fn update_eval(
         &self,
         eval_id: impl Into<String>,
-        body: serde_json::Value,
+        body: ::serde_json::Value,
     ) -> UpdateEvalCall<'_> {
         UpdateEvalCall(self.0.send(UpdateEvalRequest::new(eval_id, body)))
     }
@@ -39012,11 +38410,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `eval_id: impl Into<String>`: the `{eval_id}` path parameter
-    /// - `body: CreateEvalRunRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateEvalRunRequest2`: the request body
     pub fn create_eval_run(
         &self,
         eval_id: impl Into<String>,
-        body: CreateEvalRunRequest2,
+        body: ::schematic_definitions::openai::CreateEvalRunRequest2,
     ) -> CreateEvalRunCall<'_> {
         CreateEvalRunCall(self.0.send(CreateEvalRunRequest::new(eval_id, body)))
     }
@@ -39211,8 +38609,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: RunGraderRequest2`: the request body
-    pub fn run_grader(&self, body: RunGraderRequest2) -> RunGraderCall<'_> {
+    /// - `body: ::schematic_definitions::openai::RunGraderRequest2`: the request body
+    pub fn run_grader(
+        &self,
+        body: ::schematic_definitions::openai::RunGraderRequest2,
+    ) -> RunGraderCall<'_> {
         RunGraderCall(self.0.send(RunGraderRequest::new(body)))
     }
     /// Validate a grader.
@@ -39223,10 +38624,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: ValidateGraderRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::ValidateGraderRequest2`: the request body
     pub fn validate_grader(
         &self,
-        body: ValidateGraderRequest2,
+        body: ::schematic_definitions::openai::ValidateGraderRequest2,
     ) -> ValidateGraderCall<'_> {
         ValidateGraderCall(self.0.send(ValidateGraderRequest::new(body)))
     }
@@ -39271,11 +38672,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `fine_tuned_model_checkpoint: impl Into<String>`: the `{fine_tuned_model_checkpoint}` path parameter
-    /// - `body: CreateFineTuningCheckpointPermissionRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateFineTuningCheckpointPermissionRequest2`: the request body
     pub fn create_fine_tuning_checkpoint_permission(
         &self,
         fine_tuned_model_checkpoint: impl Into<String>,
-        body: CreateFineTuningCheckpointPermissionRequest2,
+        body: ::schematic_definitions::openai::CreateFineTuningCheckpointPermissionRequest2,
     ) -> CreateFineTuningCheckpointPermissionCall<'_> {
         CreateFineTuningCheckpointPermissionCall(
             self
@@ -39344,10 +38745,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateFineTuningJobRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateFineTuningJobRequest2`: the request body
     pub fn create_fine_tuning_job(
         &self,
-        body: CreateFineTuningJobRequest2,
+        body: ::schematic_definitions::openai::CreateFineTuningJobRequest2,
     ) -> CreateFineTuningJobCall<'_> {
         CreateFineTuningJobCall(self.0.send(CreateFineTuningJobRequest::new(body)))
     }
@@ -39463,10 +38864,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: EditImageBodyJsonParam`: the request body
+    /// - `body: ::schematic_definitions::openai::EditImageBodyJsonParam`: the request body
     pub fn create_image_edit(
         &self,
-        body: EditImageBodyJsonParam,
+        body: ::schematic_definitions::openai::EditImageBodyJsonParam,
     ) -> CreateImageEditCall<'_> {
         CreateImageEditCall(self.0.send(CreateImageEditRequest::new(body)))
     }
@@ -39478,8 +38879,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateImageRequest2`: the request body
-    pub fn create_image(&self, body: CreateImageRequest2) -> CreateImageCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateImageRequest2`: the request body
+    pub fn create_image(
+        &self,
+        body: ::schematic_definitions::openai::CreateImageRequest2,
+    ) -> CreateImageCall<'_> {
         CreateImageCall(self.0.send(CreateImageRequest::new(body)))
     }
     /// Creates a variation of a given image. This endpoint only supports `dall-e-2`.
@@ -39538,10 +38942,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateModerationRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateModerationRequest2`: the request body
     pub fn create_moderation(
         &self,
-        body: CreateModerationRequest2,
+        body: ::schematic_definitions::openai::CreateModerationRequest2,
     ) -> CreateModerationCall<'_> {
         CreateModerationCall(self.0.send(CreateModerationRequest::new(body)))
     }
@@ -39565,10 +38969,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: serde_json::Value`: the request body
+    /// - `body: ::serde_json::Value`: the request body
     pub fn admin_api_keys_create(
         &self,
-        body: serde_json::Value,
+        body: ::serde_json::Value,
     ) -> AdminApiKeysCreateCall<'_> {
         AdminApiKeysCreateCall(self.0.send(AdminApiKeysCreateRequest::new(body)))
     }
@@ -39646,10 +39050,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: UploadCertificateRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::UploadCertificateRequest2`: the request body
     pub fn upload_certificate(
         &self,
-        body: UploadCertificateRequest2,
+        body: ::schematic_definitions::openai::UploadCertificateRequest2,
     ) -> UploadCertificateCall<'_> {
         UploadCertificateCall(self.0.send(UploadCertificateRequest::new(body)))
     }
@@ -39663,10 +39067,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: ToggleCertificatesRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ToggleCertificatesRequest`: the request body
     pub fn activate_organization_certificates(
         &self,
-        body: ToggleCertificatesRequest,
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
     ) -> ActivateOrganizationCertificatesCall<'_> {
         ActivateOrganizationCertificatesCall(
             self.0.send(ActivateOrganizationCertificatesRequest::new(body)),
@@ -39682,10 +39086,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: ToggleCertificatesRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ToggleCertificatesRequest`: the request body
     pub fn deactivate_organization_certificates(
         &self,
-        body: ToggleCertificatesRequest,
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
     ) -> DeactivateOrganizationCertificatesCall<'_> {
         DeactivateOrganizationCertificatesCall(
             self.0.send(DeactivateOrganizationCertificatesRequest::new(body)),
@@ -39721,11 +39125,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `certificate_id: impl Into<String>`: the `{certificate_id}` path parameter
-    /// - `body: ModifyCertificateRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::ModifyCertificateRequest2`: the request body
     pub fn modify_certificate(
         &self,
         certificate_id: impl Into<String>,
-        body: ModifyCertificateRequest2,
+        body: ::schematic_definitions::openai::ModifyCertificateRequest2,
     ) -> ModifyCertificateCall<'_> {
         ModifyCertificateCall(
             self.0.send(ModifyCertificateRequest::new(certificate_id, body)),
@@ -39785,10 +39189,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: UpdateOrganizationDataRetentionBody`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody`: the request body
     pub fn update_organization_data_retention(
         &self,
-        body: UpdateOrganizationDataRetentionBody,
+        body: ::schematic_definitions::openai::UpdateOrganizationDataRetentionBody,
     ) -> UpdateOrganizationDataRetentionCall<'_> {
         UpdateOrganizationDataRetentionCall(
             self.0.send(UpdateOrganizationDataRetentionRequest::new(body)),
@@ -39814,8 +39218,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateGroupBody`: the request body
-    pub fn create_group(&self, body: CreateGroupBody) -> CreateGroupCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateGroupBody`: the request body
+    pub fn create_group(
+        &self,
+        body: ::schematic_definitions::openai::CreateGroupBody,
+    ) -> CreateGroupCall<'_> {
         CreateGroupCall(self.0.send(CreateGroupRequest::new(body)))
     }
     /// Retrieves a group.
@@ -39839,11 +39246,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
-    /// - `body: UpdateGroupBody`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateGroupBody`: the request body
     pub fn update_group(
         &self,
         group_id: impl Into<String>,
-        body: UpdateGroupBody,
+        body: ::schematic_definitions::openai::UpdateGroupBody,
     ) -> UpdateGroupCall<'_> {
         UpdateGroupCall(self.0.send(UpdateGroupRequest::new(group_id, body)))
     }
@@ -39889,11 +39296,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
-    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody`: the request body
     pub fn assign_group_role(
         &self,
         group_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> AssignGroupRoleCall<'_> {
         AssignGroupRoleCall(self.0.send(AssignGroupRoleRequest::new(group_id, body)))
     }
@@ -39963,11 +39370,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
-    /// - `body: CreateGroupUserBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateGroupUserBody`: the request body
     pub fn add_group_user(
         &self,
         group_id: impl Into<String>,
-        body: CreateGroupUserBody,
+        body: ::schematic_definitions::openai::CreateGroupUserBody,
     ) -> AddGroupUserCall<'_> {
         AddGroupUserCall(self.0.send(AddGroupUserRequest::new(group_id, body)))
     }
@@ -40023,8 +39430,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: InviteRequest`: the request body
-    pub fn invite_user(&self, body: InviteRequest) -> InviteUserCall<'_> {
+    /// - `body: ::schematic_definitions::openai::InviteRequest`: the request body
+    pub fn invite_user(
+        &self,
+        body: ::schematic_definitions::openai::InviteRequest,
+    ) -> InviteUserCall<'_> {
         InviteUserCall(self.0.send(InviteUserRequest::new(body)))
     }
     /// Retrieves an invite.
@@ -40074,8 +39484,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: ProjectCreateRequest`: the request body
-    pub fn create_project(&self, body: ProjectCreateRequest) -> CreateProjectCall<'_> {
+    /// - `body: ::schematic_definitions::openai::ProjectCreateRequest`: the request body
+    pub fn create_project(
+        &self,
+        body: ::schematic_definitions::openai::ProjectCreateRequest,
+    ) -> CreateProjectCall<'_> {
         CreateProjectCall(self.0.send(CreateProjectRequest::new(body)))
     }
     /// Retrieves a project.
@@ -40102,11 +39515,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: ProjectUpdateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ProjectUpdateRequest`: the request body
     pub fn modify_project(
         &self,
         project_id: impl Into<String>,
-        body: ProjectUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectUpdateRequest,
     ) -> ModifyProjectCall<'_> {
         ModifyProjectCall(self.0.send(ModifyProjectRequest::new(project_id, body)))
     }
@@ -40217,11 +39630,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: ToggleCertificatesRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ToggleCertificatesRequest`: the request body
     pub fn activate_project_certificates(
         &self,
         project_id: impl Into<String>,
-        body: ToggleCertificatesRequest,
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
     ) -> ActivateProjectCertificatesCall<'_> {
         ActivateProjectCertificatesCall(
             self.0.send(ActivateProjectCertificatesRequest::new(project_id, body)),
@@ -40237,11 +39650,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: ToggleCertificatesRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ToggleCertificatesRequest`: the request body
     pub fn deactivate_project_certificates(
         &self,
         project_id: impl Into<String>,
-        body: ToggleCertificatesRequest,
+        body: ::schematic_definitions::openai::ToggleCertificatesRequest,
     ) -> DeactivateProjectCertificatesCall<'_> {
         DeactivateProjectCertificatesCall(
             self.0.send(DeactivateProjectCertificatesRequest::new(project_id, body)),
@@ -40273,11 +39686,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: UpdateProjectDataRetentionBody`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateProjectDataRetentionBody`: the request body
     pub fn update_project_data_retention(
         &self,
         project_id: impl Into<String>,
-        body: UpdateProjectDataRetentionBody,
+        body: ::schematic_definitions::openai::UpdateProjectDataRetentionBody,
     ) -> UpdateProjectDataRetentionCall<'_> {
         UpdateProjectDataRetentionCall(
             self.0.send(UpdateProjectDataRetentionRequest::new(project_id, body)),
@@ -40311,11 +39724,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: InviteProjectGroupBody`: the request body
+    /// - `body: ::schematic_definitions::openai::InviteProjectGroupBody`: the request body
     pub fn add_project_group(
         &self,
         project_id: impl Into<String>,
-        body: InviteProjectGroupBody,
+        body: ::schematic_definitions::openai::InviteProjectGroupBody,
     ) -> AddProjectGroupCall<'_> {
         AddProjectGroupCall(self.0.send(AddProjectGroupRequest::new(project_id, body)))
     }
@@ -40387,11 +39800,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: ProjectHostedToolPermissionsUpdateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ProjectHostedToolPermissionsUpdateRequest`: the request body
     pub fn update_project_hosted_tool_permissions(
         &self,
         project_id: impl Into<String>,
-        body: ProjectHostedToolPermissionsUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectHostedToolPermissionsUpdateRequest,
     ) -> UpdateProjectHostedToolPermissionsCall<'_> {
         UpdateProjectHostedToolPermissionsCall(
             self.0.send(UpdateProjectHostedToolPermissionsRequest::new(project_id, body)),
@@ -40423,11 +39836,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: ProjectModelPermissionsUpdateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ProjectModelPermissionsUpdateRequest`: the request body
     pub fn update_project_model_permissions(
         &self,
         project_id: impl Into<String>,
-        body: ProjectModelPermissionsUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectModelPermissionsUpdateRequest,
     ) -> UpdateProjectModelPermissionsCall<'_> {
         UpdateProjectModelPermissionsCall(
             self.0.send(UpdateProjectModelPermissionsRequest::new(project_id, body)),
@@ -40477,12 +39890,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `rate_limit_id: impl Into<String>`: the `{rate_limit_id}` path parameter
-    /// - `body: ProjectRateLimitUpdateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ProjectRateLimitUpdateRequest`: the request body
     pub fn update_project_rate_limits(
         &self,
         project_id: impl Into<String>,
         rate_limit_id: impl Into<String>,
-        body: ProjectRateLimitUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectRateLimitUpdateRequest,
     ) -> UpdateProjectRateLimitsCall<'_> {
         UpdateProjectRateLimitsCall(
             self
@@ -40518,11 +39931,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: ProjectServiceAccountCreateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ProjectServiceAccountCreateRequest`: the request body
     pub fn create_project_service_account(
         &self,
         project_id: impl Into<String>,
-        body: ProjectServiceAccountCreateRequest,
+        body: ::schematic_definitions::openai::ProjectServiceAccountCreateRequest,
     ) -> CreateProjectServiceAccountCall<'_> {
         CreateProjectServiceAccountCall(
             self.0.send(CreateProjectServiceAccountRequest::new(project_id, body)),
@@ -40564,12 +39977,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `service_account_id: impl Into<String>`: the `{service_account_id}` path parameter
-    /// - `body: UpdateProjectServiceAccountBody`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateProjectServiceAccountBody`: the request body
     pub fn update_project_service_account(
         &self,
         project_id: impl Into<String>,
         service_account_id: impl Into<String>,
-        body: UpdateProjectServiceAccountBody,
+        body: ::schematic_definitions::openai::UpdateProjectServiceAccountBody,
     ) -> UpdateProjectServiceAccountCall<'_> {
         UpdateProjectServiceAccountCall(
             self
@@ -40642,11 +40055,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: CreateSpendAlertBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateSpendAlertBody`: the request body
     pub fn create_project_spend_alert(
         &self,
         project_id: impl Into<String>,
-        body: CreateSpendAlertBody,
+        body: ::schematic_definitions::openai::CreateSpendAlertBody,
     ) -> CreateProjectSpendAlertCall<'_> {
         CreateProjectSpendAlertCall(
             self.0.send(CreateProjectSpendAlertRequest::new(project_id, body)),
@@ -40681,12 +40094,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
-    /// - `body: CreateSpendAlertBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateSpendAlertBody`: the request body
     pub fn update_project_spend_alert(
         &self,
         project_id: impl Into<String>,
         alert_id: impl Into<String>,
-        body: CreateSpendAlertBody,
+        body: ::schematic_definitions::openai::CreateSpendAlertBody,
     ) -> UpdateProjectSpendAlertCall<'_> {
         UpdateProjectSpendAlertCall(
             self.0.send(UpdateProjectSpendAlertRequest::new(project_id, alert_id, body)),
@@ -40735,11 +40148,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: ProjectUserCreateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ProjectUserCreateRequest`: the request body
     pub fn create_project_user(
         &self,
         project_id: impl Into<String>,
-        body: ProjectUserCreateRequest,
+        body: ::schematic_definitions::openai::ProjectUserCreateRequest,
     ) -> CreateProjectUserCall<'_> {
         CreateProjectUserCall(
             self.0.send(CreateProjectUserRequest::new(project_id, body)),
@@ -40774,12 +40187,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
-    /// - `body: ProjectUserUpdateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::ProjectUserUpdateRequest`: the request body
     pub fn modify_project_user(
         &self,
         project_id: impl Into<String>,
         user_id: impl Into<String>,
-        body: ProjectUserUpdateRequest,
+        body: ::schematic_definitions::openai::ProjectUserUpdateRequest,
     ) -> ModifyProjectUserCall<'_> {
         ModifyProjectUserCall(
             self.0.send(ModifyProjectUserRequest::new(project_id, user_id, body)),
@@ -40827,10 +40240,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: PublicCreateOrganizationRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody`: the request body
     pub fn create_role(
         &self,
-        body: PublicCreateOrganizationRoleBody,
+        body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody,
     ) -> CreateRoleCall<'_> {
         CreateRoleCall(self.0.send(CreateRoleRequest::new(body)))
     }
@@ -40855,11 +40268,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
-    /// - `body: PublicUpdateOrganizationRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody`: the request body
     pub fn update_role(
         &self,
         role_id: impl Into<String>,
-        body: PublicUpdateOrganizationRoleBody,
+        body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody,
     ) -> UpdateRoleCall<'_> {
         UpdateRoleCall(self.0.send(UpdateRoleRequest::new(role_id, body)))
     }
@@ -40897,10 +40310,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateSpendAlertBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateSpendAlertBody`: the request body
     pub fn create_organization_spend_alert(
         &self,
-        body: CreateSpendAlertBody,
+        body: ::schematic_definitions::openai::CreateSpendAlertBody,
     ) -> CreateOrganizationSpendAlertCall<'_> {
         CreateOrganizationSpendAlertCall(
             self.0.send(CreateOrganizationSpendAlertRequest::new(body)),
@@ -40932,11 +40345,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `alert_id: impl Into<String>`: the `{alert_id}` path parameter
-    /// - `body: CreateSpendAlertBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateSpendAlertBody`: the request body
     pub fn update_organization_spend_alert(
         &self,
         alert_id: impl Into<String>,
-        body: CreateSpendAlertBody,
+        body: ::schematic_definitions::openai::CreateSpendAlertBody,
     ) -> UpdateOrganizationSpendAlertCall<'_> {
         UpdateOrganizationSpendAlertCall(
             self.0.send(UpdateOrganizationSpendAlertRequest::new(alert_id, body)),
@@ -41186,11 +40599,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
-    /// - `body: UserRoleUpdateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::UserRoleUpdateRequest`: the request body
     pub fn modify_user(
         &self,
         user_id: impl Into<String>,
-        body: UserRoleUpdateRequest,
+        body: ::schematic_definitions::openai::UserRoleUpdateRequest,
     ) -> ModifyUserCall<'_> {
         ModifyUserCall(self.0.send(ModifyUserRequest::new(user_id, body)))
     }
@@ -41236,11 +40649,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
-    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody`: the request body
     pub fn assign_user_role(
         &self,
         user_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> AssignUserRoleCall<'_> {
         AssignUserRoleCall(self.0.send(AssignUserRoleRequest::new(user_id, body)))
     }
@@ -41313,12 +40726,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `group_id: impl Into<String>`: the `{group_id}` path parameter
-    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody`: the request body
     pub fn assign_project_group_role(
         &self,
         project_id: impl Into<String>,
         group_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> AssignProjectGroupRoleCall<'_> {
         AssignProjectGroupRoleCall(
             self.0.send(AssignProjectGroupRoleRequest::new(project_id, group_id, body)),
@@ -41402,11 +40815,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: PublicCreateOrganizationRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody`: the request body
     pub fn create_project_role(
         &self,
         project_id: impl Into<String>,
-        body: PublicCreateOrganizationRoleBody,
+        body: ::schematic_definitions::openai::PublicCreateOrganizationRoleBody,
     ) -> CreateProjectRoleCall<'_> {
         CreateProjectRoleCall(
             self.0.send(CreateProjectRoleRequest::new(project_id, body)),
@@ -41441,12 +40854,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `role_id: impl Into<String>`: the `{role_id}` path parameter
-    /// - `body: PublicUpdateOrganizationRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody`: the request body
     pub fn update_project_role(
         &self,
         project_id: impl Into<String>,
         role_id: impl Into<String>,
-        body: PublicUpdateOrganizationRoleBody,
+        body: ::schematic_definitions::openai::PublicUpdateOrganizationRoleBody,
     ) -> UpdateProjectRoleCall<'_> {
         UpdateProjectRoleCall(
             self.0.send(UpdateProjectRoleRequest::new(project_id, role_id, body)),
@@ -41504,12 +40917,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `user_id: impl Into<String>`: the `{user_id}` path parameter
-    /// - `body: PublicAssignOrganizationGroupRoleBody`: the request body
+    /// - `body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody`: the request body
     pub fn assign_project_user_role(
         &self,
         project_id: impl Into<String>,
         user_id: impl Into<String>,
-        body: PublicAssignOrganizationGroupRoleBody,
+        body: ::schematic_definitions::openai::PublicAssignOrganizationGroupRoleBody,
     ) -> AssignProjectUserRoleCall<'_> {
         AssignProjectUserRoleCall(
             self.0.send(AssignProjectUserRoleRequest::new(project_id, user_id, body)),
@@ -41587,11 +41000,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `call_id: impl Into<String>`: the `{call_id}` path parameter
-    /// - `body: RealtimeSessionCreateRequestGA`: the request body
+    /// - `body: ::schematic_definitions::openai::RealtimeSessionCreateRequestGA`: the request body
     pub fn accept_realtime_call(
         &self,
         call_id: impl Into<String>,
-        body: RealtimeSessionCreateRequestGA,
+        body: ::schematic_definitions::openai::RealtimeSessionCreateRequestGA,
     ) -> AcceptRealtimeCallCall<'_> {
         AcceptRealtimeCallCall(
             self.0.send(AcceptRealtimeCallRequest::new(call_id, body)),
@@ -41622,11 +41035,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `call_id: impl Into<String>`: the `{call_id}` path parameter
-    /// - `body: RealtimeCallReferRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::RealtimeCallReferRequest`: the request body
     pub fn refer_realtime_call(
         &self,
         call_id: impl Into<String>,
-        body: RealtimeCallReferRequest,
+        body: ::schematic_definitions::openai::RealtimeCallReferRequest,
     ) -> ReferRealtimeCallCall<'_> {
         ReferRealtimeCallCall(self.0.send(ReferRealtimeCallRequest::new(call_id, body)))
     }
@@ -41639,11 +41052,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `call_id: impl Into<String>`: the `{call_id}` path parameter
-    /// - `body: RealtimeCallRejectRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::RealtimeCallRejectRequest`: the request body
     pub fn reject_realtime_call(
         &self,
         call_id: impl Into<String>,
-        body: RealtimeCallRejectRequest,
+        body: ::schematic_definitions::openai::RealtimeCallRejectRequest,
     ) -> RejectRealtimeCallCall<'_> {
         RejectRealtimeCallCall(
             self.0.send(RejectRealtimeCallRequest::new(call_id, body)),
@@ -41669,10 +41082,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: RealtimeCreateClientSecretRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest`: the request body
     pub fn create_realtime_client_secret(
         &self,
-        body: RealtimeCreateClientSecretRequest,
+        body: ::schematic_definitions::openai::RealtimeCreateClientSecretRequest,
     ) -> CreateRealtimeClientSecretCall<'_> {
         CreateRealtimeClientSecretCall(
             self.0.send(CreateRealtimeClientSecretRequest::new(body)),
@@ -41694,10 +41107,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: RealtimeSessionCreateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::RealtimeSessionCreateRequest`: the request body
     pub fn create_realtime_session(
         &self,
-        body: RealtimeSessionCreateRequest,
+        body: ::schematic_definitions::openai::RealtimeSessionCreateRequest,
     ) -> CreateRealtimeSessionCall<'_> {
         CreateRealtimeSessionCall(self.0.send(CreateRealtimeSessionRequest::new(body)))
     }
@@ -41717,10 +41130,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: RealtimeTranscriptionSessionCreateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest`: the request body
     pub fn create_realtime_transcription_session(
         &self,
-        body: RealtimeTranscriptionSessionCreateRequest,
+        body: ::schematic_definitions::openai::RealtimeTranscriptionSessionCreateRequest,
     ) -> CreateRealtimeTranscriptionSessionCall<'_> {
         CreateRealtimeTranscriptionSessionCall(
             self.0.send(CreateRealtimeTranscriptionSessionRequest::new(body)),
@@ -41742,10 +41155,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: RealtimeTranslationClientSecretCreateRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest`: the request body
     pub fn create_realtime_translation_client_secret(
         &self,
-        body: RealtimeTranslationClientSecretCreateRequest,
+        body: ::schematic_definitions::openai::RealtimeTranslationClientSecretCreateRequest,
     ) -> CreateRealtimeTranslationClientSecretCall<'_> {
         CreateRealtimeTranslationClientSecretCall(
             self.0.send(CreateRealtimeTranslationClientSecretRequest::new(body)),
@@ -41765,8 +41178,16 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateResponse`: the request body
-    pub fn create_response(&self, body: CreateResponse) -> CreateResponseCall<'_> {
+    /// - `body: ::schematic_definitions::openai::BetaCreateResponse`: the request body
+    ///
+    /// ## Optional values
+    ///
+    /// - [`beta`](CreateResponseCall::beta): the `beta` query parameter (`bool`).
+    /// - [`openai_beta`](CreateResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
+    pub fn create_response(
+        &self,
+        body: ::schematic_definitions::openai::BetaCreateResponse,
+    ) -> CreateResponseCall<'_> {
         CreateResponseCall(self.0.send(CreateResponseRequest::new(body)))
     }
     /// Retrieves a model response with the given ID.
@@ -41785,6 +41206,8 @@ impl OpenAI {
     /// - [`stream`](GetResponseCall::stream): the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
     /// - [`starting_after`](GetResponseCall::starting_after): the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
     /// - [`include_obfuscation`](GetResponseCall::include_obfuscation): the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
+    /// - [`beta`](GetResponseCall::beta): the `beta` query parameter (`bool`).
+    /// - [`openai_beta`](GetResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn get_response(&self, response_id: impl Into<String>) -> GetResponseCall<'_> {
         GetResponseCall(self.0.send(GetResponseRequest::new(response_id)))
     }
@@ -41797,6 +41220,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`beta`](DeleteResponseCall::beta): the `beta` query parameter (`bool`).
+    /// - [`openai_beta`](DeleteResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn delete_response(
         &self,
         response_id: impl Into<String>,
@@ -41814,6 +41242,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
+    ///
+    /// ## Optional values
+    ///
+    /// - [`beta`](CancelResponseCall::beta): the `beta` query parameter (`bool`).
+    /// - [`openai_beta`](CancelResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn cancel_response(
         &self,
         response_id: impl Into<String>,
@@ -41834,6 +41267,8 @@ impl OpenAI {
     ///
     /// - [`order`](ListInputItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
     /// - [`include`](ListInputItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
+    /// - [`beta`](ListInputItemsCall::beta): the `beta` query parameter (`bool`).
+    /// - [`openai_beta`](ListInputItemsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn list_input_items(
         &self,
         response_id: impl Into<String>,
@@ -41866,8 +41301,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateUploadRequest2`: the request body
-    pub fn create_upload(&self, body: CreateUploadRequest2) -> CreateUploadCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateUploadRequest2`: the request body
+    pub fn create_upload(
+        &self,
+        body: ::schematic_definitions::openai::CreateUploadRequest2,
+    ) -> CreateUploadCall<'_> {
         CreateUploadCall(self.0.send(CreateUploadRequest::new(body)))
     }
     /// Cancels the Upload. No Parts may be added after an Upload is cancelled.
@@ -41900,11 +41338,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `upload_id: impl Into<String>`: the `{upload_id}` path parameter
-    /// - `body: CompleteUploadRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CompleteUploadRequest2`: the request body
     pub fn complete_upload(
         &self,
         upload_id: impl Into<String>,
-        body: CompleteUploadRequest2,
+        body: ::schematic_definitions::openai::CompleteUploadRequest2,
     ) -> CompleteUploadCall<'_> {
         CompleteUploadCall(self.0.send(CompleteUploadRequest::new(upload_id, body)))
     }
@@ -41949,10 +41387,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateVectorStoreRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateVectorStoreRequest2`: the request body
     pub fn create_vector_store(
         &self,
-        body: CreateVectorStoreRequest2,
+        body: ::schematic_definitions::openai::CreateVectorStoreRequest2,
     ) -> CreateVectorStoreCall<'_> {
         CreateVectorStoreCall(self.0.send(CreateVectorStoreRequest::new(body)))
     }
@@ -41980,11 +41418,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
-    /// - `body: UpdateVectorStoreRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateVectorStoreRequest`: the request body
     pub fn modify_vector_store(
         &self,
         vector_store_id: impl Into<String>,
-        body: UpdateVectorStoreRequest,
+        body: ::schematic_definitions::openai::UpdateVectorStoreRequest,
     ) -> ModifyVectorStoreCall<'_> {
         ModifyVectorStoreCall(
             self.0.send(ModifyVectorStoreRequest::new(vector_store_id, body)),
@@ -42016,11 +41454,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
-    /// - `body: CreateVectorStoreFileBatchRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateVectorStoreFileBatchRequest2`: the request body
     pub fn create_vector_store_file_batch(
         &self,
         vector_store_id: impl Into<String>,
-        body: CreateVectorStoreFileBatchRequest2,
+        body: ::schematic_definitions::openai::CreateVectorStoreFileBatchRequest2,
     ) -> CreateVectorStoreFileBatchCall<'_> {
         CreateVectorStoreFileBatchCall(
             self.0.send(CreateVectorStoreFileBatchRequest::new(vector_store_id, body)),
@@ -42123,11 +41561,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
-    /// - `body: CreateVectorStoreFileRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateVectorStoreFileRequest2`: the request body
     pub fn create_vector_store_file(
         &self,
         vector_store_id: impl Into<String>,
-        body: CreateVectorStoreFileRequest2,
+        body: ::schematic_definitions::openai::CreateVectorStoreFileRequest2,
     ) -> CreateVectorStoreFileCall<'_> {
         CreateVectorStoreFileCall(
             self.0.send(CreateVectorStoreFileRequest::new(vector_store_id, body)),
@@ -42162,12 +41600,12 @@ impl OpenAI {
     ///
     /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
     /// - `file_id: impl Into<String>`: the `{file_id}` path parameter
-    /// - `body: UpdateVectorStoreFileAttributesRequest2`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateVectorStoreFileAttributesRequest2`: the request body
     pub fn update_vector_store_file_attributes(
         &self,
         vector_store_id: impl Into<String>,
         file_id: impl Into<String>,
-        body: UpdateVectorStoreFileAttributesRequest2,
+        body: ::schematic_definitions::openai::UpdateVectorStoreFileAttributesRequest2,
     ) -> UpdateVectorStoreFileAttributesCall<'_> {
         UpdateVectorStoreFileAttributesCall(
             self
@@ -42232,11 +41670,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `vector_store_id: impl Into<String>`: the `{vector_store_id}` path parameter
-    /// - `body: VectorStoreSearchRequest`: the request body
+    /// - `body: ::schematic_definitions::openai::VectorStoreSearchRequest`: the request body
     pub fn search_vector_store(
         &self,
         vector_store_id: impl Into<String>,
-        body: VectorStoreSearchRequest,
+        body: ::schematic_definitions::openai::VectorStoreSearchRequest,
     ) -> SearchVectorStoreCall<'_> {
         SearchVectorStoreCall(
             self.0.send(SearchVectorStoreRequest::new(vector_store_id, body)),
@@ -42250,10 +41688,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateConversationBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateConversationBody`: the request body
     pub fn create_conversation(
         &self,
-        body: CreateConversationBody,
+        body: ::schematic_definitions::openai::CreateConversationBody,
     ) -> CreateConversationCall<'_> {
         CreateConversationCall(self.0.send(CreateConversationRequest::new(body)))
     }
@@ -42281,11 +41719,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `conversation_id: impl Into<String>`: the `{conversation_id}` path parameter
-    /// - `body: UpdateConversationBody`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateConversationBody`: the request body
     pub fn update_conversation(
         &self,
         conversation_id: impl Into<String>,
-        body: UpdateConversationBody,
+        body: ::schematic_definitions::openai::UpdateConversationBody,
     ) -> UpdateConversationCall<'_> {
         UpdateConversationCall(
             self.0.send(UpdateConversationRequest::new(conversation_id, body)),
@@ -42326,10 +41764,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: UpdateOrganizationSpendLimitBody`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody`: the request body
     pub fn updateorganizationspendlimit(
         &self,
-        body: UpdateOrganizationSpendLimitBody,
+        body: ::schematic_definitions::openai::UpdateOrganizationSpendLimitBody,
     ) -> UpdateorganizationspendlimitCall<'_> {
         UpdateorganizationspendlimitCall(
             self.0.send(UpdateorganizationspendlimitRequest::new(body)),
@@ -42371,11 +41809,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    /// - `body: UpdateProjectSpendLimitBody`: the request body
+    /// - `body: ::schematic_definitions::openai::UpdateProjectSpendLimitBody`: the request body
     pub fn updateprojectspendlimit(
         &self,
         project_id: impl Into<String>,
-        body: UpdateProjectSpendLimitBody,
+        body: ::schematic_definitions::openai::UpdateProjectSpendLimitBody,
     ) -> UpdateprojectspendlimitCall<'_> {
         UpdateprojectspendlimitCall(
             self.0.send(UpdateprojectspendlimitRequest::new(project_id, body)),
@@ -42408,12 +41846,12 @@ impl OpenAI {
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
     /// - `service_account_id: impl Into<String>`: the `{service_account_id}` path parameter
-    /// - `body: CreateProjectServiceAccountApiKeyBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateProjectServiceAccountApiKeyBody`: the request body
     pub fn createan_apikeyforaserviceaccount(
         &self,
         project_id: impl Into<String>,
         service_account_id: impl Into<String>,
-        body: CreateProjectServiceAccountApiKeyBody,
+        body: ::schematic_definitions::openai::CreateProjectServiceAccountApiKeyBody,
     ) -> CreateanAPIkeyforaserviceaccountCall<'_> {
         CreateanAPIkeyforaserviceaccountCall(
             self
@@ -42466,8 +41904,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateVideoJsonBody`: the request body
-    pub fn create_video(&self, body: CreateVideoJsonBody) -> CreateVideoCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateVideoJsonBody`: the request body
+    pub fn create_video(
+        &self,
+        body: ::schematic_definitions::openai::CreateVideoJsonBody,
+    ) -> CreateVideoCall<'_> {
         CreateVideoCall(self.0.send(CreateVideoRequest::new(body)))
     }
     /// Create a character from an uploaded video.
@@ -42508,10 +41949,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateVideoEditJsonBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateVideoEditJsonBody`: the request body
     pub fn create_video_edit(
         &self,
-        body: CreateVideoEditJsonBody,
+        body: ::schematic_definitions::openai::CreateVideoEditJsonBody,
     ) -> CreateVideoEditCall<'_> {
         CreateVideoEditCall(self.0.send(CreateVideoEditRequest::new(body)))
     }
@@ -42523,10 +41964,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateVideoExtendJsonBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateVideoExtendJsonBody`: the request body
     pub fn create_video_extend(
         &self,
-        body: CreateVideoExtendJsonBody,
+        body: ::schematic_definitions::openai::CreateVideoExtendJsonBody,
     ) -> CreateVideoExtendCall<'_> {
         CreateVideoExtendCall(self.0.send(CreateVideoExtendRequest::new(body)))
     }
@@ -42584,11 +42025,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `video_id: impl Into<String>`: the `{video_id}` path parameter
-    /// - `body: CreateVideoRemixBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateVideoRemixBody`: the request body
     pub fn create_video_remix(
         &self,
         video_id: impl Into<String>,
-        body: CreateVideoRemixBody,
+        body: ::schematic_definitions::openai::CreateVideoRemixBody,
     ) -> CreateVideoRemixCall<'_> {
         CreateVideoRemixCall(self.0.send(CreateVideoRemixRequest::new(video_id, body)))
     }
@@ -42602,10 +42043,15 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: TokenCountsBody`: the request body
+    /// - `body: ::schematic_definitions::openai::BetaTokenCountsBody`: the request body
+    ///
+    /// ## Optional values
+    ///
+    /// - [`beta`](GetinputtokencountsCall::beta): the `beta` query parameter (`bool`).
+    /// - [`openai_beta`](GetinputtokencountsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn getinputtokencounts(
         &self,
-        body: TokenCountsBody,
+        body: ::schematic_definitions::openai::BetaTokenCountsBody,
     ) -> GetinputtokencountsCall<'_> {
         GetinputtokencountsCall(self.0.send(GetinputtokencountsRequest::new(body)))
     }
@@ -42619,10 +42065,15 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CompactResponseMethodPublicBody`: the request body
+    /// - `body: ::schematic_definitions::openai::BetaCompactResponseMethodPublicBody`: the request body
+    ///
+    /// ## Optional values
+    ///
+    /// - [`beta`](CompactconversationCall::beta): the `beta` query parameter (`bool`).
+    /// - [`openai_beta`](CompactconversationCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn compactconversation(
         &self,
-        body: CompactResponseMethodPublicBody,
+        body: ::schematic_definitions::openai::BetaCompactResponseMethodPublicBody,
     ) -> CompactconversationCall<'_> {
         CompactconversationCall(self.0.send(CompactconversationRequest::new(body)))
     }
@@ -42646,8 +42097,11 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateSkillBody`: the request body
-    pub fn create_skill(&self, body: CreateSkillBody) -> CreateSkillCall<'_> {
+    /// - `body: ::schematic_definitions::openai::CreateSkillBody`: the request body
+    pub fn create_skill(
+        &self,
+        body: ::schematic_definitions::openai::CreateSkillBody,
+    ) -> CreateSkillCall<'_> {
         CreateSkillCall(self.0.send(CreateSkillRequest::new(body)))
     }
     /// Get a skill by its ID.
@@ -42671,11 +42125,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
-    /// - `body: SetDefaultSkillVersionBody`: the request body
+    /// - `body: ::schematic_definitions::openai::SetDefaultSkillVersionBody`: the request body
     pub fn update_skill_default_version(
         &self,
         skill_id: impl Into<String>,
-        body: SetDefaultSkillVersionBody,
+        body: ::schematic_definitions::openai::SetDefaultSkillVersionBody,
     ) -> UpdateSkillDefaultVersionCall<'_> {
         UpdateSkillDefaultVersionCall(
             self.0.send(UpdateSkillDefaultVersionRequest::new(skill_id, body)),
@@ -42736,11 +42190,11 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `skill_id: impl Into<String>`: the `{skill_id}` path parameter
-    /// - `body: CreateSkillVersionBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateSkillVersionBody`: the request body
     pub fn create_skill_version(
         &self,
         skill_id: impl Into<String>,
-        body: CreateSkillVersionBody,
+        body: ::schematic_definitions::openai::CreateSkillVersionBody,
     ) -> CreateSkillVersionCall<'_> {
         CreateSkillVersionCall(
             self.0.send(CreateSkillVersionRequest::new(skill_id, body)),
@@ -42828,10 +42282,10 @@ impl OpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateChatSessionBody`: the request body
+    /// - `body: ::schematic_definitions::openai::CreateChatSessionBody`: the request body
     pub fn create_chat_session_method(
         &self,
-        body: CreateChatSessionBody,
+        body: ::schematic_definitions::openai::CreateChatSessionBody,
     ) -> CreateChatSessionMethodCall<'_> {
         CreateChatSessionMethodCall(
             self.0.send(CreateChatSessionMethodRequest::new(body)),
@@ -42900,160 +42354,5 @@ impl OpenAI {
     /// - [`user`](ListThreadsMethodCall::user): the `user` query parameter (`String`). Filter threads that belong to this user identifier. Defaults to null to return all users.
     pub fn list_threads_method(&self) -> ListThreadsMethodCall<'_> {
         ListThreadsMethodCall(self.0.send(ListThreadsMethodRequest::default()))
-    }
-    /// Creates a model response. Provide [text](/docs/guides/text) or
-    /// [image](/docs/guides/images) inputs to generate [text](/docs/guides/text)
-    /// or [JSON](/docs/guides/structured-outputs) outputs. Have the model call
-    /// your own [custom code](/docs/guides/function-calling) or use built-in
-    /// [tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)
-    /// or [file search](/docs/guides/tools-file-search) to use your own data
-    /// as input for the model's response.
-    ///
-    /// `POST /responses?beta=true`
-    ///
-    /// Returns a [`BetaCreateResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Arguments
-    ///
-    /// - `body: BetaCreateResponse`: the request body
-    ///
-    /// ## Optional values
-    ///
-    /// - [`openai_beta`](BetaCreateResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn beta_create_response(
-        &self,
-        body: BetaCreateResponse,
-    ) -> BetaCreateResponseCall<'_> {
-        BetaCreateResponseCall(self.0.send(BetaCreateResponseRequest::new(body)))
-    }
-    /// Retrieves a model response with the given ID.
-    ///
-    /// `GET /responses/{response_id}?beta=true`
-    ///
-    /// Returns a [`BetaGetResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Arguments
-    ///
-    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`include`](BetaGetResponseCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
-    /// - [`stream`](BetaGetResponseCall::stream): the `stream` query parameter (`bool`). If set to true, the model response data will be streamed to the client as it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format). See the [Streaming section below](/docs/api-reference/responses-streaming) for more information.
-    /// - [`starting_after`](BetaGetResponseCall::starting_after): the `starting_after` query parameter (`i64`). The sequence number of the event after which to start streaming.
-    /// - [`include_obfuscation`](BetaGetResponseCall::include_obfuscation): the `include_obfuscation` query parameter (`bool`). When true, stream obfuscation will be enabled. Stream obfuscation adds random characters to an `obfuscation` field on streaming delta events to normalize payload sizes as a mitigation to certain side-channel attacks. These obfuscation fields are included by default, but add a small amount of overhead to the data stream. You can set `include_obfuscation` to false to optimize for bandwidth if you trust the network links between your application and the OpenAI API.
-    /// - [`openai_beta`](BetaGetResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn beta_get_response(
-        &self,
-        response_id: impl Into<String>,
-    ) -> BetaGetResponseCall<'_> {
-        BetaGetResponseCall(self.0.send(BetaGetResponseRequest::new(response_id)))
-    }
-    /// Deletes a model response with the given ID.
-    ///
-    /// `DELETE /responses/{response_id}?beta=true`
-    ///
-    /// Returns a [`BetaDeleteResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Arguments
-    ///
-    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`openai_beta`](BetaDeleteResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn beta_delete_response(
-        &self,
-        response_id: impl Into<String>,
-    ) -> BetaDeleteResponseCall<'_> {
-        BetaDeleteResponseCall(self.0.send(BetaDeleteResponseRequest::new(response_id)))
-    }
-    /// Cancels a model response with the given ID. Only responses created with
-    /// the `background` parameter set to `true` can be cancelled.
-    /// [Learn more](/docs/guides/background).
-    ///
-    /// `POST /responses/{response_id}/cancel?beta=true`
-    ///
-    /// Returns a [`BetaCancelResponseCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Arguments
-    ///
-    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`openai_beta`](BetaCancelResponseCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn beta_cancel_response(
-        &self,
-        response_id: impl Into<String>,
-    ) -> BetaCancelResponseCall<'_> {
-        BetaCancelResponseCall(self.0.send(BetaCancelResponseRequest::new(response_id)))
-    }
-    /// Compact a conversation. Returns a compacted response object.
-    ///
-    /// Learn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced).
-    ///
-    /// `POST /responses/compact?beta=true`
-    ///
-    /// Returns a [`BetaCompactconversationCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Arguments
-    ///
-    /// - `body: BetaCompactResponseMethodPublicBody`: the request body
-    ///
-    /// ## Optional values
-    ///
-    /// - [`openai_beta`](BetaCompactconversationCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn beta_compactconversation(
-        &self,
-        body: BetaCompactResponseMethodPublicBody,
-    ) -> BetaCompactconversationCall<'_> {
-        BetaCompactconversationCall(
-            self.0.send(BetaCompactconversationRequest::new(body)),
-        )
-    }
-    /// Returns a list of input items for a given response.
-    ///
-    /// `GET /responses/{response_id}/input_items?beta=true`
-    ///
-    /// Returns a [`BetaListInputItemsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Arguments
-    ///
-    /// - `response_id: impl Into<String>`: the `{response_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`order`](BetaListInputItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    /// - [`include`](BetaListInputItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
-    /// - [`openai_beta`](BetaListInputItemsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn beta_list_input_items(
-        &self,
-        response_id: impl Into<String>,
-    ) -> BetaListInputItemsCall<'_> {
-        BetaListInputItemsCall(self.0.send(BetaListInputItemsRequest::new(response_id)))
-    }
-    /// Returns input token counts of the request.
-    ///
-    /// Returns an object with `object` set to `response.input_tokens` and an `input_tokens` count.
-    ///
-    /// `POST /responses/input_tokens?beta=true`
-    ///
-    /// Returns a [`BetaGetinputtokencountsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Arguments
-    ///
-    /// - `body: BetaTokenCountsBody`: the request body
-    ///
-    /// ## Optional values
-    ///
-    /// - [`openai_beta`](BetaGetinputtokencountsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
-    pub fn beta_getinputtokencounts(
-        &self,
-        body: BetaTokenCountsBody,
-    ) -> BetaGetinputtokencountsCall<'_> {
-        BetaGetinputtokencountsCall(
-            self.0.send(BetaGetinputtokencountsRequest::new(body)),
-        )
     }
 }

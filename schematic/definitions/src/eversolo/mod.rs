@@ -120,7 +120,7 @@ fn device_endpoints() -> Vec<Endpoint> {
         response: ApiResponse::json_type("GetModelResponse"),
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }]
 }
 
@@ -144,7 +144,7 @@ fn remote_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "RemoteInputText".to_string(),
@@ -160,7 +160,7 @@ fn remote_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Text string to input"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }
@@ -180,7 +180,7 @@ fn music_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("GetStateResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicPlayOrPause".to_string(),
@@ -191,7 +191,7 @@ fn music_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicPlayNext".to_string(),
@@ -202,7 +202,7 @@ fn music_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicPlayLast".to_string(),
@@ -213,7 +213,7 @@ fn music_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicSeekTo".to_string(),
@@ -229,7 +229,7 @@ fn music_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Target position in milliseconds"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicGetInputOutputList".to_string(),
@@ -240,7 +240,7 @@ fn music_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("InputOutputListResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicSetInput".to_string(),
@@ -256,7 +256,7 @@ fn music_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Input tag from getInputAndOutputList"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicSetOutput".to_string(),
@@ -272,7 +272,7 @@ fn music_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Output tag from getInputAndOutputList"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicSetVolume".to_string(),
@@ -288,7 +288,7 @@ fn music_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Volume level (0 to maxVolume)"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "MusicSetMute".to_string(),
@@ -305,7 +305,7 @@ fn music_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Mute state: 0 = unmuted, 1 = muted"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }
@@ -325,7 +325,7 @@ fn power_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("PowerOptionsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "PowerSetOption".to_string(),
@@ -342,7 +342,7 @@ fn power_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Power option tag (poweroff, reboot, screen, timeshutdown)"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }
@@ -362,7 +362,7 @@ fn system_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("BrightnessResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemSetScreenBrightness".to_string(),
@@ -378,7 +378,7 @@ fn system_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Brightness level index"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemGetKnobBrightness".to_string(),
@@ -389,7 +389,7 @@ fn system_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("BrightnessResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemSetKnobBrightness".to_string(),
@@ -405,7 +405,7 @@ fn system_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Brightness level index"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemGetVuModeList".to_string(),
@@ -416,7 +416,7 @@ fn system_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("DisplayModeListResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemSetVuMode".to_string(),
@@ -432,7 +432,7 @@ fn system_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("VU mode index from getVUModeList"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemGetSpectrumModeList".to_string(),
@@ -443,7 +443,7 @@ fn system_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("DisplayModeListResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemSetSpectrumMode".to_string(),
@@ -459,7 +459,7 @@ fn system_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Spectrum mode index from getSpPlayModeList"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "SystemChangeVuDisplay".to_string(),
@@ -475,7 +475,7 @@ fn system_endpoints() -> Vec<Endpoint> {
                 true,
                 Some("Display open type"),
             )),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }

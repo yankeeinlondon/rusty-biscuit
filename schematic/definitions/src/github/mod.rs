@@ -179,7 +179,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_type("RepositoryInfo"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Git Trees (for file discovery)
@@ -200,7 +200,7 @@ pub fn define_github_api() -> RestApi {
                     false,
                     Some("Fetch the tree recursively instead of a single level"),
                 )),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Repository Contents (raw file access)
@@ -217,7 +217,7 @@ pub fn define_github_api() -> RestApi {
                     "application/vnd.github.raw+json".to_string(),
                 )],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Pull Requests
@@ -261,7 +261,7 @@ pub fn define_github_api() -> RestApi {
                             Some("Sort direction"),
                         ),
                 ),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "ListPullRequestFiles".to_string(),
@@ -272,7 +272,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_vec_type("PullRequestFile"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Issues
@@ -315,7 +315,7 @@ pub fn define_github_api() -> RestApi {
                             Some("Sort direction"),
                         ),
                 ),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -326,7 +326,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_type("IssueSummary"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "ListIssueComments".to_string(),
@@ -337,7 +337,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_vec_type("IssueComment"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "ListIssueTimeline".to_string(),
@@ -348,7 +348,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_vec_type("TimelineEvent"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Tags and Releases
@@ -362,7 +362,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_vec_type("RepoTag"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "ListReleases".to_string(),
@@ -373,7 +373,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_vec_type("Release"),
                 headers: vec![],
                 params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "GetTagReference".to_string(),
@@ -384,7 +384,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_type("GitRef"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Branches
@@ -401,7 +401,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_type("GitRef"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "GetAnnotatedTag".to_string(),
@@ -413,7 +413,7 @@ pub fn define_github_api() -> RestApi {
                 response: ApiResponse::json_type("AnnotatedTagObject"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Workflow Runs (Actions / CI/CD)
@@ -463,7 +463,7 @@ pub fn define_github_api() -> RestApi {
                             Some("Filter by event type (e.g., push, pull_request)"),
                         ),
                 ),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             // =================================================================
             // Organization Repositories
@@ -510,7 +510,7 @@ pub fn define_github_api() -> RestApi {
                             Some("Sort direction"),
                         ),
                 ),
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
         ],
         module_path: Some("github".to_string()),

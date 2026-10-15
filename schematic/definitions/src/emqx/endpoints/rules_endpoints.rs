@@ -12,7 +12,7 @@ pub fn rules_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListRulesResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "CreateRule".to_string(),
@@ -23,7 +23,7 @@ pub fn rules_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RuleInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetRule".to_string(),
@@ -34,7 +34,7 @@ pub fn rules_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RuleInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "UpdateRule".to_string(),
@@ -45,7 +45,7 @@ pub fn rules_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RuleInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "DeleteRule".to_string(),
@@ -56,7 +56,7 @@ pub fn rules_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "TestRule".to_string(),
@@ -67,7 +67,7 @@ pub fn rules_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("TestRuleResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }

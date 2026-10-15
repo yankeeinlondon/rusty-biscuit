@@ -6933,8 +6933,21 @@
               ],
               "path": [
                 "responses"
+              ],
+              "query": [
+                {
+                  "key": "beta"
+                }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -6976,6 +6989,9 @@
                 {
                   "key": "include_obfuscation",
                   "description": "When true, stream obfuscation will be enabled. Stream obfuscation adds\nrandom characters to an `obfuscation` field on streaming delta events\nto normalize payload sizes as a mitigation to certain side-channel\nattacks. These obfuscation fields are included by default, but add a\nsmall amount of overhead to the data stream. You can set\n`include_obfuscation` to false to optimize for bandwidth if you trust\nthe network links between your application and the OpenAI API.\n"
+                },
+                {
+                  "key": "beta"
                 }
               ],
               "variable": [
@@ -6985,6 +7001,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Retrieves a model response with the given ID.\n"
           }
         },
@@ -7001,6 +7025,11 @@
                 "responses",
                 ":response_id"
               ],
+              "query": [
+                {
+                  "key": "beta"
+                }
+              ],
               "variable": [
                 {
                   "key": "response_id",
@@ -7008,6 +7037,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Deletes a model response with the given ID.\n"
           }
         },
@@ -7025,6 +7062,11 @@
                 ":response_id",
                 "cancel"
               ],
+              "query": [
+                {
+                  "key": "beta"
+                }
+              ],
               "variable": [
                 {
                   "key": "response_id",
@@ -7032,6 +7074,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Cancels a model response with the given ID. Only responses created with\nthe `background` parameter set to `true` can be cancelled. \n[Learn more](/docs/guides/background).\n"
           }
         },
@@ -7065,6 +7115,9 @@
                 {
                   "key": "include",
                   "description": "Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
+                },
+                {
+                  "key": "beta"
                 }
               ],
               "variable": [
@@ -7074,6 +7127,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Returns a list of input items for a given response."
           }
         },
@@ -7089,8 +7150,21 @@
               "path": [
                 "responses",
                 "input_tokens"
+              ],
+              "query": [
+                {
+                  "key": "beta"
+                }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -7115,144 +7189,11 @@
               "path": [
                 "responses",
                 "compact"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "description": "Compact a conversation. Returns a compacted response object.\n\nLearn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced)."
-          }
-        },
-        {
-          "name": "BetaGetResponse",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/responses/:response_id?beta=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "responses",
-                "{response_id}?beta=true"
               ],
               "query": [
                 {
-                  "key": "include",
-                  "description": "Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
-                },
-                {
-                  "key": "stream",
-                  "description": "If set to true, the model response data will be streamed to the client\nas it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\nSee the [Streaming section below](/docs/api-reference/responses-streaming)\nfor more information.\n"
-                },
-                {
-                  "key": "starting_after",
-                  "description": "The sequence number of the event after which to start streaming.\n"
-                },
-                {
-                  "key": "include_obfuscation",
-                  "description": "When true, stream obfuscation will be enabled. Stream obfuscation adds\nrandom characters to an `obfuscation` field on streaming delta events\nto normalize payload sizes as a mitigation to certain side-channel\nattacks. These obfuscation fields are included by default, but add a\nsmall amount of overhead to the data stream. You can set\n`include_obfuscation` to false to optimize for bandwidth if you trust\nthe network links between your application and the OpenAI API.\n"
+                  "key": "beta"
                 }
-              ],
-              "variable": [
-                {
-                  "key": "response_id",
-                  "value": "<response_id>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "openai-beta",
-                "value": "<openai-beta>",
-                "disabled": true,
-                "description": "Optional beta features to enable for this request."
-              }
-            ],
-            "description": "Retrieves a model response with the given ID.\n"
-          }
-        },
-        {
-          "name": "BetaDeleteResponse",
-          "request": {
-            "method": "DELETE",
-            "url": {
-              "raw": "{{baseUrl}}/responses/:response_id?beta=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "responses",
-                "{response_id}?beta=true"
-              ],
-              "variable": [
-                {
-                  "key": "response_id",
-                  "value": "<response_id>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "openai-beta",
-                "value": "<openai-beta>",
-                "disabled": true,
-                "description": "Optional beta features to enable for this request."
-              }
-            ],
-            "description": "Deletes a model response with the given ID.\n"
-          }
-        },
-        {
-          "name": "BetaCancelResponse",
-          "request": {
-            "method": "POST",
-            "url": {
-              "raw": "{{baseUrl}}/responses/:response_id/cancel?beta=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "responses",
-                ":response_id",
-                "cancel?beta=true"
-              ],
-              "variable": [
-                {
-                  "key": "response_id",
-                  "value": "<response_id>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "openai-beta",
-                "value": "<openai-beta>",
-                "disabled": true,
-                "description": "Optional beta features to enable for this request."
-              }
-            ],
-            "description": "Cancels a model response with the given ID. Only responses created with\nthe `background` parameter set to `true` can be cancelled. \n[Learn more](/docs/guides/background).\n"
-          }
-        },
-        {
-          "name": "BetaCompactconversation",
-          "request": {
-            "method": "POST",
-            "url": {
-              "raw": "{{baseUrl}}/responses/compact?beta=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "responses",
-                "compact?beta=true"
               ]
             },
             "header": [
@@ -7273,128 +7214,6 @@
               }
             },
             "description": "Compact a conversation. Returns a compacted response object.\n\nLearn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced)."
-          }
-        },
-        {
-          "name": "BetaListInputItems",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/responses/:response_id/input_items?beta=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "responses",
-                ":response_id",
-                "input_items?beta=true"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "description": "A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
-                },
-                {
-                  "key": "order",
-                  "description": "The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
-                },
-                {
-                  "key": "after",
-                  "description": "An item ID to list items after, used in pagination.\n"
-                },
-                {
-                  "key": "include",
-                  "description": "Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
-                }
-              ],
-              "variable": [
-                {
-                  "key": "response_id",
-                  "value": "<response_id>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "openai-beta",
-                "value": "<openai-beta>",
-                "disabled": true,
-                "description": "Optional beta features to enable for this request."
-              }
-            ],
-            "description": "Returns a list of input items for a given response."
-          }
-        },
-        {
-          "name": "BetaGetinputtokencounts",
-          "request": {
-            "method": "POST",
-            "url": {
-              "raw": "{{baseUrl}}/responses/input_tokens?beta=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "responses",
-                "input_tokens?beta=true"
-              ]
-            },
-            "header": [
-              {
-                "key": "openai-beta",
-                "value": "<openai-beta>",
-                "disabled": true,
-                "description": "Optional beta features to enable for this request."
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "description": "Returns input token counts of the request.\n\nReturns an object with `object` set to `response.input_tokens` and an `input_tokens` count."
-          }
-        }
-      ]
-    },
-    {
-      "name": "Responses?beta=true",
-      "item": [
-        {
-          "name": "BetaCreateResponse",
-          "request": {
-            "method": "POST",
-            "url": {
-              "raw": "{{baseUrl}}/responses?beta=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "responses?beta=true"
-              ]
-            },
-            "header": [
-              {
-                "key": "openai-beta",
-                "value": "<openai-beta>",
-                "disabled": true,
-                "description": "Optional beta features to enable for this request."
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "description": "Creates a model response. Provide [text](/docs/guides/text) or\n[image](/docs/guides/images) inputs to generate [text](/docs/guides/text)\nor [JSON](/docs/guides/structured-outputs) outputs. Have the model call\nyour own [custom code](/docs/guides/function-calling) or use built-in\n[tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)\nor [file search](/docs/guides/tools-file-search) to use your own data\nas input for the model's response.\n"
           }
         }
       ]

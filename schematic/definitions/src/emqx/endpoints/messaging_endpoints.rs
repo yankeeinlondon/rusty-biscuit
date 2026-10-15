@@ -13,7 +13,7 @@ pub fn messaging_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListSubscriptionsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         // Publishing
         Endpoint {
@@ -25,7 +25,7 @@ pub fn messaging_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "PublishBulk".to_string(),
@@ -36,7 +36,7 @@ pub fn messaging_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         // Topics
         Endpoint {
@@ -48,7 +48,7 @@ pub fn messaging_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListTopicsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         // Retained Messages
         Endpoint {
@@ -60,7 +60,7 @@ pub fn messaging_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListRetainedResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetRetained".to_string(),
@@ -71,7 +71,7 @@ pub fn messaging_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("RetainedMessage"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "DeleteRetained".to_string(),
@@ -82,7 +82,7 @@ pub fn messaging_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ]
 }

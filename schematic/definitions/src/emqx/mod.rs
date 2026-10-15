@@ -242,7 +242,7 @@ pub fn define_emqx_bearer_api() -> RestApi {
             response: ApiResponse::json_type("LoginResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         // Logout endpoint
         Endpoint {
@@ -254,7 +254,7 @@ pub fn define_emqx_bearer_api() -> RestApi {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ];
     endpoints.extend(build_common_endpoints());

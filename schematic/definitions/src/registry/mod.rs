@@ -246,24 +246,34 @@ impl SchemaRegistry {
     ) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
-        // A path-shaped name (`serde_json::Value`) is a foreign type, not a
-        // registrable local one: an imported spec uses it wherever a body had no
-        // named schema to reference. Requiring registration for it would make
-        // every such API permanently incomplete.
-        let is_registrable = |name: &String| !name.contains("::");
-
-        for endpoint in &api.endpoints {
-            if let schematic_define::ApiResponse::Json(schema) = &endpoint.response {
-                let type_name = &schema.type_name;
-                if is_registrable(type_name) && !self.types.contains_key(type_name) {
-                    missing.push(type_name.clone());
+        fn references(value: &serde_json::Value, names: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(object) => {
+                    if let Some(name) = object.get("$ref").and_then(|v| v.as_str())
+                        .and_then(|v| v.strip_prefix("#/components/schemas/")) {
+                        names.push(name.to_owned());
+                    }
+                    for value in object.values() { references(value, names); }
                 }
+                serde_json::Value::Array(values) => for value in values { references(value, names); },
+                _ => {},
             }
-            if let Some(schematic_define::ApiRequest::Json(schema)) = &endpoint.request {
-                let type_name = &schema.type_name;
-                if is_registrable(type_name) && !self.types.contains_key(type_name) {
-                    missing.push(type_name.clone());
+        }
+        for endpoint in &api.endpoints {
+            let response = match &endpoint.response {
+                schematic_define::ApiResponse::Json(schema) => Some(schema), _ => None,
+            };
+            let request = match &endpoint.request {
+                Some(schematic_define::ApiRequest::Json(schema)) => Some(schema), _ => None,
+            };
+            for schema in response.into_iter().chain(request) {
+                let mut names = Vec::new();
+                if let Some(descriptor) = &schema.descriptor {
+                    references(&descriptor.wire_schema(), &mut names);
+                } else if !schema.type_name.contains("::") {
+                    names.push(schema.type_name.clone());
                 }
+                missing.extend(names.into_iter().filter(|name| !self.types.contains_key(name)));
             }
         }
 
@@ -413,6 +423,19 @@ mod tests {
     // =============================================
 
     #[test]
+    fn typed_completeness_checks_nominal_references_inside_wrappers() {
+        use schematic_define::{DefinitionContext, Endpoint, RestApi};
+        let mut ctx = DefinitionContext::types_in("::schematic_definitions::openai");
+        let endpoint = Endpoint::get("Models", "/models").describes("Models")
+            .returns_json::<Option<Vec<Model>>>(&mut ctx).build().unwrap();
+        let api = RestApi::builder(&ctx, "Models", "https://example.com")
+            .describes("Models").no_auth().endpoints([endpoint]).build().unwrap();
+        assert_eq!(SchemaRegistry::new().validate_completeness(&api).unwrap_err(), ["Model"]);
+        SchemaRegistry::from_context(&ctx).unwrap().validate_completeness(&api).unwrap();
+        assert_eq!(SchemaRegistry::from_context(&ctx).unwrap().names().collect::<Vec<_>>(), ["Model"]);
+    }
+
+    #[test]
     fn validate_completeness_passes_for_complete_registry() {
         let api = define_openai_api();
         let registry = openai_registry();
@@ -461,7 +484,7 @@ mod tests {
                     response: ApiResponse::json_type("MissingType"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None,
+                    oauth_scopes: None, cross_origin: None, pagination: None,
                 },
                 Endpoint {
                     id: "Get2".to_string(),
@@ -472,7 +495,7 @@ mod tests {
                     response: ApiResponse::json_type("MissingType"), // Same type
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None,
+                    oauth_scopes: None, cross_origin: None, pagination: None,
                 },
             ],
             module_path: None,
@@ -519,7 +542,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -564,7 +587,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None,
+                    oauth_scopes: None, cross_origin: None, pagination: None,
                 },
                 Endpoint {
                     id: "Text".to_string(),
@@ -575,7 +598,7 @@ mod tests {
                     response: ApiResponse::Text,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None,
+                    oauth_scopes: None, cross_origin: None, pagination: None,
                 },
                 Endpoint {
                     id: "Empty".to_string(),
@@ -586,7 +609,7 @@ mod tests {
                     response: ApiResponse::Empty,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None,
+                    oauth_scopes: None, cross_origin: None, pagination: None,
                 },
             ],
             module_path: None,
