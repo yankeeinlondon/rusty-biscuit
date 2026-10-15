@@ -207,7 +207,7 @@ Endpoint {
     response: ApiResponse::json_type("User"),
     headers: vec![],
     params: None,
-    oauth_scopes: None,
+    oauth_scopes: None, cross_origin: None,
 }
 
 // POST with JSON body
@@ -220,7 +220,7 @@ Endpoint {
     response: ApiResponse::json_type("User"),
     headers: vec![],
     params: None,
-    oauth_scopes: None,
+    oauth_scopes: None, cross_origin: None,
 }
 
 // File upload with multipart form
@@ -236,7 +236,7 @@ Endpoint {
     response: ApiResponse::json_type("FileMetadata"),
     headers: vec![],
     params: None,
-    oauth_scopes: None,
+    oauth_scopes: None, cross_origin: None,
 }
 ```
 
@@ -347,3 +347,18 @@ at API build; JSON schemas without evidence fail the builder too. OpenAPI export
 retain GET list inference, while Option/nominal wrappers do not. Legacy providers,
 import emitter and external literals remain until migration. Read
 `schematic/docs/definition-builders.md` for accepted forms and the Default allow-list.
+
+
+## Definition runtime and parameter forms
+
+Endpoint `.cross_origin(policy)` replaces API policy for redirects and pager links;
+caller policies only tighten. Exact allow_origins and HTTP header names validate
+at API build. API `.request_id_header` / `.secret_header` normalize lowercase;
+`ParamDef::new(wire_name, type).secret()` emits existing runtime redaction metadata.
+Use `.query(param)`, `.header_param(param)`, `.cookie(param)` for explicit locations;
+`.rust_name("git_ref")` keeps the `ref` wire name. Optional Boolean beta/recursive
+use ordinary setters. GET bodies fail endpoint build and destination API build;
+HEAD is unchanged. `.pager_managed()` is serializable and requires a matching
+resolved strategy input/caller control, plus a sent default for required inputs.
+`.default_pagination(strategy)` feeds the existing resolver. New unused fields omit
+from JSON; path-query remains a warning until provider migrations finish.
