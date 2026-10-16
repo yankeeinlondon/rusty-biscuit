@@ -29,21 +29,23 @@ We provide both **primary** research topics as well as buckets of **summary** re
 
 ```mermaid
 mindmap 
-    root((Research))
+    root((RESEARCH))
         Shared Assets((Shared\nAssets))
             Prompts
             Agent Skills
             Hooks
             Sub-Agent Defn
+            MCP
+            Plugins
         Interface((Interface))
             CLI
             API
+            Desktop App
         Handling((Handling))
             Logging
             Errors
             Non-Interactive
         Vendor((Vendor))
-            Desktop App
             Plans
             Caching
         Config((Config))
@@ -52,6 +54,7 @@ mindmap
             Permissions
             System Prompt
         Capabilities((Capabilities))
+            Tools
             Resumption
             Steering
             Sandboxing
@@ -59,16 +62,35 @@ mindmap
             Memory Systems
 ```
 
-#### ACP
+#### Capabilities
 
+#### Shared Assets
 
-#### CLI
+- [**Agent Skills**](./skills/_fleet.md)
+- [**MCP**](./mcp/_fleet.md)
+- [**Hooks**](./hooks/_fleet.md)
+- [**Prompts**](./slash-commands/_fleet.md)
+- [**Sub Agent Defn**](./subagents/_fleet.md)
 
+#### Interface
 
-#### Errors
+- **API**
+- [**CLI**](./agent-cli/_fleet.md)
+- **Desktop App**
+- [**ACP**](./acp/_fleet.md)
 
+#### Configuration
 
-#### Logging
+- [**Models**](./model-config/_fleet.md)
+- [**Reasoning Level**](./reasoning-level/_fleet.md)
+- **System Prompt**
+- **Permissions**
+
+#### Handling
+
+- **Errors**
+- **Logging**
+- **Non-Interactive**
 
 #### Model Configuration
 
