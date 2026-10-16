@@ -4,6 +4,16 @@ created: 2026-10-15
 phase: 1
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: "true"
+source_files_during_phase_1:
+    - biscuit-terminal/features/2026-10-15-upgraded-rendering/evidence/capture/capture.rs
+    - biscuit-terminal/features/2026-10-15-upgraded-rendering/evidence/capture/run-leg.sh
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - biscuit-visualized/src/tests/fixtures/mermaid-corpus/PROVENANCE.md
+skills_files_updated_during_phase_1: []
+packages:
+    - biscuit-visualized
+    - biscuit-terminal
 ---
 
 # Upgraded Diagram Rendering — Implementation Plan
@@ -50,23 +60,23 @@ Dropped spikes (ruled, not scheduled): a performance spike — the spec explicit
 
 #### Wave 1
 
-- [ ] **Record rulings** —
+- [x] **Record rulings** —
   - Present R1–R5 to the author; capture decisions and any new constraints in the implementation-log scaffold.
   - Flag any ruling that materially changes later waves (corpus location gates Wave 2; R3 gates Wave 10).
-- [ ] **Run dependency spike** —
+- [x] **Run dependency spike** —
   - Execute S1 as described; record resolution output, MSRV findings, and single-rasterizer confirmation in the log.
   - If the spike fails on the pinned toolchain, stop and report — the upgrade decision changes before any workspace manifest is touched.
-- [ ] **Scaffold implementation log** —
+- [x] **Scaffold implementation log** —
   - Create `biscuit-terminal/features/2026-10-15-upgraded-rendering/implementation-log.md` with sections: dependency choices, corpus and provenance, comparison legs, validation evidence, departures from spec.
 
 #### Wave 2
 
 Requires the corpus-location ruling (R1).
 
-- [ ] **Freeze corpus** —
+- [x] **Freeze corpus** —
   - One file per input with a provenance header (upstream commit or local regression test of origin) and expected behavior: flowchart(s) including a routing case, radar, state fork/join, requirement diagram, plus the existing gitGraph labeled-merge and tag-spacing sources reused from `biscuit-visualized/src/src/tests/gitgraph_tests.rs` and the `biscuit-terminal` git_graph tests — reuse, do not invent a gallery.
   - Record the R5 note that the user's particular failures are not yet reproduced; radar and requirement may fail to parse on 0.3.1 — record that as their expected baseline category.
-- [ ] **Capture baseline leg A** —
+- [x] **Capture baseline leg A** —
   - With current dependencies (Mermaid 0.3.1 + resvg 0.45), render every corpus input to SVG and PNG under one documented comparison configuration: same themes (default and dark), same scale/`target_width` choices, same fonts, identical requested dimensions across all future legs.
   - Isolate each leg's cache via `BISCUIT_VISUALIZED_CACHE_DIR` (or `FileCache::with_base_dir`) so preexisting output cannot substitute for a render; record resolved font families per R4.
   - Store evidence per R1; categorize each input as parse failure / SVG geometry defect / PNG rasterization defect / terminal display defect.
