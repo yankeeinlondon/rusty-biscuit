@@ -6,6 +6,20 @@ total_phases: 6
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+    - claudine/cli/tests/l1/loop_config_matrix.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/features/2026-10-25-loops-and-flow-control/spike/loop_flow_spike.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/dependency-audit.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/path-inventory.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/coverage-inventory.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/matrix-contracts.md
+    - claudine/features/2026-10-25-loops-and-flow-control/spike/README.md
+skills_files_updated_during_phase_1: []
+packages:
+    - claudine-cli
 ---
 
 # Loops and flow control implementation plan
@@ -37,22 +51,22 @@ The specification reports no open questions. Preserve its decisions; the followi
 
 ### Wave 1 — parallel inventories
 
-- [ ] **Dependency audit**
+- [x] **Dependency audit**
   - Compare landed APIs and tests with the dependency gate above. Inventory `composition/looping/{config,engine,types}.rs`, `lifecycle/{actions,executor,control,parse,validate,signatures}.rs`, sequence normalization/preflight/task execution, CLI sequence orchestration, and the prerequisite container runner.
   - Record concrete seams for primitive invocation, lifecycle ownership, approval inventory, cancellation/deadlines, invocation chains, and parent result publication. Separate dependency gaps from this feature's changes.
   - Deliver an implementation log with the compatibility ruling, shared-file owners, and the exact baseline required to begin Phase 2.
-- [ ] **Path inventory**
+- [x] **Path inventory**
   - Independently inventory Darkmatter's `expression/functions/mod.rs`, `resolve_ctx.rs`, path-shaping helpers, file-index operations, and existing tests. Record each function's return type, missing-target behavior, URL behavior, and error propagation.
   - Include an absolute caller path inside the repository: current `dirname` uses projected display paths and can still lose that absolute input's anchor. Keep pure filename operations unchanged.
   - Deliver the path contract/fixture table used by Phase 2; this task does not depend on future container APIs.
-- [ ] **Coverage inventory**
+- [x] **Coverage inventory**
   - Locate existing loop/lifecycle/sequence tests, consolidated test registration, prompt-test recipes, frozen prompts, and `shipped_prompt_route_drift` fixture derivation.
   - Map every numbered acceptance criterion to a planned public assertion and owning task. Verify supported executable configuration formats; include YAML frontmatter and external YAML/JSON/JSON5/JSONL/NDJSON task sources that can carry the changed fields.
   - Establish the format-specific fixture cases and approved absence/null rules below before implementation. Do not extend this matrix to Markdown bodies or expression text grammar.
 
 ### Wave 2 — serial control-flow spike
 
-- [ ] **Control flow spike**
+- [x] **Control flow spike**
   - Prerequisite: dependency audit passes. Run one bounded, in-process experiment with fake primitive bodies and the existing lifecycle/runner interfaces.
   - Demonstrate a typed result carrying a loop identity, a suspended event continuing after `prep`, and exactly-once cleanup when a break crosses a container. Include one pending concurrent break and one failed cleanup.
   - Demonstrate current-pass checkpoint restoration without erasing an earlier pass. Determine how the shared target runner passes cancellation, remaining deadline, and branch-local call/handoff ancestry without borrowing caller runtime roots.
@@ -120,7 +134,7 @@ Cover bare/positional/object directive forms separately, code range `0..=255`, n
 
 The `implemented` examples deliberately retain the specified expression semantics rather than inventing a new boolean validator; characterize the actual public decision for non-boolean/collection cells in Phase 1. By contrast `ready` and `recurrence` must be actual booleans. A missing pre-review counter means zero; explicit null must fail as a present non-integer. If the current `frontmatter()` surface conflates them, identify the smallest presence-aware read needed before migration; do not silently accept null as absent.
 
-- [ ] **Matrix contracts**
+- [x] **Matrix contracts**
   - Finish all expanded per-field columns and any necessary owner rulings before parsing work. Start from actual tool-produced/accepted fixtures (serialized through existing public format tools and confirmed by Claudine), with a positive control that demonstrably launches, loops, skips, or selects a result.
   - Implement one parameterized matrix traversal per supported format, derived from that fixture with one edit per cell. Assert public status, launch/effect counts, published results, or summaries—not parser return values. Include source location on errors and preserve valid body/record content.
   - Audit for `#[serde(default)]`, absent/null-conflating `Option<T>`, silent `filter_map(..as_str())`, `unwrap_or_default()`, and `.ok()` on load-bearing parses. Use presence-aware deserialization when needed. A review finding reports every other cell in that row and column.
