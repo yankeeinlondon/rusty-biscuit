@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use messenger::research::generate::{self, GenerateError, check, generate};
@@ -1203,10 +1204,144 @@ fn the_runner_records_finished_interrupted_and_stopped() {
 fn the_runner_stops_a_sequence_that_exceeds_the_elapsed_time_limit() {
     let repo = Repo::published();
     let run = repo.prepare_with(PlatformId::Discord, RunLimits { max_seconds: 1, max_invocations: 8 }, &day("2026-09-18"));
-    let record = runner::execute_with(&repo.loader, run.run_id.as_str(), &sleep_command()).expect("run");
+    // dash defers `SIGINT` until its foreground `sleep` ends, so this command
+    // always outlives the stop grace period; keep that period short.
+    let record = runner::execute_with_grace(&repo.loader, run.run_id.as_str(), &sleep_command(), TEST_GRACE).expect("run");
     assert_eq!(record.status, RunStatus::Failed);
     assert_eq!(record.runner, Some(RunnerOutcome::Stopped));
     assert!(record.stop_reason.as_deref().is_some_and(|reason| reason.contains("elapsed-time limit")), "{:?}", record.stop_reason);
+}
+
+/// A grace period long enough for a shell's `INT` trap, far below the
+/// production default.
+const TEST_GRACE: Duration = Duration::from_secs(1);
+
+/// Waits, bounded, for `path` to exist.
+fn wait_for(path: &Path, within: Duration) -> bool {
+    let until = Instant::now() + within;
+    while Instant::now() < until {
+        if path.exists() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    path.exists()
+}
+
+/// Whether the process whose PID was written to `pid_file` still runs.
+fn recorded_process_alive(pid_file: &Path) -> bool {
+    let pid: u32 = fs::read_to_string(pid_file).expect("pid file").trim().parse().expect("a pid");
+    let mut system = sysinfo::System::new();
+    let pid = sysinfo::Pid::from_u32(pid);
+    system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+    system.process(pid).is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie)
+}
+
+/// `script` as a PowerShell `-EncodedCommand` value (Base64 of UTF-16LE), so
+/// no shell between the test and PowerShell reinterprets its quoting.
+fn encoded_powershell(script: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, byte)| n | u32::from(*byte) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// PowerShell single-quoted literal of `path`.
+fn ps_path(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "''"))
+}
+
+/// A sequence command whose direct process waits on a grandchild that writes
+/// its PID and a readiness file, waits (at most ten seconds) for `release`,
+/// and only then writes `done`.
+fn barrier_command(pid: &Path, ready: &Path, release: &Path, done: &Path) -> Vec<String> {
+    if cfg!(windows) {
+        let script = format!(
+            "Set-Content -LiteralPath {pid} -Value $PID; New-Item -ItemType File -Path {ready} | Out-Null; \
+             $until = (Get-Date).AddSeconds(10); \
+             while (-not (Test-Path -LiteralPath {release}) -and (Get-Date) -lt $until) {{ Start-Sleep -Milliseconds 100 }}; \
+             if (Test-Path -LiteralPath {release}) {{ New-Item -ItemType File -Path {done} | Out-Null }}",
+            pid = ps_path(pid), ready = ps_path(ready), release = ps_path(release), done = ps_path(done),
+        );
+        ["cmd", "/D", "/C", "powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand"]
+            .map(str::to_string)
+            .into_iter()
+            .chain([encoded_powershell(&script)])
+            .collect()
+    } else {
+        let inner = r#"echo $$ > "$1"; : > "$2"; i=0; while [ ! -f "$3" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; if [ -f "$3" ]; then : > "$4"; fi"#;
+        let mut command: Vec<String> = ["sh", "-c", r#"sh -c "$0" inner "$@" & wait"#, inner].map(str::to_string).to_vec();
+        command.extend([pid, ready, release, done].map(|path| path.display().to_string()));
+        command
+    }
+}
+
+/// Criterion 22: a sequence stopped at its elapsed-time limit releases the
+/// fleet lock only after its descendants are gone. While it is being stopped
+/// a second run is refused; afterwards its surviving work cannot write.
+#[test]
+fn a_timed_out_run_settles_its_descendants_before_releasing_the_fleet_lock() {
+    let repo = Repo::published();
+    let on = day("2026-09-18");
+    // PowerShell (about 0.2 s warm on the Windows build host) must start
+    // inside the limit for the readiness file to exist; Unix shells start in
+    // milliseconds.
+    let max_seconds = if cfg!(windows) { 2 } else { 1 };
+    let first = repo.prepare_with(PlatformId::Discord, RunLimits { max_seconds, max_invocations: 8 }, &on);
+    let second = repo.prepare(PlatformId::Slack, &on);
+    let files = tempfile::tempdir().expect("tempdir");
+    let [pid, ready, release, done] = ["pid", "ready", "release", "done"].map(|name| files.path().join(name));
+    let command = barrier_command(&pid, &ready, &release, &done);
+    let state = repo.state();
+
+    let (record, overlap) = std::thread::scope(|scope| {
+        let runner = scope.spawn(|| runner::execute_with_grace(&repo.loader, first.run_id.as_str(), &command, TEST_GRACE));
+        assert!(wait_for(&ready, Duration::from_secs(4)), "the grandchild started");
+        let overlap = runner::execute_with(&repo.loader, second.run_id.as_str(), &exit_command(0));
+        (runner.join().expect("runner thread").expect("run"), overlap)
+    });
+
+    assert!(
+        matches!(&overlap, Err(RefreshError::RunnerLive { path }) if path == "messenger/.research-state/runs/fleet.lock"),
+        "a second run is refused while the first owns live work: {overlap:?}"
+    );
+    assert_eq!(record.runner, Some(RunnerOutcome::Stopped));
+    assert!(record.stop_reason.as_deref().is_some_and(|reason| reason.contains("elapsed-time limit")), "{:?}", record.stop_reason);
+    assert!(!recorded_process_alive(&pid), "the grandchild was settled before the runner returned");
+    assert!(!state.fleet_lock_held(), "the lock is released after settlement");
+    fs::write(&release, "").expect("release");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!done.exists(), "no work of the stopped run survives to write");
+    assert!(!repo.run(&second).launched, "the refused run recorded nothing");
+}
+
+/// A stopped sequence first gets the Ctrl-C request, so its own cleanup runs.
+#[cfg(unix)]
+#[test]
+fn a_timed_out_run_lets_the_sequence_clean_up_before_killing_it() {
+    let repo = Repo::published();
+    let run = repo.prepare_with(PlatformId::Discord, RunLimits { max_seconds: 1, max_invocations: 8 }, &day("2026-09-18"));
+    let files = tempfile::tempdir().expect("tempdir");
+    let marker = files.path().join("cleaned-up");
+    let command = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        r#"trap ': > "$0"; exit 130' INT; while :; do sleep 0.1; done"#.to_string(),
+        marker.display().to_string(),
+    ];
+    let record = runner::execute_with_grace(&repo.loader, run.run_id.as_str(), &command, TEST_GRACE).expect("run");
+    assert_eq!(record.runner, Some(RunnerOutcome::Stopped));
+    assert!(marker.exists(), "the sequence's interrupt handler ran before the hard stop");
 }
 
 /// Criterion 22: a stale `active` record — launched by a runner that is gone —

@@ -73,7 +73,19 @@ Platform research is becoming typed, reviewed metadata (feature
   status the run's `check-run` steps decided stays), `interrupted` (Ctrl-C,
   exit `130` → the run rests `interrupted`), or `stopped` (any other exit or a
   spawn failure → an undecided run rests `failed` with the exit named). The
-  run's `RunLimits` elapsed-time cap is enforced here. Every prepared prompt
+  run's `RunLimits` elapsed-time cap is enforced here. The run owns the
+  sequence's process tree and `run()` returns (releasing the lock) only after it
+  settles (`refresh/owned_tree.rs`, sysinfo, PID + start-time identity): on the
+  limit or a `try_wait` error it sends `SIGINT` to the direct child only (Unix;
+  Claudine's Ctrl-C cleanup path, exit 130), waits up to `STOP_GRACE` (10 s;
+  tests use `#[doc(hidden)] execute_with_grace`), then kills every observed
+  descendant deepest first plus the child. A normal exit kills nothing:
+  Claudine has settled its tasks, and Playa's detached audio worker must
+  outlive it. Descendants are sampled every fourth poll (~1 s) because Claudine
+  puts each task in its own process group, so a group kill cannot reach them;
+  never move Claudine into a new group from here (it would leave the
+  terminal's foreground group and break Ctrl-C → 130). A Unix double-fork +
+  `setsid` completed between samples after its parent exits escapes. Every prepared prompt
   reserves an invocation through its `start` shell hook (`research admit-agent`);
   `RunRecord.invocations` persists across resumptions. The preparation lock
   serializes admission updates, and refusal prevents the provider launch.

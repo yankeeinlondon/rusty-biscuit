@@ -132,3 +132,11 @@ Run `/bin/bash` explicitly for job-control fixtures (it creates the group
 either way) and assert the group split with `getpgid`. Reproduce the
 terminal case from a non-interactive shell with
 `script -qec "cargo nextest run …" /dev/null`.
+
+dash also defers a `SIGINT` sent to the shell alone (not its process group)
+until its foreground child exits: `sh -c 'sleep 30'` signaled by PID keeps
+running for the whole `sleep` on Linux and WSL2, where macOS's bash `sh`
+execs the `sleep` and dies at once. Measured 2026-10-16: Messenger's research
+runner gives a stopped sequence a grace period after `SIGINT`, and its
+elapsed-time test took the full 10 s grace on `BUILD_LINUX` only. Shorten the
+grace in tests rather than relying on the shell to exit.
