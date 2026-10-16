@@ -150,7 +150,7 @@ The `implemented` examples deliberately retain the specified expression semantic
   - Add `break`/`prep` arguments to shared actions, signatures, validators, action enumeration, and `claudine/schemas/` partials. Permit non-final `prep`; retain last-item placement for unconditional terminating directives. Reject both under `cancelled` and preserve shell-free initialization checks.
   - Parse `when` as a reserved task option, not step data; reject sequence-root `when` and unsupported task loop locations. Retain current task `params` spelling.
   - Deliver typed configuration/control contracts from the spike without executing helpers during validation. Run format matrix tests against public preflight and execution as those seams become available; passive-invalid cases must execute nothing.
-- [ ] **Path contracts**
+- [x] **Path contracts**
   - Independent owner: Darkmatter functions/resolver tests and corresponding docs/catalog/skill. Reuse the current path-shaping resolver and `FileReference`; never recapture anchors.
   - Make `absolute` return the first local candidate for a missing target and reject HTTP(S). Preserve an absolute input's parent anchor in `dirname`. Resolve file-index inputs before changing names, retaining their parent/provenance. Preserve existing read/existence contracts and typed permission/reference/probe failures.
   - Add table-driven public expression tests for collisions, explicit `./`/`../`, caller provenance, prefixed/absolute references, missing files, outside-repo operation, spaces, URLs, and probe errors. Construct Windows-native paths only on Windows; use existing portable identity helpers for comparisons.
