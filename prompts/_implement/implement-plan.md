@@ -77,7 +77,10 @@ success:
 
             {{ as_unordered_list(ctx.dirty_files) }}
         - shell: git add ..
-        - shell: git commit -m "{{commit_message}}"
+        # Pre-flight resolves every branch's command, so an absent
+        # `commit_message` needs a present fallback even though this branch
+        # only runs when it is set.
+        - shell: git commit -m "{{ commit_message || '' }}"
     - when: "!ctx.dirty_files"
       then:
           - message: phase {{phase}} of the plan made no file changes!
@@ -134,7 +137,7 @@ You will log your implementation progress to: {{log}}
     - set `started_phase` to "{{phase}}"
 ::end-block
 
-::block when="is_last"
+::block when="loop.is_last"
 Now we need to update the specification file's frontmatter ({{spec}}):
 
 - set `implemented` to `true`
