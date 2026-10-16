@@ -2283,6 +2283,95 @@ mod container_grammar {
         assert!(plan.steps[0].state.extra.is_empty());
     }
 
+    /// The well-formed spelling of every action `cancelled` forbids.
+    fn forbidden_in_cancelled() -> [(&'static str, Value); 8] {
+        [
+            ("retry", json!({"retry": 2})),
+            ("resume", json!({"resume": "continue"})),
+            ("proxy", json!({"proxy": "@prompts/next.md"})),
+            ("prep", json!({"prep": "@prompts/next.md"})),
+            ("skip", json!({"skip": null})),
+            ("error", json!({"error": "stopped"})),
+            ("break", json!({"break": "done"})),
+            ("defer", json!({"defer": "5m"})),
+        ]
+    }
+
+    #[derive(Clone, Copy)]
+    enum Container {
+        Sequence,
+        Group,
+    }
+
+    /// One sequence item whose containers nest in `chain` order, outermost
+    /// first; the innermost owns `cancelled`.
+    fn nested_item(chain: &[Container], cancelled: Value) -> Value {
+        let (innermost, outer) = chain.split_last().expect("at least one container");
+        let depth = chain.len();
+        let wrap = |container: Container, level: usize, child: Option<Value>, cancelled: Option<Value>| {
+            let name = format!("level-{level}");
+            let children = json!([child.unwrap_or_else(|| json!({"name": "leaf", "sequence": []}))]);
+            let mut body = match container {
+                Container::Sequence => json!({"name": name, "sequence": children}),
+                Container::Group => json!({"name": name, "group": {"name": format!("group-{level}"), "tasks": children}}),
+            };
+            if let Some(cancelled) = cancelled {
+                match container {
+                    Container::Sequence => body["cancelled"] = cancelled,
+                    Container::Group => body["group"]["cancelled"] = cancelled,
+                }
+            }
+            body
+        };
+        outer.iter().enumerate().rev().fold(wrap(*innermost, depth, None, Some(cancelled)), |child, (index, container)| {
+            wrap(*container, index + 1, Some(child), None)
+        })
+    }
+
+    /// Every forbidden verb in the innermost `cancelled` of `chain` fails plan
+    /// normalization, which runs before the root `initialize` and every task;
+    /// `[stop]` and a permitted action are accepted at the same site.
+    fn assert_innermost_cancelled_checked(chain: &[Container]) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sequence.md");
+        for (verb, action) in forbidden_in_cancelled() {
+            let item = nested_item(chain, json!([action]));
+            let error = normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true)
+                .expect_err(verb);
+            let message = error.to_string();
+            assert!(message.contains("cancelled") && message.contains(&format!("`{verb}`")), "{verb}: {message}");
+        }
+        for permitted in [json!(["stop"]), json!([{"warn": "x"}])] {
+            let item = nested_item(chain, permitted.clone());
+            normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true)
+                .unwrap_or_else(|error| panic!("{permitted}: {error}"));
+        }
+    }
+
+    /// The shipped schema types two container levels; the parser judges the
+    /// `cancelled` stack of a container at the third level and below.
+    macro_rules! deep_cancelled_is_checked {
+        ($($name:ident: [$($container:ident),+];)+) => {$(
+            #[test]
+            fn $name() {
+                assert_innermost_cancelled_checked(&[$(Container::$container),+]);
+            }
+        )+};
+    }
+
+    deep_cancelled_is_checked! {
+        deep_cancelled_seq_seq_seq: [Sequence, Sequence, Sequence];
+        deep_cancelled_seq_seq_group: [Sequence, Sequence, Group];
+        deep_cancelled_seq_group_seq: [Sequence, Group, Sequence];
+        deep_cancelled_seq_group_group: [Sequence, Group, Group];
+        deep_cancelled_group_seq_seq: [Group, Sequence, Sequence];
+        deep_cancelled_group_seq_group: [Group, Sequence, Group];
+        deep_cancelled_group_group_seq: [Group, Group, Sequence];
+        deep_cancelled_group_group_group: [Group, Group, Group];
+        deep_cancelled_fourth_level_seq: [Sequence, Sequence, Sequence, Sequence];
+        deep_cancelled_fourth_level_mixed: [Group, Sequence, Group, Sequence];
+    }
+
     #[test]
     fn sequence_task_shape_matrix_and_exclusivity() {
         let dir = TempDir::new().unwrap();

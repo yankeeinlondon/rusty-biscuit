@@ -100,7 +100,7 @@ impl TaskExecution<'_> {
                         group.clone()
                     } else {
                         let (fresh, graph) = super::super::preflight::prepare_nested_group(
-                            self.task, &state, context, self.stack.file_resolution_context,
+                            self.task, group, &state, context, self.stack.file_resolution_context,
                         )?;
                         self.verify_nested_graph(&graph)?;
                         fresh

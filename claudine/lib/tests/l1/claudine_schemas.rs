@@ -1,8 +1,10 @@
 //! Claudine's schema bundle under `claudine/schemas/` (`2026-10-21-claudine-schemas`,
 //! criteria 1–5): the five files load through Darkmatter's loader, the action
 //! types agree with the lifecycle parser's verb inventory and Darkmatter's
-//! catalogs, the bundles copy the category short forms, the lifecycle types
-//! are typed three conditional levels deep, and the fixture corpus under
+//! catalogs, the bundles copy the category short forms, the ordinary and
+//! `initialize` lifecycle stacks are typed three conditional levels deep and
+//! the `cancelled` stack at every depth the parser accepts, and the fixture
+//! corpus under
 //! `tests/fixtures/claudine-schemas/` gets its decided verdicts through the
 //! same trigger-discovery path DMLS uses.
 //!
@@ -632,7 +634,8 @@ fn every_file_loads_and_every_export_resolves() {
         "bare-verb", "loose-body", "stack", "item-1", "conditional-1", "stack-2", "item-2", "conditional-2",
         "stack-3", "item-3", "conditional-3", "initialize-stack", "initialize-item-1", "initialize-conditional-1",
         "initialize-stack-2", "initialize-item-2", "initialize-conditional-2", "initialize-stack-3",
-        "initialize-item-3", "initialize-conditional-3", "loop-action", "loop-action-entry", "loop",
+        "initialize-item-3", "initialize-conditional-3", "cancelled-conditional-5", "cancelled-item-6",
+        "loop-action", "loop-action-entry", "loop",
     ];
     let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &lifecycle_exports);
     assert_eq!(lifecycle.len(), lifecycle_exports.len());
@@ -1193,4 +1196,427 @@ fn sequence_container_schema_contract() {
             assert!(!judged.properties.contains(retired), "retired catalog property {retired}");
         }
     }
+}
+
+// ── Forbidden cancellation actions at every container boundary ─────────────
+
+/// One well-formed item per flow directive that section 4 excludes from
+/// `cancelled`. Each is accepted by a `start` stack, so a rejection under
+/// `cancelled` is the restricted action set, not a malformed item.
+const FORBIDDEN_IN_CANCELLED: [(&str, &str); 8] = [
+    ("retry", "{ retry: 2 }"),
+    ("resume", "{ resume: continue }"),
+    ("proxy", "{ proxy: '@prompts/next.md' }"),
+    ("prep", "{ prep: '@prompts/next.md' }"),
+    ("skip", "{ skip: null }"),
+    ("error", "{ error: stopped }"),
+    ("break", "{ break: done }"),
+    ("defer", "{ defer: 5m }"),
+];
+
+/// One cancellation site: the frontmatter, with `ITEMS` standing for the
+/// stack's items, and the instance path of its first item.
+struct CancelledSite {
+    name: &'static str,
+    frontmatter: &'static str,
+    pointer: &'static str,
+}
+
+/// Judges `site` against the discovered `bundle`: each `forbidden` item is
+/// rejected with a problem at the site's pointer, and `[stop]` and `[]` are
+/// valid.
+fn assert_cancelled_restricted_at(
+    bundle: &[BundleFile],
+    claudine: &str,
+    inline: &str,
+    site: CancelledSite,
+    forbidden: &[(&str, &str)],
+) {
+    let repo = SchemaRepo::new(bundle);
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    let judge = |name: &str, items: &str| {
+        let text = format!("---\n{}\n---\n", site.frontmatter.replace("ITEMS", items));
+        let path = repo.write_document(&format!("{name}.md"), &text);
+        discovered.judge(&path, claudine, inline).expect("judged").report
+    };
+    let CancelledSite { name: site_name, pointer, .. } = site;
+    for (verb, item) in forbidden {
+        let report = judge(&format!("cancelled-{verb}"), &format!("[{item}]"));
+        let found = problems(&report);
+        assert!(!report.valid, "{site_name}: `{verb}` is rejected in `cancelled`");
+        assert!(
+            found.iter().any(|(path, _)| path == pointer),
+            "{site_name}: `{verb}` is reported at `{pointer}`: {found:?}"
+        );
+    }
+    for (control, items) in [("stop", "[stop]"), ("empty", "[]")] {
+        let report = judge(&format!("control-{control}"), items);
+        assert!(report.valid, "{site_name}: `cancelled: {items}` is valid: {:?}", problems(&report));
+    }
+}
+
+#[test]
+fn forbidden_cancelled_items_are_well_formed_start_actions() {
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    for (verb, item) in FORBIDDEN_IN_CANCELLED {
+        let path = repo.write_document(&format!("start-{verb}.md"), &format!("---\nstart: [{item}]\n---\n"));
+        let report = discovered
+            .judge(
+                &path,
+                include_str!("../../../schemas/claudine.yaml"),
+                include_str!("../../../schemas/inline-compose.yaml"),
+            )
+            .expect("judged")
+            .report;
+        assert!(report.valid, "`{verb}` is a valid `start` action: {:?}", problems(&report));
+    }
+}
+
+#[test]
+fn document_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "document",
+            frontmatter: "cancelled: ITEMS",
+            pointer: "/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED,
+    );
+}
+
+#[test]
+fn task_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "task",
+            frontmatter: "agent: claude\nsequence:\n  - name: child\n    sequence: []\n    cancelled: ITEMS",
+            pointer: "/sequence/0/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED,
+    );
+}
+
+#[test]
+fn group_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "group",
+            frontmatter: "agent: claude\nsequence:\n  - group:\n      tasks: [{ name: leg, shell: 'echo done' }]\n      cancelled: ITEMS",
+            pointer: "/sequence/0/group/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED,
+    );
+}
+
+#[test]
+fn nested_sequence_child_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "nested sequence child",
+            frontmatter: "agent: claude\nsequence:\n  - name: outer\n    sequence:\n      - name: inner\n        sequence: []\n        cancelled: ITEMS",
+            pointer: "/sequence/0/sequence/0/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED,
+    );
+}
+
+#[test]
+fn group_leg_sequence_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "group leg",
+            frontmatter: "agent: claude\nsequence:\n  - group:\n      tasks:\n        - name: leg\n          sequence: []\n          cancelled: ITEMS",
+            pointer: "/sequence/0/group/tasks/0/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED,
+    );
+}
+
+/// A task or group imported as an authored parameter type gets the same
+/// restriction as one reached through a document's `sequence:`. Each document
+/// compiles its own `$schema`, so one verb stands for the eight already judged
+/// through the trigger at the same named types.
+#[test]
+fn imported_task_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "imported task",
+            frontmatter: "$schema:\n  nested: task@../schemas/lifecycle.yaml\nnested:\n  name: child\n  sequence: []\n  cancelled: ITEMS",
+            pointer: "/nested/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED[..1],
+    );
+}
+
+#[test]
+fn imported_group_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "imported group",
+            frontmatter: "$schema:\n  nested: group@../schemas/lifecycle.yaml\nnested:\n  tasks: [{ name: leg, shell: 'echo done' }]\n  cancelled: ITEMS",
+            pointer: "/nested/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED[..1],
+    );
+}
+
+#[test]
+fn imported_group_leg_cancelled_rejects_forbidden_actions() {
+    assert_cancelled_restricted_at(
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        CancelledSite {
+            name: "imported group leg",
+            frontmatter: "$schema:\n  nested: group@../schemas/lifecycle.yaml\nnested:\n  tasks:\n    - name: leg\n      sequence: []\n      cancelled: ITEMS",
+            pointer: "/nested/tasks/0/cancelled/0",
+        },
+        &FORBIDDEN_IN_CANCELLED[..1],
+    );
+}
+
+// ── Cancellation stacks at every conditional depth ─────────────────────────
+
+/// The deepest conditional level Claudine's lifecycle parser accepts
+/// (`MAX_CONDITIONAL_DEPTH` in `composition/lifecycle/parse.rs`).
+const PARSER_MAX_CONDITIONAL_DEPTH: usize = 5;
+
+/// A cancellation stack's site: the frontmatter, with `ITEMS` standing for
+/// the stack, and the instance path of the stack itself.
+struct StackSite {
+    name: &'static str,
+    frontmatter: &'static str,
+    stack: &'static str,
+}
+
+const DOCUMENT_CANCELLED: StackSite = StackSite {
+    name: "document cancelled",
+    frontmatter: "cancelled: ITEMS",
+    stack: "/cancelled",
+};
+const TASK_CANCELLED: StackSite = StackSite {
+    name: "task cancelled",
+    frontmatter: "agent: claude\nsequence:\n  - name: child\n    sequence: []\n    cancelled: ITEMS",
+    stack: "/sequence/0/cancelled",
+};
+const GROUP_CANCELLED: StackSite = StackSite {
+    name: "group cancelled",
+    frontmatter: "agent: claude\nsequence:\n  - group:\n      tasks: [{ name: leg, shell: 'echo done' }]\n      cancelled: ITEMS",
+    stack: "/sequence/0/group/cancelled",
+};
+const TASK_2_CANCELLED: StackSite = StackSite {
+    name: "nested task cancelled",
+    frontmatter: "agent: claude\nsequence:\n  - name: outer\n    sequence:\n      - name: inner\n        sequence: []\n        cancelled: ITEMS",
+    stack: "/sequence/0/sequence/0/cancelled",
+};
+const GROUP_2_CANCELLED: StackSite = StackSite {
+    name: "nested group cancelled",
+    frontmatter: "agent: claude\nsequence:\n  - group:\n      tasks:\n        - name: leg\n          group:\n            tasks: [{ name: inner, shell: 'echo done' }]\n            cancelled: ITEMS",
+    stack: "/sequence/0/group/tasks/0/group/cancelled",
+};
+
+/// The items placed in `branch` (`then` or `else`) of a conditional `level`
+/// levels deep, with each enclosing conditional descending through `then`.
+/// Returns the stack and the instance path of `leaf` below the stack.
+fn in_conditional(level: usize, branch: &str, leaf: &str) -> (String, String) {
+    let mut stack = if branch == "then" {
+        format!("[{{ when: \"ctx.l{level}\", then: [{leaf}] }}]")
+    } else {
+        format!("[{{ when: \"ctx.l{level}\", then: [{{ info: hi }}], else: [{leaf}] }}]")
+    };
+    for outer in (1..level).rev() {
+        stack = format!("[{{ when: \"ctx.l{outer}\", then: {stack} }}]");
+    }
+    (stack, format!("{}/0/{branch}/0", "/0/then".repeat(level - 1)))
+}
+
+/// Judges `site` with each `forbidden` item in the `then` and the `else` of a
+/// conditional `level` levels deep: each is rejected at its exact instance
+/// path, and `stop` in the same places, `[stop]`, and `[]` are valid.
+fn assert_cancelled_restricted_in_conditionals(site: &StackSite, level: usize, forbidden: &[(&str, &str)]) {
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    let judge = |name: &str, items: &str| {
+        let text = format!("---\n{}\n---\n", site.frontmatter.replace("ITEMS", items));
+        let path = repo.write_document(&format!("{name}.md"), &text);
+        discovered
+            .judge(
+                &path,
+                include_str!("../../../schemas/claudine.yaml"),
+                include_str!("../../../schemas/inline-compose.yaml"),
+            )
+            .expect("judged")
+            .report
+    };
+    let StackSite { name: site_name, stack: base, .. } = site;
+    for branch in ["then", "else"] {
+        for (verb, item) in forbidden {
+            let (items, below) = in_conditional(level, branch, item);
+            let pointer = format!("{base}{below}");
+            let found = problems(&judge(&format!("{verb}-{branch}"), &items));
+            assert!(
+                found.iter().any(|(path, _)| *path == pointer),
+                "{site_name}: `{verb}` in a level-{level} `{branch}` is rejected at `{pointer}`: {found:?}"
+            );
+        }
+        let (items, _) = in_conditional(level, branch, "stop");
+        let report = judge(&format!("stop-{branch}"), &items);
+        assert!(report.valid, "{site_name}: `stop` in a level-{level} `{branch}`: {:?}", problems(&report));
+    }
+    for (control, items) in [("stop", "[stop]"), ("empty", "[]")] {
+        let report = judge(&format!("control-{control}"), items);
+        assert!(report.valid, "{site_name}: `{items}` is valid: {:?}", problems(&report));
+    }
+}
+
+/// One test per site and conditional level, each judging both branches.
+macro_rules! cancelled_conditional_tests {
+    ($($test:ident => ($site:expr, $level:expr, $forbidden:expr);)*) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_cancelled_restricted_in_conditionals(&$site, $level, $forbidden);
+            }
+        )*
+    };
+}
+
+cancelled_conditional_tests! {
+    document_cancelled_rejects_forbidden_actions_in_level_1_conditionals =>
+        (DOCUMENT_CANCELLED, 1, &FORBIDDEN_IN_CANCELLED);
+    document_cancelled_rejects_forbidden_actions_in_level_2_conditionals =>
+        (DOCUMENT_CANCELLED, 2, &FORBIDDEN_IN_CANCELLED);
+    document_cancelled_rejects_forbidden_actions_in_level_3_conditionals =>
+        (DOCUMENT_CANCELLED, 3, &FORBIDDEN_IN_CANCELLED);
+    document_cancelled_rejects_forbidden_actions_in_level_4_conditionals =>
+        (DOCUMENT_CANCELLED, 4, &FORBIDDEN_IN_CANCELLED);
+    document_cancelled_rejects_forbidden_actions_in_level_5_conditionals =>
+        (DOCUMENT_CANCELLED, PARSER_MAX_CONDITIONAL_DEPTH, &FORBIDDEN_IN_CANCELLED);
+    task_cancelled_rejects_forbidden_actions_in_the_deepest_conditionals =>
+        (TASK_CANCELLED, PARSER_MAX_CONDITIONAL_DEPTH, &FORBIDDEN_IN_CANCELLED);
+    group_cancelled_rejects_forbidden_actions_in_the_deepest_conditionals =>
+        (GROUP_CANCELLED, PARSER_MAX_CONDITIONAL_DEPTH, &FORBIDDEN_IN_CANCELLED);
+    nested_task_cancelled_rejects_forbidden_actions_in_the_deepest_conditionals =>
+        (TASK_2_CANCELLED, PARSER_MAX_CONDITIONAL_DEPTH, &FORBIDDEN_IN_CANCELLED);
+    nested_group_cancelled_rejects_forbidden_actions_in_the_deepest_conditionals =>
+        (GROUP_2_CANCELLED, PARSER_MAX_CONDITIONAL_DEPTH, &FORBIDDEN_IN_CANCELLED);
+}
+
+/// The cancellation stack ends where the parser does: a conditional one level
+/// deeper than it accepts is a schema error at that conditional, on a document
+/// and on a nested container, and the lifecycle parser refuses the document's
+/// stack.
+#[test]
+fn cancelled_rejects_a_conditional_deeper_than_the_parser_accepts() {
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    let level = PARSER_MAX_CONDITIONAL_DEPTH + 1;
+    for site in [DOCUMENT_CANCELLED, TASK_2_CANCELLED] {
+        let (items, _) = in_conditional(level, "then", "stop");
+        let text = format!("---\n{}\n---\n", site.frontmatter.replace("ITEMS", &items));
+        let path = repo.write_document("too-deep.md", &text);
+        let report = discovered
+            .judge(
+                &path,
+                include_str!("../../../schemas/claudine.yaml"),
+                include_str!("../../../schemas/inline-compose.yaml"),
+            )
+            .expect("judged")
+            .report;
+        let pointer = format!("{}{}", site.stack, "/0/then".repeat(level - 1) + "/0");
+        let found = problems(&report);
+        assert!(
+            found.iter().any(|(path, _)| *path == pointer),
+            "{}: a level-{level} conditional is rejected at `{pointer}`: {found:?}",
+            site.name
+        );
+    }
+    let path = repo.write_document("too-deep.md", &format!("---\ncancelled: {}\n---\n", in_conditional(level, "then", "stop").0));
+    let markdown = Markdown::try_from(path.as_path()).expect("document loads");
+    let error = parse_lifecycle_config(&frontmatter_json(&markdown), &path).expect_err("the parser refuses a sixth level");
+    assert!(format!("{error}").contains("conditionals nest at most 5 levels"), "{error}");
+}
+
+/// A whole cancellation stack written as one dictionary, and a dictionary
+/// `then`/`else` body at the deepest level, reject the same eight verbs.
+#[test]
+fn cancelled_dictionaries_reject_forbidden_actions() {
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    let judge = |name: &str, frontmatter: &str| {
+        let path = repo.write_document(&format!("{name}.md"), &format!("---\n{frontmatter}\n---\n"));
+        discovered
+            .judge(
+                &path,
+                include_str!("../../../schemas/claudine.yaml"),
+                include_str!("../../../schemas/inline-compose.yaml"),
+            )
+            .expect("judged")
+            .report
+    };
+    let deepest = PARSER_MAX_CONDITIONAL_DEPTH;
+    for (verb, item) in FORBIDDEN_IN_CANCELLED {
+        let found = problems(&judge(&format!("root-{verb}"), &format!("cancelled: {item}")));
+        assert!(found.iter().any(|(path, _)| path == "/cancelled"), "root dictionary `{verb}`: {found:?}");
+        for branch in ["then", "else"] {
+            let (items, below) = in_conditional(deepest, branch, "stop");
+            let items = items.replace("[stop]", item);
+            let pointer = format!("/cancelled{}", below.trim_end_matches("/0"));
+            let found = problems(&judge(&format!("body-{verb}-{branch}"), &format!("cancelled: {items}")));
+            assert!(
+                found.iter().any(|(path, _)| *path == pointer),
+                "a level-{deepest} `{branch}` dictionary with `{verb}` is rejected at `{pointer}`: {found:?}"
+            );
+        }
+    }
+    let report = judge("root-control", "cancelled: { warn: cancelled, stop: null }");
+    assert!(report.valid, "a dictionary of permitted verbs: {:?}", problems(&report));
+}
+
+/// Pins the documented container bound: SimplifiedSchema inlines named types
+/// and cannot recurse, so containers are typed two levels deep (a task or
+/// group, and its direct children). A third-level container's list is any
+/// list, so its `cancelled` stack is checked by the task parser before
+/// anything runs, not by the schema. This bound is the agreed contract
+/// (sequence-containers requirement 5, ruling R1-HR1); deepening it is a
+/// deliberate change.
+#[test]
+fn grandchild_cancelled_is_left_to_the_task_parser() {
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    let path = repo.write_document(
+        "grandchild.md",
+        "---\nagent: claude\nsequence:\n  - name: a\n    sequence:\n      - name: b\n        sequence:\n          - name: c\n            sequence: []\n            cancelled: [{ retry: 2 }]\n---\n",
+    );
+    let report = discovered
+        .judge(
+            &path,
+            include_str!("../../../schemas/claudine.yaml"),
+            include_str!("../../../schemas/inline-compose.yaml"),
+        )
+        .expect("judged")
+        .report;
+    assert!(report.valid, "below the typed levels: {:?}", problems(&report));
 }

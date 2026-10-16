@@ -390,6 +390,11 @@ impl SpanScanner {
 pub const CONTAINER_EVENT_KEYS: &[&str] = &["initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"];
 
 /// Validate task grammar before preparation can execute any work.
+///
+/// Inline containers are validated transitively, an inline group's events and
+/// legs included, so a nested container's events fail here, before the root
+/// `initialize` runs, at any depth. Referenced containers are judged when
+/// static preflight loads them.
 pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
     for key in ["setup", "teardown", "execution", "fail_fast"] {
         if let Some(value) = map.get(key) {
@@ -397,17 +402,17 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
         }
     }
     let inline = matches!(map.get("sequence"), Some(Value::Array(_)));
-    for key in CONTAINER_EVENT_KEYS {
-        if let Some(value) = map.get(*key) {
-            if !inline {
-                return Err(CompositionError::RemovedGrammar {
-                    source_path: origin.to_path_buf(), path: (*key).into(), removed: (*key).into(),
-                    replacement: "container events belong on an inline `sequence:` list or inside a `group:` object; put referenced sequence events in its target document".into(),
-                });
-            }
-            let mut root = serde_json::Map::new();
-            root.insert((*key).into(), value.clone());
-            super::super::lifecycle::parse_lifecycle_config(&Value::Object(root), origin)?;
+    if !inline && let Some(key) = CONTAINER_EVENT_KEYS.iter().find(|key| map.contains_key(**key)) {
+        return Err(CompositionError::RemovedGrammar {
+            source_path: origin.to_path_buf(), path: (*key).into(), removed: (*key).into(),
+            replacement: "container events belong on an inline `sequence:` list or inside a `group:` object; put referenced sequence events in its target document".into(),
+        });
+    }
+    validate_container_events(map, origin)?;
+    if let Some(Value::Object(group)) = map.get("group") {
+        validate_container_events(group, origin)?;
+        for leg in group.get("tasks").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_object) {
+            validate_task_grammar(leg, origin)?;
         }
     }
     if let Some(value) = map.get("sequence") {
@@ -421,6 +426,18 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
                 }
             }
             other => return Err(CompositionError::SequenceInvalid(format!("task `sequence` must be a list or file reference, got {}", json_type_name(other)))),
+        }
+    }
+    Ok(())
+}
+
+/// Parse each container event `map` carries, one at a time.
+fn validate_container_events(map: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
+    for key in CONTAINER_EVENT_KEYS {
+        if let Some(value) = map.get(*key) {
+            let mut root = serde_json::Map::new();
+            root.insert((*key).into(), value.clone());
+            super::super::lifecycle::parse_lifecycle_config(&Value::Object(root), origin)?;
         }
     }
     Ok(())

@@ -90,7 +90,7 @@ document they accept can still be rejected by the parser (see
 | File | Kind | Holds |
 |---|---|---|
 | [`action.yaml`](../../schemas/action.yaml) | library (`kind: schema`) | the four action types and the two dictionary-bundle types |
-| [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`) and the `loop:` block type |
+| [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`), the `loop:` block type, and the sequence container types (`step`, `task`, `group`) |
 | [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
 | [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: trigger-schema`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: trigger-schema`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
@@ -165,6 +165,7 @@ An event's type says which action types it allows:
 |---|---|---|---|---|
 | `initialize` | yes | yes | **no** | yes |
 | `start`, `blocked`, `success`, `failure`, `finalize` | yes | yes | yes | yes |
+| `cancelled` | yes | `stop` only | yes | yes |
 | `loop:` loose verb keys and its `gate:` | yes | yes | yes | yes |
 
 `initialize` is shell-free, so its type has no `shell` arm. A shell there is an
@@ -176,6 +177,18 @@ initialize:
     - shell: "git fetch"      # invalid: initialize allows no shell action
 start:
     - shell: "git status"     # valid
+```
+
+`cancelled` is cleanup only, so `stop` is its one flow directive. `retry`,
+`resume`, `proxy`, `prep`, `skip`, `error`, `break`, and `defer` are schema
+errors there, at every conditional depth, on a document and on every typed
+container (see [Sequence containers](#sequence-containers)):
+
+```yaml
+cancelled:
+    - warn: "cancelled"       # valid
+    - stop                    # valid: ends only this stack
+    - retry: 2                # invalid: cancelled allows no retry
 ```
 
 ### Single actions, long forms, and bundles
@@ -230,10 +243,32 @@ start:
 
 ### How deep the schema checks
 
-The schema types three conditional levels fully. A `then`/`else` body inside a
-third-level `when` is accepted loosely, as any list or mapping. The parser
-still checks it, and it allows conditionals five levels deep; a sixth level is
-a parser error.
+The parser allows conditionals five levels deep; a sixth level is a parser
+error. How much of that the schema covers depends on the event:
+
+| Stack | Typed conditional levels | Below them |
+|---|---|---|
+| `cancelled` | all five | a sixth-level `when` with `then` is a schema error |
+| `initialize`, `start`, `blocked`, `success`, `failure`, `finalize`, and the loop's `gate:` | three | a body inside a level-3 `when` is accepted as any list or mapping |
+
+So a directive that `cancelled` forbids is a schema error wherever the parser
+would accept its position:
+
+```yaml
+cancelled:
+    - when: "fm.a"                   # level 1
+      then:
+          - when: "fm.b"             # level 2
+            then:
+                - when: "fm.c"       # level 3
+                  then:
+                      - when: "fm.d" # level 4
+                        then:
+                            - retry: 2   # invalid: cancelled allows no retry
+```
+
+In the other events, an action inside a level-3 `when` passes the schema, and
+the parser rejects it before anything runs:
 
 ```yaml
 initialize:
@@ -247,6 +282,58 @@ initialize:
                                              # the parser rejects it
 ```
 
+`cancelled` reaches every level by typing `then` and `else` as one pattern
+key, which keeps the compiled schema small. The editor therefore does not
+complete `then`/`else` inside a `cancelled` conditional, and an `else`
+without `then` there is left to the parser.
+
+### Sequence containers
+
+A document's `sequence:` list is typed with `step` items: a value, or a
+`task` object. A task's inline `sequence:` list and its `group:` are typed
+too, and so are a group's `tasks:` legs. You can also import the types for
+your own properties, for example
+`$schema: { nested: task@./lifecycle.yaml }`.
+
+Every typed container types its `cancelled` event with the same restricted
+stack as a document, so a forbidden directive is caught in the editor and at
+launch:
+
+```yaml
+agent: claude
+sequence:
+    - name: build
+      cancelled: [{ retry: 2 }]          # invalid: task `cancelled`
+      sequence:
+          - name: compile
+            shell: "just build"
+            cancelled: [{ proxy: "@p.md" }]  # invalid: a child's `cancelled`
+    - group:
+          cancelled: [stop]              # valid
+          tasks:
+              - name: lint
+                shell: "just lint"
+                cancelled: [{ skip: null }]  # invalid: a leg's `cancelled`
+```
+
+Two limits keep the compiled schema small. SimplifiedSchema copies a named
+type into every place that uses it, so a type cannot contain itself:
+
+- **Two container levels are typed**: a task or group, and its direct
+  children (the items of its inline `sequence:` and the legs of its
+  `tasks:`). A container nested deeper than that is accepted as any list:
+  the schema does not check its `cancelled` actions, and the task parser
+  rejects a forbidden one before anything runs.
+- **A container's other events** (`initialize`, `start`, `blocked`,
+  `success`, `failure`, `finalize`) are checked for shape only: a list or a
+  mapping. The lifecycle parser checks their actions. Typing each of them
+  like a document's events copies a full action catalog into every container
+  and makes each validation several times slower.
+
+A referenced sequence or group file (`sequence: "@tasks.yaml"`) is not
+Markdown, so no schema judges it; the task parser checks it when the
+sequence is prepared.
+
 ### What only the parser checks
 
 The schema cannot express these rules; the lifecycle parser enforces them
@@ -257,7 +344,13 @@ before anything runs:
 - `skip` only in `initialize`
 - no `when` on a root dictionary or at the `loop:` root, and `gate:` never
   beside loose loop verbs
-- anything below the three typed levels, and the five-level nesting limit
+- in every event except `cancelled`, anything inside a level-3 `when`, and
+  the five-level nesting limit
+- in `cancelled`, an `else` written without `then`, and a guarded bundle
+  (`when` beside verbs, such as `- { when: "fm.x", stop: null }`) placed
+  inside a fifth-level `when`, which the parser counts as a sixth level
+- a container's events other than `cancelled`, and any container below the
+  two typed container levels
 - a shell expansion hidden in a `set` value in `initialize`
   (`set: { sha: "$(git rev-parse HEAD)" }`)
 - the arguments of the generated verbs (below)

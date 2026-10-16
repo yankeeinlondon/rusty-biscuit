@@ -2548,17 +2548,34 @@ mod phase7 {
     #[test]
     fn sequence_reuse_is_legal_and_only_all_first_descendants_offer_bytes() {
         let dir = TempDir::new().unwrap();
-        write_yaml(dir.path(), "inner.json", &json!({"sequence":[
+        // The referenced document declares the value its commands read.
+        write_yaml(dir.path(), "inner.json", &json!({"value":"early","sequence":[
             {"name":"first","sequence":[{"name":"leaf","shell":"echo {{ value }}"}]},
             {"name":"second","shell":"echo {{ value }}"}
         ]}));
-        let path = write_source(dir.path(), "root.md", &[("value", json!("early")), ("sequence", json!([
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([
             {"name":"one","sequence":"inner.json"}, {"name":"two","sequence":"inner.json"}
         ]))], "");
         let graph = graph_for(&path).unwrap();
         assert_eq!(graph.template_candidates.iter().map(|candidate| candidate.resolved.is_some()).collect::<Vec<_>>(),
             [true, false, false, false]);
         assert_eq!(graph.steps.len(), 2);
+    }
+
+    #[test]
+    fn referenced_sequence_shells_resolve_against_the_referenced_document() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "child.json", &json!({"value":"child","start":[{"shell":"echo {{ value }}"}],
+            "sequence":[{"name":"leaf","shell":"echo {{ value }}-leaf"}]}));
+        let path = write_source(dir.path(), "root.md", &[("value", json!("caller")), ("sequence", json!([
+            {"name":"child","sequence":"child.json"}, {"name":"after","shell":"echo {{ value }}-after"}
+        ]))], "");
+        let graph = graph_for(&path).unwrap();
+        let commands = graph.shell_commands.iter().map(|command| command.command.as_str()).collect::<Vec<_>>();
+        assert_eq!(commands, ["echo child", "echo child-leaf"], "the root's later step offers only a template");
+        assert_eq!(graph.steps[0].task.as_ref().map(|task| matches!(&task.action,
+            PreflightAction::Sequence(sequence) if sequence.frontmatter.as_ref().and_then(|fm| fm.get("value")) == Some(&json!("child")))),
+            Some(true));
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub(super) struct RootRun<'a> {
     pub(super) runtime: Arc<RuntimeState>,
     pub(super) started: bool,
     pub(super) approved: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
+    /// The task graph the first attempt discovered, which every retry runs.
+    pub(super) graph: Option<claudine::composition::PreflightGraph>,
     pub(super) pending: Option<ContainerEventDecision>,
     pub(super) child_error: Option<LifecycleErrorInfo>,
     pub(super) proxy_location: Option<claudine::composition::ActionLocation>,
@@ -27,7 +29,7 @@ impl<'a> RootRun<'a> {
         runtime: Arc<RuntimeState>,
     ) -> Self {
         Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)),
-            stack, runtime, started: false, approved: None, pending: None, child_error: None, proxy_location: None }
+            stack, runtime, started: false, approved: None, graph: None, pending: None, child_error: None, proxy_location: None }
     }
 
     pub(super) fn event(&mut self, mut signal: LifecycleSignal, mut error: Option<LifecycleErrorInfo>) -> Result<ContainerEventDecision> {

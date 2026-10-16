@@ -29,6 +29,44 @@ Nested containers execute recursively. An empty nested list returns an empty
 array and still runs its container lifecycle. Only an inline list can carry container lifecycle events
 on its task; a reference carries those events in its referenced document.
 
+### What a referenced sequence reads
+
+A sequence referenced by file is a document: its events, its conditions, its
+`set` values, its lifecycle `shell` commands, and its steps read its own
+frontmatter, so it behaves the same whether you run it directly or reference
+it. Given `child.md`:
+
+```yaml
+---
+local_value: child-value
+start: [{ stdout: "{{ local_value }}" }]
+sequence: []
+---
+```
+
+both `claudine sequence child.md` and a root with
+`sequence: [{ name: child, sequence: child.md }]` print `child-value`, even
+when the root declares its own `local_value`. Values reach a referenced
+sequence the way they reach a referenced prompt document. Lowest precedence
+first:
+
+1. the referenced document's own properties
+2. invocation setters (`--set`, shorthand `key=value`)
+3. runtime writes made so far, by the caller or by the sequence itself
+
+The caller's authored frontmatter is not among them: a property only the root
+declares reads as `null` inside the referenced sequence. To pass a value down,
+write it at run time with `set`, or supply it with `--set`. A `set` inside the
+referenced sequence is a runtime write, so the caller sees it afterward.
+
+This applies when the reference names a whole sequence document: a Markdown
+file with `sequence:`, or a `kind: sequence` YAML, JSON, or JSON5 file,
+including one reached through a group leg or an external `task:` file. A
+reference with an `-> offset` or `::operator` suffix selects a list of steps
+rather than a document, so like an inline list it reads the frontmatter of the
+document that authored it. Group files carry no document properties; a group's
+own values are its `variables`, read through `group`.
+
 Groups are concurrent: omit `execution:`. Both `execution: parallel` and
 `execution: serial` are removed grammar; ordered work uses a nested
 `sequence:`. Every group leg requires a unique, nonempty string `name`.
@@ -418,8 +456,8 @@ Claudine walks the **entire task graph**:
   `group.*` values are late in its events as well as in its legs. Use a scalar
   expression such as `first(group.succeeded)` when passing an outcome to a command.
 
-  Root retries reuse the original approval set. If a nested source changes
-  before preparation, every newly discovered command
+  Root retries reuse the original approval set and the original task graph.
+  If a nested source changes before preparation, every newly discovered command
   must already belong to the invocation's approval set. Unapproved commands,
   templates, and prompt targets fail preparation before children start;
   concurrent descendants never open another approval prompt.
@@ -485,6 +523,8 @@ State layering, lowest precedence to highest:
 2. user setters (`--set`, shorthand `key=value`)
 3. accumulated runtime mutations (what `set` writes)
 
+Inside a referenced sequence document, layer 1 is that document's frontmatter,
+not the source's ([What a referenced sequence reads](#what-a-referenced-sequence-reads)).
 The lexical `seq` root travels beside these frontmatter layers.
 
 Layers 1 and 2 are authored, so their `{{ … }}` and `$( … )` spans are
@@ -498,9 +538,29 @@ inline-compose sequence's body write-backs — and any frontmatter an agent edit
 mid-run — are visible to later steps. Mid-run *external* edits take effect too;
 that is both the feature and the hazard.
 
-What is *not* re-derived at a step boundary: the step list. A
-`sequence: $(ls)` that would enumerate differently mid-run does not change the
-plan under execution.
+What is *not* re-derived at a step boundary: the task graph. The children
+preflight discovered — every step, group leg, and nested container, with their
+names, order, and executables — run as discovered for the whole invocation,
+including every retry. A `sequence: $(ls)` that would enumerate differently
+mid-run does not change the plan under execution, and neither does an earlier
+task that edits a later container's file. Here the `added` step never runs,
+even though its command is already approved:
+
+```yaml
+# root.md frontmatter
+sequence:
+  - name: rewrite
+    side_effect: { append_line: [child.yaml, "  - { name: added, shell: echo child }"] }
+  - name: nested
+    sequence: child.yaml     # child.yaml lists one step: { name: original, shell: echo child }
+```
+
+When a nested container prepares, its source is still read again: its own
+lifecycle events and a group's `variables` take the current file's values, and
+a command, template, or prompt document the reread introduces is refused
+because approval has closed. To let a later step observe a file an earlier
+step wrote, read the file when the step runs, through a prompt document or an
+expression such as `{{ frontmatter('state.md', 'status') }}`.
 
 **Mid-run failures.** A just-in-time composition failure is a failure of *that
 step*: recorded in the summary and routed to the enclosing container
@@ -726,8 +786,9 @@ group:
   which case they admit in **declaration order** as slots free up.
 - **Snapshot isolation** — every task receives the same state snapshot and the
   same `seq.outputs` view, taken when the group starts. In-memory mutations
-  stay private until settlement. Nested steps re-read live files, so a sibling's
-  file edits can be visible when a later nested step prepares.
+  stay private until settlement. Nested steps read live files when they run, so a sibling's
+  file edits can be visible to a later nested step. The steps themselves stay
+  as preflight discovered them.
 - **State merge** — mutations fold in **task-declaration order**, never
   completion order. Disjoint keys merge cleanly; when two tasks wrote the same
   key the later-declared task wins and Claudine warns on stderr naming the key

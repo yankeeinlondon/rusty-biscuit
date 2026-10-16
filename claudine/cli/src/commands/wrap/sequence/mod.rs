@@ -499,6 +499,15 @@ fn execute_sequence_inner(
         root.approved.as_ref(),
     )?;
     root.approved = Some(preflight_approved.clone());
+    // A retry's walk rereads referenced sources only to refuse commands the
+    // closed approval never saw; the task graph stays the first attempt's.
+    let graph = match &root.graph {
+        Some(first) => first.clone(),
+        None => {
+            root.graph = Some(graph.clone());
+            graph
+        }
+    };
     if let Some(lifecycle) = &graph.root_lifecycle { root.runner.guard_mut().set_config(lifecycle.clone()); }
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(

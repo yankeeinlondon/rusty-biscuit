@@ -1407,8 +1407,9 @@ Claudine validates lifecycle frontmatter when the document is prepared, before
 any event fires. Every error names the authored path of the offending node,
 for example `failure[0].else[1].shell.command`. Claudine's
 [schemas](../schemas.md) catch many of the same mistakes earlier, in the editor
-and in the launch verdict, but only within three conditional levels; the
-parser below is the authority. The most common errors:
+and in the launch verdict. They type `cancelled` at every conditional depth,
+but other stacks only within three conditional levels; the parser below is
+the authority. The most common errors:
 
 | Error | Cause |
 |-------|-------|
@@ -1538,10 +1539,18 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 
 Sequences and groups use the same event order as documents: initialize,
 preparation, start, a terminal event, then finalize. The root sequence
-initializes before static preflight. Nested sources are reread before start;
-preparation errors run blocked and finalize with shell execution disabled.
+initializes before static preflight. Nested sources are reread before start for
+their events and group `variables`; the children preflight discovered run
+unchanged ([Sequences](sequences.md#phase-2--just-in-time-composition)).
+Preparation errors run blocked and finalize with shell execution disabled.
 A body-only sequence step composes its source body without running the source
 lifecycle again.
+
+A container's events read the same frontmatter its children do. A referenced
+sequence document's events read that document's own properties, under the
+invocation's `--set` values and runtime writes, exactly as when it runs
+directly; inline containers and groups read the frontmatter of the document
+that authored them ([Sequences](sequences.md#what-a-referenced-sequence-reads)).
 
 ```mermaid
 stateDiagram-v2

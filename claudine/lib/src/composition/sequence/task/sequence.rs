@@ -46,6 +46,10 @@ impl TaskExecution<'_> {
         let mut secondary_errors = Vec::new();
         let mut interrupted_stdout = String::new();
         let mut prepared = None;
+        // A referenced document's events share their own live state, as a
+        // directly run document's events do, rather than the caller's.
+        let own_live = sequence.frontmatter.is_some().then(|| std::sync::Mutex::new(Map::new()));
+        let live_frontmatter = own_live.as_ref().or(self.stack.live_frontmatter);
         loop {
             if !matches!(signal, LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
                 && self.interrupted()
@@ -57,8 +61,11 @@ impl TaskExecution<'_> {
             }
             if signal == LifecycleSignal::Start {
                 let context = self.stack.prepared_context.cloned().unwrap_or_else(|| self.state.context().clone());
+                let mut supplied = match self.user_setters { Some(Value::Object(setters)) => setters.clone(), _ => Map::new() };
+                supplied.extend(runtime.snapshot().mutations);
                 match crate::composition::sequence::preflight::prepare_nested_sequence(
-                    self.task, self.state, context, self.stack.file_resolution_context, self.stack.group.is_some(),
+                    self.task, sequence, self.state, supplied, context, self.stack.file_resolution_context,
+                    self.stack.group.is_some(),
                 ).and_then(|(fresh, graph)| {
                     self.verify_nested_graph(&graph)?;
                     Ok(fresh)
@@ -84,8 +91,12 @@ impl TaskExecution<'_> {
             }
             let sequence = prepared.as_ref().unwrap_or(sequence);
             let seq = SequenceBinding::container(run_id, runtime.snapshot().outputs).to_value();
-            let mut event_frontmatter = self.stack.frontmatter.clone();
+            let base = self.sequence_frontmatter(sequence);
+            let mut event_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
             event_frontmatter.extend(runtime.snapshot().mutations);
+            if let Some(live) = &own_live {
+                live.lock().expect("sequence live frontmatter poisoned").extend(event_frontmatter.clone());
+            }
             if let Some(live) = self.stack.live_frontmatter {
                 live.lock().expect("sequence live frontmatter poisoned").extend(runtime.snapshot().mutations);
             }
@@ -93,7 +104,7 @@ impl TaskExecution<'_> {
             let stack = StackExecutionContext {
                 shell_runner: if shell_enabled { self.stack.shell_runner } else { &disabled },
                 seq: Some(&seq), runtime_state: Some(runtime.as_ref()), frontmatter: &event_frontmatter,
-                source_path: &sequence.origin_path, err: error.as_ref(),
+                live_frontmatter, source_path: &sequence.origin_path, err: error.as_ref(),
                 ..self.stack.with_signal(signal)
             };
             let event = if self.prompt.is_dry_run() {
@@ -121,7 +132,7 @@ impl TaskExecution<'_> {
                         let overlay = crate::composition::sequence::build_step_overlay(&plan, index);
                         let seq = SequenceBinding::step(&overlay, runtime.snapshot().outputs).to_value();
                         runtime.set_sequence_binding(seq.clone());
-                        let mut data = self.state.data().clone();
+                        let mut data = base.clone().map_or_else(|| self.state.data().clone(), |base| base.into_iter().collect());
                         data.extend(runtime.snapshot().mutations);
                         let state = match EffectiveStateBuilder::new().with_frontmatter(data)
                             .with_context(self.state.context().clone()).with_allow_ctx_override(true).build()
@@ -157,7 +168,7 @@ impl TaskExecution<'_> {
                         let frontmatter = state.data().iter().map(|(key,value)| (key.clone(), value.clone())).collect();
                         let child_stack = StackExecutionContext {
                             seq: Some(&seq), runtime_state: Some(runtime.as_ref()),
-                            frontmatter: &frontmatter, source_path: &task.origin_path,
+                            frontmatter: &frontmatter, live_frontmatter, source_path: &task.origin_path,
                             prepared_context: run.as_ref().map(|opened| &opened.context).or(self.stack.prepared_context),
                             ..self.stack.with_signal(LifecycleSignal::Start)
                         };
@@ -254,7 +265,7 @@ impl TaskExecution<'_> {
                 }
                 ContainerEventDecision::Retry { delay, overlay } => {
                     if !delay.is_zero() { std::thread::sleep(delay); }
-                    let state = self.state.data().iter().map(|(key,value)| (key.clone(),value.clone())).collect();
+                    let state = base.clone().unwrap_or_else(|| self.state.data().iter().map(|(key,value)| (key.clone(),value.clone())).collect());
                     runtime.clear_outputs();
                     if let Err(failure) = runtime.set_batch(self.stack.effect_engine, &overlay, &state) {
                         let diagnostic = TaskDiagnostic { stage: TaskStage::Primary,
@@ -299,6 +310,19 @@ impl TaskExecution<'_> {
 }
 
 impl TaskExecution<'_> {
+    /// The base state of a referenced sequence document's events and
+    /// children: its authored properties under the invocation setters.
+    /// Runtime mutations are layered above it at each read. `None` for an
+    /// inline list or a step selection, which read the enclosing state.
+    fn sequence_frontmatter(&self, sequence: &PreflightSequence) -> Option<Map<String, Value>> {
+        let mut base: Map<String, Value> = sequence.frontmatter.as_ref()?.iter()
+            .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
+        if let Some(Value::Object(setters)) = self.user_setters {
+            base.extend(setters.clone());
+        }
+        Some(base)
+    }
+
     pub(super) fn verify_nested_graph(&self, fresh: &crate::composition::sequence::preflight::PreflightGraph) -> Result<(), CompositionError> {
         let unapproved = fresh.shell_commands.iter().find(|command| !self.graph.shell_commands.iter()
             .any(|approved| approved.command == command.command));

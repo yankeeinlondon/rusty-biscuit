@@ -15,7 +15,7 @@ them.
 | File | Kind | Role |
 | --- | --- | --- |
 | `action.yaml` | library (`kind: schema`) | the four action types (`communicate`, `flow`, `shell`, `expression`) and the two dictionary-bundle types (`bundle`, `initialize-bundle`) |
-| `lifecycle.yaml` | library (`kind: schema`) | the lifecycle stack types (`stack`, `initialize-stack`), typed three conditional levels deep, and the `loop:` block type |
+| `lifecycle.yaml` | library (`kind: schema`) | the lifecycle stack types (`stack` and `initialize-stack`, typed three conditional levels deep; `cancelled-stack`, typed at all five levels the parser accepts), the `loop:` block type, and the sequence container types (`step`, `task`, `group`) |
 | `linking.yaml` | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
 | `claudine.yaml` | trigger (`kind: trigger-schema`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
 | `inline-compose.yaml` | trigger (`kind: trigger-schema`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
@@ -34,16 +34,21 @@ keep the action types aligned with its verb inventory and with Darkmatter's
 side-effect and expression-function catalogs.
 
 The frontmatter catalog includes `cancelled` on documents and containers. Its
-stack accepts communication, expressions, shells, and `stop`; the lifecycle
-parser rejects other flow directives. An empty `cancelled: []` opts a
-primitive into cancellation. Container execution is implemented separately
-from this grammar and schema surface.
+stack accepts communication, expressions, shells, and `stop`, and rejects
+every other flow directive at every conditional depth the parser accepts. An
+empty `cancelled: []` opts a primitive into cancellation.
 
 `lifecycle.yaml` also exports `step`, `task`, and `group` for editor completion
 and authored parameter schemas, for example
 `$schema: { nested: task@./lifecycle.yaml }`.
 A task can contain an inline `sequence:` list or a referenced sequence;
-a group owns `tasks:`, `variables:`, and `fail_fast:`. Deeper nested lists
-remain parser-validated, as do executable exclusivity, unique leg names,
-container-event placement, and removed-key diagnostics. The document catalog
+a group owns `tasks:`, `variables:`, and `fail_fast:`. Named types are
+inlined, so containers are typed two levels deep (`task`/`group` and their
+direct children, `step-2`/`task-2`/`group-2`), each with a restricted
+`cancelled`; their other events are checked for shape only. A container
+nested deeper than that is accepted as any list, so its `cancelled` is
+checked by the task parser, not the schema. Deeper lists,
+those events' actions, executable exclusivity, unique leg names,
+container-event placement, and removed-key diagnostics remain
+parser-validated. The document catalog
 does not declare `fail_fast` or the former injected sequence overlays.

@@ -6457,6 +6457,23 @@ mod nested_sequences {
     }
 
     #[test]
+    fn changed_nested_source_keeps_the_discovered_children() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "inner.yaml", &json!({"sequence":[{"name":"child","shell":"approved"}]}));
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":"inner.yaml"}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        write_yaml(fixture._dir.path(), "inner.yaml", &json!({"sequence":[
+            {"name":"added","shell":"approved"}, {"name":"child","shell":"approved"}
+        ]}));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default().stdout_for("approved", "ran");
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.commands(), ["approved"]);
+        assert_eq!(outcome.result, json!(["ran"]));
+    }
+
+    #[test]
     fn empty_sequence_returns_an_empty_native_array() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(dir.path(), json!({"name":"outer","sequence":[]}));

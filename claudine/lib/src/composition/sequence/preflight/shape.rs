@@ -306,6 +306,14 @@ pub struct PreflightSequence {
     pub lifecycle: Box<crate::composition::LifecycleConfig>,
     /// Source used to resolve child references and compose body-only steps.
     pub origin_path: PathBuf,
+    /// The referenced sequence document's authored root properties, for a
+    /// reference that names a whole document (no offset or operator).
+    ///
+    /// When present it replaces the caller's frontmatter as the base state of
+    /// this container's events and children; invocation setters and runtime
+    /// mutations still layer above it. `None` (inline lists, offset and
+    /// operator references) keeps the enclosing scope's state.
+    pub frontmatter: Option<Map<String, Value>>,
 }
 
 /// A resolved group and its member tasks.

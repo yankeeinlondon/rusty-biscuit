@@ -214,7 +214,10 @@ primitive tasks; terminal event placeholders require templates. The graph's
 `root_lifecycle` is installed on the root guard after the audit. Lifecycle
 clones share settled authorization; a reread graph is settled only against the
 original invocation's approval, never by prompting. Root retries pass the same
-closed membership into graph approval; rebuilding the graph cannot reopen approval. Preserve normalized exact
+closed membership into graph approval; rebuilding the graph cannot reopen approval,
+and the retry runs the first attempt's graph (`RootRun::graph`). Nested preparation
+(`prepare_nested_sequence`/`prepare_nested_group`) rereads container events and
+`variables` but keeps the frozen node's children and order. Preserve normalized exact
 command keys, including multiple shell-value commands. Catalog cycle identity
 includes the selected group name, so distinct entries in one catalog are legal;
 diagnostics retain each entry as `catalog#name`. First position propagates to
@@ -264,6 +267,17 @@ through data overrides so canonical rereads do not fire container events again. 
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
 Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
+SimplifiedSchema inlines named types (no recursion), so `lifecycle.yaml`
+types two container levels (`task`/`group`, then `step-2`/`task-2`/`group-2`),
+each with `cancelled: cancelled-stack`; other container events stay
+shape-only, because every inlined full `stack` slows each validation
+(see [Schemas](topics/schemas.md#sequence-containers)). The
+`cancelled-*` family is unrolled to the parser's `MAX_CONDITIONAL_DEPTH` (5)
+with no conditional at level 6; its conditionals use one
+`<pattern::^(?:then|else)$>` key, since literal `then`+`else` inline each body
+twice and grow the schema 2^n (measured 10x per validation at five levels).
+DMLS neither completes pattern keys nor resolves values below them, which is
+why `initialize-*` keeps literal keys and three typed levels.
 
 ## Lexical sequence bindings
 

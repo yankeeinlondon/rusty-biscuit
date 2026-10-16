@@ -25,9 +25,7 @@ fn nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps()
                     let (mut progress, wait) = self.changed.wait_timeout_while(progress,
                         Duration::from_secs(2), |progress| !progress.0).unwrap();
                     assert!(progress.0 && !wait.timed_out(), "reader never reached its first child");
-                    write_yaml(self.target.parent().unwrap(), "next.yaml", &json!({"sequence":[
-                        {"name":"observe", "side_effect":{"set":{"observed":"new-file;own={{ own }};sibling={{ sibling }}"}}}
-                    ]}));
+                    fs::write(&self.target, "---\nstate: new-file\n---\n").unwrap();
                     progress.1 = true;
                     self.changed.notify_all();
                 }
@@ -38,8 +36,14 @@ fn nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps()
         }
     }
     let dir = TempDir::new().unwrap();
-    write_yaml(dir.path(), "next.yaml", &json!({"sequence":[
-        {"name":"observe", "side_effect":{"set":{"observed":"old-file;own={{ own }};sibling={{ sibling }}"}}}
+    // The discovered graph is frozen, so the sibling's edit is observed through
+    // a file the step reads when it runs, not by rewriting the step itself.
+    fs::write(dir.path().join("shared.md"), "---\nstate: old-file\n---\n").unwrap();
+    // A referenced document reads its own properties, under the leg's
+    // runtime writes: `own` shows the leg's write, `sibling` that the other
+    // leg's write stayed private.
+    write_yaml(dir.path(), "next.yaml", &json!({"own":"initial", "sibling":"initial", "sequence":[
+        {"name":"observe", "side_effect":{"set":{"observed":"{{ frontmatter('shared.md', 'state') }};own={{ own }};sibling={{ sibling }}"}}}
     ]}));
     let source = write_source(dir.path(), "root.md", &[
         ("own", json!("initial")), ("sibling", json!("initial")),
@@ -58,7 +62,7 @@ fn nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps()
     let fixture = Fixture::build(dir, &source).unwrap();
     let recorder = Recorder::default();
     let fake = FakeTaskShell::default();
-    let shell = CoordinatedShell { target:fixture._dir.path().join("next.yaml"),
+    let shell = CoordinatedShell { target:fixture._dir.path().join("shared.md"),
         progress:Mutex::new((false, false)), changed:std::sync::Condvar::new() };
     let runtime = Arc::new(RuntimeState::new());
     let mut wiring = Wiring::new(&recorder, &fake);

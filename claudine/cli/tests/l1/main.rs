@@ -128,6 +128,9 @@ mod lifecycle_message_drain_interrupt;
 mod lifecycle_shell_templates;
 #[cfg(unix)]
 mod loop_cli;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod loop_config_matrix;
 // Installs the `claudine-fake-goose` fixture binary on Windows, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -240,5 +243,8 @@ mod wrap_watchdog_startup_stall;
 mod wrap_watchdog_timeout;
 
 mod sequence_containers;
+mod sequence_frozen_graph;
+mod sequence_referenced_state;
+mod sequence_deep_cancelled;
 
 mod research_sequence_artifacts;
