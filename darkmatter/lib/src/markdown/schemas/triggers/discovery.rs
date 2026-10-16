@@ -261,27 +261,33 @@ type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPay
 ///
 /// Memoized for the process: a bundle's texts are `'static` and its payloads
 /// resolve without the disk or the document context, so the result for one
-/// bundle document can never change. The key is the identity of every text in
-/// the bundle (a payload reads the bundle's libraries too): a `'static` text is
-/// never freed, so its address and length name its content for the whole run.
-/// Only successes are kept; a failure is recomputed (and reported) on every
-/// load.
+/// bundle document depends only on texts. An entry is keyed by the bundle
+/// name, the document name, and its text, and records the text of every
+/// bundle document its payload read (its imports, transitively); it is reused
+/// only while each of those documents still holds the same text. Editing a
+/// bundle document the payload never reads, such as another trigger, keeps
+/// the entry. Only successes are kept; a failure is recomputed (and reported)
+/// on every load.
 fn load_embedded_trigger(
     bundle: EmbeddedSchemaBundle,
     name: &str,
     text: &'static str,
 ) -> Result<EmbeddedTriggerLoad, SchemaError> {
-    type Key = (&'static str, String, Vec<(&'static str, usize, usize)>);
-    static LOADED: std::sync::OnceLock<std::sync::Mutex<HashMap<Key, EmbeddedTriggerLoad>>> =
-        std::sync::OnceLock::new();
+    type Key = (&'static str, String, &'static str);
+    /// The `(virtual path, text)` of each bundle document a payload read.
+    type Reads = Vec<(PathBuf, &'static str)>;
+    type Memo = std::sync::Mutex<HashMap<Key, Vec<(Reads, EmbeddedTriggerLoad)>>>;
+    static LOADED: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
     let memo = LOADED.get_or_init(Default::default);
-    let texts = bundle
-        .sorted_files()
-        .into_iter()
-        .map(|(file, text)| (file, text.as_ptr() as usize, text.len()))
-        .collect();
-    let key: Key = (bundle.name(), name.to_string(), texts);
-    if let Some(hit) = memo.lock().expect("embedded trigger memo poisoned").get(&key) {
+    let current_text = |path: &Path| {
+        bundle.files().iter().find(|(file, _)| Path::new(&bundle.virtual_path(file)) == path).map(|(_, text)| *text)
+    };
+    let key: Key = (bundle.name(), name.to_string(), text);
+    if let Some(entries) = memo.lock().expect("embedded trigger memo poisoned").get(&key)
+        && let Some((_, hit)) = entries
+            .iter()
+            .find(|(reads, _)| reads.iter().all(|(path, read)| current_text(path) == Some(*read)))
+    {
         return Ok(hit.clone());
     }
     let load_error = |source: SchemaError| SchemaError::EmbeddedTriggerLoad {
@@ -289,8 +295,8 @@ fn load_embedded_trigger(
         name: name.to_string(),
         source: Box::new(source),
     };
-    let loaded = match parse_trigger_envelope_from_str(text).map_err(load_error)? {
-        None => None,
+    let (loaded, reads) = match parse_trigger_envelope_from_str(text).map_err(load_error)? {
+        None => (None, Vec::new()),
         Some(envelope) => {
             let trigger = LoadedTrigger {
                 source: TriggerSource::Embedded {
@@ -301,14 +307,20 @@ fn load_embedded_trigger(
                 pattern_cwd: PathBuf::new(),
                 bundle: Some(bundle),
             };
-            let payload = super::assemble::resolve_embedded_trigger_payload(&trigger)
-                .map_err(load_error)?;
-            Some((trigger.envelope, payload))
+            let (payload, read_paths) =
+                super::assemble::resolve_embedded_trigger_payload(&trigger).map_err(load_error)?;
+            let reads: Reads = read_paths
+                .into_iter()
+                .filter_map(|path| current_text(&path).map(|read| (path, read)))
+                .collect();
+            (Some((trigger.envelope, payload)), reads)
         }
     };
     memo.lock()
         .expect("embedded trigger memo poisoned")
-        .insert(key, loaded.clone());
+        .entry(key)
+        .or_default()
+        .push((reads, loaded.clone()));
     Ok(loaded)
 }
 

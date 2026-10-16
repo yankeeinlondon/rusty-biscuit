@@ -248,7 +248,7 @@ pub(crate) fn resolve_trigger_payload(
     let source = match (&trigger.source, trigger.bundle) {
         (TriggerSource::File(path), _) => path,
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
-            return resolve_embedded_payload(trigger, bundle, name);
+            return resolve_embedded_payload(trigger, bundle, name).map(|(payload, _)| payload);
         }
         (TriggerSource::Embedded { bundle, name }, None) => {
             return Err(SchemaError::EmbeddedBundle {
@@ -264,7 +264,16 @@ pub(crate) fn resolve_trigger_payload(
             reason: "trigger envelope has no `$schema:` payload".into(),
         }
     })?;
+    file_payload_memo::resolve(source, payload, schema_roots, context)
+}
 
+/// [`resolve_trigger_payload`] for a schema-root file, uncached.
+fn resolve_file_payload(
+    source: &Path,
+    payload: &YamlValue,
+    schema_roots: &[PathBuf],
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedPayload, SchemaError> {
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
     let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots, context)?;
 
@@ -293,6 +302,138 @@ pub(crate) fn resolve_trigger_payload(
     })
 }
 
+/// A process-wide memo of resolved schema-root trigger payloads.
+///
+/// A long-running host (DMLS) scans the trigger registry for every request,
+/// and a large payload (Claudine's resolves to megabytes) takes hundreds of
+/// milliseconds to expand. Every downstream memo (the trigger merge, root-arm
+/// wrapping, and the validator cache's digest) is keyed by the payload's
+/// `Arc` identity, so returning the same `Arc` for unchanged inputs also
+/// keeps those warm.
+///
+/// An entry is reused only when the trigger path, the payload value, the
+/// schema roots, and the request context are equal, every dependency file
+/// still hashes the same, and the entry list of every searched directory (the
+/// schema roots and each dependency's folder) is unchanged, so a file added
+/// in front of a bare-name target is noticed. Only successes are kept.
+mod file_payload_memo {
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    use biscuit_hash::xx_hash_bytes;
+    use serde_yaml_ng::Value as YamlValue;
+
+    use super::{ResolvedPayload, resolve_file_payload};
+    use crate::markdown::schemas::errors::SchemaError;
+
+    const RECENT_PAYLOADS: usize = 16;
+
+    struct Entry {
+        source: PathBuf,
+        payload: YamlValue,
+        schema_roots: Vec<PathBuf>,
+        context: biscuit_file::FileResolutionContext,
+        fingerprint: u64,
+        resolved: ResolvedPayload,
+    }
+
+    static ENTRIES: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+
+    pub(super) fn resolve(
+        source: &Path,
+        payload: &YamlValue,
+        schema_roots: &[PathBuf],
+        original: &biscuit_file::FileResolutionContext,
+    ) -> Result<ResolvedPayload, SchemaError> {
+        let context = &folder_context(original);
+        let same_inputs = |entry: &Entry| {
+            entry.source == source
+                && entry.schema_roots == schema_roots
+                && entry.payload == *payload
+                && entry.context == *context
+        };
+        let held = {
+            let entries = ENTRIES.lock().expect("trigger payload memo poisoned");
+            entries
+                .iter()
+                .find(|entry| same_inputs(entry))
+                .map(|entry| (entry.fingerprint, entry.resolved.clone()))
+        };
+        if let Some((fingerprint, resolved)) = held
+            && fingerprint == inputs_fingerprint(schema_roots, &resolved.dependencies)
+        {
+            return Ok(resolved);
+        }
+
+        let resolved = resolve_file_payload(source, payload, schema_roots, original)?;
+        let fingerprint = inputs_fingerprint(schema_roots, &resolved.dependencies);
+        let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
+        entries.retain(|entry| !same_inputs(entry));
+        if entries.len() == RECENT_PAYLOADS {
+            entries.remove(0);
+        }
+        entries.push(Entry {
+            source: source.to_path_buf(),
+            payload: payload.clone(),
+            schema_roots: schema_roots.to_vec(),
+            context: context.clone(),
+            fingerprint,
+            resolved: resolved.clone(),
+        });
+        Ok(resolved)
+    }
+
+    /// The memo key's context: a document context with its source path
+    /// replaced by its folder. Every document in one folder shares the
+    /// derived `cwd`, tree, and anchors; the source path itself only names
+    /// the resolution source in diagnostics and the containment check, which
+    /// the folder decides alike. Any other context is kept whole.
+    fn folder_context(context: &biscuit_file::FileResolutionContext) -> biscuit_file::FileResolutionContext {
+        match context.source_path() {
+            Some(source) if source.parent() == Some(context.cwd()) => {
+                context.clone().with_source_path(context.cwd())
+            }
+            _ => context.clone(),
+        }
+    }
+
+    /// Hashes each dependency's bytes and the sorted entry names of every
+    /// schema root and dependency folder. An unreadable file or folder hashes
+    /// as absent, which differs from any readable state.
+    fn inputs_fingerprint(schema_roots: &[PathBuf], dependencies: &[PathBuf]) -> u64 {
+        let mut folders: Vec<&Path> = schema_roots
+            .iter()
+            .map(PathBuf::as_path)
+            .chain(dependencies.iter().filter_map(|path| path.parent()))
+            .collect();
+        folders.sort();
+        folders.dedup();
+        let mut fingerprint = 0u64;
+        let mut fold = |bytes: &[u8]| fingerprint = fingerprint.rotate_left(5) ^ xx_hash_bytes(bytes);
+        for folder in folders {
+            fold(folder.as_os_str().as_encoded_bytes());
+            match std::fs::read_dir(folder) {
+                Ok(entries) => {
+                    let mut names: Vec<_> = entries.filter_map(|entry| entry.ok().map(|entry| entry.file_name())).collect();
+                    names.sort();
+                    for name in names {
+                        fold(name.as_encoded_bytes());
+                    }
+                }
+                Err(_) => fold(b"\0absent folder"),
+            }
+        }
+        for dependency in dependencies {
+            fold(dependency.as_os_str().as_encoded_bytes());
+            match std::fs::read(dependency) {
+                Ok(bytes) => fold(&bytes),
+                Err(_) => fold(b"\0absent file"),
+            }
+        }
+        fingerprint
+    }
+}
+
 /// The object shape of a payload that passed the merge-compatibility gate.
 /// A gated payload is never a root union, so only a single-object projection
 /// is kept.
@@ -306,8 +447,11 @@ fn payload_shape(
 }
 
 /// [`resolve_trigger_payload`] for an embedded trigger, which needs neither
-/// schema roots nor a document context.
-pub(crate) fn resolve_embedded_trigger_payload(trigger: &LoadedTrigger) -> Result<ResolvedPayload, SchemaError> {
+/// schema roots nor a document context, alongside the virtual paths
+/// (`{bundle}/{file}`) of every bundle document the payload read.
+pub(crate) fn resolve_embedded_trigger_payload(
+    trigger: &LoadedTrigger,
+) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
     match (&trigger.source, trigger.bundle) {
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => resolve_embedded_payload(trigger, bundle, name),
         (source, _) => Err(SchemaError::EmbeddedBundle {
@@ -329,7 +473,7 @@ fn resolve_embedded_payload(
     trigger: &LoadedTrigger,
     bundle: EmbeddedSchemaBundle,
     name: &str,
-) -> Result<ResolvedPayload, SchemaError> {
+) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
     let importer = bundle.virtual_path(name);
     let importer_path = PathBuf::from(&importer);
     let payload = trigger.envelope.payload.as_ref().ok_or_else(|| {
@@ -379,13 +523,15 @@ fn resolve_embedded_payload(
             ),
         }),
     })?;
+    let (resolved, reads) = resolved;
     enforce_merge_compatible(&importer_path, payload, &resolved.json_schema)?;
-    Ok(ResolvedPayload {
+    let payload = ResolvedPayload {
         shape: payload_shape(resolved.simplified),
         json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: Vec::new(),
         advisories: resolved.advisories,
-    })
+    };
+    Ok((payload, reads))
 }
 
 /// Rejects payloads that are root unions, non-objects, or otherwise not
@@ -775,6 +921,55 @@ mod tests {
             }
             other => panic!("expected TriggerSchemaReferenced, got {other:?}"),
         }
+    }
+
+    // ── Payload memo ────────────────────────────────────────────────────
+
+    /// A repository whose `schemas/` holds the trigger and its payload.
+    fn payload_repo() -> TempDir {
+        let repo = repo_fixture();
+        write(&repo.path().join("schemas/claudine.trigger.yaml"), TRIGGER_WITH_PAYLOAD);
+        write(&repo.path().join("schemas/claudine.yaml"), PAYLOAD);
+        repo
+    }
+
+    fn payload_properties(registry: &TriggerRegistry) -> Vec<String> {
+        registry.payloads[0].json_schema["properties"].as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn documents_in_one_folder_share_the_resolved_payload() {
+        let repo = payload_repo();
+        let root = repo.path();
+
+        let first = discovery::scan(&doc_context(root).for_source(root.join("a.md"))).unwrap();
+        let second = discovery::scan(&doc_context(root).for_source(root.join("b.md"))).unwrap();
+
+        assert!(std::sync::Arc::ptr_eq(&first.payloads[0].json_schema, &second.payloads[0].json_schema));
+    }
+
+    #[test]
+    fn an_edited_payload_file_is_resolved_again() {
+        let repo = payload_repo();
+        let root = repo.path();
+        assert_eq!(payload_properties(&discovery::scan(&doc_context(root)).unwrap()), ["model"]);
+
+        write(&root.join("schemas/claudine.yaml"), "$schema:\n  owner: string(required)\n");
+
+        assert_eq!(payload_properties(&discovery::scan(&doc_context(root)).unwrap()), ["owner"]);
+    }
+
+    #[test]
+    fn a_bare_name_target_added_in_a_nearer_root_is_resolved_again() {
+        let repo = payload_repo();
+        let root = repo.path();
+        fs::create_dir_all(root.join("pkg/schemas")).unwrap();
+        let context = || doc_context(root).with_package_root(root.join("pkg")).for_source(root.join("pkg/doc.md"));
+        assert_eq!(payload_properties(&discovery::scan(&context()).unwrap()), ["model"]);
+
+        write(&root.join("pkg/schemas/claudine.yaml"), "$schema:\n  owner: string(required)\n");
+
+        assert_eq!(payload_properties(&discovery::scan(&context()).unwrap()), ["owner"]);
     }
 
     // ── payload_suggestion ──────────────────────────────────────────────
