@@ -5,25 +5,83 @@
 # Every object shape is a named type, in ./_types.yaml or ../_types.yaml.
 $schema:
     schema_revision: literal(2; required) -> Revision of this research contract; a document written for another revision is rejected
-    provider: identifier(required)@../_types.yaml -> Roster slug of the provider this document describes
+    provider: identifier(required) -> Roster slug of the provider this document describes
     created: date(required) -> Date this document was first written; kept unchanged on refresh
     last_updated: date(required) -> Date of the research run that produced this version
     contract_checked: date -> Date the fleet last confirmed this document satisfies the contract; written by the fleet after validation and never by the researcher
-    agent: research_agent(required)@../_types.yaml -> Agentic CLI that performed the research, which the fleet checks against its assignment
-    model: research_model(required)@../_types.yaml -> Model that performed the research, recorded so findings can be weighed by who produced them
-    reasoning_effort: research_effort(required)@../_types.yaml -> Reasoning effort the research itself ran with
-    versions_examined: version[](required)@../_types.yaml -> Provider versions whose documentation, source, or behavior was examined
-    evidence: evidence[](required)@../_types.yaml -> Every source a claim in this document rests on
+    agent: research_agent(required) -> Agentic CLI that performed the research, which the fleet checks against its assignment
+    model: research_model(required) -> Model that performed the research, recorded so findings can be weighed by who produced them
+    reasoning_effort: research_effort(required) -> Reasoning effort the research itself ran with
+    versions_examined: version[](required) -> Provider versions whose documentation, source, or behavior was examined
+    evidence: evidence[](required) -> Every source a claim in this document rests on
     support: enum(every_model,some_models,none,unknown; required) -> Whether the provider lets a caller choose a reasoning level at all
-    levels: level[](required)@./_types.yaml -> Every level the provider accepts, with the levels of its scale weakest first and then any mode that is not a point on the scale; empty when the provider has none
+    levels: level[](required) -> Every level the provider accepts, with the levels of its scale weakest first and then any mode that is not a point on the scale; empty when the provider has none
     default_level: default_level(required)@./_types.yaml -> The level in force when the caller chooses nothing
-    controls: control[](required)@./_types.yaml -> Every way a caller can choose the level, including ways that only work inside a session
-    precedence: identifier[](required)@../_types.yaml -> Control names from strongest to weakest, showing which wins when several are set
-    models: model_levels[](required; max(40))@./_types.yaml -> Which levels each model accepts, only for models whose levels differ from the full list; models that share the same levels are grouped under one pattern and a catalog is never copied here
-    invalid_level: invalid_level(required)@./_types.yaml -> What the provider does when asked for a level it or the model does not accept
-    reporting: reporting(required)@./_types.yaml -> How a caller can confirm afterwards which level was actually used
-    reasoning_output: reasoning_output(required)@./_types.yaml -> Whether the model's reasoning text reaches the caller
-    gaps: gap[](required)@./_types.yaml -> What remains unknown, each with the next check to run; every value recorded as unknown has an entry here
+    controls: control[](required) -> Every way a caller can choose the level, including ways that only work inside a session
+    precedence: identifier[](required) -> Control names from strongest to weakest, showing which wins when several are set
+    models: model_levels[](required; max(40)) -> Which levels each model accepts, only for models whose levels differ from the full list; models that share the same levels are grouped under one pattern and a catalog is never copied here
+    invalid_level: invalid_level(required) -> What the provider does when asked for a level it or the model does not accept
+    reporting: reporting(required) -> How a caller can confirm afterwards which level was actually used
+    reasoning_output: reasoning_output(required) -> Whether the model's reasoning text reaches the caller
+    gaps: gap[](required) -> What remains unknown, each with the next check to run; every value recorded as unknown has an entry here
     changes: string[](required) -> What changed in this document since the previous version
     requires_claudine_update: boolean(required) -> Whether a finding here means Claudine's code or metadata must change
     reason: string(required; not-empty) -> Why Claudine does or does not need to change
+
+types:
+    normalized_level: enum(off,minimal,low,medium,high,very_high,maximum,outside_scale) -> Claudine's provider-neutral scale, used to compare levels between providers; outside_scale marks a mode that is not a point on the provider's scale
+    # this should replace the normalized level
+    canonical_reasoning_level: enum(none,low,medium,high,xhigh,max) -> the canonical list of reasoning levels that a model might expose
+
+    level:
+        native: string(required; pattern(^[A-Za-z0-9_.:-]+$)) -> The exact token the provider accepts, copied as observed and never tidied up
+        normalized: normalized_level(required)@this -> The closest point on Claudine's scale, judged by the provider's own ordering of its levels
+        meaning: string(required; not-empty) -> What the provider says this level does, in the provider's terms
+        evidence_ids: identifier[](required) -> Evidence that the provider accepts this exact token
+
+    default_level:
+        native: string(pattern(^[A-Za-z0-9_.:-]+$)) -> The level used when none is chosen; omitted when it cannot be established
+        decided_by: enum(provider,model,account,unknown; required) -> What determines the default, since it may differ by model or by subscription
+        evidence_ids: identifier[](required) -> Evidence for the default and for what determines it
+
+    control:
+        id: identifier(required) -> Stable name the precedence list and the reporting entry use to refer to this control
+        kind: enum(launch_flag,config_override_flag,config_file_key,environment_variable,model_suffix,session_command,request_field; required) -> How the caller expresses the choice
+        name: string(required; pattern(^[A-Za-z0-9_./:-]+$)) -> The exact flag, key, variable, or command, copied as observed
+        value: enum(level_token,token_budget,on_or_off; required) -> Whether the control takes a named level, a number of reasoning tokens, or only a switch
+        arguments: string[](required) -> Command-line arguments that apply this control at launch, one argument per entry, with <level> where the level goes; empty for an environment variable, a configuration key, a session command, or a request field
+        launch_modes: launch_mode[](required) -> Launch modes in which the control works
+        lasts: enum(one_request,one_session,until_changed,unknown; required) -> How long the choice stays in force
+        changes_running_session: enum(yes,no,unknown; required) -> Whether the control can change the level of a session that has already started
+        evidence_ids: identifier[](required) -> Evidence that the control exists under this exact name and behaves as recorded
+
+    model_levels:
+        model: string(required; pattern(^[A-Za-z0-9_./:@*-]+$)) -> The exact model identifier the provider accepts, or a pattern with * that covers every model sharing these levels
+        accepts: string[](required) -> Native level tokens this model accepts; empty when the model has no adjustable reasoning
+        default: string(pattern(^[A-Za-z0-9_.:-]+$)) -> The level this model uses when none is chosen, where it differs from the provider default
+        evidence_ids: identifier[](required) -> Evidence for which levels this model accepts
+
+    invalid_level:
+        behavior: enum(refuses_to_start,fails_the_request,uses_nearest_level,uses_default,unknown; required) -> What the provider does with the run when the level is not accepted
+        warns: enum(yes,no,unknown; required) -> Whether the provider tells the caller the requested level was not used; without a warning a caller cannot trust its own request
+        message: string -> The exact error text, when the provider reports one
+        evidence_ids: identifier[](required) -> Evidence from an attempt with a level the provider does not accept
+
+    reporting:
+        source: enum(stream_event,session_record,log_file,status_command,nowhere,unknown; required) -> Where the provider states the level a run actually used
+        locator: string(pattern(^[A-Za-z0-9_~<>./*:-]+$)) -> The event name or file pattern that holds it, with <placeholders> for the parts that vary; omitted when the source is a command or nowhere
+        command: string[] -> The command that prints it, one argument per entry, with <placeholders> for the parts that vary; present only when the source is status_command
+        notes: string -> What a reader needs to find the value that the locator and field cannot express
+        field: pointer -> Where in that event or record the level appears
+        evidence_ids: identifier[](required) -> Evidence that the reported value matches the level that was requested
+
+    reasoning_output:
+        reaches_caller: enum(full_text,summary,hidden,unknown; required) -> How much of the reasoning a non-interactive caller receives
+        control_id: identifier -> The control that shows or hides it, when one exists
+        evidence_ids: identifier[](required) -> Evidence for what a caller receives
+
+    gap:
+        area: enum(levels,default_level,controls,precedence,models,invalid_level,reporting,reasoning_output,other; required) -> Which part of this document the gap is in, so gaps can be compared between providers
+        entry: string(pattern(^[A-Za-z0-9_./:@*-]+$)) -> The level, control, or model the gap concerns, named exactly as this document names it; omitted when the gap concerns the whole area
+        detail: string(required; not-empty) -> What is not known, stated precisely enough for someone else to investigate
+        next_check: string(required; not-empty) -> The specific check that would close the gap
