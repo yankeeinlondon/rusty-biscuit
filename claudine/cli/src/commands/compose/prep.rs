@@ -972,7 +972,6 @@ fn build_loop_options(
 ) -> LoopExecutionOptions {
     LoopExecutionOptions {
         max_iterations: shared.max_iterations,
-        fail_fast: claudine::composition::resolve_fail_fast_from_env(environment),
         on_rate_limit: shared.on_rate_limit.map(Into::into),
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
@@ -1128,9 +1127,6 @@ fn build_and_run_loop(
     let mut stabilized: Option<(ResolvedCompositionSource, darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals)> =
         None;
     let staged_start = std::time::Instant::now();
-    // A halting loop renders the failed iteration's error in its final block;
-    // a continuing one never does, so the iteration reports its own.
-    let loop_fail_fast = loop_options.fail_fast.or(config.fail_fast).unwrap_or(true);
 
     run_loop_with_overrides(
         source,
@@ -1322,6 +1318,8 @@ fn build_and_run_loop(
             // executor returns, so swapping here keeps both the per-iteration
             // terminal events and the post-finalize gate on live state.
             guard.set_config(prepared.lifecycle.clone());
+            // The gate after this pass reads the frontmatter it composed with.
+            let pass_frontmatter = prepared.effective_frontmatter.as_object().cloned();
 
             let request = build_execution_request(
                 shared,
@@ -1355,12 +1353,10 @@ fn build_and_run_loop(
                     .chain()
                     .find_map(|cause| cause.downcast_ref::<UnrecoveredLifecycleDowngrade>())
             {
-                if !loop_fail_fast && !shared.silent {
-                    claudine::harness::report::report_unhandled_failure(&downgrade.message, &term);
-                }
                 let mut output =
                     downgraded_loop_iteration_output(ctx.iteration, &source.resolved_path, downgrade);
                 output.context = run_context;
+                output.frontmatter = pass_frontmatter;
                 return Ok(output);
             }
             let outcome = attempt.map_err(|e| {
@@ -1389,22 +1385,12 @@ fn build_and_run_loop(
                         snapshot: DiagnosticSnapshot::select(other.as_ref()).map(Box::new),
                     },
                 }
-            })
-            .inspect_err(|error| {
-                // Under `fail_fast: false` the engine continues past an
-                // iteration that could not complete and drops its error, so a
-                // refused hand-off or a preparation failure would otherwise
-                // never be shown.
-                if !loop_fail_fast && !shared.silent && !error.is_already_emitted() {
-                    crate::log::message(&biscuit_terminal::errors::BlockError::report_block_error(
-                        error, &term,
-                    ));
-                }
             })?;
 
             let mut output =
                 build_loop_iteration_output(ctx.iteration, &source.resolved_path, outcome);
             output.context = run_context;
+            output.frontmatter = pass_frontmatter;
             Ok(output)
         },
     )
@@ -1701,9 +1687,21 @@ fn execute_loop_or_single(
             if let Some(handoff) = loop_result.handoff {
                 return Ok(ActiveDocumentOutcome::Handoff(handoff));
             }
+            // A `break`'s code is the process exit code only for the root
+            // invocation's loop; a document looping inside a sequence step
+            // records it in the summary and the run continues.
+            let mut exit_code = loop_result.final_exit_code;
+            if let Some(broken) = &loop_result.broken {
+                use claudine::composition::lifecycle::LifecycleEmitter as _;
+                claudine::composition::DefaultLifecycleEmitter.emit_info(&broken.summary(), &wrap_terminal());
+                if step_scope.is_none() {
+                    exit_code = i32::from(broken.code);
+                }
+            }
             return Ok(ActiveDocumentOutcome::Done {
-                exit_code: loop_result.final_exit_code,
-                final_output: Some(loop_result.last_output),
+                exit_code,
+                // A loop a `break` ended before any pass ran published nothing.
+                final_output: (loop_result.iteration_count > 0).then_some(loop_result.last_output),
             });
         }
     }

@@ -39,10 +39,23 @@ pub fn run_sequence(
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let _prep = super::prep_target::install_for(&args.shared, verbose);
     run_sequence_inner(
         args,
         verbose,
         startup_timings,
+        crate::request::snapshot(),
+        crate::request::document_environment_source(),
+    )
+}
+
+/// Run `file` as a sequence invocation of its own, in this process: a
+/// lifecycle `prep` target.
+pub(crate) fn run_sequence_target(shared: SharedComposeArgs, file: String, verbose: u8) -> Result<i32> {
+    run_sequence_inner(
+        SequenceArgs { shared, args: vec![file] },
+        verbose,
+        None,
         crate::request::snapshot(),
         crate::request::document_environment_source(),
     )
@@ -457,6 +470,7 @@ mod tests {
             sandbox: false,
             repo: false,
             dry_run: false,
+            dry_run_shell: false,
             quiet: false,
             silent: true,
             set: None,

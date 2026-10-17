@@ -50,6 +50,7 @@ fn step_options(
         invocation,
         run_evidence: None,
         deferred_shell_roots: Default::default(),
+        loop_values: None,
         validation_probe: false,
         document_shell_values: None,
     };
@@ -95,6 +96,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         invocation: &invocation,
         run_evidence: None,
         deferred_shell_roots: Default::default(),
+        loop_values: None,
         validation_probe: false,
         document_shell_values: None,
     };

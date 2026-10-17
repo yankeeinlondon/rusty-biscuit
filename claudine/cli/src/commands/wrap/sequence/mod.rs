@@ -287,13 +287,31 @@ pub(crate) fn execute_sequence(
         ctx_base_dir: Some(file_resolution_context.request_cwd()), prepared_context: Some(&context), file_resolution_context: &file_resolution_context,
         effect_engine: &engine, shell_runner: invocation.shell_runner(), emitter: &emitter, term: &term,
         source_path: &source.resolved_path, repo_root: source_context.repository_root(), messaging: &messaging, settings: &settings };
-    let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime));
+    // A looping root allocates its loop before `initialize`, which already
+    // reads the first pass's values. A dry run previews one pass, with pass
+    // 1's values, and lists the root's `prep` targets without running them.
+    let frame = root_loop_frame(source, &frontmatter, shared, &invocation, &file_resolution_context, &context)?;
+    if shared.dry_run {
+        use claudine::composition::lifecycle::LifecycleEmitter as _;
+        if let (Some(frame), Some(value)) = (&frame, frontmatter.get("loop")) {
+            let location = claudine::composition::LoopLocation::document_root(&source.resolved_path);
+            if let Ok(block) = claudine::composition::parse_loop_block(value, claudine::composition::LoopOwner::Sequence, &location) {
+                emitter.emit_info(&claudine::composition::looping::dry_run_loop_note(&location.property, &block.config, frame.max()), &term);
+            }
+        }
+        for target in lifecycle.literal_prep_targets() {
+            log::message(&super::composition::dry_run::render_prep_target(&target, &term));
+        }
+    }
+    let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime), frame);
     if !shared.dry_run {
         match root.event(LifecycleSignal::Initialize, None)? {
             ContainerEventDecision::Continue => {},
             ContainerEventDecision::Skip => return Ok(0),
             ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
-            ContainerEventDecision::Finished { failed } => return Ok(if root.runner.is_cancelled() { 130 } else { i32::from(failed) }),
+            ContainerEventDecision::Finished { failed } => return Ok(if root.runner.is_cancelled() { 130 }
+                else if let Some(code) = (!failed).then(|| root.broken_exit_code()).flatten() { code }
+                else { i32::from(failed) }),
             other => return Err(color_eyre::eyre::eyre!("invalid initialize transition: {other:?}")),
         }
     }
@@ -311,15 +329,50 @@ pub(crate) fn execute_sequence(
             Err(error) => (if root.started { LifecycleSignal::Failure } else { LifecycleSignal::Blocked }, Some(LifecycleErrorInfo::from_error_or_action("sequence", error.as_ref()))),
         };
         runtime.set_sequence_binding(seq.clone());
+        if root.pending.is_none() && matches!(signal, LifecycleSignal::Success | LifecycleSignal::Failure) {
+            root.record_pass(i32::from(signal == LifecycleSignal::Failure));
+        }
         let decision = root.pending.take().map(Ok).unwrap_or_else(|| root.event(signal, error));
         match decision? {
             ContainerEventDecision::Retry { delay, overlay } => root.retry(delay, &overlay)?,
             ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
-            ContainerEventDecision::Finished { failed } => return if root.runner.is_cancelled() { Ok(130) } else if failed { outcome.and(Ok(1)) } else { Ok(0) },
+            ContainerEventDecision::Finished { failed } => return if root.runner.is_cancelled() { Ok(130) } else if failed { outcome.and(Ok(1)) }
+                else { Ok(root.broken_exit_code().unwrap_or(0)) },
             ContainerEventDecision::Skip => return Ok(0),
             other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
         }
     }
+}
+
+/// The root sequence's loop frame, when its frontmatter declares `loop:`.
+///
+/// A templated `max` resolves once, here, against the root's values under
+/// the caller's setters; `--max-iterations`, then `CLAUDINE_MAX_ITERATIONS`,
+/// replaces the authored cap.
+#[allow(clippy::result_large_err)]
+fn root_loop_frame(
+    source: &ResolvedCompositionSource,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    shared: &SharedComposeArgs,
+    invocation: &claudine::invocation_context::InvocationContext,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    context: &darkmatter::markdown::compose::ComposeContext,
+) -> std::result::Result<Option<claudine::composition::looping::LoopFrame>, CompositionError> {
+    let Some(value) = frontmatter.get("loop") else { return Ok(None) };
+    let location = claudine::composition::LoopLocation::document_root(&source.resolved_path);
+    let mut config = claudine::composition::parse_loop_block(value, claudine::composition::LoopOwner::Sequence, &location)?.config;
+    let ambient = claudine::composition::LoopAmbient::new(1, true, false, serde_json::json!([]), 0);
+    let lookup = claudine::composition::LoopExpressionLookup::new(frontmatter, &ambient, file_resolution_context, &source.resolved_path)
+        .with_prepared_context(Some(context));
+    claudine::composition::resolve_templated_loop_max(&mut config, &lookup, &location)?;
+    let cap = match shared.max_iterations {
+        Some(cap) => Some(cap),
+        None => claudine::composition::resolve_max_iterations_from_env(invocation.document_environment(), &source.resolved_path)?,
+    };
+    claudine::composition::looping::LoopFrame::new(
+        &config, cap, claudine::composition::looping::LoopResultKind::Sequence, &source.resolved_path, &location.property,
+    )
+    .map(Some)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -779,6 +832,7 @@ fn execute_sequence_inner(
         // Each step opens its own run at its turn.
         run_evidence: None,
         deferred_shell_roots: Default::default(),
+        loop_values: None,
         validation_probe: false,
         document_shell_values: None,
     };
@@ -823,7 +877,7 @@ fn execute_sequence_inner(
     // ── Phase 2: compose and execute each step, at its turn ────────────
     drop(_preflight_span);
 
-    let run_context = iterate::SequenceRunContext {
+    let mut run_context = iterate::SequenceRunContext {
         plan: &plan,
         graph: &graph,
         resolved_targets: &resolved_targets,
@@ -843,35 +897,84 @@ fn execute_sequence_inner(
         silent,
         verbose,
         perf_enabled,
+        loop_values: None,
     };
-    if !shared.dry_run {
-        root.started = true;
-        let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
-        if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
-            root.pending = Some(decision);
-            return Ok(1);
+    // One pass of the root runs its steps. A looping root settles each
+    // successful pass's terminal event, `finalize`, and gate here and enters
+    // the next; the last pass, and any pass that did not succeed, settles in
+    // the caller as a root without a loop does.
+    loop {
+        run_context.loop_values = root.loop_values();
+        if !shared.dry_run {
+            root.enter_pass();
+            root.started = true;
+            let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
+            if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
+                root.pending = Some(decision);
+                return Ok(1);
+            }
+        }
+        let (summary, interrupt_observed) =
+            iterate::run_sequence_steps(&run_context, &mut perf_accumulator, &root.runtime)?;
+
+        if let Some(step) = summary.steps.iter().find(|step| !step.success) {
+            let mut error = claudine::composition::lifecycle::context::LifecycleErrorInfo::from_action_failure(
+                "sequence", step.error.clone().unwrap_or_else(|| "a sequence child failed".into()));
+            error.snapshot = step.error_snapshot.clone();
+            root.child_error = Some(error);
+        }
+        if let Some(acc) = perf_accumulator.as_mut() {
+            acc.set_invocation_work(&prep_context.invocation.work_snapshot());
+        }
+
+        let looping = !shared.dry_run && root.frame.is_some();
+        let code = report::emit_sequence_summary(
+            &summary,
+            if looping { None } else { perf_accumulator.take() },
+            &interrupted,
+            interrupt_observed,
+            silent,
+            shared.dry_run,
+        )?;
+        if !looping || code != 0 {
+            emit_perf(perf_accumulator.take());
+            return Ok(code);
+        }
+        root.runtime.set_sequence_binding(
+            claudine::composition::lifecycle::bindings::SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value(),
+        );
+        root.record_pass(0);
+        let settled = root.settle_pass()?;
+        if !matches!(settled, claudine::composition::lifecycle::runtime::ContainerEventDecision::Finished { failed: false })
+            || root.runner.is_cancelled()
+        {
+            root.pending = Some(settled);
+            emit_perf(perf_accumulator.take());
+            return Ok(code);
+        }
+        match root.finish_pass() {
+            Ok(claudine::composition::looping::ContainerPassEnd::Continue) => {}
+            Ok(claudine::composition::looping::ContainerPassEnd::Complete | claudine::composition::looping::ContainerPassEnd::Broken(_)) => {
+                root.pending = Some(claudine::composition::lifecycle::runtime::ContainerEventDecision::Finished { failed: false });
+                emit_perf(perf_accumulator.take());
+                return Ok(0);
+            }
+            // The loop owner failed after the pass settled: nothing re-enters
+            // the pass's events, and the root fails with it.
+            Err(error) => {
+                root.pending = Some(claudine::composition::lifecycle::runtime::ContainerEventDecision::Finished { failed: true });
+                emit_perf(perf_accumulator.take());
+                return Err(error.into());
+            }
         }
     }
-    let (summary, interrupt_observed) =
-        iterate::run_sequence_steps(&run_context, &mut perf_accumulator, &root.runtime)?;
+}
 
-    if let Some(step) = summary.steps.iter().find(|step| !step.success) {
-        let mut error = claudine::composition::lifecycle::context::LifecycleErrorInfo::from_action_failure(
-            "sequence", step.error.clone().unwrap_or_else(|| "a sequence child failed".into()));
-        error.snapshot = step.error_snapshot.clone();
-        root.child_error = Some(error);
+/// Emit a looping root's `--perf` report once, after its last pass.
+fn emit_perf(accumulator: Option<crate::perf::SequencePerfAccumulator>) {
+    if let Some(accumulator) = accumulator {
+        crate::perf::emit_report(&accumulator.into_report());
     }
-    if let Some(acc) = perf_accumulator.as_mut() {
-        acc.set_invocation_work(&prep_context.invocation.work_snapshot());
-    }
-
-    report::emit_sequence_summary(
-        &summary,
-        perf_accumulator,
-        &interrupted,
-        interrupt_observed,
-        silent,
-    )
 }
 
 #[cfg(test)]

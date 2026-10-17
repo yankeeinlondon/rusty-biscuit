@@ -171,8 +171,21 @@ pub struct SharedComposeArgs {
     pub repo: bool,
 
     /// Show the composed result without requiring or launching the provider executable.
+    ///
+    /// A sequence previews each loop body once and runs no lifecycle event,
+    /// `prep` target, `shell:` task, or `side_effect:` task: each task is
+    /// reported as `rendered (dry-run): would run …`. Composition's `$( … )`
+    /// expansions still run, so their side effects still happen.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// With `--dry-run`, run each `shell:` task once during the preview.
+    ///
+    /// This mutates: the commands run for real (a `git add` stages). It never
+    /// launches a provider, runs no `side_effect:` task, and turns no loop or
+    /// lifecycle event back on.
+    #[arg(long, requires = "dry_run")]
+    pub dry_run_shell: bool,
 
     /// Suppress env details and info messages, but still show the system prompt when set.
     #[arg(short = 'q', long)]
@@ -654,6 +667,7 @@ pub fn run_compose(
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let ComposeArgs { shared, args } = args;
+    let _prep = super::prep_target::install_for(&shared, verbose);
     prep::run_composition_inner(
         shared,
         args,
@@ -674,6 +688,7 @@ pub fn run_inline_compose(
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let InlineComposeArgs { shared, args } = args;
+    let _prep = super::prep_target::install_for(&shared, verbose);
     prep::run_composition_inner(
         shared,
         args,

@@ -273,6 +273,7 @@ fn group_variables_and_member_tasks_are_scanned_for_ctx_references() {
             variables,
             tasks: vec![member],
             origin_path: fixture.origin_path(),
+            loop_config: None,
         },
     );
 

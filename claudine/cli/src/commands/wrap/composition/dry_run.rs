@@ -160,6 +160,16 @@ pub(crate) fn render_hr(term: &Terminal) -> String {
         .render(term)
 }
 
+/// Render one `prep` target the document names, which a dry run lists but
+/// does not run.
+pub(crate) fn render_prep_target(target: &str, term: &Terminal) -> String {
+    Prose::new(format!(
+        "<b>prep</b> target <cyan>{}</cyan> (<i>not run in a dry run</i>)",
+        claudine::harness::report::prose_escape(target)
+    ))
+    .render(term)
+}
+
 /// Render the `Frontmatter (resolved):` heading.
 pub(crate) fn render_frontmatter_heading(term: &Terminal) -> String {
     Prose::new("<b>Frontmatter</b> (<i>resolved</i>):").render(term)

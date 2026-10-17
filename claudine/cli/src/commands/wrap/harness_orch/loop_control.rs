@@ -700,7 +700,7 @@ fn start_lifecycle_phase(
         ) {
             setup_error.msg.clone()
         } else {
-            "lifecycle start failed".to_string()
+            format!("lifecycle start failed: {}", setup_error.msg)
         };
         return Err(eyre!(message));
     }
@@ -710,6 +710,17 @@ fn start_lifecycle_phase(
                 unreachable!("the catch protocol consumes start error control")
             }
             StackControl::Stop => {}
+            StackControl::Break { .. } => {
+                return settle_break_before_launch(
+                    lifecycle_guard,
+                    materialized,
+                    &prompt_state.source_path,
+                    repo_root,
+                    term,
+                    effect_engine,
+                    loop_start,
+                );
+            }
             _ => {
                 // Provenance and the hop/cycle check use the shared invocation
                 // ledger on the compose path (so a hop back to an invocation
@@ -794,6 +805,52 @@ fn start_lifecycle_phase(
         }
     }
     Ok(None)
+}
+
+/// Settle a `break` fired before the provider launched (from `start`, or a
+/// handoff target's `initialize`): no further event fires but `finalize`,
+/// once, and the document publishes nothing. The loop the break ends reads it
+/// from its slot.
+///
+/// ## Errors
+///
+/// A failed `finalize`, which beats the pending break.
+#[allow(clippy::too_many_arguments)]
+fn settle_break_before_launch(
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    loop_start: std::time::Instant,
+) -> Result<Option<LoopStep>> {
+    lifecycle_guard.defuse();
+    let finalize = run_lifecycle_event(
+        lifecycle_guard,
+        LifecycleSignal::Finalize,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        effect_engine,
+        None,
+        loop_start,
+    );
+    if let Some(info) = finalize.evaluation_error.as_ref() {
+        return Err(crate::output::error_walker::emit_lifecycle_evaluation_error_block(
+            CompositionError::lifecycle_evaluation("finalize", source_path, info),
+            term,
+        )
+        .into());
+    }
+    if let Some(StackControl::Error { reason }) = finalize.control.as_ref() {
+        return Err(eyre!(
+            "{}",
+            reason.as_deref().unwrap_or("lifecycle finalize marked the run as failed")
+        ));
+    }
+    Ok(Some(LoopStep::Return((0, None, None, None))))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -913,6 +970,17 @@ fn run_initialize_stages(
         TargetInitializeAction::Proceed => {}
         TargetInitializeAction::ExitCleanly => {
             return Ok(Some(LoopStep::Return((0, None, None, None))));
+        }
+        TargetInitializeAction::Break => {
+            return settle_break_before_launch(
+                lifecycle.guard,
+                materialized,
+                &prompt.prompt_state.source_path,
+                prompt.repo_root,
+                lifecycle.term,
+                lifecycle.effect_engine,
+                lifecycle.loop_start,
+            );
         }
         TargetInitializeAction::Abort(error) => return Err(error),
         TargetInitializeAction::Reproxy(request) => {
@@ -2128,7 +2196,7 @@ fn classify_attempt_phase(
     // Every recovery decision below negotiates over the session this attempt
     // opened, so the capability that gates it has to be the one that opened it.
     let ExecutedHarnessAttempt {
-        materialized,
+        mut materialized,
         outcome,
         iteration_signals,
         provider,
@@ -2136,6 +2204,18 @@ fn classify_attempt_phase(
         native_exit,
         provider_tail,
     } = executed;
+    // A looping document's pass just finished: its terminal events and
+    // `finalize` read its result as `loop.last_output`, as the gate after
+    // them does, while its body and `start` read the previous pass's. A
+    // document inside a looping container keeps the container's values.
+    if materialized.frontmatter.get("loop").is_some()
+        && let Some(values) = materialized.loop_values.as_mut()
+    {
+        values.last_output = serde_json::Value::String(
+            claudine::composition::trim_transport_newline(&outcome.final_response).to_string(),
+        );
+        values.last_exit_code = outcome.exit_code;
+    }
     if outcome.termination == claudine::harness::ProcessTermination::Interrupted
         || claudine::composition::lifecycle::cancellation::requested()
     {

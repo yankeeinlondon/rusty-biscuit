@@ -28,6 +28,7 @@ fn shared_args() -> SharedComposeArgs {
         sandbox: false,
         repo: false,
         dry_run: false,
+        dry_run_shell: false,
         quiet: false,
         silent: true,
         set: None,
