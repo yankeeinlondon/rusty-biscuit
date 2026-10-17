@@ -403,7 +403,12 @@ fn lifecycle_inventory_matches_the_authored_claudine_schema() {
     assert_eq!(authored_structural, structural);
 
     let loop_keys = keys_of(&object(&lifecycle, "loop"));
-    let mut loop_grammar: BTreeSet<String> = LOOP_ITERATION_KEYS.iter().map(|key| key.to_string()).collect();
+    // `fail_fast` is removed grammar: the parser still owns it so it can reject
+    // it, so the schema must not offer it.
+    let removed = "fail_fast";
+    assert!(LOOP_ITERATION_KEYS.contains(&removed) && !loop_keys.contains(removed), "{loop_keys:?}");
+    let mut loop_grammar: BTreeSet<String> =
+        LOOP_ITERATION_KEYS.iter().filter(|key| **key != removed).map(|key| key.to_string()).collect();
     loop_grammar.extend(["gate".to_string(), "no_error".to_string()]);
     // `max` is both an iteration key and an expression-function verb name, so
     // the grammar is checked in both directions rather than as a difference.

@@ -1582,5 +1582,9 @@ fn schema_validate_shipped_claudine_schema_rejects_values_inside_a_reused_loop_e
     let paths: Vec<&str> = found.iter().map(|(path, _)| path.as_str()).collect();
     assert_eq!(paths, ["/loop/action/op", "/loop/max"], "{report}");
     assert!(found[0].1.contains("\"explode\" is not one of"), "{report}");
-    assert_eq!(found[1].1, "0 is less than the minimum of 1", "{report}");
+    // `max` is a union (a count, or a `{{ cap }}` template resolved before the
+    // loop starts), so a rejected count is reported against the union, and the
+    // problem's description names both arms.
+    assert_eq!(found[1].1, "0 is not valid under any of the schemas listed in the 'anyOf' keyword", "{report}");
+    assert!(report.to_string().contains("the most iterations to run | a cap such as {{ cap }}"), "{report}");
 }
