@@ -82,3 +82,23 @@ local `local-features` remain separate metadata contracts.
 
 Run `just check-test-interrupts` to verify that every package-area `test`
 recipe also preserves Ctrl+C as exit `130`.
+
+## When work is split across agents
+
+The steps above are the **coordinator's** final gates, run once per phase after
+every agent's work is merged and while no agent is still running. An agent
+working on one slice of the phase runs only the tests for what it changed: its
+new or edited test files and the tests of the modules it touched, selected with
+a nextest filter or the area recipe's positional filter. It does not run the
+area's full `just test`.
+
+This is a measured failure, not a style preference. On 2026-10-16 three
+parallel agents each ran claudine's full `just test` (about 10,000 tests) on one
+macOS host, and its load average rose to about 200. One run reported 2 failures
+and 179 timeouts. All 181 passed in 24 s when rerun alone at a load average
+of 5. Each spurious failure had already triggered another full rerun, which
+added more load. The phase took over three hours instead of 30–40 minutes.
+
+When a test fails during agent work, rerun that test alone before anything
+wider. A test that passes alone is load-sensitive, and that is recorded, not
+answered with another suite run.

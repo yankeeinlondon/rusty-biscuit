@@ -60,6 +60,10 @@ the wrong thing.
 10. **Scope final gates by blast radius**, never by a workspace-wide run, and
     do not add `--no-fail-fast`: CI already passes it.
     → [verification-scope.md](verification-scope.md), [recipes.md](recipes.md)
+    When work is split across agents, each runs only its slice's tests; the
+    area's full `just test` runs once, by the coordinator, after merging.
+    Concurrent full suites overload the host, and its timeouts then look like
+    regressions. → [verification-scope.md](verification-scope.md#when-work-is-split-across-agents)
 11. **An L1 test over 5 s is a failing test.** It passes on a development host
     and times out on a 2-core CI runner. Make it fast; a `slow_` prefix or a
     nextest `slow-timeout` override is not a fix. → [test-speed.md](test-speed.md)
