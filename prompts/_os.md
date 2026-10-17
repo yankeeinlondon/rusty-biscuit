@@ -1,11 +1,41 @@
+---
+# The OS most unlike this host, when a build host for it is declared
+# (`BUILD_WIN`/`BUILD_LINUX`); `ctx.os` alone cannot tell WSL from Linux
+cross_os_target: |-
+    {{
+        env.WSL_DISTRO_NAME
+            ? (env.BUILD_WIN ? 'windows' : null)
+            : ctx.os == 'Windows'
+                ? (env.BUILD_LINUX ? 'linux' : null)
+                : (ctx.os == 'Linux' || ctx.os == 'macOS') && env.BUILD_WIN
+                    ? 'windows'
+                    : null
+    }}
+# Where a cross-OS failure is recorded: the including prompt's spec, else its
+# review, else its plan
+os_failing_file: "{{ spec || review || plan || null }}"
+---
 # OS Testing
 
-You are currently operating on a host that runs "{{ ctx.os }}" and so most of your testing should be on this local host until you are close to being done (aka, all tests pass on the local host and consideration has been given to the other OS's we need to support). 
+All functionality must work across Windows, macOS, Linux, and WSL2/Ubuntu. Keep this in mind while implementing, but be aware that the CI/CD pipeline WILL test cross-OS functionality, so it is NOT a strict requirement that you do so as part of your work. Your current host runs **{{ ctx.os }}**, so do most of your testing here. Where your work carries OS-level risk (for example, a lot of work around file paths, or an OS-specific crate), use the 'os' agent skill to learn about OS variance before you change that code.
 
-Note that we don't _always_ need to test on other OSes because CI/CD will incorporate this for us but where we feel there are OS level risks you should do two things:
+::block when="cross_os_target"
+## Cross-OS Check
 
-1. use the 'os' agent skill to gather more information about OS variance
-2. leverage the available local OS platforms to do your testing; these environments will be MUCH faster than CI/CD and allow us to lower our OS risk prior to pushing to the remote
+If (and only if) the work you've done has notable cross-OS risks, run a cross-OS test at the end of your implementation cycle to make sure you haven't accidentally broken anything on another OS:
+
+- test **{{ cross_os_target }}** by running `just cross-check <package> --os {{ cross_os_target }}` for each package you touched directly
+
+If you hit any failing tests (regardless of whether you believe they came from your changes) you need to attempt to fix them on **{{ cross_os_target }}**. Make at most three attempts. If **{{ cross_os_target }}** is still failing after the third attempt:
+
+::block when="os_failing_file"
+- set the `os_failing` frontmatter property of {{ os_failing_file }} to `{{ cross_os_target }}`
+::end-block
+::block when="!os_failing_file"
+- there is no spec, review, or plan for this task, so report that **{{ cross_os_target }}** is failing in your final summary
+::end-block
+- you may NOT finish this phase of the work with any failing tests on **{{ ctx.os }}**, but it is OK to continue to the next phase while **{{ cross_os_target }}** is still failing after your third fix attempt. Sometimes a bug can only be fixed properly by running directly on the failing OS; this will be flagged later in the process so that it gets done (this is not your concern directly)
+::end-block
 
 ## Local OS Testing Rigs
 
@@ -25,7 +55,7 @@ The following local testing rigs are available to you:
 - macOS testing can be done on: **{{env.BUILD_MACOS}}**
 ::end-block
 
-Each of these test rigs allow for SSH access but to make your life easier and to make sure we act as "good citizens" on these test rigs you should instead use the `just cross-check` recipe that will already know which hosts per OS are available and how to interact with them:
+These environments are MUCH faster than CI/CD. Each of these test rigs allows SSH access, but to make your life easier, and to make sure we act as "good citizens" on these test rigs, use the `just cross-check` recipe instead; it already knows which hosts per OS are available and how to interact with them:
 
 ```sh
 just cross-check <package> --os [linux, windows, wsl, macos, all]
