@@ -14,5 +14,10 @@ Agent Skills are an invaluable way to give agent's knowledge on a specific topic
 4. **Separate General Knowledge from Repo Specific Knowledge**
 5. **No Host specific IP or DNS Addresses**
 
-    - any IP Address found in a skill that is in the RFC1812 (e.g., 10.0.0.0/16, 192.168.0.0/24, 172.0.0.0/16) set of IP addresses is almost surely a mistake!
-    - any DNS name that ends in `.home`, `.local`, `.
+    - High probability mistakes:
+        - any fully qualified IP Address found in a skill that is in the RFC1812 (e.g., 10.0.0.0/16, 192.168.0.0/24, 172.0.0.0/16) set of IP addresses is almost surely a mistake!
+        - any fully qualified DNS name that ends in `.home`, `.local`, `.private`, `.lan`, `.test` `.corp` is almost certainly too specific to include in an agent skill. There might be a VERY rare exception but be sure there is a legitimate reason for these to be here.
+        - Note: it's fine for agent skills to reference a netmask like `10.x.y.z/mm` in many cases but not all but sure that these references apply to ALL HOSTS that might use this netmask. Private repos are more likely to allow fo this than public repos.
+    - The general rule:
+        - describe patterns that apply to ALL possible hosts who might interact with this repo
+        - if this is a private repo there can be more cases where _more_ specific references make sense but for public repos you should almost abstract specific IP's or DNS names with an agreed upon ENV variable to act as the abstraction layer
