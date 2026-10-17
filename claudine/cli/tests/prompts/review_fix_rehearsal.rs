@@ -192,8 +192,13 @@ impl Rehearsal {
             &serde_json::to_string(&self.scenario).expect("serialize scenario"),
         );
         let spec = self.scenario.spec.strip_prefix(self.fixture.cwd()).expect("spec inside the repository");
+        // `just` places itself in the repository, so the recipe and its nested
+        // `just _link` calls run there.
+        let repo = portable(self.fixture.cwd());
         let mut command = Command::new(&self.just);
-        command.current_dir(self.fixture.cwd()).args(["fix", &portable(spec), "--use-defaults"]);
+        command
+            .args(["--justfile", &format!("{repo}/justfile"), "--working-directory", &repo])
+            .args(["fix", &portable(spec), "--use-defaults"]);
         // `claudine` is a grandchild here (just → bash → claudine), so the
         // fixture's environment policy is applied to the outermost process.
         self.fixture.command_builder().apply_policy_to(&mut command);
