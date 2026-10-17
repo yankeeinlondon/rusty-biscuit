@@ -40,13 +40,24 @@ packages:
     - claudine
 human_review: false
 message_to_agent: |-
-    Phase 1 is complete. Facts later phases depend on:
-    - Test seams live in DMLS: `dmls::work_counters::{work_counts, WorkCounts::since}` (reads, content hashes, Markdown document parses; every production DMLS file read/hash goes through `work_counters::read`/`read_to_string`/`hash_bytes`, and `index_document_timed` calls `record_parse`). Route the Phase 3 registry's reads and hashes through these helpers so the no-I/O test can assert a zero delta. In-memory cache-key hashes (e.g. `xx_hash_bytes(format!("{registry:?}"))` in `overlay/mod.rs`) are intentionally not counted.
-    - `dmls::clock::{Clock, SystemClock, ManualClock}` for R9 timing.
-    - `dmls::log_capture::CapturedLogs`: `scoped(|| ..)` captures only the calling thread; use `CapturedLogs::global()` (once per process; nextest is process-per-test) when events come from dispatch or worker threads. `tracing_test::traced_test` cannot see `dmls` events from the `l1` integration binary.
-    - The R1 claim rule only accepts a plain `kind` key at column 0. A quoted key (`"kind": trigger-schema`) or any JSON-style flow mapping that fails to parse is unclaimed, per the spec. Claudine's robustness matrix writes quoted keys, so its duplicate/trailing trigger cells now expect "unclassified" (`unclaimed_trigger` in `claudine/lib/tests/l1/claudine_schemas_matrix.rs`).
-    - `SchemaError::TriggerEnvelopeYaml { message, line, column }`: column counts characters of the source with a leading BOM removed. DMLS converts it in `diagnostics/frontmatter.rs::trigger_yaml_span`.
-    - Docs (definition.md claim rule and R2 error) were left for Phase 6 as planned.
+    Phase 2 (R9 slow-request logging) is complete. Facts later phases depend on:
+    - `dmls::request_timing`: the router puts a fresh `RequestTimings` on `ServerState.timings` at every dequeue and emits one `CompletionEvent` per request or notification. Time new work with `self.timings.time(Stage::…, || …)`. When a request blocks on the file list (Phase 4) or the full index (Phase 5), call `timings.record_wait(Wait::FileList | Wait::FullIndex)`; nothing sets those flags yet. Phase 3's registry lookup is already timed as `Stage::TriggerRegistry` around each `OverlayCache::trigger_registry` call in `overlay/mod.rs`. Keep that wrapper when you replace the scan.
+    - Dispatch paths must call `OverlayState::for_document_timed(…, &self.timings)`. `for_document` (the untimed form) is for tests and other non-dispatch callers.
+    - Dispatch-level log tests: see `dmls/src/router/logging_tests.rs`. It runs `run_server` over `Connection::memory()` under `tracing::dispatcher::with_default(&logs.dispatch(), …)`, with a stepping clock through `RunOptions::with_clock`. Reuse that `Session` helper for the R4/R8 log tests. Note that `initialized` is consumed by the `lsp_server` handshake and never reaches dispatch, and that the startup index thread is not captured by `with_default`. For log lines emitted on the startup or worker threads (the R8 lines), use `CapturedLogs::global()` or pass the dispatch into the spawned thread.
+    - At `--log-level debug`, `lsp_server`'s own transport trace prints full payloads. This was already true, and the filter was left unchanged. A no-payload test must scope to `dmls*` and `darkmatter*` records (`own_records` in `tests/l1/stdio_subprocess.rs`).
+source_files_during_phase_2:
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/clock.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Implementation Log for 2026-10-17-logging-improvements (6 phases)
@@ -182,3 +193,116 @@ R1 rule itself, not a parse failure silently read as absent.
   `-E 'binary(/research/) | test(/research/)'` gives 15 passed.
 - Cross-OS check not run: the change has no path or OS-specific logic, and
   CRLF/BOM handling is covered in-process.
+
+## Phase 2
+
+### What changed
+
+- **New module `dmls/src/request_timing.rs`.**
+  - `SLOW_THRESHOLD` (500 ms, a constant).
+  - `RequestTimings` records the elapsed time of each `Stage` (`OverlayBuild`,
+    `SchemaAssembly`, `TriggerRegistry`, `ProviderChain`) and the
+    `Wait::{FileList, FullIndex}` flags. It reads an injected `Clock`.
+  - `CompletionEvent::emit` writes the one completion event:
+    `slow request` / `request complete`, or `slow notification` /
+    `notification complete`.
+  - Event fields: `method`, `uri` (omitted when the message names no
+    document), `id` (requests only), `outcome` (`ok` / `error` / `panic` /
+    `cancelled`), `cancelled=true` (cancelled only), `elapsed_ms`,
+    `<stage>_ms` (omitted for a stage that did not run),
+    `waited_for_file_list`, and `waited_for_full_index`.
+  - The module docs record the nesting: overlay build ⊇ schema assembly ⊇
+    trigger registry; the provider chain is a sibling. A stage that runs more
+    than once in a message reports the sum of its runs.
+- **Router (`dmls/src/router.rs`).**
+  - `run()` starts a fresh `RequestTimings` on `ServerState` at every request
+    or notification dequeue. `shutdown` and `exit` are not timed: the loop
+    returns on them.
+  - `handle_request` emits the completion event after the response is sent,
+    for every path: a cancel from the ledger, an `Ok` response (an error
+    response is `outcome="error"`, and a `RequestCanceled` code is
+    `cancelled`), or a caught panic.
+  - `handle_notification` emits after its handler returns, or after a panic
+    is caught.
+  - `with_document` times the overlay build and the provider call (`f`).
+    `workspace/symbol`, `prepareRename`, `rename`, and `willRenameFiles`
+    time their provider calls directly.
+  - A `#[cfg(test)]` method, `logging_tests::PANIC_METHOD`, panics so the
+    panic boundary can be tested.
+- **Overlay.** `OverlayState::for_document_timed` takes the record.
+  `for_document` keeps its signature and passes an `untimed()` record, so
+  about 50 test call sites are unchanged. `schema_for` and
+  `standalone_named_types` are timed as schema assembly, and each
+  `trigger_registry` call is timed as the trigger registry.
+- **Clock injection.** `RunOptions` gains `clock: Arc<dyn Clock>` (default
+  `SystemClock`) and `with_clock`. `Clock` gains a `Debug` supertrait so
+  `RunOptions` keeps `#[derive(Debug)]`. `main.rs` builds its options with
+  `..RunOptions::new(snapshot)`.
+- **Design note (ruling 2).** The record is a per-message value that lives on
+  `ServerState` and is replaced at each dequeue. It is passed explicitly into
+  the overlay build (`for_document_timed`), not through a global span. Keeping
+  it on `ServerState` avoids adding a parameter to every handler and to
+  `refresh_all_diagnostics`, which notification handlers reach through
+  `reload_config` and `rescan_workspace`.
+- **No waits yet.** Nothing in DMLS waits for the file list or full index
+  until Phases 4 and 5, so both flags are always `false` today. Those phases
+  must call `timings.record_wait(Wait::FileList | Wait::FullIndex)` where the
+  request blocks.
+
+### Finding: `lsp_server` debug trace logs full payloads (pre-existing)
+
+At `--log-level debug`, the `lsp_server` crate's own transport trace
+(`lsp_server::msg`, `lsp_server::stdio`, through the `log` bridge) prints
+every protocol message in full, including `didOpen` text. This behavior was
+already there; it is not DMLS's code. The spec says log filtering stays
+unchanged, so I did not filter it. DMLS's and Darkmatter's own records
+contain no source text, which the subprocess test asserts by scoping to
+`dmls*`/`darkmatter*` records. If this should change (for example, a default
+`lsp_server=info` directive), that is a separate decision.
+
+### Requirement-to-test mapping (R9)
+
+| Requirement | Test |
+| --- | --- |
+| below 500 ms → one `debug` `request complete` | `dmls request_timing::tests::below_the_threshold_is_one_debug_request_complete` (499 ms, `ManualClock`) |
+| exactly 500 ms → `warn` `slow request` | `…::exactly_at_the_threshold_is_one_warn_slow_request` |
+| above → `warn` with method/uri/id/outcome/elapsed/wait flags; absent stages omitted | `…::above_the_threshold_is_one_warn_slow_request_with_every_field` |
+| URI-less requests omit `uri` | `…::a_request_without_a_document_omits_uri`; dispatch: `router::logging_tests::a_workspace_symbol_request_omits_uri_and_overlay_stages` |
+| stage figures nested, not summed; wait flag | `…::stages_are_reported_separately_and_nested_not_summed` |
+| repeated stage sums | `…::a_stage_that_runs_twice_reports_its_sum` |
+| cancelled → elapsed + `cancelled=true` | `…::a_cancelled_request_logs_elapsed_and_cancelled_true`; dispatch: `router::logging_tests::a_cancelled_request_emits_one_cancelled_completion` |
+| notifications: own text, no id, both levels | `…::notifications_use_their_own_text_and_carry_no_request_id`; dispatch: `router::logging_tests::notifications_log_their_own_completion_without_response_timing` |
+| wiring: fast hover → one debug event with all four stages | `router::logging_tests::a_fast_hover_logs_one_debug_request_complete_with_its_stages` |
+| wiring: slow hover → one warn event, every stage moved | `router::logging_tests::a_slow_hover_logs_one_warn_slow_request` |
+| provider error (MethodNotFound, InvalidParams) → one `error` event | `router::logging_tests::error_responses_emit_one_error_completion` |
+| caught panic → one `panic` event, dispatch continues | `router::logging_tests::a_caught_panic_emits_one_panic_completion_and_dispatch_continues` |
+| no source text or frontmatter values (every level, in-process) | `router::logging_tests::no_source_text_or_frontmatter_value_is_logged` |
+| logs never on stdout; strict framing; stderr routing | `dmls l1 stdio_subprocess::request_logs_go_to_stderr_and_never_into_the_stdout_protocol_stream` |
+| `--log-file` routing unchanged | `dmls l1 stdio_subprocess::a_log_file_receives_request_logs_instead_of_stderr` |
+| `textDocument.uri` extraction | `request_timing::tests::document_uri_reads_only_the_text_document_uri` |
+
+Dispatch-level tests run `run_server` over `Connection::memory()` with a
+clock that moves a fixed step on every read. The server thread runs under
+`tracing::dispatcher::with_default`, so no global subscriber is needed.
+`initialized` never reaches dispatch, because `lsp_server`'s handshake
+consumes it, so the no-URI notification case uses `$/cancelRequest`.
+
+The input robustness matrix does not apply: this phase reads no file
+format or configuration.
+
+### Gates and downstream tests
+
+- Targeted: `cargo nextest run -p dmls -E 'test(/request_timing|logging_tests/)'`
+  gives 17 passed; `-E 'test(/stdio_subprocess/)'` gives 6 passed.
+- `just lint` (darkmatter): clean.
+- `just test` (darkmatter): 10172 passed, 10 skipped, 0 failed (33 s).
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Downstream: no package outside `darkmatter/` depends on `dmls`. The
+  changed public items (`RunOptions.clock`, the `Clock: Debug` supertrait,
+  `OverlayState::for_document_timed`, the `request_timing` module) are used
+  only inside the area, which `just test` covers.
+- Cross-OS check not run: the change has no path or OS-specific logic. The
+  subprocess tests build URIs with `url::Url::from_{file,directory}_path`
+  and read both streams to EOF.
+- `claudine/cli/tests/l1/tts_prewarm.rs` was already modified in the working
+  tree before this phase started. It is not part of this phase.

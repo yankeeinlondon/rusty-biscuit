@@ -39,6 +39,19 @@ packages:
     - darkmatter-cli
     - dmls
     - claudine
+source_files_during_phase_2:
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/clock.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Plan: DMLS Startup Schema Registry and Logging
@@ -221,7 +234,7 @@ Runs before Phase 3 so the stage timings can be wired as the registry lands.
 
 ### Wave 3 (parallel)
 
-- [ ] **Dispatch timing.** In `dmls/src/router.rs`, measure each request from
+- [x] **Dispatch timing.** In `dmls/src/router.rs`, measure each request from
   dequeue to response send with the injected clock.
   - Emit exactly one completion event per terminal path: success, provider
     error, caught panic, cancellation (`cancelled=true`).
@@ -231,25 +244,25 @@ Runs before Phase 3 so the stage timings can be wired as the registry lands.
   - Requests with no document omit `uri`.
   - Notifications get `slow notification` / `notification complete`, measured
     through handler completion only.
-- [ ] **Stage timings.** Add `RequestTimings` (ruling 2) covering overlay
+- [x] **Stage timings.** Add `RequestTimings` (ruling 2) covering overlay
   build, schema assembly, trigger registry, and the provider chain, plus
   flags for "waited for file list" and "waited for full index".
   - Stages are absent when not run.
   - Document nesting; do not sum.
-- [ ] **No payload logging.** Add a test that no source text, frontmatter
+- [x] **No payload logging.** Add a test that no source text, frontmatter
   values, or payloads appear in captured output.
 
 ### Wave 4 (after Wave 3)
 
-- [ ] **R9 tests.** Using the injected clock, cover below, exactly at, and
+- [x] **R9 tests.** Using the injected clock, cover below, exactly at, and
   above 500 ms; one event on error and on cancellation; notifications have no
   response timing; URI-less requests omit `uri`.
-- [ ] **Stdout safety.** Assert logs never enter the stdout protocol stream,
+- [x] **Stdout safety.** Assert logs never enter the stdout protocol stream,
   and `--log-file` routing is unchanged.
 
 ### Validation checkpoint 2
 
-- [ ] `just test` and `just lint` pass; one completion event per request is
+- [x] `just test` and `just lint` pass; one completion event per request is
   asserted by test.
 
 ## Phase 3: Schema Registry (R3, R4)
