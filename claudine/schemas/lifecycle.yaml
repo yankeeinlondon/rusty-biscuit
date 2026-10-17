@@ -168,8 +168,8 @@ types:
         break:
             - null
             - "unknown[](max(0))"
-            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); running it fails until loop control is built"
-        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; running it fails until the target runner is built"
+            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
         shell: "shell -> run a shell command (never in initialize)"
         set: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
         append_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
@@ -407,8 +407,8 @@ types:
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command timeout"
-        when: "string(not-empty) -> the task's guard, a condition expression (planned: validated now, refused at run time until guards are evaluated)"
-        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it (planned: refused at run time until container loops run)"
+        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
+        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it"
         "<string>": "unknown -> authored step state; the task parser rejects reserved keys"
         initialize: loose-body
         start: loose-body
@@ -426,7 +426,7 @@ types:
         flow: "string -> default flow for prompt legs"
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
-        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it (planned: refused at run time until container loops run)"
+        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it"
         initialize: loose-body
         start: loose-body
         blocked: loose-body
@@ -455,8 +455,8 @@ types:
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command timeout"
-        when: "string(not-empty) -> the task's guard, a condition expression (planned: validated now, refused at run time until guards are evaluated)"
-        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it (planned: refused at run time until container loops run)"
+        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
+        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it"
         "<string>": "unknown -> authored step state; the task parser rejects reserved keys"
         initialize: loose-body
         start: loose-body
@@ -474,7 +474,7 @@ types:
         flow: "string -> default flow for prompt legs"
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
-        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it (planned: refused at run time until container loops run)"
+        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it"
         initialize: loose-body
         start: loose-body
         blocked: loose-body

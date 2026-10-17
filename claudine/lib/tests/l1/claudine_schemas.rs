@@ -413,9 +413,9 @@ fn hand_verbs_equal_the_parser_inventory() {
         }
     }
 
-    // A verb the parser accepts but the runtime refuses says so where an
-    // author sees it: `defer` is planned, and `break` and `prep` fail when
-    // they run (`LifecycleDirectiveNotYetSupported`).
+    // `defer` is the one verb the parser accepts and the runtime refuses, and
+    // its description says so where an author sees it; `break` and `prep`
+    // run, and their descriptions say what happens when they cannot.
     let descriptions_of = |verb: &str| {
         let mut descriptions = Vec::new();
         collect_descriptions(&types["flow"]["properties"][verb], &mut descriptions);
@@ -423,12 +423,12 @@ fn hand_verbs_equal_the_parser_inventory() {
     };
     let defer = descriptions_of("defer");
     assert!(defer.iter().any(|description| description.contains("planned")), "`defer` is described as planned: {defer:?}");
-    for verb in ["break", "prep"] {
+    for (verb, says) in [("break", "a break outside every loop fails its event"), ("prep", "a target that fails fails this event")] {
         let descriptions = descriptions_of(verb);
         assert!(
-            descriptions.iter().any(|description| description.contains("running it fails"))
-                && !descriptions.iter().any(|description| description.contains("planned") || description.contains("not yet accepted")),
-            "`{verb}` is described as accepted and refused at run time: {descriptions:?}"
+            descriptions.iter().any(|description| description.contains(says))
+                && !descriptions.iter().any(|description| description.contains("planned") || description.contains("running it fails")),
+            "`{verb}` is described as running: {descriptions:?}"
         );
     }
 }

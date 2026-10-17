@@ -83,7 +83,7 @@ $schema:
     sequence:
         - "step[]@./lifecycle.yaml -> the sequence's tasks; deeper container grammar is parser-validated"
         - "string -> a file reference to the sequence's tasks"
-    loop: "loop@./lifecycle.yaml -> run the prompt repeatedly; beside `sequence:`, the sequence's loop (planned: refused at run time)"
+    loop: "loop@./lifecycle.yaml -> run the prompt repeatedly; beside `sequence:`, the sequence's loop"
     argv: "string[] -> arguments passed through to the agent"
     title: "string -> the document's title"
     description: "string -> the document's summary, shown by dry runs"
