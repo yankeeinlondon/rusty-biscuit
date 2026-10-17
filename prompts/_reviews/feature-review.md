@@ -193,7 +193,7 @@ earlier reviews. Observations are not findings and are not carried.
 
 ## Task
 
-::block when="iterations == 1"
+::block when="iteration == 1"
 ### Choose Course of Action
 
 You are in the first review cycle after the implementation. During the implementation the agent was told to avoid human-in-the-loop review cycles
