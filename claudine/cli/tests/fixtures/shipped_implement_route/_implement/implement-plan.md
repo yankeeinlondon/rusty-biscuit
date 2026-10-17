@@ -165,7 +165,6 @@ persistence boundaries
 When changing parsers, schemas, templates, prompts, or configuration-driven
 behavior:
 
-- add a passive corpus test covering all shipped artifacts
 - add at least one end-to-end test using the real shipped artifact and normal
 invocation path
 - include a repeated read/write/read round trip when values are persisted
