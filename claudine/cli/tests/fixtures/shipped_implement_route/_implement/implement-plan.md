@@ -11,7 +11,6 @@ $schema:
     pass_icon: string
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
-    in_loop: boolean -> set by the `review-loop` sequence; when true this step opts out once the spec is marked `implemented`
 yolo: true
 commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
@@ -35,12 +34,6 @@ spec: |-
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
-    # Inside the review-loop sequence the step list is static; a plan whose
-    # spec is already implemented opts out here and launches nothing.
-    - when: "in_loop && spec && frontmatter(spec, 'implemented') == true"
-      then:
-          - message: "implementation skipped: `{{parent_dir(spec)}}` is already marked implemented"
-          - skip
     - ensure_file: "{{log}}"
     - when: "!total_phases || total_phases <= 0"
       then:
