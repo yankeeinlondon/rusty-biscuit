@@ -1,380 +1,303 @@
 # macOS
 
-macOS is the primary development host, so most of what is non-obvious here is
-about what the host can do for the *other* operating systems and about host
-conditions that masquerade as repository defects.
+Part of the `os` skill; [SKILL.md](SKILL.md) is the index.
+
+macOS is the primary development host. Most traps here are about what it can
+do for the *other* operating systems, and about host conditions that look like
+repository defects.
 
 ## Paths
 
-- APFS on the primary macOS host rejects `U+FDD1` in a filename with
-  "Illegal byte sequence". Git metadata can still record a missing path
-  containing it. Exercise such renderer inputs through a real Git record's
-  `gitdir` text or the public rendering API rather than creating that filename.
-  The rejection is broader than that codepoint: any filename whose bytes are
-  not valid UTF-8 fails at the syscall level with `EILSEQ` ("Illegal byte
-  sequence"), so a fixture cannot create a genuinely non-UTF-8 path on the
-  worktree here (Linux can). To test that a code path preserves non-UTF-8 Git
-  paths byte-exactly on macOS, build the path through the index and commit
-  trees (e.g. `git2::Index::add_frombuffer` with raw path bytes) and compare
-  committed-tree output, never a worktree file; sniff's
-  `filesystem::git::changed_paths_tests` does exactly this split.
-- `/var` and `/tmp` are symlinks into `/private`. A test that compares a
-  `tempfile` path with what a child process reports must canonicalize on
-  Unix (the `launched_spelling` helper does) or the two spellings differ.
-  This is the macOS half of the same trap Windows has with short names
-  ([windows-paths.md](windows-paths.md)).
-- The same split reaches production code: a launch directory from
-  `current_dir()` is physical (`/private/var/…`) while `$HOME` keeps its
-  authored spelling (`/var/…`), so a lexical `launch == home` or
-  "is this local path the user one?" check silently misses when `$HOME` has a
-  symlinked component. An in-process unit test that builds both from one
-  `TempDir` spelling cannot see it; an L1 subprocess launched from the
-  fixture `$HOME` does. Compare by identity (`fs::canonicalize`) where two
-  such spellings meet — Claudine's `with_prompt_magic_roots` does
-  (`2026-09-23-local-before-home`).
-- macOS periodically sweeps files under `/tmp` that have not been accessed
-  for a few days while leaving populated directories in place. A git worktree
-  created there (the `rb-*-baseline` and `rb-*-review` checkouts) loses its
-  small `.git` pointer file first, which `git worktree list` then reports as
-  `prunable`. Do not treat that state as corruption; `git worktree prune`
-  clears the registration, and long-lived worktrees belong under
-  `~/.claudine/worktrees`, not `/tmp`.
-- Case-insensitive APFS folds names by a Unicode rule, not by lowercasing: `ς` opens a stored
-  `Σ` and `ß` opens a stored `SS`, though their `to_lowercase()` strings
-  differ. Decide whether a spelling is the stored one by an exact
-  `read_dir` entry, never by comparing folded strings. When the parent can
-  be traversed but not listed (mode `0111`), `fs::canonicalize` still
-  reports the stored final name (`locked/anchor/DOCS` canonicalizes to
-  `…/docs`), unless that name is a symlink. biscuit-file's absolute-glob
-  spelling check relies on both facts (verified 2026-10-02).
-- macOS temporary directories can live on a case-sensitive filesystem. Do
-  not assert that a differently cased ASCII or Unicode name opens merely
-  because `cfg!(target_os = "macos")` is true. Probe the fixture directory's
-  behavior and keep the ordinary exact-name and mismatch assertions on both
-  filesystem types. Reproduced 2026-10-02 with a temporary HFSX image:
-  `hdiutil create -size 40m -fs HFSX -volname glob-review-case -type UDIF /tmp/glob-review-case.dmg`,
-  attach with `hdiutil attach -nobrowse -mountpoint /tmp/glob-review-case-mount /tmp/glob-review-case.dmg`,
-  then set `TMPDIR=/tmp/glob-review-case-mount` on the area's `just test`
-  command. Detach the image and remove it afterward. These commands need no
-  administrator prompt or foreground window.
-- `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
-  be green on macOS and read the real home directory on Windows. The shared
-  `biscuit_file::home_dir()` follows `USERPROFILE` on Windows instead, so a
-  fixture setting both variables lands in the same place on every OS.
-- A Unix socket path holds at most 104 bytes (`sun_path`), and the per-user
-  `$TMPDIR` (`/private/var/folders/xx/…/T/`) spends about half of that. A
-  test that starts a socket-binding daemon under a `tempfile` directory can
-  fail with "path must be shorter than SUN_LEN" — `kache daemon run` does,
-  binding `daemon.control.v2.sock` inside its store. Root such a fixture
-  under `/tmp` when `$TMPDIR` is long, as `real_kache_worktree_restore`
-  (`tools/test-toolkit`) does; `/tmp` is on the same APFS volume.
-- `getcwd` (Rust `std::env::current_dir()`) in a process whose current
-  directory was deleted fails with `ENOENT` here, but only after about two
-  seconds. A unit test that proves an
-  unreadable-cwd branch therefore costs ~2 s per lookup on macOS, as
-  sniff-cli's `relative_base_with_unreadable_cwd_fails` does (measured
-  2026-10-06). Keep such a test to one lookup.
+- **APFS rejects non-UTF-8 filenames** (`EILSEQ`, "Illegal byte sequence",
+  error 92), and also some valid ones such as `U+FDD1`. A fixture cannot create
+  such a path in the worktree (Linux can). Git can still record one: build it
+  through the index and commit trees (`git2::Index::add_frombuffer` with raw
+  bytes) and compare committed-tree output, as sniff's
+  `filesystem::git::changed_paths_tests` does. Or build a catalog of
+  nonexistent paths under a canonicalized temporary root, or gate the test to
+  an OS whose filesystem allows such names.
+- **`/var` and `/tmp` are symlinks into `/private`.** A `tempfile` path and the
+  path a child process reports have different spellings. Canonicalize before
+  you compare (see `launched_spelling` in
+  `claudine/cli/tests/l1/ctx_launch_anchor.rs`). This is the macOS form of the
+  Windows short-name trap ([windows-paths.md](windows-paths.md)).
+- **The same split happens in production.** `current_dir()` is physical
+  (`/private/var/…`), while `$HOME` keeps the spelling it was set with
+  (`/var/…`). A lexical `launch == home` check silently misses. An in-process
+  test that builds both paths from one `TempDir` spelling cannot see this; an
+  L1 subprocess launched from the fixture `$HOME` can. Compare with
+  `fs::canonicalize` where two such spellings meet, as Claudine's
+  `with_prompt_magic_roots` does.
+- **macOS sweeps old files under `/tmp` but leaves populated directories.** A
+  git worktree there loses its small `.git` pointer file first, and
+  `git worktree list` then shows it as `prunable`. That is not corruption: run
+  `git worktree prune`. Keep long-lived worktrees under `~/.claudine/worktrees`.
+- **Case-insensitive APFS folds by a Unicode rule, not by `to_lowercase()`.**
+  `ς` opens a stored `Σ`, and `ß` opens a stored `SS`. To tell whether a
+  spelling is the stored one, compare against an exact `read_dir` entry, never
+  against folded strings. If the parent can be traversed but not listed (mode
+  `0111`), `fs::canonicalize` still reports the stored final name, unless that
+  name is a symlink. biscuit-file's absolute-glob spelling check relies on both
+  facts.
+- **Temporary directories can be case-sensitive.** `cfg!(target_os = "macos")`
+  does not mean a name with different casing will open. Probe the fixture
+  directory's behavior, and keep the exact-name and mismatch assertions for
+  both filesystem types. To reproduce without admin rights or a window, create
+  and attach an HFSX image, then point `TMPDIR` at it:
+
+  ```sh
+  hdiutil create -size 40m -fs HFSX -volname case-test -type UDIF /tmp/case-test.dmg
+  hdiutil attach -nobrowse -mountpoint /tmp/case-test-mount /tmp/case-test.dmg
+  TMPDIR=/tmp/case-test-mount just test   # then detach and delete the image
+  ```
+- **`dirs::home_dir()` honors `HOME` here but not on Windows.** That is why a
+  hermetic-home test passes on macOS and reads the real home directory on
+  Windows. Use `biscuit_file::home_dir()`, which follows `USERPROFILE` on
+  Windows. A fixture that sets both variables then lands in the same place on
+  every OS.
+- **A Unix socket path holds at most 104 bytes** (`sun_path`), and the
+  per-user `$TMPDIR` (`/private/var/folders/…/T/`) uses about half of that. A
+  socket-binding daemon under a `tempfile` dir fails with "path must be shorter
+  than SUN_LEN" (`kache daemon run` does). Root the fixture under `/tmp`, as
+  `real_kache_worktree_restore` (`tools/test-toolkit`) does.
+- **`getcwd` after the cwd is deleted** fails with `ENOENT`, but only after
+  about 2 s. A test of an unreadable-cwd branch (for example sniff-cli's
+  `relative_base_with_unreadable_cwd_fails`) should make only one lookup.
 
 ## Process groups
 
-- One `kill(-pgid, SIGKILL)` does not reach a child that a group member is
-  forking at that moment: XNU does not make `fork` atomic with a group signal,
-  so the child joins the group unsignalled and survives. Killing
-  `sh -c 'echo started; sleep 300'` on reading `started` left `sleep` running
-  in 63–74 of 2,000 tries on this host, and in 0 of 2,000 in a Linux
-  container. Repeat the group kill until it fails. A group that holds only
-  zombies answers `EPERM` on macOS but `0` on Linux, so "until it fails" ends
-  on macOS while the unreaped leader is a zombie and spins on Linux; Claudine's
-  `ProcessTree` drop repeats only off Linux, under a 250 ms bound.
-- The escaped child holds whatever the group inherited. With a test's stderr
-  inherited, nextest reports `LEAK-FAIL` about 30 s after the test passed,
-  even though every pid the test watched was reaped.
+- **One `kill(-pgid, SIGKILL)` can miss a child that is being forked.** XNU
+  does not make `fork` atomic with a group signal, so the new child joins the
+  group without the signal and survives. Repeat the group kill until it fails.
+  A group that holds only zombies returns `EPERM` on macOS but `0` on Linux.
+  So "repeat until it fails" ends on macOS and spins forever on Linux. This is
+  why Claudine's `ProcessTree` drop
+  (`claudine/lib/src/composition/sequence/task/shell.rs`) repeats the kill only
+  off Linux, with a time limit.
+- The surviving child keeps whatever the group inherited. If it holds a
+  test's stderr, nextest reports `LEAK-FAIL` after the test passed, even
+  though every pid the test watched was reaped.
 
 ## Linux and Windows evidence from this host
 
-"macOS-only host, cross-platform runs not executable" is wrong here.
+"This host is macOS-only, so cross-platform runs are not possible" is wrong.
 
-- **Real Linux runs:** Docker Desktop provides a `linux/arm64` kernel. `open
-  -a Docker`, poll `docker info` (about 20 s), then run the package tests in a
-  container. PTY-backed L2 tests pass there too. Mount the source as a copy
-  (`rsync -a --exclude=target/ --exclude=.git --exclude=.gitnexus/`) because a worktree's `.git`
-  is a file pointing outside the container. Excluding `.gitnexus/` is required: its
-  parsed-file store churns during indexing, so rsync exits 23 on vanished files. Put that copy
-  and the target under `$HOME` (e.g. `~/.cache/<scratch>`): Docker Desktop's default file
-  sharing rejects both `/Volumes/...` and `/tmp` (`/private`) bind mounts with
-  `mkdir /Volumes: read-only file system` (found 2026-09-16). Two traps: keep
-  `CARGO_TARGET_DIR` on a host mount (`-v ~/.cache/x-target:/t -e
-  CARGO_TARGET_DIR=/t`), since the VM overlay is small and fills; and a
-  whole-package `cargo nextest run` OOM-kills the linker in the default VM,
-  so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and targeted `--lib` /
-  `--test <name>` runs. podman's VM does not start on this host.
-  On 2026-09-17, bind mounts under `/tmp` failed ("error while creating mount
-  source path '/private/tmp/…': mkdir /private: read-only file system"): the
-  host's Docker file sharing does not cover `/private/tmp`. Put both the
-  source copy and the target dir under `$HOME` (for example
-  `~/.cache/rb-linux/{src,target}`). `rust:1` needs
-  `apt-get install libdbus-1-dev pkg-config` for `messenger --features desktop`,
-  plus `libasound2-dev` for anything that reaches Playa's `native-playback`
-  (all of `claudine-cli`).
-  Run the container command with `bash -c`, not `bash -lc`: the login shell
-  resets `PATH` and drops `/usr/local/cargo/bin`, so every `cargo` call fails
-  with "command not found" while a trailing pipe can still exit 0. `rust:1`
-  has no `cargo-nextest`; `cargo test --test <name>` avoids a slow install.
-- **Linux Level 3 keyboard tests** that use `biscuit_test_harness::xvfb`
-  (a private `Xvfb` plus kitty, XTEST presses) run in the same container and
-  never touch the Mac's desktop. `rust:1` needs `xvfb kitty libgl1-mesa-dri`
-  on top of the packages above, and `cargo-nextest` from
-  `https://get.nexte.st/latest/linux-arm`. kitty 0.41 under Xvfb works with
-  software OpenGL and no window manager; `SetInputFocus` alone gives it focus
-  (2026-09-28). Its "Failed to connect to DBUS" log lines are harmless.
-- **Windows compile evidence:** the `x86_64-pc-windows-gnu` target; details
-  and the msvc prohibition are in [windows.md](windows.md).
-- **Behavioral Windows and WSL2 evidence:** the build hosts
+- **Real Linux runs:** Docker Desktop provides a `linux/arm64` kernel. Run
+  `open -a Docker`, poll `docker info`, then run tests in a container. PTY
+  L2 tests pass there too. podman's VM does not start on this host.
+  - Copy the source rather than mounting the worktree, because a worktree's
+    `.git` is a file that points outside the container. Use
+    `rsync -a --exclude=target/ --exclude=.git --exclude=.gitnexus/`. The
+    `.gitnexus/` store changes during indexing, so rsync exits 23 if you
+    include it.
+  - Put the source copy and the target dir under `$HOME`, for example
+    `~/.cache/<scratch>/{src,target}`. Docker's file sharing rejects bind
+    mounts from `/Volumes/…` and `/tmp` (`/private`) with
+    `mkdir …: read-only file system`.
+  - Keep `CARGO_TARGET_DIR` on a host mount (`-v …:/t -e CARGO_TARGET_DIR=/t`),
+    because the VM overlay is small. A whole-package build OOM-kills the
+    linker in the default VM, so use `--memory=7g`, `CARGO_BUILD_JOBS=2`, and
+    targeted `--lib` / `--test <name>` runs.
+  - Use `bash -c`, not `bash -lc`. A login shell resets `PATH` and drops
+    `/usr/local/cargo/bin`, so `cargo` is "command not found", and a trailing
+    pipe can still exit 0.
+  - `rust:1` needs `libdbus-1-dev pkg-config` for `messenger --features desktop`,
+    and `libasound2-dev` for anything that reaches Playa's `native-playback`
+    (all of `claudine-cli`). It has no `cargo-nextest`; `cargo test --test <name>`
+    avoids a slow install.
+- **Linux Level 3 keyboard tests** that use `biscuit_test_harness::xvfb` (a
+  private `Xvfb` plus kitty, with XTEST key presses) run in the same container
+  and never touch the Mac's desktop. Add `xvfb kitty libgl1-mesa-dri`, plus
+  `cargo-nextest` from `https://get.nexte.st/latest/linux-arm`. kitty works
+  under Xvfb with software OpenGL and no window manager; `SetInputFocus` is
+  enough to give it focus. Its "Failed to connect to DBUS" lines are harmless.
+- **Windows compile evidence:** use the `x86_64-pc-windows-gnu` target. The
+  details, and why msvc is not allowed, are in [windows.md](windows.md).
+- **Behavioral Windows and WSL2 evidence:** use the build hosts
   ([build-hosts.md](build-hosts.md), [wsl.md](wsl.md)).
 
 ## The `macos-latest` leg
 
-GitHub's standard `macos-latest` runner has 3 cores and 7 GB, fewer than the
-4-core Linux and Windows runners this public repository gets, and it is the
-slowest leg for Claudine's CLI suite by more than 2x. Tune any concurrency
-cap to this leg, not to Linux. It is also the only leg where Level 3
-focus-stealing tests could run, and they do not run on CI at all. Details in
-[ci-runners.md](ci-runners.md).
+`macos-latest` is the smallest hosted runner and the slowest leg, so tune any
+concurrency cap for it, not for Linux. Level 3 focus-stealing tests do not run
+on CI at all. See [ci-runners.md](ci-runners.md).
 
 ## Finding filesystem watchers
 
-An open-file scan does not enumerate FSEvents directory watches. On 2026-10-05,
-a Node `fs.watch(path, { recursive: true })` process with cwd `/` received a
-created-file event, but `lsof -nP -a -p <pid> -Fftn` contained no watched path.
-The probe used a temporary directory and waited for delivery before inspecting
-its descriptors. A process whose cwd is inside a worktree may still be found
-through cwd inspection; that is evidence of directory use, not a watch record.
-
-Apple's `FSEventStreamCopyPathsBeingWatched` inspects a stream reference owned
-by the caller, not a system-wide list of other processes' registrations. Do
-not treat an empty `lsof` or vnode-descriptor scan as proof that no process
-watches a directory. See the [FSEvents guide](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
+An open-file scan does not list FSEvents directory watches. A process running
+a recursive `fs.watch` receives events, but `lsof -nP -a -p <pid> -Fftn` shows
+no watched path. Apple's `FSEventStreamCopyPathsBeingWatched` covers only
+streams that the caller owns; it is not a system-wide list. So an empty `lsof`
+or vnode-descriptor scan does not prove that nothing watches a directory. A cwd
+inside the directory shows that the directory is in use, not that it is
+watched. See the [FSEvents guide](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
 and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
 
 ### Reading other processes' descriptors and cwd
 
-Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
+`sniff/lib/src/filesystem/query/macos.rs` implements this. Traps it handles:
 
-- The `libproc` crate (0.14.11) is a poor fit. `pids_by_path` /
-  `pids_by_type_and_path` is **not recursive**: it matches only processes whose
-  fd or cwd is the queried vnode itself, never anything beneath a directory.
-  Its `is_volume` and `exclude_event_only` flags are silently ignored, because
-  `sys/macos.rs` passes `pathflags` only on the sizing call. `pidcwd` returns
-  "not implemented for macos". Its `build.rs` also runs bindgen, so the build
-  needs libclang.
-- Raw `libc::proc_pidinfo(PROC_PIDLISTFDS)` plus
-  `proc_pidfdinfo(PROC_PIDFDVNODEPATHINFO = 2)` gives each vnode fd's canonical
-  `/private/...` path, `vst_dev`, `vst_ino`, and `fi_openflags`.
-  `proc_pidinfo(PROC_PIDVNODEPATHINFO)` gives the cwd the same way. `libc`
-  lacks `proc_fileinfo`, `vnode_fdinfowithpath`, and that constant, so define
-  them locally.
-- `PROC_PIDLISTFDS` fills only the buffer you pass and does not report that it
-  was too small. Retry larger whenever the returned count equals the capacity.
-  `pbi_nfiles` is table capacity, not the open count.
-- An `O_EVTONLY` open is visible (`fi_openflags = 0x8001`). It is a
-  descriptor, not proof of an FSEvents subscription.
-- Another user's process (PID 1) fails every per-PID call with `EPERM`, while
-  `proc_listpids` still lists every PID. Treat EPERM as "not inspected", never
-  as "no matches". That includes `PROC_PIDTBSDINFO`, the only flavor with a
-  start time, so such a process has no creation token;
-  `PROC_PIDT_SHORTBSDINFO` succeeds for it but carries no start time.
-- `proc_pidinfo`/`proc_pidfdinfo` return **0, not -1**, on failure and set
-  `errno`. Zero `errno` before the call: `PROC_PIDLISTFDS` returning 0 with
-  `errno` still 0 is an empty table, not an error.
-- `vinfo_stat.vst_dev` is `u32`, but `st_dev` is `i32` and
-  `std::os::unix::fs::MetadataExt::dev()` sign-extends it. Compare with
-  `vst_dev as i32 as u64`, or a device with the high bit set never matches.
+- **Do not use the `libproc` crate.** `pids_by_path` is not recursive: it
+  matches only an fd or cwd that is exactly the queried vnode. It silently
+  ignores the `is_volume` and `exclude_event_only` flags, `pidcwd` is "not
+  implemented for macos", and its `build.rs` needs libclang.
+- **Use raw `libc` instead.** `proc_pidinfo(PROC_PIDLISTFDS)` plus
+  `proc_pidfdinfo(PROC_PIDFDVNODEPATHINFO = 2)` gives each fd's canonical
+  `/private/…` path, `vst_dev`, `vst_ino`, and `fi_openflags`.
+  `PROC_PIDVNODEPATHINFO` gives the cwd. `libc` does not define
+  `proc_fileinfo`, `vnode_fdinfowithpath`, or that constant, so define them
+  locally.
+- `PROC_PIDLISTFDS` fills only the buffer you pass and does not say when it was
+  too small. Retry with a bigger buffer whenever the returned count equals the
+  capacity. `pbi_nfiles` is the table capacity, not the number of open files.
+- These calls return **0, not -1**, on failure and set `errno`. Zero `errno`
+  before each call: a return of 0 with `errno` still 0 means an empty table.
+- Another user's process fails every per-PID call with `EPERM`, while
+  `proc_listpids` still lists it. Treat that as "not inspected", never as "no
+  matches". `PROC_PIDTBSDINFO`, the only flavor with a start time, fails too,
+  so such a process has no creation token.
+- An `O_EVTONLY` open shows up (`fi_openflags = 0x8001`). It is a descriptor,
+  not proof of an FSEvents subscription.
+- `vst_dev` is `u32`, but `MetadataExt::dev()` sign-extends the `i32`
+  `st_dev`. Compare with `vst_dev as i32 as u64`, or devices with the high bit
+  set never match.
 
 ## Host conditions that look like repo failures
 
-- **A Homebrew upgrade of `libgit2` breaks linking with `ld: library 'git2'
-  not found`.** `libgit2-sys` links the system library when `pkg-config`
-  finds a compatible one, and its build-script output records the versioned
-  Cellar path (`/opt/homebrew/Cellar/libgit2/1.9.4/lib`). After `brew upgrade`
-  moves it (1.9.7 on 2026-10-03), every feature combination whose
-  `libgit2-sys` build predates the upgrade fails to link (for example
-  `cd sniff && just test`, `just check-tier-coverage sniff`), while another
-  combination built later links fine, so it looks like a change-specific
-  failure. Confirm with `grep link-search target/debug/build/libgit2-sys-*/output`.
-  `cargo clean -p libgit2-sys` did **not** help: the rerun build script wrote
-  the same stale path (the cached build under `kache` is the suspect, not
-  proven). Prefixing the command with `LIBGIT2_NO_PKG_CONFIG=1` builds the
-  vendored libgit2 instead and links (one-time C build, about 4 min under
-  load).
-
-- **`CDPATH` sends a relative `cd` from a linked worktree into the main
-  checkout.** Agent shells on this host inherit a `CDPATH` that lists
-  `/Users/ken/coding/personal/rusty-biscuit` and does not start with `.`. In
-  Bash, `cd sniff` from a worktree root therefore lands in the **main
-  checkout's** `sniff/`, prints that path, and exits 0. A gate script that
-  loops `cd "$area" && just test` then tests and lints the wrong tree and
-  reports green. On 2026-09-25 all 12 Phase 4 gates of the worktree fix
-  `2026-09-24-ux-improvements` ran against the main checkout this way. The
-  giveaways were a first log line naming `/Users/ken/coding/...` and
-  test counts that did not match the branch. In scripts, `unset CDPATH` and
-  `cd` to absolute paths (or `./area`), and log `pwd` first. It redirects
-  edits too: on 2026-10-03 a `cd darkmatter/lib/src && sed -i …` issued while
-  the shell was already inside that directory wrote into the main checkout.
-  After any relative-`cd` edit, check `git -C <main checkout> status`.
-- **Claudine currently shadows the login home for agent sessions on this
-  host.** An agent can inherit `HOME=/Users/ken/.claudine` even though the
-  login home and OpenPGP keyring are under `/Users/ken`. A signed Git command
-  then looks in the wrong keyring or opens pinentry despite the Keychain-backed
-  signing key needing no interaction. Run commit, verification, and push with
-  both `HOME=/Users/ken` and `GNUPGHOME=/Users/ken/.gnupg`. If a wrong-home
-  agent was already started, kill and relaunch `gpg-agent` with those same two
-  values; setting only one did not prevent the dialog on 2026-09-12.
-- **A background Kitty is not an L2 host.** The dev host has `kitty` but no
-  remote-control instance, so every `*_in_kitty` test skips in `just test-l2`.
-  On 2026-09-23 an instance started without taking focus (`open -g -n -a kitty
-  --args -o allow_remote_control=yes --listen-on unix:<sock>
-  --start-as=minimized`) gave panes a few columns wide and no graphics
-  detection. 19 or 20 of `biscuit-terminal-cli`'s 25 Kitty tests failed, on the
-  unmigrated base too, and the failing set varied between runs. Treat such a
-  run as no evidence either way. It also ignores `SIGTERM`: stop it with
-  `kitty @ --to unix:<sock> close-window --match all`.
-  What does work (2026-09-25): a *normal* (not minimized, not hidden)
-  instance per test, `open -g -n -a kitty --args --config NONE -o
-  allow_remote_control=socket-only -o initial_window_width=<N>c …`, which
-  stays unfocused, has exactly the cells asked for, and can be screenshotted
-  with `screencapture -x -o -l <platform_window_id from kitty @ ls>`. That is
-  `biscuit_test_harness::kitty::KittyInstance`. A hidden instance's
-  screenshot is black (never drawn). On 2026-10-12, Kitty 0.49.2 in hidden
-  mode also delayed OSC 10/11 and device-attribute replies until after `hug`
-  exited: the replies entered Bash's next command line and broke its begin
-  marker. A normal unfocused instance eliminated that delay. Use the normal
-  instance for text captures that run terminal-capability probes too.
-  Stop an instance with `kitty @ --to …
-  action quit`; without `confirm_os_window_close=0` that opens a "Quit
-  kitty?" window instead.
-  An *occluded* instance's screenshot is empty too (2026-09-28): Kitty does
-  not render a window another window covers, and `open -g` puts it behind
-  the frontmost app. On the dev Mac it opened at the same spot on the second
-  display, under a full-height Zed window, so 100×32 and 56×60 windows were
-  always empty and 200×60 ones only when a strip stuck out; a second
-  instance also covers the first. Grant Screen Recording and uncover that
-  area for real pixel evidence; the Kitty graph tests skip visibly otherwise.
-- **A script's `cd <area>` lands in the main checkout.** The dev Mac's
-  shell exports `CDPATH` (with `~/coding/personal` and the main checkout
-  among its entries), so in a script or subshell run from a linked worktree,
-  a relative `cd worktree && just test` can resolve to
-  `~/coding/personal/rusty-biscuit/worktree` and quietly test the wrong tree
-  (seen 2026-09-27: every gate green, counts matching an older state). Use
-  absolute paths or `env -u CDPATH`, and check that the recipe's first
-  output line (the area path) names the worktree.
-- **A shell prompt inside a captured L2 frame.** The L2 WezTerm harness
-  spawns an interactive login shell, so anything the host's shell startup
-  does interactively lands in the pane. A first-run tool prompt (seen with
-  Atuin's "AI is not yet configured") swallows the typed command, the
-  `claudine_rc:` exit marker never appears, and the test times out with an
-  empty program frame. It can reproduce in isolation, so isolation does not
-  discriminate; the tell is prompt text in the `plain:` block and no program
-  output. Dismiss or configure the tool on the host; do not chase the diff.
-- **`tmux send-keys failed` on the first send of an L2 run, green when rerun
-  alone.** Another test run on this host (a second worktree's `just test-l2`
-  or pre-push hook; check `ps` for `biscuit-harness-broker`, `nextest`, or
-  `just ci-local`) spawned its own harness and its stale-resource reaper
-  killed this run's shared session, whose tag named the already-exited
-  broker. Fixed by tagging with the recipe's pid
-  (`BISCUIT_HARNESS_OWNER_PID`, see the `biscuit-test-harness` skill); the
-  send error now carries tmux's own message and the live session list. If
-  it recurs, read that list before blaming the test.
-- **WezTerm L2 tests time out at `attach/spawn WezTerm` or `initial capture`
-  with `command timed out after 10s`/`15s`, or fail `WezTerm not available`,
-  different tests each run.** Too many concurrent `wezterm cli` clients for
-  the process behind `WEZTERM_UNIX_SOCKET`; from inside WezTerm that is the
-  GUI (`gui-sock-<pid>`), not a `wezterm-mux-server`. The GUI serves every
-  client on its main thread and pushes each connected client the render
-  changes of every busy pane, so the cost is clients × busy panes, and a
-  slow answer keeps clients connected longer. `sample <gui-pid> 5` during a
-  stall shows the main thread in `GetPaneRenderChangesResponse` encoding,
-  and an unrelated `wezterm cli list` stalls too. On 2026-10-08 claudine-cli
-  at 14 workers failed three then four different WezTerm tests; on
-  2026-10-10, 16 concurrent clients took 13–40 s each. The harness now lets
-  only two clients per mux run at once across all processes (see the
-  `biscuit-test-harness` skill), and biscuit-terminal-cli's 653-test L2 run
-  passed at 14 workers. `_test_l2_threads` still gives parallel L2 half the
-  host's cores (8 here). If it recurs, look for something driving
-  `wezterm cli` outside the harness before blaming the test.
-- **Terminal detection forks `defaults`.** On an iTerm2 host,
-  `biscuit_terminal::Terminal::default()` spawns `defaults read
-  com.googlecode.iterm2 New Bookmarks` up to three times (font name, size,
-  ligatures), gated only on `TERM_PROGRAM`, not on a TTY. A test that shims
-  `defaults` on `PATH` must discriminate on argv, or it misattributes the
-  appearance probe. Do not "fix" this by adding a TTY guard to the font
-  queries; glyph selection for redirected output depends on them.
-- **Shell-init deadlock without a TTY.** Editors that capture the project
-  environment by running `$SHELL -l -i -c 'zed --printenv'` through pipes can
-  wedge when shell init sources completions via process substitution. The
-  symptom is "no language server starts at all" in Zed. Guard
-  completion-loading in shell init with `if [ -t 0 ] || [ -t 1 ]`. Diagnose
-  with `pgrep -fl printenv` and `sample <pid>` showing `run_init_scripts`.
-- **Relative `cd` into a package area can land elsewhere** when `CDPATH` is
-  set; the shell stays at the repo root and `just lint`/`just test` run the
-  root recipes, surfacing unrelated packages' failures. Use absolute paths and
-  confirm with `pwd`. An *exported* `CDPATH` also makes `cd` print the path,
-  so `$(cd … && pwd)` captures it twice: `.githooks/tests/test-pre-push.sh`
-  then fails at once with `FAIL: hook not executable at <root>\n<root>/…`.
-  Run it as `env -u CDPATH bash .githooks/tests/test-pre-push.sh`.
-- **`#!/usr/bin/env bash` selects `/bin/bash` 3.2 on a stock Mac**, which
-  under `set -u` rejects `"${arr[@]}"` on an empty array as unbound and aborts
-  the script. Homebrew's Bash 5 accepts it, so the script runs for whoever has
-  Homebrew first on PATH and fails for everyone else. Write
-  `${arr[@]+"${arr[@]}"}` and avoid `mapfile`, `declare -A`, and `${v,,}` in
-  any shell script that is `#!/usr/bin/env bash`.
+- **`ld: library 'git2' not found` after `brew upgrade libgit2`.**
+  `libgit2-sys` links Homebrew's library and records its versioned Cellar path
+  in its build-script output. Builds made before the upgrade fail to link, and
+  builds made after it link fine, so the failure looks specific to one change.
+  Confirm with `grep link-search target/debug/build/libgit2-sys-*/output`.
+  `cargo clean -p libgit2-sys` did not help. Prefix the command with
+  `LIBGIT2_NO_PKG_CONFIG=1` to build the vendored libgit2, which takes a
+  one-time C build.
+- **`CDPATH` sends a relative `cd` into the main checkout.** Agent shells here
+  inherit an exported `CDPATH` that lists the main checkout and does not start
+  with `.`. From a linked worktree, `cd sniff` lands in the main checkout's
+  `sniff/` and exits 0. Gates then test and lint the wrong tree and report
+  green, and `sed -i` edits go to the wrong file. You can tell when the first
+  log line names the main checkout or the test counts don't match the branch.
+  Fixes:
+  - In scripts, `unset CDPATH` (or use `env -u CDPATH`) and `cd` to absolute
+    paths or `./area`. Log `pwd` first.
+  - After any edit made through a relative `cd`, check
+    `git -C <main checkout> status`.
+  - An exported `CDPATH` also makes `cd` print the path, so `$(cd … && pwd)`
+    captures it twice. Run `.githooks/tests/test-pre-push.sh` as
+    `env -u CDPATH bash .githooks/tests/test-pre-push.sh`.
+- **Signing fails or opens pinentry because Claudine shadows `HOME`.** An agent
+  session can inherit `HOME=~/.claudine` (Claudine's directory), while the
+  OpenPGP keyring lives under the login home. Run commit, verify, and push with
+  both `HOME=<login home>` and `GNUPGHOME=<login home>/.gnupg`. If a
+  `gpg-agent` already started with the wrong home, kill it and relaunch it with
+  both variables set; setting only one is not enough.
+- **Kitty L2 runs need a normal, uncovered window.** A background instance
+  with no remote control makes every `*_in_kitty` test skip. Minimized
+  instances get panes only a few columns wide and give results that vary from
+  run to run; such a run is no evidence either way. Hidden instances are never
+  drawn (their screenshots are black) and delay OSC 10/11 and
+  device-attribute replies until the program exits, which corrupts the next
+  shell line. What works is a normal, unfocused instance per test with an
+  exact cell size: `biscuit_test_harness::kitty::KittyInstance`
+  (`biscuit-test-harness/src/kitty.rs`). It still renders nothing while
+  another window covers it (`open -g` puts it behind the frontmost app). For
+  real pixel evidence, grant Screen Recording and make sure nothing covers the
+  window; the graph tests skip visibly otherwise. To stop an instance, use
+  `kitty @ … action quit` with `confirm_os_window_close=0`; it ignores
+  `SIGTERM`.
+- **A shell prompt shows up in a captured L2 frame.** The WezTerm harness
+  starts an interactive login shell. A first-run tool prompt (such as Atuin's)
+  swallows the typed command, the `claudine_rc:` marker never appears, and the
+  test times out with an empty program frame. This reproduces in isolation
+  too. The tell is prompt text in the `plain:` block and no program output.
+  Fix the tool's setup on the host instead of chasing the diff.
+- **`tmux send-keys failed`, or WezTerm `attach/spawn`/`initial capture`
+  timeouts that hit different tests each run.** Another harness on this host
+  (another worktree's `just test-l2`, a pre-push hook, or anything else driving
+  `wezterm cli`) is competing for the same sessions or mux. Check `ps` for
+  `biscuit-harness-broker`, `nextest`, or `just ci-local`. When `wezterm cli
+  list` stalls too, and `sample <gui-pid> 5` shows the GUI main thread in
+  `GetPaneRenderChangesResponse`, you have hit the WezTerm client-turn limit.
+  Ownership, throttling, and cleanup are covered in the `biscuit-test-harness`
+  skill's `sharing-and-parallel-runs.md`.
+- **Terminal detection runs `defaults`.** On an iTerm2 host,
+  `biscuit_terminal::Terminal::default()` runs `defaults read
+  com.googlecode.iterm2 …` for font settings. It checks only `TERM_PROGRAM`,
+  not whether there is a TTY. A test that shims `defaults` must match on argv.
+  Don't add a TTY guard: glyph choice for redirected output depends on these
+  queries.
+- **Shell init can deadlock without a TTY.** Editors capture the environment by
+  running `$SHELL -l -i -c '… --printenv'` through pipes. If shell init loads
+  completions through process substitution, this hangs, and in Zed "no
+  language server starts". Guard completion loading with
+  `if [ -t 0 ] || [ -t 1 ]`. To diagnose, run `pgrep -fl printenv`, then
+  `sample <pid>`, and look for `run_init_scripts`.
+- **`#!/usr/bin/env bash` runs `/bin/bash` 3.2 on a stock Mac.** It has no
+  `declare -A`, `mapfile`, `${v,,}`, or `${args[*]@Q}`. Under `set -u` it
+  rejects an empty `"${arr[@]}"`; write `${arr[@]+"${arr[@]}"}`. Homebrew's
+  Bash 5 hides the problem from whoever has it first on PATH. The cross-check
+  shipping tests call `/bin/bash` explicitly.
+- **System Python is 3.9.** CI Python helpers must run on 3.9 (no
+  `TestCase.enterContext`; use `addCleanup`). An L1 fixture that narrows
+  `PATH` to `<fixture>/bin:/usr/bin:/bin` also picks up that `python3`, so a
+  script that needs `tomllib` fails only on macOS.
+  `tools/test-toolkit/tests/common/kache.rs` links the host's `python3` into
+  the fixture `bin/` for this reason.
 - **`dyld: Library not loaded: @rpath/libLLVM.dylib` / `failed to invoke LLD:
-  signal: 6 (SIGABRT)` on a kache-wrapped link** (typically wasm, e.g.
-  `just zed-wasm`). The prebuilt kache binary carries the hardened runtime,
-  and dyld strips every `DYLD_*` variable from a hardened process. rustup's
-  `DYLD_FALLBACK_LIBRARY_PATH` never reaches `rust-lld`. The toolchain is not
-  broken: do not symlink `libLLVM.dylib` into it or export `DYLD_*` in
-  recipes. Re-sign kache ad hoc (`just install-kache` does this and gates on
-  `scripts/kache-host.sh probe-passthrough`). Measured 2026-09-23; details in
-  the `kache` skill's `installation.md`.
-
-- **Concurrent tree-hugger corpus checks and Clippy can exhaust L1 budgets.** On 2026-10-07, the default-worker full suite ran beside sniff tests and Clippy; two unchanged CLI cache-robustness corpus tests exceeded 30 seconds. The same pair passed in isolation at two workers in 6.6 and 7.0 seconds. Finish competing compiles and verify the full suite with bounded workers before changing test timeouts or treating the result as a Git-index defect.
-- **Concurrent Sniff host probes can exceed the L1 timeout.** On 2026-10-07,
-  a default-concurrency `just test` timed out four unchanged CoreAudio/audio
-  hardware tests at 30 s while network-interface probes approached 29 s.
-  `just test detect_audio_devices_on_macos --test-threads 1` passed in 9.875 s;
-  `just test --test-threads 4` then passed all 3,154 L1 tests. Suspect host-probe
-  contention when these unrelated probes slow together; verify with bounded
-  workers before changing timeout policy or treating the result as a Git defect.
+  signal: 6` on a kache-wrapped link** (typically wasm, for example
+  `just zed-wasm`). The prebuilt kache binary is signed with the hardened
+  runtime, and dyld removes every `DYLD_*` variable from a hardened process,
+  so rustup's `DYLD_FALLBACK_LIBRARY_PATH` never reaches `rust-lld`. The
+  toolchain is fine. Re-sign kache ad hoc (`just install-kache` does this and
+  checks it with `scripts/kache-host.sh probe-passthrough`). The `kache`
+  skill's `installation.md` has the details. A fake wrapper in a fixture that
+  models this stripping must `unset DYLD_FALLBACK_LIBRARY_PATH` explicitly,
+  because a plain Bash passthrough can keep the variable on hosted macOS.
+- **L1 timeouts when heavy jobs run at the same time.** Sniff's CoreAudio and
+  network-interface probes, and tree-hugger's corpus tests, can exceed the
+  30 s L1 budget when they run beside Clippy, other compiles, or other suites
+  at default concurrency. If unrelated tests slow down together, finish the
+  competing work and rerun with bounded workers (`--test-threads 4`) before
+  you change timeouts or suspect a code defect.
 
 ## Diagnosing a slow host
 
-- Pair load average with idle CPU: `sysctl -n vm.loadavg` and `top -l 1 -n 0
-  | grep 'CPU usage'`. High load with an idle CPU means blocked threads,
-  never CPU shortage; the usual cause is a hung network mount (an SMB
-  automount reached over a WAN never fails cleanly, and every `/Volumes`
-  enumeration parks a thread). Quit the automounter before `umount`, or the
-  share re-mounts within seconds and the fix looks like it failed.
-- `ps -o %cpu` is a decaying average, not an instantaneous reading; use
-  `top -l N` and read the second or later sample. In `sample` output count
-  the leading sample counts, not stack lines. Aggregate process CPU hides
-  which thread is hot.
+- **Compare load average with idle CPU:** `sysctl -n vm.loadavg` and
+  `top -l 1 -n 0 | grep 'CPU usage'`. High load with idle CPU means threads
+  are blocked, not that the CPU is short. The usual cause is a hung network
+  mount: an SMB automount over a WAN never fails cleanly, and every `/Volumes`
+  listing gets stuck on it. Quit the automounter before `umount`, or the share
+  mounts again within seconds.
+- `ps -o %cpu` is a decaying average. Use `top -l N` and read the second or a
+  later sample. In `sample` output, count the leading sample counts, not the
+  stack lines.
 - After an OS upgrade, third-party menu-bar and window overlays are the first
-  suspect for WindowServer load.
+  suspects for WindowServer load.
+
+## Shared-cache dylibs
+
+Some system dylibs exist only in dyld's shared cache, so a missing
+`/usr/lib/*.dylib` file does not mean the dependency is missing. Use
+`otool -L` for an emitted binary's dependencies and `dyld_info -uuid
+<install-name>` for cached libraries. `dyld_info -linked_dylibs` marks some
+imports as `weak-link`, meaning dyld allows them to be absent (libobjc's
+`libobjc-env.dylib`, for example). Follow only the required dependencies, or
+valid programs get rejected.
 
 ## Audio fixture discovery outside PATH
 
-Sniff's program discovery falls back to macOS application bundles after PATH.
-A private PATH containing only a fake `aplay` still discovered `mpv.app` during
-the silent-audio fix. Therefore a private PATH does not prove that the installed
-player list contains only fixture programs. Playa currently launches host players
-by bare binary name, so an out-of-PATH bundle produces a spawn error; it does not
-launch that bundle. Keep a volume-capable recording player in PATH for controlled
-fallback tests, and test incapable-player rejection at command construction.
+Sniff's program discovery looks in macOS application bundles after PATH. So a
+private PATH that holds only fake players does not prove that the discovered
+player list holds only fixtures. Playa launches players by bare name, so a
+bundle outside PATH causes a spawn error instead of launching. For controlled
+fallback tests, keep a recording player that supports volume in PATH. Test
+that incapable players are rejected when the command is built.
 
 ## Proving a call was eliminated
 
-When a change claims a walk, scan, or launch was *removed*, count it with an
-lldb breakpoint on the test binary; no root and no instrumentation needed:
+To show that a walk, scan, or launch was removed, count calls with an lldb
+breakpoint on the test binary. This needs no root and no instrumentation:
 
 ```bash
 xcrun lldb --batch \
@@ -383,48 +306,9 @@ xcrun lldb --batch \
   -o "breakpoint list" -- target/debug/deps/<test-binary>
 ```
 
-Count only the location whose `where` is the bare function in its defining
-file; a regex breakpoint also resolves generic and closure instantiations.
-Strip ANSI before matching libtest's output. lldb refuses Apple-signed
-platform binaries but attaches to locally built ones. Resolve the binary with
-the same `-p` selection the recipe uses, or feature unification names a
+Count only the location whose `where` is the bare function in its own file. A
+regex breakpoint also matches generic and closure instantiations. Strip ANSI
+codes before you match libtest output. lldb refuses Apple-signed platform
+binaries but attaches to ones you built. Pick the binary with the same `-p`
+selection the recipe uses; feature unification can otherwise give you a
 different artifact.
-
-## CI shell and runtime inspection (2026-09-15)
-
-Kache passthrough fixtures must explicitly unset `DYLD_FALLBACK_LIBRARY_PATH`
-when modeling a stripping wrapper. A Bash script that merely executes its
-arguments can preserve it on hosted macOS, so relying on shell startup to
-strip it makes the negative probe pass and skips the expected re-sign step.
-The shared fake's `strip` mode and the standalone negative probe both remove
-the variable explicitly; `forward` mode supplies the probe's sentinel.
-
-`/bin/bash` is 3.2: associative arrays and `${args[*]@Q}` are unavailable, and
-empty indexed arrays need `${args[@]+"${args[@]}"}` under `set -u`. The
-cross-check shipping tests must use `/bin/bash` explicitly on macOS. Python CI
-helpers support Python 3.9; `TestCase.enterContext` requires a newer interpreter,
-so temporary resources use `addCleanup` or a context manager.
-
-An L1 fixture that narrows the child `PATH` to `<fixture>/bin:/usr/bin:/bin`
-also narrows `python3` to that 3.9 interpreter, so a script needing `tomllib`
-fails only on macOS. `tools/test-toolkit/tests/common/kache.rs` links the test
-host's `python3` into the fixture `bin/` for this reason (2026-09-23).
-
-System dylibs may exist only in dyld's shared cache. `otool -L` reads an emitted
-binary's dependencies, but an absent `/usr/lib/*.dylib` file does not establish
-that its dependency is missing. `dyld_info -uuid <install-name>` observes cached
-library identities without loading test programs or opening a window.
-
-When walking shared-cache dependencies, `dyld_info -linked_dylibs` marks
-`weak-link` imports that dyld permits to be absent. macOS 27's libobjc lists
-`/usr/lib/libobjc-env.dylib` this way; treating it as a required library falsely
-rejects valid programs. Traverse required dependencies and preserve the weak
-import distinction.
-
-### Non-UTF-8 filename fixtures
-
-APFS on this macOS host rejects invalid UTF-8 directory names with error 92,
-`Illegal byte sequence`. Gate tests requiring actual byte-named files to an OS
-whose filesystem supports them. Native-path lookup tests can instead build a
-catalog of nonexistent paths under a canonicalized temporary root; this proves
-byte identity without asking APFS to create an unsupported filename.

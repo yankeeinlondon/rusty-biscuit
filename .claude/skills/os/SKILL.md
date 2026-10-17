@@ -1,26 +1,22 @@
 ---
 name: os
 description: |-
-  Non-obvious, repo-specific knowledge for handling operating-system matters in
-  rusty-biscuit: which hosts can produce macOS, Linux, native-Windows, and WSL2
-  evidence and how to reach them; how the WSL2 CI leg runs (nextest archives)
-  and how to reproduce its failures faithfully; Windows path-spelling,
-  handle-inheritance, console, and cross-compile traps; Linux directory-order,
-  locale, shallow-clone, and thread-count traps; macOS symlinked temp dirs,
-  Docker-for-Linux, and host-diagnosis methods; hosted CI runner sizes,
-  per-leg timing profiles, cross-run comparison rules, and per-OS evidence
-  reuse. Load this before claiming "cannot test on X here", before tuning a CI
-  thread cap or comparing leg timings, before touching `#[cfg(windows)]` or
-  path comparison code, and whenever a test is red on exactly one CI
-  environment.
+  Non-obvious, repo-specific operating-system knowledge for rusty-biscuit:
+  which hosts can produce macOS, Linux, native-Windows, and WSL2 evidence and
+  how to reach them; how the WSL2 CI leg runs and how to reproduce it; Windows
+  path, process, and console traps; Linux and macOS host traps; hosted runner
+  differences and per-OS evidence reuse. Load before claiming an OS cannot be
+  tested from here, before touching `#[cfg(windows)]` or path-comparison code,
+  before tuning or comparing CI legs, and whenever a test is red on exactly
+  one environment.
 ---
 
 # OS Matters
 
 Every package must compile and behave on macOS, Linux, native Windows, and
 WSL2. This skill records what is *not* obvious about doing that from this
-repository: where each OS can be exercised, the traps that have already cost
-real time, and the recipes that resolved them. Generic Rust portability
+repository: where each OS can be exercised, the traps each OS sets, and how to
+work with them. Generic Rust portability
 guidance lives in `prompts/cross-platform.md`; the `wsl` skill covers
 configuring WSL itself; the `rust-testing` skill owns test design.
 
@@ -62,14 +58,14 @@ environment's cell and how to record an execution ban.
 | A process count too high on Linux or WSL | `sysinfo` lists threads as processes | [linux.md](linux.md#sysinfo-lists-threads-as-processes) |
 | Red only on `wsl2-ubuntu` | the guest runs an archive built on `ubuntu-latest`; builder paths baked in at compile time (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures, toolchain lookups; fix binaries with `biscuit_test_harness::bin_exe!`) | [wsl.md](wsl.md) |
 | Red only in an archive run (WSL2, or `just cross-check --os windows`), "could not resolve `../../…`" | an extracted archive has no `.git`, so `build_resolution_context` makes the request directory the tree root and a snapshot built at a package refuses a fixture's `..` climb; anchor it at the run-time repository root (`manifest_dir!()`'s ancestor), never `env!("CARGO_MANIFEST_DIR")` | [wsl.md](wsl.md) |
-| WSL guest red at provisioning with a 403 | anonymous GitHub API rate limit (fixed; do not re-diagnose) | [wsl.md](wsl.md) |
-| WSL guest "lost communication with the server", killed at ~45 min, no log | runner agent died during provisioning (open, instrumented) | [wsl.md](wsl.md) |
+| WSL guest red at provisioning with a 403 | anonymous GitHub API rate limit | [wsl.md](wsl.md) |
+| WSL guest "lost communication with the server", killed with no log | the runner agent died during provisioning | [wsl.md](wsl.md) |
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
 | Red only on `windows-latest`, elapsed time equals some child's timeout | handle inheritance keeps pipes open | [windows.md](windows.md#environment-and-processes) |
 | Windows cell red although every test passed, `UnicodeEncodeError` in the last step | Python's piped stdout is cp1252; workflows must set `PYTHONUTF8=1` | [windows.md](windows.md#environment-and-processes) |
 | Red on Windows only when the agent ran it, a git child exiting `0xC0000005` with empty stderr | the run descended from Git Bash (the agent's Bash tool); rerun from PowerShell | [windows.md](windows.md#environment-and-processes) |
-| Python-gated test PASSes in ~0.3 s on BUILD_WIN over SSH, nothing ran | `python3`/`python` resolve to WindowsApps aliases; prepend the real interpreter on a process-scoped `PATH` | [windows.md](windows.md#environment-and-processes) |
-| Red only on Windows, "still checking" or another wait expiring, many small git commands in `GIT_TRACE` | ~47 ms per git process; read metadata in-process instead of raising the wait | [windows.md](windows.md#environment-and-processes) |
+| Python-gated test passes almost instantly on BUILD_WIN over SSH, nothing ran | `python3`/`python` resolve to WindowsApps aliases; prepend the real interpreter on a process-scoped `PATH` | [windows.md](windows.md#environment-and-processes) |
+| Red only on Windows, "still checking" or another wait expiring, many small git commands in `GIT_TRACE` | every git process is expensive on Windows; read metadata in-process instead of raising the wait | [windows.md](windows.md#environment-and-processes) |
 | Red only on `windows-latest` with an empty failure message | a std handle redirected to `CONOUT$` | [windows-console.md](windows-console.md#attaching-a-console-inside-a-nextest-process) |
 | macOS watcher receives events but its target is absent from `lsof` | FSEvents directory watches do not require an open descriptor naming the target | [macos.md](macos.md#finding-filesystem-watchers) |
 | `ErrorKind::NotFound` check misses on Windows only; message shows `os error -2147024894` | a `windows` crate error converted with `io::Error::from` keeps the HRESULT | [windows.md](windows.md#environment-and-processes) |
@@ -120,7 +116,7 @@ environment's cell and how to record an execution ban.
 | [ci-evidence.md](ci-evidence.md) | Per-cell evidence reuse across environments and commits, execution bans, `scope-only`, what the pre-push hook reviews |
 | [ci-runners.md](ci-runners.md) | Hosted runner sizes (macOS is the tightest), per-leg build and execution profiles, the anonymous API limit, cache quota, `main` cancellation, merge-gate bypass, cross-run noise and comparison rules |
 | [linux.md](linux.md) | Ubuntu hook fixtures, shallow checkouts, `read_dir` order, `LANG=C`, wrap-dependent counts, `sysinfo` threads |
-| [wsl.md](wsl.md) | The archive-mode contract, faithful reproduction on `BUILD_WSL`, `bin_exe!`, the 403 history, the lost-runner investigation, the guest's apt set, Level 2 on WSL, which red step means what |
+| [wsl.md](wsl.md) | The archive-mode contract, faithful reproduction on `BUILD_WSL`, provisioning failures (the 403 rate limit, a lost runner), the guest's packages, Level 2 on WSL, the guest's network-share `~/.config`, which red step means what |
 | [windows.md](windows.md) | Environment and processes (handle inheritance, Job Objects, stack size, killing `git`, `python3` alias, batch arguments, Ctrl+C), current-directory locks, the `windows-latest` leg, compile evidence from macOS |
 | [windows-paths.md](windows-paths.md) | Verbatim `\\?\` paths, home and cache known folders, 8.3 short names, separators, `file://` URIs, Markdown escapes, junctions and reparse points |
 | [windows-console.md](windows-console.md) | WezTerm on `build-win`, PowerShell output streams and encoding, a windowless ConPTY console for L2, attaching a console under nextest |
