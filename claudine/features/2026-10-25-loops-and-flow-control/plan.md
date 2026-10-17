@@ -111,6 +111,153 @@ packages:
     - darkmatter
     - darkmatter-cli
     - dmls
+source_files_during_phase_3:
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/tests/l1/error_guards/boxed-diagnostic-allow.toml
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/loop_gate_ambient.rs
+    - claudine/cli/tests/l1/loop_primitives.rs
+    - claudine/cli/tests/l1/loop_retry_passes.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/pass_order.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/rate_limits.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/frame.rs
+    - claudine/lib/src/composition/looping/frame/tests.rs
+    - claudine/lib/src/composition/looping/mod.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+docs_updated_during_phase_3:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/lib/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_4:
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/report.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/lifecycle_directive_matrix.rs
+    - claudine/cli/tests/l1/lifecycle_prep.rs
+    - claudine/cli/tests/l1/loop_break.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/sequence_dry_run.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - claudine/cli/tests/l1/task_guards.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/prep.rs
+    - claudine/lib/src/composition/lifecycle/prep/tests.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/frame.rs
+    - claudine/lib/src/composition/looping/frame/tests.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+docs_updated_during_phase_4:
+    - claudine/cli/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/schemas.md
+    - claudine/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Loops and flow control implementation plan
@@ -253,7 +400,7 @@ The `implemented` examples deliberately retain the specified expression semantic
 
 ### Wave 4 — serial engine work
 
-- [ ] **Loop state machine**
+- [x] **Loop state machine**
   - Build one primitive-neutral repetition mechanism around the existing lifecycle guard, with typed document/string, sequence/array, and group/dictionary pass results. Allocate the nearest-loop frame before `initialize`; expose initial empty result, exit code 0, count 1, and cap-only `is_last`.
   - Implement initialize-once, per-pass preparation/start/terminal/finalize, post-finalize gate, fresh condition reads, condition-before-exhaustion, and continuation-only atomic action staging. Mutate document state or container runtime `set` state as appropriate.
   - Remove predictive condition evaluation and loop-level fail-fast behavior without changing group fail-fast or approved provider recovery. Freeze graph/configuration; keep live authored expression/preparation boundaries and data provenance.
@@ -262,11 +409,11 @@ The `implemented` examples deliberately retain the specified expression semantic
 
 ### Wave 5 — parallel primitive adapters
 
-- [ ] **Document adapter**
+- [x] **Document adapter**
   - Route direct compose, inline-compose, sequence prompt tasks, and group prompt legs through the same document repetition path. The section 3 counting fixture must launch three prompts in each applicable entry point.
   - Keep document lifecycle ownership, template approval audit, live re-read, rate-limit handling as ruled, and raw final-iteration output. Add lifecycle/count/output trace tests.
   - Own document runner and prompt adapter files; request coordinator changes to shared sequence plumbing rather than editing the container owner's files.
-- [ ] **Container adapters**
+- [x] **Container adapters**
   - Apply the shared mechanism to root/nested sequences and inline/file groups while retaining their own schema, neighbors, concurrency, runtime roots, and aggregate failure rules.
   - Maintain cumulative flat `seq.outputs` separately from the current pass slice; rebuild group leg results and summaries each pass, preserving null for skipped legs. Reset each descendant invocation's initialization and inner loop count on the next outer pass.
   - Thread innermost `loop.*` through owner events, gate, conditions/actions, and descendants. Retain first-task resolved-byte approval and later typed-template evaluation on repeated passes.
@@ -274,7 +421,7 @@ The `implemented` examples deliberately retain the specified expression semantic
 
 ### Wave 6 — serial recovery integration
 
-- [ ] **Retry publication**
+- [x] **Retry publication**
   - Prerequisite: both adapters integrated. Snapshot current-pass accumulator boundaries and runtime mutation state; restore only those on retry and apply retry `with` overlays afterward. Rebuild group pass results without resetting earlier sequence outputs, cap/count, or initialize.
   - Preserve authored/data and file provenance in restored layers. Record external writes repeating without attempting rollback.
   - Prove second-pass `A`/`B` failure and retry, repeated retries, nested looping containers, group rebuilding, and exactly-once final cleanup. Assert parent publication is absent for failure/cancellation and successful results publish once.
@@ -286,21 +433,21 @@ The `implemented` examples deliberately retain the specified expression semantic
 
 ### Wave 7 — parallel work with explicit file ownership
 
-- [ ] **Break propagation**
+- [x] **Break propagation**
   - Own loop/container outcome routing and lifecycle cleanup integration. Carry the selected nearest-loop identity and reason/code through intermediate containers; stop later actions/events/siblings except cleanup, retaining prior mutations and successful partial results.
   - Cover initialize without launch, terminal events, finalize, and gate; runtime error outside a loop; root-only exit status; child/container publication after cleanup with no synthetic break entry.
   - In concurrent groups, settle admitted and queued legs without break-driven cancellation/admission stops. Choose the first breaking leg in declaration order, independent of completion order. Failure/cancellation/timeout and failed cleanup take precedence.
   - Add deterministic queued-leg and precedence tests using barriers/notifications, not fixed sleeps. Leave lifecycle `prep` wiring to Wave 8 to avoid shared-file edits.
-- [ ] **Prep target runner**
+- [x] **Prep target runner**
   - Own shared target invocation/preparation and approval inventory support, outside the break-routing files. Implement document/group/sequence target calls with isolated runtime roots, output accumulator, and loop boundary; preserve overlay origins and author-relative resolution.
   - Reuse the target runner for calls/handoffs, keeping mixed active ancestry and hop limits per branch. Release returned children so repeated calls are legal; permit a target proxy to complete before returning.
   - Pass cancellation and the remaining caller wall-clock deadline without reset. Preserve disk effects, attach child failure causes, treat child skip as success and nonzero child root-break status as call failure.
   - Inventory statically known targets transitively without running them; runtime-only targets must obey frozen approval. From initialize, prepare the child independently and rerun parent preflight after return, retaining the parent's shell-free guard.
-- [ ] **Task guard binding**
+- [x] **Task guard binding**
   - Own task normalization/evaluation and input binding. Keep the graph structural and frozen but preserve authored templates for task-boundary resolution; make caller setters/frontmatter available without shadowing reserved roots or evaluating produced data again.
   - Evaluate read-only `when` before composition/events/loop entry. False means skipped with no launch/output; expression errors are located failures. Static validation/approval must still inventory false-guard tasks.
   - Freeze concurrent runtime guard inputs at group start even for delayed admission; file reads remain live. Reevaluate guards each outer pass. Test caller values in shell commands and authored step data, missing values, and changed first-task approved bytes.
-- [ ] **Dry run traversal**
+- [x] **Dry run traversal**
   - Own CLI flag/help, preview dispatch, and report rendering; do not edit live execution routing owned above. Add `--dry-run-shell` requiring `--dry-run` and clearly disclose mutation and composition expansion effects.
   - Render each loop body once, repetition/conditions unevaluated, task guards displayed, known prep targets listed. Execute no lifecycle, helper, provider, side-effect, loop action, runtime ledger write, or completed-task summary.
   - Render shells with approved bytes or typed templates; report-only empty placeholders never enter runtime accumulators. The opt-in executes shells once only. Side-effect previews show action/arguments and unresolved future templates under both flag combinations.
@@ -310,7 +457,7 @@ The coordinator reserves shared request/options/result structs and patches them 
 
 ### Wave 8 — serial directive integration
 
-- [ ] **Returning call wiring**
+- [x] **Returning call wiring**
   - Connect the target runner to lifecycle execution as a returning action, not an event-ending `proxy` signal. After success, continue the same list and enclosing conditional list. Keep break targeting inside the called invocation only.
   - Integrate failure/finalize call errors without re-entering that event or replacing the original primary error; verify cancellation cleanup and exactly-once finalization across nested calls/handoffs.
   - Exercise all new surfaces together: guard plus nested loop, prep from initialize, repeated prep plus outer loop, target proxy, pending break with handled/unhandled failures, frozen command approval, and preview with helper-containing loops.
