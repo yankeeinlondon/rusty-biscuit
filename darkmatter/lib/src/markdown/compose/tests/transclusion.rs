@@ -1495,10 +1495,10 @@ mod remote_transclusion_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn file_exists_false_for_unallowed_remote_host() {
+    async fn file_exists_errors_for_unallowed_remote_host() {
         // Remote reads enabled but no allowed hosts: the URL is denied and
-        // never fetched, so `file_exists` reads it as non-existent rather
-        // than erroring out of composition.
+        // never fetched. A denial is not evidence of absence, so composition
+        // fails instead of reading `false`.
         let server = MockServer::start().await;
         let url = format!("{}/blocked.md", server.uri());
 
@@ -1507,10 +1507,13 @@ mod remote_transclusion_tests {
         let body = format!("X: {{{{ file_exists(\"{url}\") }}}}\n");
         std::fs::write(&root, &body).unwrap();
 
-        let (composed, _) = compose_with_remote(&body, &root, &server, vec![])
+        let error = compose_with_remote(&body, &root, &server, vec![])
             .await
-            .unwrap();
-        assert_eq!(composed.content(), "X: false\n");
+            .expect_err("a denied remote read must not read as a missing file");
+        assert!(
+            format!("{error:?}").contains("remote read denied"),
+            "unexpected error: {error:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

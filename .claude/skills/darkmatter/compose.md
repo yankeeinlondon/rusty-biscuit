@@ -506,6 +506,27 @@ the `$()` ternary condition/branch) is local-only, so a remote URL argument
 fails loudly there; only body interpolation carries a remote runtime. See
 `darkmatter/docs/topics/darkmatter-expressions.md`.
 
+### Path functions: build, keep anchors, report failures
+
+Every path function resolves through `resolve_ctx.rs` (`FileReference` in the
+captured request context); never add a second resolver or re-read CWD/home.
+Document in `/r/prompts`, repository `/r`:
+
+| Call | On disk | Result |
+|---|---|---|
+| `absolute("notes.md")` | `/r/prompts/notes.md` and `/r/notes.md` | `/r/prompts/notes.md` (native spelling) |
+| `absolute("sub/new.md")` | nothing | `/r/prompts/sub/new.md`: the first candidate, so `absolute` does **not** prove existence |
+| `absolute("https://…")`, `absolute("%x.md")` with no match | — | error (URLs are never fetched; a recursive miss has no file shape) |
+| `dirname("/r/claudine/x/spec.md")` | either | `/r/claudine/x`: an absolute input keeps its absolute parent, even inside the repository |
+| `dirname("sub/x.md")` | either | `sub` (relative input: display form, unchanged) |
+| `increment_file_index("/r/claudine/x/review-1.md")` | either | `/r/claudine/x/review-2.md`; the file-index family and `find_*` resolve first, edit the name, and keep an absolute anchor |
+| `file_exists("missing.md")` | nothing | `false` |
+| `file_exists("~/x.md")` without home, `"../../out.md"` escaping the tree, a locked directory, a denied remote fetch | — | error, never `false` |
+
+So `dirname(absolute(spec)) + '/review-1.md'` stays beside the caller's spec
+whether the prompt lives in the repository or outside it.
+`darkmatter/lib/tests/l1/path_function_contracts.rs` is the contract table.
+
 How text becomes an AST — scanning, lexing (including the `-` identifier
 rule), the grammar ladder, the failure table (every full-document surface is
 fatal), and what DMLS checks — is in `darkmatter/docs/topics/parsing/`. The

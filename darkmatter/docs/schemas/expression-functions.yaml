@@ -1026,7 +1026,10 @@ functions:
     - name: absolute
       category: Filesystem
       order: 56
-      description: Resolves a file path to an absolute path.
+      description:
+          Returns the absolute path a file reference names, in native spelling;
+          a missing target returns the first location it would be resolved at,
+          so the result does not prove the file exists. Rejects HTTP(S) URLs.
       overloads:
           - parameters:
                 - name: file
@@ -1059,7 +1062,10 @@ functions:
     - name: file_exists
       category: Filesystem
       order: 58
-      description: Returns true when the file exists (local or remote URL).
+      description:
+          Returns true when the file exists (local or remote URL) and false when
+          it is absent; an invalid reference, missing context, probe failure, or
+          failed remote fetch is an error.
       overloads:
           - parameters:
                 - name: file
@@ -1144,7 +1150,10 @@ functions:
     - name: increment_file_index
       category: Filesystem
       order: 67
-      description: Increments the numeric index suffix, preserving zero-padding width.
+      description:
+          Increments the numeric index suffix, preserving zero-padding width, in
+          the resolved file's directory; an absolute input returns an absolute
+          path.
       overloads:
           - parameters:
                 - name: file
@@ -1159,7 +1168,9 @@ functions:
     - name: decrement_file_index
       category: Filesystem
       order: 68
-      description: Decrements the numeric index suffix, clamped at 0.
+      description:
+          Decrements the numeric index suffix, clamped at 0, in the resolved
+          file's directory; an absolute input returns an absolute path.
       overloads:
           - parameters:
                 - name: file
@@ -1204,7 +1215,9 @@ functions:
     - name: dirname
       category: Filesystem
       order: 71
-      description: Returns the directory portion of the display path.
+      description:
+          Returns the directory portion of the display path; an absolute input
+          returns its absolute parent directory.
       overloads:
           - parameters:
                 - name: file
@@ -1550,7 +1563,8 @@ functions:
       description:
           Returns the lowest-indexed existing sibling in the file's directory,
           with the unindexed base sorting first; returns the input when the
-          family has no existing member.
+          family has no existing member. An absolute input returns an absolute
+          path.
       overloads:
           - parameters:
                 - name: file
@@ -1567,7 +1581,8 @@ functions:
       order: 89
       description:
           Returns the highest-indexed existing sibling in the file's directory;
-          returns the input when the family has no existing member.
+          returns the input when the family has no existing member. An absolute
+          input returns an absolute path.
       overloads:
           - parameters:
                 - name: file
