@@ -70,10 +70,7 @@ bundle expands in a fixed canonical order at parse time. Every retired spelling
 `CompositionError::RemovedGrammar` with a replacement hint. The directive
 verbs live in one list (`signatures.rs::LIFECYCLE_CONTROL_VERBS`); `prep` is
 the one directive that returns (`LifecycleControlAction::returns`), so it is
-exempt from the last-item rule. `break` and `prep` parse today and are refused
-in one place at run time (`executor.rs::resolve_control`,
-`LifecycleDirectiveNotYetSupported`, an evaluation error `no_error` cannot
-suppress). A loop `gate:` is never `null` or `{}`. The parser
+exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser
 slice (`lifecycle/{parse,action_shape,actions,validate,signatures,source_map}.rs`)
 is lift-ready: `lib/tests/l1/lifecycle_lift_ready_guard.rs` fails if it names a
 Claudine runtime type, so the caller injects the effect catalog
@@ -87,6 +84,54 @@ it over the retained proxy overlay (retry wins a shared key). The retried
 attempt's preflight read only looks at it and `materialize_harness_prompt`
 consumes it, so it applies to exactly one transition; resume and proxy
 adoption clear it.
+
+**One loop for every primitive.** `looping/frame.rs::LoopFrame` is the
+nearest-loop frame, allocated before `initialize` (which reads pass 1's
+values): cap precedence override > authored > 100, `is_last` is `count ==
+max` only, and `decide` reads the condition before classifying the cap
+(`LoopDecision::{Complete, Continue, Exhausted}`); actions stage only on
+`Continue`. `record_pass` runs before a pass's terminal event (that event,
+`finalize`, the gate, and the condition read the pass's own typed result:
+text, sequence slice array, group dictionary), and `retry_pass` restores the
+previous result for a retried attempt. The document engine
+(`execute_loop_with_lifecycle`) and the containers (`sequence/task/sequence.rs`,
+`group.rs`, CLI `wrap/sequence/container.rs::RootRun`) share it; containers
+run `looping/container.rs::finish_container_pass` after `Finished { failed:
+false }` and `ContainerRunner::begin_next_pass`. A looping container's retry
+restores `PassCheckpoint` (mutations and outputs at pass entry); a
+non-looping one keeps its old rule. Loop-level fail-fast is gone (no
+`CLAUDINE_FAIL_FAST` read): a failed pass ends the loop before its gate.
+Gate/condition/action failures are `LifecycleLoopGateFailed`/
+`LoopEvaluationFailed`/`LoopActionWriteRefused` with the pass. A `prompt:`
+task whose document declares `loop:` runs through
+`prepare_and_run_active_document` (`task_run.rs::run_looping_document`), and
+`PromptTaskRequest.loop_values`/`StepComposeContext.loop_values` carry an
+enclosing container's `loop.*` into non-looping documents.
+
+**`break`, `prep`, dry run.** A `break` records `LoopBreak { reason, code }`
+in its nearest loop's `LoopBreakSlot` (`LoopAmbient.breaks`, shared by every
+page whose innermost loop it is; `LoopFrame::pending_break`) and ends its
+event like `stop`; outside every loop it is `LifecycleBreakWithoutLoop`.
+Containers stop starting children while the slot is pending, `defuse()` the
+guard, run `finalize` once, publish partial results; the owner ends with
+`ContainerPassEnd::Broken`/`LoopExecutionResult::broken`. Group legs get
+`with_isolated_breaks()` and the fold forwards the first succeeded leg's
+break in declaration order; a failure or retry `discard()`s it. The code is
+the exit status only for the root loop (`RootRun::broken_exit_code`;
+`prep.rs` when `step_scope` is `None`). `PromptRunOutcome.withheld` keeps an
+unlaunched document out of `seq.outputs`. `prep` is a returning action
+(`executor.rs::run_prep`) through the thread-installed
+`lifecycle::prep::PrepRunner` (`install`, `inherit` for group workers, call
+chain `enter_call`, one cycle domain with proxies); the CLI runner
+(`commands/prep_target.rs`, installed by compose/inline-compose/sequence)
+re-enters `run_composition_inner`/`run_sequence_target` in process with the
+overlay as data setters. A failed call is `LifecyclePrepFailed` (a dispatch
+failure `no_error` tolerates). Not built: `kind: group` targets and static
+approval inventory of `prep` targets. `--dry-run` renders `shell:` and
+`side_effect:` tasks (`PrimaryOutcome::withheld`), shows guards unevaluated,
+previews one pass with a frame for `loop.*` (`dry_run_loop_note`), and lists
+literal `prep` targets (`LifecycleConfig::literal_prep_targets`);
+`--dry-run-shell` (clap `requires = "dry_run"`) runs the shells once.
 
 **Loop configuration.** Every owner's `loop:` parses through
 `looping/config.rs`: `resolve_loop_config` for a document,
@@ -252,13 +297,19 @@ unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
 Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
 grammar. Container `loop:` (group object, sequence-document root, inline
-nested sequence task) and task `when:` are grammar ahead of behavior:
-`sequence/grammar.rs` validates them (`container_loop`, `task_when`,
-`validate_sequence_root`, located by `normalize_plan_at`'s property path in
-the declaring file), then refuses a valid one with
-`ContainerLoopNotYetSupported`/`TaskWhenNotYetSupported`; those two functions
-are the only refusal sites. Sequence-root `when:` and `loop` on any other task
-are permanent errors. JSON-family sources reject duplicate keys in
+nested sequence task) is validated by `sequence/grammar.rs::container_loop`
+and frozen on `PreflightSequence`/`PreflightGroup.loop_config`
+(`PreflightLoop`, config plus location; the gate goes into the container's
+`loop` stack so preflight approves its shells); the root's is parsed by the
+CLI (`root_loop_frame`). Task `when:` (beside an executable only; a body
+step's is `WhenMisplaced`) is evaluated at the task's turn by
+`sequence::task::evaluate_task_guard` (read-only, task-setup scope): nested
+children and legs in `TaskExecution::run_guarded` (a leg in its worker,
+against the group-start member state), a root step in
+`iterate.rs::run_one_step` before it composes (`task_run.rs::root_step_guard`,
+then `run_admitted`). False is `TaskOutcome.skipped` (null result, nothing
+published); a raising guard is `TaskWhenEvaluationFailed`. Sequence-root
+`when:` and `loop` on any other task are permanent errors. JSON-family sources reject duplicate keys in
 `sequence/data.rs` (`DuplicateScan`) before the `serde_json::Value` conversion. The CLI rejects `--fail-fast` before source loading, keeps explicit
 provider `--` tails opaque, and no longer injects `CLAUDINE_FAIL_FAST`.
 `cancelled` is a cleanup-only lifecycle event. Presence, including `[]` or
@@ -272,8 +323,7 @@ never `failure` recovery. `stop` ends only the cancellation stack. Recovery in
 the following finalize raises the typed cancellation-recovery error without
 launching work; cleanup errors stay secondary and preserve cancellation/130.
 Loop initialization checks cancellation before catch controls, and cancelled
-iterations terminate before handoffs, loop gates, or mutations regardless of
-`fail_fast`. Timeouts remain failures; cleanup timeouts remain cleanup errors. Root sequence
+iterations terminate before handoffs, loop gates, or mutations. Timeouts remain failures; cleanup timeouts remain cleanup errors. Root sequence
 Ctrl-C exits 130 on every OS; native Windows provider status `0xC000013A` is
 normalized to 130. See [Sequences → Cancellation](topics/flow-control/sequences.md#cancellation).
 Sibling cancellation uses `composition.cancelled` with `err.detail.group`,

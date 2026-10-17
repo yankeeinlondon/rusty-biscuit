@@ -33,15 +33,16 @@ A container's `loop:` goes in one of three places: on a group object beside
 `tasks:`, at a sequence document's root beside `sequence:`, or on an inline
 nested sequence's task entry beside `sequence: [ … ]`. The block uses the
 [loop grammar](./looping.md#frontmatter-shape) and is checked when the
-sequence is resolved (a group file's when preflight loads it). **Planned:**
-container loops do not run yet, so a valid one is refused with a typed,
-located "not yet supported at run time" error before any task, event, or
-provider runs, rather than running its body once.
+sequence is resolved (a group file's when preflight loads it). The container
+then repeats by the same rules as a document: `initialize` once, `start`, its
+children, its terminal event, and `finalize` each pass, then the loop gate;
+see [Composition Looping](./looping.md#iteration-semantics) for the pass order,
+results, and retries inside a looping container.
 
 ```yaml
 sequence:
     - name: retry-build
-      loop: { until: "built", max: 3 }   # inline nested sequence: accepted, refused at run time
+      loop: { until: "built", max: 3 }   # inline nested sequence: repeats its steps
       sequence:
           - name: build
             shell: just build
@@ -154,18 +155,10 @@ simply requires every step to carry an executable.
 
 Optional task fields: `name`, `params:`
 (user setters passed to a `prompt` document), `timeout:` (per shell command),
-`operation:`, `flow:`, and `when:` (any task). A field that cannot affect the
+`operation:`, `flow:`, and `when:` (any task with an executable; see
+[Task guards](#task-guards-when)). A field that cannot affect the
 chosen executable — say `params:` on a `shell:` task — is a typed error, not a
 silent no-op.
-
-`when:` is a task option, never step state. It must be a non-empty string
-that parses as a condition expression, the same surface as a lifecycle item's
-`when`; `null`, a boolean, a number, a list, a map, `""`, or an unparsable
-expression is a typed error naming the task's property (`sequence[0].when`).
-**Planned:** guards are not evaluated yet, so a valid `when:` is refused before
-anything runs, rather than ignored. A `when:` at the sequence document's root
-is always an error: the document's body is not a step. On a group object it is
-also an error; put it beside `group:` on the task.
 
 ```yaml
 ---
@@ -183,6 +176,58 @@ sequence:
 ---
 Work on {{ seq.topic }}.
 ```
+
+### Task guards (`when:`)
+
+A `when:` beside a task's executable decides, at that task's turn, whether the
+task runs at all:
+
+```yaml
+sequence:
+    - name: stage
+      when: "stage == 'all'"          # stage=all on the command line runs it
+      shell: git add -A
+    - name: review
+      when: "length(seq.outputs) > 0"
+      prompt: "@prompts/review.md"
+```
+
+- **Where it goes.** On every sequence step and group leg that has an
+  executable (`prompt:`, `shell:`, `side_effect:`, `group:`, `sequence:`, or
+  `task:`), beside that executable. A step without an executable, which runs
+  the document body, takes no guard (`WhenMisplaced`: "`when` guards a task
+  and goes beside its executable; a step that runs the document body takes no
+  guard"). A `when:` at a sequence document's root, or on a group object, is
+  also an error; put it beside `group:` on the task.
+- **What it must be.** A non-empty string that parses as a condition
+  expression, the same surface as a lifecycle item's `when`. `null`, a
+  boolean, a number, a list, a map, `""`, or an unparsable expression is a
+  typed error naming the task's property (`sequence[0].when`). It is a task
+  option, never step state.
+- **What it reads.** Live state at the task's turn: the task's frontmatter
+  values (document values, caller setters, and runtime `set` writes), `seq`,
+  `loop`, and `group`. Truthiness is a lifecycle `when`'s. A guard is
+  read-only and runs no shell.
+- **False means skipped, not failed.** Nothing is composed or launched, no
+  lifecycle event fires, the task's own loop runs zero times, and nothing is
+  appended to `seq.outputs`. In a group the leg's outcome is `skipped` with a
+  null output. A root step prints `` step N/M skipped (`when` was false) ``;
+  a group breakdown shows `skipped`.
+- **Inside a loop** the guard is evaluated again on every pass of the
+  enclosing loop. A guarded looping container that runs starts its own loop
+  from a fresh count.
+- **Concurrent legs** read their group's start snapshot: runtime values are
+  frozen when the group starts, even for a leg admitted later under
+  `max_parallel`. File reads, such as `frontmatter('state.md', 'status')`,
+  stay live.
+- **An expression error fails the task**, located at the guard
+  (`TaskWhenEvaluationFailed`: "task guard `<path>.when` could not be
+  evaluated"). It is never read as false. A root step's runtime location reads
+  `tasks[N].when`.
+
+A guard never hides a task from [static preflight](#phase-1--static-preflight):
+a task whose guard will be false is still validated, and its shell commands are
+still approved before step 1.
 
 ## Step state
 
@@ -450,7 +495,11 @@ Claudine walks the **entire task graph**:
   - **The first task** (the first step's task, or every leg of a first-step
     group, or the first child recursively through nested first-step sequences)
     resolves each command now, under the launch environment and the
-    caller's values, and approves those bytes. They are what runs.
+    caller's values, and approves those bytes. They are what runs. If a later
+    pass of an outer loop changes a value such a command reads (a loop action
+    or a runtime `set`), the changed command is refused before it runs
+    (`SequenceShellApprovalChanged`, naming `changed: <value>`); it is never
+    silently replaced by the approved bytes.
   - **Every later task** approves each command with a placeholder only by its
     typed shape (`just clean --out {{ string }}/build`), even when its values
     are known now, because an earlier task may change them. An `exact` rule for
@@ -618,6 +667,9 @@ or unadmitted legs map to `null`, and failed legs retain partial output.
 - A nested sequence publishes an array; a group publishes a dictionary keyed
   by leg name in declaration order. These values stay native when nested, for
   example `["first", ["inner"], {"lint": "clean"}]`.
+- A container that a [`break`](flow-control.md#break) passes through publishes
+  the work it completed, once, after its own cleanup: no placeholder for
+  children that never ran, and no synthetic break entry.
 - A failed container publishes nothing. A group with `fail_fast: true` also
   withholds all leg mutations on failure. With `fail_fast: false`, leg failures
   are handled and their mutations merge in declaration order. A failing
@@ -746,9 +798,10 @@ or `variables` scoping around one task.
 A group leg may itself declare a group or a sequence task. Each leg receives
 a private in-memory runtime branch; siblings share the filesystem.
 
-**Group `loop` is planned.** A group object's `loop:` is checked with the loop
-grammar, then refused before anything runs; see
-[Container grammar](#container-grammar).
+A group object's `loop:` repeats the whole group: every pass admits its legs
+again, rebuilds `group.legs` and the outcome lists, and exposes the pass's
+dictionary as `loop.last_output`. The parent receives only the final pass's
+dictionary; see [Composition Looping](./looping.md#results-of-a-looping-primitive).
 
 ### Task references and lifecycle events
 
@@ -800,6 +853,12 @@ Every command gets a **30s** default timeout, overridable with `timeout:` as a
 duration (`45s`, `2m`) — a bare integer is rejected because the unit is part of
 the grammar, and `0s` is rejected rather than read as unbounded. A task passes
 when every command exits `0`. Stdout is concatenated in declaration order.
+
+Caller values (`key=value`, `--set`) are plain names to `shell:` commands and
+to authored step data, in the first task and in later ones, so
+`claudine sequence ship.md target=staging` lets a task run
+`shell: "just deploy {{ target }}"`. A caller value a command reads that is
+missing fails preflight.
 
 ### Ordered work
 
@@ -883,18 +942,44 @@ An unhandled step failure stops the sequence. Document `fail_fast:` and the
 |---|---|
 | `0` | Every executed step succeeded (or a dynamic source resolved to 0 steps) |
 | `1` | At least one step failed |
+| `code` | A looping root sequence ended through `break`; the process exits with the `break`'s `code` (default `0`). See [Looping — Breaking out of a loop](looping.md#breaking-out-of-a-loop) |
 | `130` | Ctrl+C interrupted the sequence, or `Esc`/Ctrl+C left the provider review screen before any step started |
+
+### Dry run
 
 `--dry-run` performs the **full preflight**, then just-in-time-composes every
 step against the *initial* state — empty `seq.outputs`, no runtime mutations —
 without launching a provider and without inline-compose write-back.
 Late-binding references render exactly as a first-step composition would see
-them.
+them. Static validation and shell approval are the same as in a live run.
 
-> **`--dry-run` still executes shell work.** `$( … )` expansions and `shell:`
-> tasks run for real, because their output is what composition needs. A dry-run
-> of a sequence containing `shell: just commit` can commit. Use commands safe
-> to execute when rehearsing; dry-run does not provide filesystem isolation.
+What a dry run shows instead of doing:
+
+| Element | In a dry run |
+|---|---|
+| `shell:` task | Rendered, not run: `` rendered (dry-run): would run `<command>` `` with the approved bytes (or the template of a template-mode command). It publishes nothing. |
+| `side_effect:` task | Rendered with its authored action and arguments, templates unresolved: `` rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}` ``. It never writes a file or applies a runtime `set`. |
+| `loop:` | The body is visited once with pass 1's `loop.*` values: `` `loop` previews one pass (dry-run); repetition is not evaluated: until `<expr>`, max N ``. No gate, condition, or action is evaluated. |
+| Task `when:` | Shown, not evaluated: `` `<name>` runs when `<expr>` (not evaluated in a dry run) ``; the task is rendered. |
+| Lifecycle events | None fire. |
+| `prep` | Targets do not run; a literal target is listed as `prep target @helper.md (not run in a dry run)`. |
+
+The run ends with `Sequence previewed (dry-run): N step(s) rendered, none run`.
+
+> **Composition shell work still runs.** `$( … )` expansions in step documents
+> execute for real, because their output is what composition needs, so their
+> side effects happen. Dry-run does not provide filesystem isolation.
+
+`--dry-run-shell` (only with `--dry-run`; alone it is a usage error, exit `2`)
+additionally runs each `shell:` task once, during the single preview pass:
+
+```sh
+claudine sequence --dry-run --dry-run-shell release.md
+```
+
+Those commands have their real effects (a `git add` stages), but no provider
+launches, no `side_effect:` task runs, and no loop repetition or lifecycle
+event is turned back on.
 
 ## Requiring caller input
 
@@ -931,10 +1016,13 @@ switch sets, and a reportable field in Claudine's logs.
 
 ## Remaining planned behavior
 
-**Planned:** generalized container loops, task `when:` guards, and persisted
-checkpoint/resume. A valid container `loop:` or task `when:` is validated, then
-refused before anything runs. Recursive containers, their lifecycle
-events, cancellation, and native array/dictionary results are implemented.
+**Planned:** persisted checkpoint/resume; running a `kind: group` file as a
+[`prep`](flow-control.md#prep) target; and inventorying `prep` targets in the
+front-loaded approval: today a `prep` target is approved as its own invocation
+when it runs, under the caller's approval flags (`--yolo`, policy).
+Recursive containers, their lifecycle events and loops, task `when:` guards,
+`break` and `prep`, cancellation, and native array/dictionary results are
+implemented.
 
 
 ## Container lifecycle and recovery
@@ -996,8 +1084,9 @@ flowchart TD
 ```
 
 Dry-run fires no lifecycle events recursively and launches no provider or
-inline write-back. It still executes shell tasks and composition shell
-expansions against initial state: those commands can have real effects.
+inline write-back. It renders shell tasks rather than running them (unless
+`--dry-run-shell` is given), but composition shell expansions still run against
+initial state and can have real effects. See [Dry run](#dry-run).
 
 
 ## Cancellation

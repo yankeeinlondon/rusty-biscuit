@@ -763,7 +763,8 @@ Successful children publish a string, sequence array, or named group dictionary
 only after finalize. Nested sequences start with empty `seq.outputs` and share
 `seq.run_id`. In-memory isolation does not roll back filesystem effects.
 Task `setup:`/`teardown:`, group `execution:`, sequence-level `fail_fast`, and
-`--fail-fast` are removed grammar. Container looping remains planned.
+`--fail-fast` are removed grammar. Containers loop through the shared
+`looping::LoopFrame` and `finish_container_pass`.
 
 Two seams are worth knowing before editing:
 

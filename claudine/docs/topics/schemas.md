@@ -378,9 +378,9 @@ start:
 `break` and `prep` are accepted by the schema and the parser alike
 (`break: "done"`, `break: { reason: done, code: 2 }`,
 `prep: "@prompts/next.md"`); the schema checks `code` is an integer from 0 to
-255 and `prep`'s target is a non-empty string. Running either is **planned**:
-reaching one fails the event with `LifecycleDirectiveNotYetSupported`. `defer`
-parses but is not executed yet either. The schema reads `prep: null` as
+255 and `prep`'s target is a non-empty string. Both run; see
+[Flow Control](flow-control/flow-control.md#break). `defer` parses but is not
+executed yet (**planned**). The schema reads `prep: null` as
 absent, so that spelling is left to the parser, which rejects it.
 
 ### Optional inputs and open metadata

@@ -729,8 +729,10 @@ unhandled failure, or `130` on interruption. `--perf` adds aggregated timing;
 `--silent` suppresses per-step status messages.
 
 `--dry-run` performs preflight and composes against initial state without
-provider launches, lifecycle dispatch, or inline write-back. Shell tasks and
-composition shell expansions still run with real effects.
+provider launches, lifecycle dispatch, or inline write-back. `shell:` and
+`side_effect:` tasks are rendered, not run (`--dry-run-shell` runs the
+`shell:` tasks once); composition shell expansions still run with real
+effects.
 
 ### Per-step runtime bindings
 

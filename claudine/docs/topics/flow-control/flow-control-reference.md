@@ -13,7 +13,7 @@ Placement is checked once, at parse time: `skip` is accepted only in `initialize
 | `blocked` (from compose pre-flight) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
 | `loop` (the iteration gate) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
 
-`stop` works in every event. `error` is rejected in `cancelled`. Recovery in the `finalize` after cancellation raises a typed cancellation-recovery error and launches no work. `defer` fails with `LifecycleDeferNotImplemented` in every event until its scheduler exists. `break` and `prep` fail with `LifecycleDirectiveNotYetSupported` in every event and in the loop gate until loop control and the target runner exist; `no_error` does not suppress the refusal.
+`stop` works in every event. `error` is rejected in `cancelled`. Recovery in the `finalize` after cancellation raises a typed cancellation-recovery error and launches no work. `defer` fails with `LifecycleDeferNotImplemented` in every event until its scheduler exists. `break` and `prep` run in every event except `cancelled`, and in the loop gate; see [`break` and `prep` in detail](#break-and-prep-in-detail).
 
 The unsupported cells have no re-entry point to return to, so they raise a typed error instead of quietly doing nothing. Put those recoveries on `start`, `success`, `failure`, or `finalize`.
 
@@ -88,12 +88,13 @@ The target must exist. A missing target fails with a typed `Unresolvable file re
 
 ### Passing values with `with:`
 
-`with:` is a transient overlay of top-level frontmatter properties for the document a transition reads next. Two directives accept it:
+`with:` is a transient overlay of top-level frontmatter properties for the document a transition reads next. Three directives accept it:
 
 - on `proxy` it parameterizes the **target** of the handoff;
-- on `retry` it parameterizes the **fresh re-read of the same document** for the retried attempt (see [Retry overlays](#retry-overlays)).
+- on `retry` it parameterizes the **fresh re-read of the same document** for the retried attempt (see [Retry overlays](#retry-overlays));
+- on `prep` it parameterizes the **called target**, with `proxy`'s shape, typing, and evaluation rules. It is the target's only caller values: the caller's own setters do not reach a `prep` target (see [`prep`](#prep)).
 
-`resume` takes no `with:`: it continues a live session rather than reading a document anew. `prep` accepts one with `proxy`'s rules (its call is **planned** at run time).
+`resume` takes no `with:`: it continues a live session rather than reading a document anew.
 
 ```yaml
 success:
@@ -120,7 +121,7 @@ The rules below hold for both directives unless a section says otherwise.
 | `with:` is not a mapping | `LifecycleWithNotMapping` |
 | A key contains `{{ … }}` | `LifecycleWithDynamicKey` |
 | The whole mapping is one span, such as `with: "{{ payload }}"` | `LifecycleWithWholeMapping` (out of scope for v1) |
-| `with:` appears on a directive other than `proxy` or `retry`, `resume` included | `LifecycleWithUnsupported` |
+| `with:` appears on a directive other than `proxy`, `retry`, or `prep`, `resume` included | `LifecycleWithUnsupported` |
 | `with:` written beside a short-form directive in the same item (`- proxy: "x"` plus a sibling `with:`) | `LifecycleUnknownVerb`, because a sibling key is read as a verb; use the long form |
 
 #### Value types
@@ -228,6 +229,29 @@ These guarantees hold regardless:
 - An overlay cannot enable shell commands during initialization. Shell commands in later events are discovered and approved by the target's own pre-flight, so the approved bytes are the executed bytes.
 - Status output may say that a handoff carries an overlay, and tracing may record property names and counts. Neither prints overlay values.
 
+## `break` and `prep` in detail
+
+### `break`
+
+| Rule | Detail |
+|------|--------|
+| Which loop | The nearest enclosing one: the document's own `loop:`, or a looping group or sequence around it. An outer loop is never ended by an inner loop's `break`. |
+| No loop | A typed run-time error of the firing event, `LifecycleBreakWithoutLoop` ("… fired outside any loop"). `no_error` does not suppress it. |
+| `code` | An integer `0`–`255`, default `0`. When the broken loop is the root invocation's (`claudine compose` of a looping document, or a looping root sequence), the process exits with it. An inner loop's `code` appears only in the summary line, and the run continues. |
+| `reason` | Optional text; may interpolate `{{ … }}`. The summary prints `loop broken: <reason> (code N)`, or `loop broken (code N)` without one. Loops that end by their condition or by `max` print no such line. |
+| Precedence | Any failure beats a pending `break`: an unhandled sibling failure, a failing `finalize`, or a `break` fired from `failure`. A leg failure handled by `fail_fast: false` does not. Ctrl-C overrides it (exit `130`). A `retry` discards it. |
+| Concurrent group | The group carries the first breaking leg in declaration order, after every leg settles. |
+
+### `prep`
+
+| Rule | Detail |
+|------|--------|
+| Return | Exit `0` returns, including a target whose `initialize` skipped or whose own root loop ended by `break` with code `0`. Any other status fails the call. |
+| Failure | An action failure of the caller's current event, `LifecyclePrepFailed` ("`prep` of `<target>` failed: <cause>"). It takes the event's ordinary error route; `no_error: true` on the `prep` tolerates it. In `failure` or `finalize` the event is not re-entered and the original error stays primary. |
+| Cycles | Calls and `proxy` handoffs share one cycle domain and the 16-hop limit (`MAX_PROXY_HOPS`) over the active chain: `LifecyclePrepCycle` ("would re-enter an active call or exceed the hop limit"). A returned call is released, so calling the same helper again is legal. Concurrent legs keep separate chains. |
+| Output | Reported under the target. Nothing is appended to the caller's `seq.outputs`, and the target's frontmatter, loop frames, and `set` writes never merge back. |
+| Resolution | Relative to the document that authored the directive, by the [`proxy` rules](#how-a-proxy-target-is-found). |
+
 ## `--dry-run`
 
-`--dry-run` fires no lifecycle events. It returns before the lifecycle runtime is constructed, so no event runs and no dynamic `proxy` is followed. Composition shell expansions and sequence `shell:` tasks still execute and may change the filesystem or perform other real work; for example, a dry-run containing `shell: just commit` can commit. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run).
+`--dry-run` fires no lifecycle events. It returns before the lifecycle runtime is constructed, so no event runs, no dynamic `proxy` is followed, and no `prep` target runs. Composition shell expansions still execute and may change the filesystem or perform other real work. Sequence `shell:` tasks are rendered, not run, unless `--dry-run-shell` is also given; `side_effect:` tasks never run. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run) and [Sequences — Dry run](sequences.md#dry-run).

@@ -44,7 +44,7 @@ loop's configuration, and can carry lifecycle actions of its own (see
 | `failure` | Provider or completion verdict failed | An unhandled child failure reached this container. |
 | `cancelled` | Cleanup after sibling-failure cancellation or Ctrl-C | Descendants settled after cancellation, before owner cleanup. |
 | `finalize` | Once after the terminal event, unless skipped or transferred by recovery | Once after the final attempt; successful results publish afterward. |
-| `loop` | Loop configuration and lifecycle gate after `finalize` | Group loops are rejected; general container loop support is planned. |
+| `loop` | Loop configuration and lifecycle gate after `finalize` | A group's or sequence's loop gate runs after each pass's `finalize`, as a document's does. |
 
 `cancelled` accepts communications (`say`/`speak`, `effect`, `message`,
 `notify`, `stdout`, `stderr`, `info`, `warn`, `success`), expression side
@@ -59,9 +59,9 @@ running primitive. Cleanup waits for descendants, then runs `cancelled` and
 `finalize` before restoring the enclosing scope. Shells remain disabled when
 the primitive has not reached `start`.
 
-Cancellation bypasses `failure` recovery. In a looping prompt, it also skips
-the loop gate and mutations and prevents another iteration, even with
-`CLAUDINE_FAIL_FAST=false` and a true continuation condition. A recovery directive in the following
+Cancellation bypasses `failure` recovery. In any looping primitive, it also
+skips the loop gate and mutations and prevents another pass, even with a true
+continuation condition. A recovery directive in the following
 `finalize` raises a typed cancellation-recovery error and starts no new work.
 Cleanup errors are secondary diagnostics: cancellation remains terminal and
 Ctrl-C still exits `130`. A timeout during ordinary execution remains a failure;
@@ -237,7 +237,7 @@ flowchart TD
     E -- "true" --> F["run the then body, by these same rules"]
     E -- "false" --> G["run the else body, if there is one"]
     E -- "the expression fails" --> X["the event fails; else is never chosen"]
-    D --> H{"was it a flow-control directive?"}
+    D --> H{"was it a flow-control directive other than prep?"}
     F --> H
     G --> H
     H -- "yes" --> Z["the whole event ends: nothing after it runs, in this list or any enclosing one"]
@@ -258,6 +258,10 @@ flowchart TD
   follows the usual failure routing.
 - The first flow-control directive that fires **ends the whole event**,
   wherever it sits: at the root, inside `then`, or inside a nested `else`.
+  `prep` is the exception: after its target returns, the next item runs.
+- An action failure in `initialize` or `start` that nothing tolerates fails
+  the run with the action's own message, for example
+  `lifecycle start failed: <message>` (or `lifecycle initialize failed: <message>`).
 - An event is complete when its synchronous work has finished, its messages
   are registered for delivery, and its audio has been published.
 
@@ -773,7 +777,7 @@ success:
       obj: "{{ payload }}"
 ```
 
-A literal nested map used as an argument value (`merge_frontmatter: { file: "state.md", obj: { owner: ken } }`) is a typed object-data-through-interpolation error. The one mapping-valued parameter is `with`, on `proxy` and `retry`.
+A literal nested map used as an argument value (`merge_frontmatter: { file: "state.md", obj: { owner: ken } }`) is a typed object-data-through-interpolation error. The one mapping-valued parameter is `with`, on `proxy`, `retry`, and `prep`.
 
 #### The removed `verb(args)` spelling
 
@@ -781,9 +785,9 @@ The `verb(args)` spelling (`say(All done)`, `shell(git push)`, `set_frontmatter(
 
 ### Flow Control Actions
 
-Nine directives change what the run does next instead of producing a side effect: `stop`, `skip`, `error`, `retry`, `resume`, `proxy`, `defer`, `break`, and `prep`. Three are **planned** at run time: they parse, and fail when they fire, `defer` with `LifecycleDeferNotImplemented` and `break` and `prep` with `LifecycleDirectiveNotYetSupported`. The first one that fires ends the whole event, except `prep`, which returns; an unconditional directive other than `prep` must be the last item in its list (see [Flow-control placement](#flow-control-placement)). `skip` is valid only in `initialize`; `cancelled` permits only `stop` from this directive set.
+Nine directives change what the run does next instead of producing a side effect: `stop`, `skip`, `error`, `retry`, `resume`, `proxy`, `defer`, `break`, and `prep`. Only `defer` is **planned**: it parses, and fails with `LifecycleDeferNotImplemented` when it fires. `break` ends the nearest enclosing loop, and `prep` runs another document or sequence to completion and then returns to the next item. The first directive that fires ends the whole event, except `prep`, which returns; an unconditional directive other than `prep` must be the last item in its list (see [Flow-control placement](#flow-control-placement)). `skip` is valid only in `initialize`; `cancelled` permits only `stop` from this directive set.
 
-See [Flow Control](flow-control.md) for what each directive does and when to use it, and the [Flow Control Reference](flow-control-reference.md) for runtime limits, retry and resume re-entry, and `proxy` handoffs, including the `with:` overlays on `proxy` and `retry`.
+See [Flow Control](flow-control.md) for what each directive does and when to use it, and the [Flow Control Reference](flow-control-reference.md) for runtime limits, retry and resume re-entry, and `proxy` handoffs, including the `with:` overlays on `proxy`, `retry`, and `prep`.
 
 ### Shell Actions
 
@@ -982,7 +986,9 @@ It is rejected:
 
 `no_error` never suppresses an expression-layer error: a crashed `when:`, a
 `{{ … }}` that raised, a `with` overlay that failed to evaluate, or a shell
-prohibition always halts.
+prohibition always halts. On a `prep` it tolerates a failed call
+(`LifecyclePrepFailed`) like a failed `shell` action; it never suppresses a
+`break` fired outside any loop (`LifecycleBreakWithoutLoop`).
 
 ## Lifecycle Context
 
@@ -1184,7 +1190,7 @@ Loop execution runs `initialize` once at the start, then re-enters each iteratio
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](looping.md#iteration-semantics) for the full counting table.
 
-The `loop:` block's lifecycle concerns read ordinary frontmatter and the `loop` values. Inside the gate these describe the iteration that just finished, the same values the `while`/`until` condition reads, so on the pass that ends the loop `loop.count` is the number of iterations that ran. `retry`, `resume`, and `proxy` in the gate fail with `LifecycleSetupPhaseRecoveryUnsupported`.
+The `loop:` block's lifecycle concerns read ordinary frontmatter and the `loop` values. Inside the gate these describe the iteration that just finished, the same values the `while`/`until` condition reads, so on the pass that ends the loop `loop.count` is the number of iterations that ran. `retry`, `resume`, and `proxy` in the gate fail with `LifecycleSetupPhaseRecoveryUnsupported`. A `break` in the gate ends the loop without evaluating the condition or applying the action, and a `prep` in the gate runs its target and returns to the next gate item; see [Looping — Breaking out of a loop](looping.md#breaking-out-of-a-loop).
 
 ## Examples
 
@@ -1432,7 +1438,7 @@ the authority. The most common errors:
 | `LifecycleSayConflict` | `say` and `speak` in one dictionary |
 | `LifecycleUnknownEffect` | A literal `effect` name not in the compiled catalog |
 | `LifecycleActionPlacement` | `skip` outside `initialize`, a shell in `initialize`, or a forbidden flow directive in `cancelled` (any branch) |
-| `LifecycleWithUnsupported` | `with` on a verb other than `proxy` and `retry` |
+| `LifecycleWithUnsupported` | `with` on a verb other than `proxy`, `retry`, and `prep` |
 | `LifecycleNestedSpanInLiteral`, `LifecycleErrNotAvailable` | Described below |
 
 ```yaml

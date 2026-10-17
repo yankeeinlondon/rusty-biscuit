@@ -355,8 +355,8 @@ fails. `false` handles leg failures and merges completed leg mutations in
 declaration order. Cancellation opt-in is the presence of a `cancelled` stack,
 including `cancelled: []`. Snapshot isolation covers in-memory state only; shell
 and agent filesystem effects are never rolled back. `execution:` and task
-`setup:`/`teardown:` are removed grammar; use lifecycle events. Container loops
-remain planned.
+`setup:`/`teardown:` are removed grammar; use lifecycle events. Groups and
+sequences loop like documents.
 
 Unhandled failures propagate through enclosing containers and stop subsequent
 sequence steps. `fail_fast` is accepted only on groups; `--fail-fast` and
@@ -381,7 +381,7 @@ Runs composition through provider/model resolution, then emits the composed resu
 - **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
 - `--quiet` / `--silent` have **no effect** under `--dry-run`.
 - **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
-- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `seq.outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No lifecycle events fire, no provider launches, and no inline-compose write-back occurs. Shell work is **not** suppressed: `$( … )` expansions and `shell:` tasks execute for real, so a dry run of a sequence containing `shell: just commit` will commit.
+- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `seq.outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No lifecycle events fire, no `prep` target runs (literal targets are listed), no provider launches, and no inline-compose write-back occurs. `shell:` and `side_effect:` tasks are rendered as `rendered (dry-run): would run …` and publish nothing; loops preview one pass with pass 1's `loop.*`; task guards are shown, not evaluated; the summary reads `Sequence previewed (dry-run): N step(s) rendered, none run`. `$( … )` composition expansions still execute for real. `--dry-run --dry-run-shell` runs each `shell:` task once (mutating; never a provider, never a `side_effect:`); `--dry-run-shell` alone is a usage error.
 
 See [Composition — Dry Run](topics/composition.md#dry-run) for the full reference.
 
