@@ -62,6 +62,13 @@ success:
     - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
     - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
     - say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
+    # The agent writes the completion flags; this only surfaces a final
+    # phase that exited without them, since marking them here could claim
+    # gates the agent never finished.
+    - when: "phase >= total_phases && (!frontmatter(plan, 'implemented') || (spec && !frontmatter(spec, 'implemented')))"
+      then:
+        - warn: "the final phase of `{{parent_dir(plan)}}` finished without setting `implemented: true` on the plan and spec; check the log before treating it as complete"
+        - message: "⚠️  final phase of `{{parent_dir(plan)}}` finished without `implemented: true` on the plan and spec; check the log before treating it as complete"
     - when: "ctx.dirty_files && !commit_message"
       then:
         - message: |-
@@ -134,13 +141,6 @@ You will log your implementation progress to: {{log}}
     - set `started_phase` to "{{phase}}"
 ::end-block
 
-::block when="loop.is_last"
-Now we need to update the specification file's frontmatter ({{spec}}):
-
-- set `implemented` to `true`
-- set `implemented_by` to "{{ctx.agent}}/{{ctx.model}}"
-::end-block
-
 ::block when="file_exists(log) && (!markdown_body_empty(log) || !is_empty(frontmatter(log)))"
 - the log file already has content from earlier work; keep it and append to it
 - you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
@@ -204,6 +204,34 @@ You are done when:
 - all GFM tasks/todos in the plan have been completed (and have been marked as complete)
     - NOTE: you should mark tasks as complete as soon as you believe they are complete (e.g., implemented and any relevant tests suggest this is complete). Doing this allows an immediate feedback loop but also helps in recovering from a phase that didn't complete
 
+### When the Test and Lint Gates May Be Skipped
+
+`just test` and `just lint` are required unless the CI scope calculator shows
+that this phase changed nothing any package reads. You do not decide that by
+judgment; you decide it by running this from the repository root after all of
+the phase's edits (including plan, log, and spec frontmatter) are saved:
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+The uncommitted working tree is exactly this phase's changes, because each
+earlier phase is committed when it succeeds.
+
+- if the output has `"packages": []`, the gates may be skipped
+    - record the command and its `packages` / `change_class` values in the log
+      under `## Phase {{phase}}`, and state in your final summary that the
+      gates were skipped and why
+- in every other case run both gates, including when:
+    - `packages` is non-empty: a "documentation" file such as a Markdown
+      fixture, golden file, or `include_str!` target counts as source when
+      compiled code reads it, and the calculator knows that while you may not
+    - the command errors or its output cannot be read
+    - you listed any file in `source_files_during_phase_{{phase}}`
+- never skip a gate because the change is small, "only a rename", "only
+  comments", or "only tests"; those all compile
+
 ### Plan and Log Frontmatter
 
 - You must set the following Frontmatter properties to both the plan file ({{plan}}) and the implementation log ({{log}}):
@@ -211,12 +239,6 @@ You are done when:
     - `docs_updated_during_phase_{{phase}}` should be set to all documentation files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `docs_created_during_phase_{{phase}}` should be set to all documentation files which were created during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `skills_files_updated_during_phase_{{phase}}` should be set to all agent skill files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
-    ::block when="phase == total_phases"
-        - set `source_code` Frontmatter to every source code file that was updated or created during the various phases of the plan
-        - set `documentation` Frontmatter to every documentation file that was updated or created during the various phases of the plan
-        - set `completed_phase` to `{{phase}}`
-        - set `implemented` to `true`
-    ::end-block
     ::block when="ctx.is_monorepo"
     - set `packages` as a list of packages in the monorepo which were touched by the implementation in phase {{phase}}
         ::block when="phase > 1"
@@ -252,9 +274,27 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
 ::block when="!frontmatter(spec, '$schema')"
 ::file ../_set_spec_schema.md 
 ::end-block
-::block when="loop.is_last"
-- set the `implemented` frontmatter to `true`
 ::end-block
+
+::block when="phase == total_phases"
+### Final Phase: Mark the Implementation Complete
+
+This is the **last** phase of the plan. Once its work and gates are finished,
+and before your final summary, set these Frontmatter properties:
+
+- on the plan ({{plan}}) **and** the implementation log ({{log}}):
+    - `source_code`: every source code file created or updated across all phases of the plan
+    - `documentation`: every documentation file created or updated across all phases of the plan
+    - `completed_phase`: `{{phase}}`
+    - `implemented`: `true`
+::block when="spec"
+- on the spec ({{spec}}):
+    - `implemented`: `true`
+    - `implemented_by`: "{{ctx.agent}}/{{ctx.model}}"
+::end-block
+
+The pipeline reads these flags to decide what runs next, so the plan is not
+complete until they are saved to disk.
 ::end-block
 
 **IMPORTANT:** 
@@ -267,8 +307,12 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
 ::end-block
 - Do NOT commit or stage files to git, this will be done as a separate process.
 - Report a summary of what you did including all the source files you changed.
-- You do not need to run tests across the entire monorepo as this will take far too long. Only 
+- You do not need to run tests across the entire monorepo as this will take far too long. Only run the gates for the '{{ctx.current_package_area}}' package area plus the dependent-package tests described in "Test Scope", and skip the gates only as described in "When the Test and Lint Gates May Be Skipped".
 - once the implementation is complete update the '{{ctx.current_package_area}}' if there were any notable changes needed in this skill
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
+
+::file "../_finish-before-exit.md"
+
+::file "../_test-scope.md"
 
 ::file "../_os.md"
