@@ -104,9 +104,9 @@ environment's cell and how to record an execution ban.
 - `#[cfg(unix)]` and `#[cfg(windows)]` test the **target**, not the build
   host. A `#![cfg(unix)]` inside a test file does not stop Cargo building that
   test's dev-dependencies for a Windows target; gate the dependency graph.
-- Never override `CARGO_TARGET_DIR` on the `BUILD_WIN` host; its checkout
-  pins the target dir to the `W:` volume for a reason
-  ([build-hosts.md](build-hosts.md)).
+- Never override `CARGO_TARGET_DIR` on the `BUILD_WIN` host: each clone's
+  `target` already sits on the large `CODING_DIR` volume, and an override can
+  fill the system drive ([build-hosts.md](build-hosts.md)).
 
 ## Files
 

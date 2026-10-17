@@ -213,9 +213,10 @@ Disk-space crises are handled by the `storage-strategy` skill. What
 - `just` recipes run `scripts/storage-preflight.sh`, which refuses to build
   below 50 GiB free (`BISCUIT_BUILD_MIN_FREE_GIB`). When it refuses, free
   space or use another host; do not work around it.
-- **Never override `CARGO_TARGET_DIR` on the Windows host.** Its Cargo config
-  places targets on the large volume, and an override once filled the system
-  drive and froze the host.
+- **Never override `CARGO_TARGET_DIR` on the Windows host.** No Cargo config
+  pins the target directory: each clone builds into its own `<clone>\target`,
+  which sits on the `CODING_DIR` volume because the clone does. An override
+  pointing anywhere else can fill the small system drive and freeze the host.
 - No scheduled sweep covers standing clones or scratch checkouts.
   `cross-check-refresh` is how clones get retired. Delete your own scratch
   targets, on Windows and inside the WSL guest, before you report.
