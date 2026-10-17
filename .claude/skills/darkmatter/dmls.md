@@ -99,7 +99,20 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `hash_bytes` helpers. Timing that decides behavior reads a `clock::Clock`
   (`ManualClock` in tests). `log_capture::CapturedLogs` captures formatted
   `tracing` lines: `scoped` sees only the calling thread, `global` sees every
-  thread (once per process).
+  thread (once per process). A test that runs `run_server` on its own thread
+  wraps it in `tracing::dispatcher::with_default(&logs.dispatch(), ..)`
+  instead (see `router/logging_tests.rs`); `initialized` never reaches
+  dispatch, since `lsp_server`'s handshake consumes it.
+- Request timing (`request_timing`): the router starts a `RequestTimings` on
+  `ServerState` at each dequeue and emits exactly one `CompletionEvent` per
+  request or notification (`slow request`/`slow notification` at `warn` from
+  500 ms, else `request complete`/`notification complete` at `debug`). Wrap
+  new measured work in `timings.time(Stage::…, ..)`, call
+  `record_wait(Wait::…)` when a request blocks on the file list or full
+  index, and call `OverlayState::for_document_timed` from dispatch paths.
+  `RunOptions::with_clock` injects the clock. Never log text, frontmatter
+  values, or payloads; `lsp_server`'s own debug trace already prints full
+  payloads, so a leak test must scope to `dmls`/`darkmatter` records.
 - Fixture traps: sniff recognizes a package only under a workspace manifest,
   and counts a declared member whose directory exists even without its own
   manifest. Inline `$schema` `file` is lazy (syntax only); use `file(eager)`

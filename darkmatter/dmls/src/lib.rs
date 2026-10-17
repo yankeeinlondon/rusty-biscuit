@@ -21,6 +21,7 @@ pub mod graph;
 pub mod log_capture;
 pub mod overlay;
 pub mod providers;
+pub mod request_timing;
 pub mod router;
 pub mod semantic_legend;
 pub mod source_map;

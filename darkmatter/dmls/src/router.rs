@@ -52,12 +52,14 @@ use darkmatter::markdown::compose::RequestSnapshot;
 use thiserror::Error;
 
 use crate::capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};
+use crate::clock::{Clock, SystemClock};
 use crate::config::{ConfigSeverity, ConfigState};
 use crate::context::{DocumentResolution, RepositoryContexts};
 use crate::diagnostics::DiagnosticsScheduler;
 use crate::graph::{WorkspaceGraph, WorkspaceIndex};
 use crate::overlay::OverlayState;
 use crate::providers::{DocumentContext, ProviderRegistry};
+use crate::request_timing::{CompletionEvent, MessageKind, Outcome, RequestTimings, Stage, document_uri};
 use crate::workspace::snapshot::SharedSnapshot;
 use crate::workspace::startup::{ProgressReporter, SilentProgress, collect_indices};
 use crate::workspace::watch::{
@@ -92,12 +94,20 @@ pub struct RunOptions {
     /// context is built from, fixed for the server's lifetime. The binary
     /// takes it from the process once; tests pass a fixture snapshot.
     pub snapshot: RequestSnapshot,
+    /// The monotonic clock request timing reads (the slow-request log).
+    pub clock: Arc<dyn Clock>,
 }
 
 impl RunOptions {
-    /// Options with no `--config` override.
+    /// Options with no `--config` override, timed by the system clock.
     pub fn new(snapshot: RequestSnapshot) -> Self {
-        Self { config_path: None, snapshot }
+        Self { config_path: None, snapshot, clock: Arc::new(SystemClock) }
+    }
+
+    /// Replaces the clock request timing reads.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 }
 
@@ -178,6 +188,8 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         watch_mode,
         contexts,
         manifests,
+        timings: RequestTimings::start(Arc::clone(&options.clock)),
+        clock: options.clock,
     };
     Router::new(connection, state).run()
 }
@@ -258,6 +270,10 @@ pub struct ServerState {
     pub contexts: Arc<RepositoryContexts>,
     /// Package-manifest hashes from the last scan, for [`WatchMode::ServerRescan`].
     manifests: HashMap<PathBuf, u64>,
+    /// The clock every message's [`RequestTimings`] reads.
+    clock: Arc<dyn Clock>,
+    /// The message being dispatched; the router replaces it at each dequeue.
+    timings: RequestTimings,
 }
 
 impl ServerState {
@@ -280,14 +296,17 @@ impl ServerState {
         let (path, resolution) = self.document_resolution(uri)?;
         let snapshot = self.snapshot.load();
         let doc_id = snapshot.document_id(&path);
-        let overlay = self.overlay.for_document(
-            uri,
-            open.text(),
-            &path,
-            self.config.effective(),
-            &self.roots,
-            &resolution,
-        );
+        let overlay = self.timings.time(Stage::OverlayBuild, || {
+            self.overlay.for_document_timed(
+                uri,
+                open.text(),
+                &path,
+                self.config.effective(),
+                &self.roots,
+                &resolution,
+                &self.timings,
+            )
+        });
         let ctx = DocumentContext {
             uri,
             path: &path,
@@ -300,7 +319,7 @@ impl ServerState {
             overlay: overlay.as_ref(),
             resolution: &resolution,
         };
-        Some(f(&ctx))
+        Some(self.timings.time(Stage::ProviderChain, || f(&ctx)))
     }
 
     /// The path a document is analyzed at and its file-resolution context.
@@ -740,12 +759,14 @@ impl Router {
                     if self.connection.handle_shutdown(&request)? {
                         return Ok(());
                     }
+                    self.state.timings = RequestTimings::start(Arc::clone(&self.state.clock));
                     self.handle_request(request);
                 }
                 Message::Notification(notification) => {
                     if notification.method == "exit" {
                         return Err(ServerError::ExitWithoutShutdown);
                     }
+                    self.state.timings = RequestTimings::start(Arc::clone(&self.state.clock));
                     self.handle_notification(notification);
                 }
                 Message::Response(response) => {
@@ -761,28 +782,45 @@ impl Router {
 
     /// Panic boundary: a panicking handler answers `InternalError` instead
     /// of taking down the request loop.
+    ///
+    /// Every path ends in exactly one completion event, emitted after the
+    /// response is sent so the figure covers the send.
     fn handle_request(&mut self, request: Request) {
         let id = request.id.clone();
-        if self.cancelled.take(&id) {
+        let method = request.method.clone();
+        let uri = document_uri(&request.params);
+        let outcome = if self.cancelled.take(&id) {
             self.respond(Response::new_err(
-                id,
+                id.clone(),
                 ErrorCode::RequestCanceled as i32,
                 "request was cancelled".to_string(),
             ));
-            return;
-        }
-        let outcome = catch_unwind(AssertUnwindSafe(|| self.dispatch_request(request)));
-        match outcome {
-            Ok(response) => self.respond(response),
-            Err(_) => {
-                tracing::error!(id = %id, "request handler panicked");
-                self.respond(Response::new_err(
-                    id,
-                    ErrorCode::InternalError as i32,
-                    "request handler panicked".to_string(),
-                ));
+            Outcome::Cancelled
+        } else {
+            match catch_unwind(AssertUnwindSafe(|| self.dispatch_request(request))) {
+                Ok(response) => {
+                    let outcome = response_outcome(&response);
+                    self.respond(response);
+                    outcome
+                }
+                Err(_) => {
+                    tracing::error!(id = %id, "request handler panicked");
+                    self.respond(Response::new_err(
+                        id.clone(),
+                        ErrorCode::InternalError as i32,
+                        "request handler panicked".to_string(),
+                    ));
+                    Outcome::Panic
+                }
             }
+        };
+        CompletionEvent {
+            kind: MessageKind::Request { id: &id },
+            method: &method,
+            uri: uri.as_deref(),
+            outcome,
         }
+        .emit(&self.state.timings);
     }
 
     fn dispatch_request(&mut self, request: Request) -> Response {
@@ -804,6 +842,8 @@ impl Router {
             PrepareRenameRequest::METHOD => self.prepare_rename(id, request.params),
             Rename::METHOD => self.rename(id, request.params),
             WillRenameFiles::METHOD => self.will_rename_files(id, request.params),
+            #[cfg(test)]
+            logging_tests::PANIC_METHOD => panic!("test handler panic"),
             other => {
                 tracing::debug!(method = other, "unhandled request");
                 Response::new_err(
@@ -833,10 +873,9 @@ impl Router {
             return invalid_params(id);
         };
         let snapshot = self.state.snapshot.load();
-        let symbols = self
-            .state
-            .registry
-            .workspace_symbols(&params.query, snapshot.as_ref());
+        let symbols = self.state.timings.time(Stage::ProviderChain, || {
+            self.state.registry.workspace_symbols(&params.query, snapshot.as_ref())
+        });
         Response::new_ok(id, WorkspaceSymbolResponse::Nested(symbols))
     }
 
@@ -1019,11 +1058,13 @@ impl Router {
         };
         let snapshot = self.state.snapshot.load();
         let env = self.state.rename_env(snapshot.as_ref());
-        let response = crate::providers::rename::prepare_rename(
-            &env,
-            &params.text_document.uri,
-            params.position,
-        );
+        let response = self.state.timings.time(Stage::ProviderChain, || {
+            crate::providers::rename::prepare_rename(
+                &env,
+                &params.text_document.uri,
+                params.position,
+            )
+        });
         Response::new_ok(id, response)
     }
 
@@ -1035,7 +1076,10 @@ impl Router {
         let uri = params.text_document_position.text_document.uri;
         let snapshot = self.state.snapshot.load();
         let env = self.state.rename_env(snapshot.as_ref());
-        match crate::providers::rename::rename(&env, &uri, position, &params.new_name) {
+        let renamed = self.state.timings.time(Stage::ProviderChain, || {
+            crate::providers::rename::rename(&env, &uri, position, &params.new_name)
+        });
+        match renamed {
             Ok(edit) => Response::new_ok(id, edit),
             // Refuse unsafe/ambiguous renames with an error the client surfaces,
             // rather than applying a partial edit (spec criterion 9).
@@ -1053,18 +1097,32 @@ impl Router {
         };
         let snapshot = self.state.snapshot.load();
         let env = self.state.rename_env(snapshot.as_ref());
-        let edit = crate::providers::rename::will_rename_files(&env, &params.files);
+        let edit = self.state.timings.time(Stage::ProviderChain, || {
+            crate::providers::rename::will_rename_files(&env, &params.files)
+        });
         Response::new_ok(id, edit)
     }
 
     fn handle_notification(&mut self, notification: Notification) {
         let method = notification.method.clone();
+        let uri = document_uri(&notification.params);
         let outcome = catch_unwind(AssertUnwindSafe(|| {
             self.dispatch_notification(notification)
         }));
-        if outcome.is_err() {
-            tracing::error!(method = %method, "notification handler panicked");
+        let outcome = match outcome {
+            Ok(()) => Outcome::Ok,
+            Err(_) => {
+                tracing::error!(method = %method, "notification handler panicked");
+                Outcome::Panic
+            }
+        };
+        CompletionEvent {
+            kind: MessageKind::Notification,
+            method: &method,
+            uri: uri.as_deref(),
+            outcome,
         }
+        .emit(&self.state.timings);
     }
 
     fn dispatch_notification(&mut self, notification: Notification) {
@@ -1249,6 +1307,15 @@ fn untitled_name(uri: &Uri) -> Option<String> {
     Some(name.to_string())
 }
 
+/// How a dispatched request's response reads in the completion event.
+fn response_outcome(response: &Response) -> Outcome {
+    match &response.error {
+        None => Outcome::Ok,
+        Some(error) if error.code == ErrorCode::RequestCanceled as i32 => Outcome::Cancelled,
+        Some(_) => Outcome::Error,
+    }
+}
+
 /// Builds an `InvalidParams` error response for a malformed request payload.
 fn invalid_params(id: RequestId) -> Response {
     Response::new_err(
@@ -1331,6 +1398,9 @@ fn parse_params<P: serde::de::DeserializeOwned>(params: serde_json::Value) -> Op
         }
     }
 }
+
+#[cfg(test)]
+mod logging_tests;
 
 #[cfg(test)]
 mod tests {

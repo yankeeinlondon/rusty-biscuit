@@ -146,7 +146,7 @@ fn main() -> ExitCode {
     let (connection, io_threads) = Connection::stdio();
     let options = dmls::RunOptions {
         config_path: args.config,
-        snapshot,
+        ..dmls::RunOptions::new(snapshot)
     };
     let outcome = dmls::run_server(connection, options);
     let joined = io_threads.join();

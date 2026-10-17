@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use biscuit_hash::xx_hash_bytes;
 
 use crate::context::DocumentResolution;
+use crate::request_timing::{RequestTimings, Stage};
 use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
@@ -257,6 +258,23 @@ impl OverlayState {
         workspace_roots: &[PathBuf],
         resolution: &DocumentResolution,
     ) -> Option<DocumentOverlay> {
+        let timings = RequestTimings::untimed();
+        self.for_document_timed(uri, text, path, config, workspace_roots, resolution, &timings)
+    }
+
+    /// [`OverlayState::for_document`], recording the schema-assembly and
+    /// trigger-registry stages into the dispatched message's `timings`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn for_document_timed(
+        &self,
+        uri: &Uri,
+        text: &str,
+        path: &Path,
+        config: &DmlsConfig,
+        workspace_roots: &[PathBuf],
+        resolution: &DocumentResolution,
+        timings: &RequestTimings,
+    ) -> Option<DocumentOverlay> {
         // Markdown frontmatter path.
         if let Some(parse) = FrontmatterAst::parse(text) {
             let uri_key = uri.as_str().to_string();
@@ -281,8 +299,18 @@ impl OverlayState {
                 text
             };
             let schema_text = schema_text.to_string();
-            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions } = cache
-                .schema_for(&uri_key, &schema_text, path, config, workspace_roots, resolution);
+            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions } =
+                timings.time(Stage::SchemaAssembly, || {
+                    cache.schema_for(
+                        &uri_key,
+                        &schema_text,
+                        path,
+                        config,
+                        workspace_roots,
+                        resolution,
+                        timings,
+                    )
+                });
             let mut suggestions = suggestions::inline_lints(text, ast.as_deref());
             // A stale outcome was assembled from the last-good text, whose
             // spans do not describe the current buffer.
@@ -331,7 +359,9 @@ impl OverlayState {
                         // A root I/O failure reaches the documents it governs
                         // through `schema_for`; this envelope's own load error
                         // is read below.
-                        let _ = cache.trigger_registry(path, workspace_roots, context);
+                        let _ = timings.time(Stage::TriggerRegistry, || {
+                            cache.trigger_registry(path, workspace_roots, context)
+                        });
                     }
                     if let Some(error) = cache
                         .trigger_load_errors
@@ -368,13 +398,15 @@ impl OverlayState {
                 cache
                     .standalone_last_good
                     .insert(uri.as_str().to_string(), Arc::clone(&model));
-                let resolved = cache.standalone_named_types(
-                    uri.as_str(),
-                    text,
-                    &model,
-                    workspace_roots,
-                    resolution,
-                );
+                let resolved = timings.time(Stage::SchemaAssembly, || {
+                    cache.standalone_named_types(
+                        uri.as_str(),
+                        text,
+                        &model,
+                        workspace_roots,
+                        resolution,
+                    )
+                });
                 problems.extend(resolved.suggestions.iter().cloned());
                 return Some(DocumentOverlay {
                     ast: None,
@@ -469,6 +501,7 @@ impl OverlayState {
 impl OverlayCache {
     /// Returns the cached schema outcome, reassembling only when the document
     /// content or the schema configuration changed.
+    #[allow(clippy::too_many_arguments)]
     fn schema_for(
         &mut self,
         uri_key: &str,
@@ -477,6 +510,7 @@ impl OverlayCache {
         config: &DmlsConfig,
         workspace_roots: &[PathBuf],
         resolution: &DocumentResolution,
+        timings: &RequestTimings,
     ) -> FrontmatterSchema {
         // A document whose context failed resolves no `$schema` reference or
         // trigger payload; its context-failure diagnostic says why.
@@ -484,7 +518,9 @@ impl OverlayCache {
             self.schema.remove(uri_key);
             return FrontmatterSchema::new(SchemaOutcome::Ready(None));
         };
-        let registry = match self.trigger_registry(path, workspace_roots, context) {
+        let registry = match timings.time(Stage::TriggerRegistry, || {
+            self.trigger_registry(path, workspace_roots, context)
+        }) {
             Ok(registry) => registry,
             Err(error) => {
                 self.schema.remove(uri_key);
