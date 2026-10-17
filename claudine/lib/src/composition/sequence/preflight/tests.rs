@@ -640,11 +640,10 @@ mod blocked {
         assert!(matches!(outer.tasks[0].action, PreflightAction::Group(_)));
     }
 
-    /// A valid group `loop` parses, but container repetition is not wired
-    /// yet, so the run is refused before preflight rather than running the
-    /// group once.
+    /// A valid group `loop` is frozen on the preflight group, its gate on
+    /// the group's `loop` event and its location kept for diagnostics.
     #[test]
-    fn group_loop_is_refused() {
+    fn group_loop_is_carried_on_the_preflight_group() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         let source = write_legacy_source(
@@ -663,15 +662,13 @@ mod blocked {
             )],
             "Body.\n",
         );
-        let error = legacy_err_for(&source);
-        assert!(
-            matches!(
-                &error,
-                CompositionError::ContainerLoopNotYetSupported { property, owner: crate::composition::LoopOwner::Group, .. }
-                    if property == "sequence[0].group.loop"
-            ),
-            "a valid group `loop` must be refused with a typed, located error; got: {error}",
-        );
+        let graph = graph_for(&source).unwrap();
+        let PreflightAction::Group(group) = &graph.steps[0].task.as_ref().unwrap().action else { panic!("expected a group") };
+        let looping = group.loop_config.as_ref().expect("the group's loop is carried");
+        // Runtime diagnostics locate a root step as `tasks[N]`, as every other
+        // preflight task diagnostic does.
+        assert_eq!(looping.location.property, "tasks[0].group.loop");
+        assert!(matches!(&looping.config.condition, crate::composition::LoopCondition::While(text) if text == "true"));
     }
 
     /// A group document is never directly executable — it runs only as a task.

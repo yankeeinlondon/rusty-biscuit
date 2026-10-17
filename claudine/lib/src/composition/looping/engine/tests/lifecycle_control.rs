@@ -408,7 +408,6 @@ fn loop_gate_explicit_error_fails_and_exits_without_mutation() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: None,
     };
     let lifecycle = lifecycle_from(json!({
@@ -466,7 +465,6 @@ fn loop_gate_unintentional_error_does_not_invert_outcome() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: None,
     };
     let lifecycle = lifecycle_from(json!({
@@ -510,7 +508,6 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: None,
     };
     // The gate item's `when:` calls an unknown function, so it *raises*
@@ -701,7 +698,6 @@ fn loop_gate_evaluation_error_fires_finalize_with_err() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: None,
     };
     // The gate `when:` calls an unknown function, so it *raises* at event
@@ -767,7 +763,6 @@ fn loop_gate_evaluation_error_with_finalize_raise_surfaces_finalize() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: None,
     };
     // `finalize` top-level `stderr` fires (recorder logs the signal) before
@@ -931,8 +926,7 @@ fn cancelled_loop_initialize_error_has_priority_over_routing() {
 #[test]
 fn cancelled_loop_executor_stops_without_gate_or_mutation() {
     let dir = TempDir::new().unwrap();
-    let mut config = counter_loop(3);
-    config.fail_fast = Some(false);
+    let config = counter_loop(3);
     let mut calls = 0;
     let result = run_loop(&dir.path().join("loop.md"), &config, object(json!({"counter":0})), LoopExecutionOptions::default(), |_| {
         calls += 1;
@@ -950,12 +944,11 @@ fn cancelled_loop_executor_stops_without_gate_or_mutation() {
 }
 
 #[test]
-fn cancelled_loop_executor_error_stops_even_when_fail_fast_is_false() {
+fn cancelled_loop_executor_error_stops_with_the_interrupt_status() {
     let dir = TempDir::new().unwrap();
     let token = crate::composition::lifecycle::cancellation::CancellationToken::default();
     let _scope = token.enter();
-    let mut config = counter_loop(3);
-    config.fail_fast = Some(false);
+    let config = counter_loop(3);
     let mut calls = 0;
     let result = run_loop(&dir.path().join("loop.md"), &config, object(json!({"counter":0})), LoopExecutionOptions::default(), |_| {
         calls += 1;

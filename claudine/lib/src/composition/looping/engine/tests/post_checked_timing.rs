@@ -25,7 +25,6 @@ fn post_checked_condition_counts_iterations_and_body_state() {
             actions: vec![LoopAction::Increment("n".into())],
             max_iterations: None,
             max_template: None,
-            fail_fast: None,
             on_rate_limit: None,
         };
         let observed = RefCell::new(Vec::new());

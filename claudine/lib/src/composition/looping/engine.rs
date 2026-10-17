@@ -1,6 +1,6 @@
 //! Loop execution orchestration.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Map, Value};
 use tracing::info;
@@ -14,8 +14,8 @@ use super::super::lifecycle::runtime::{
     LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState,
 };
 use super::super::types::{LoopConfig, OnRateLimit};
-use super::actions::ActionStaging;
-use super::expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
+use super::expression::{LoopAmbient, LoopExpressionLookup};
+use super::frame::{LoopDecision, LoopFrame, LoopOutcome, LoopResultKind};
 use super::types::{
     LoopExecutionOptions, LoopExecutionResult, LoopIterationContext, LoopIterationOutput,
 };
@@ -34,24 +34,23 @@ const PAUSE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_milli
 /// providers commonly return `429` for a moment after the nominal reset.
 const PAUSE_RESET_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Execute a loop with integrated lifecycle events.
+/// Execute a document loop with integrated lifecycle events.
 ///
-/// This is the only loop engine, and it is post-checked: every iteration runs
-/// before its condition is read, so a loop always runs at least once. It emits
-/// `initialize` exactly once before the first iteration, delegates
-/// `start`/terminal/`finalize` emission to the provided executor, and runs the
-/// post-`finalize` loop gate in the required order:
+/// This is the only document loop engine, and it is post-checked: every pass
+/// runs before its condition is read, so a loop always runs at least once. The
+/// pass state lives in a [`LoopFrame`] allocated before `initialize`, so
+/// `initialize` already reads pass 1's `loop` values. The engine emits
+/// `initialize` exactly once, delegates `start`/terminal/`finalize` emission to
+/// the executor, and then, after each pass:
 ///
-/// 1. Loop lifecycle concerns (against pre-mutation frontmatter).
-/// 2. Evaluate `while`/`until` condition (against pre-mutation frontmatter).
-/// 3. Apply per-iteration mutations only when continuing.
+/// 1. runs the loop gate,
+/// 2. reads `while`/`until` against current values and fresh file reads,
+/// 3. classifies the cap only when the condition still asks for a pass, and
+/// 4. stages the action only when another pass will run.
 ///
-/// Steps 1 and 2 read the same `loop.*` values: those of the iteration that
-/// just finished. Loop concerns run on every gate pass, including the terminal
-/// pass that exits. Under `fail_fast: true`, iterations ending in `blocked` or `failure`
-/// emit `finalize` through the executor and then exit before the loop gate.
-/// Under `fail_fast: false`, failed iterations reach the loop gate. Cancellation
-/// always ends the loop before its gate, mutation, or another iteration.
+/// A failed pass is an unhandled failure: the loop ends with it before its
+/// gate. Cancellation and handoffs also end the loop before the gate, the
+/// condition, or the action.
 ///
 /// `initialize_frontmatter` is the full bootstrap namespace, separate from
 /// iteration-control state. Its live mutations remain visible to catch
@@ -89,20 +88,13 @@ where
             );
         }
     }
-    if let Some(template) = &config.max_template {
-        return Err(CompositionError::LoopInvalid {
-            source_path: prompt_path.to_path_buf(),
-            property: "loop.max".to_string(),
-            message: format!(
-                "`loop.max` template `{template}` was not resolved before the loop started"
-            ),
-        });
-    }
-    let max_iterations = options
-        .max_iterations
-        .or(config.max_iterations)
-        .unwrap_or(DEFAULT_MAX_ITERATIONS);
-    let fail_fast = options.fail_fast.or(config.fail_fast).unwrap_or(true);
+    let mut frame = LoopFrame::new(
+        config,
+        options.max_iterations,
+        LoopResultKind::Document,
+        prompt_path,
+        "loop",
+    )?;
     let on_rate_limit = options
         .on_rate_limit
         .or(config.on_rate_limit)
@@ -121,9 +113,11 @@ where
 
     let mut guard = LifecycleRunGuard::new(lifecycle_config, lifecycle_ctx, emitter);
 
-    // Emit initialize once before any iteration runs.
+    // Emit initialize once before any iteration runs. It is inside the loop:
+    // it reads pass 1's values.
     let init_timing = capture_loop_lifecycle_timing(loop_start);
     let initialize_live = std::sync::Mutex::new(initialize_frontmatter.clone());
+    let entry_ambient = frame.ambient();
     let mut init_ctx = build_loop_stack_context(
         LifecycleSignal::Initialize,
         initialize_frontmatter,
@@ -135,8 +129,7 @@ where
         file_resolution_context,
         Some(&init_timing),
         current_authority.clone(),
-        // `initialize` fires once, before any iteration: outside the loop.
-        None,
+        Some(&entry_ambient),
     );
     init_ctx.live_frontmatter = Some(&initialize_live);
     init_ctx.runtime_state = runtime_state;
@@ -277,56 +270,57 @@ where
                 // `Stop` only ends the initialize stack; the run continues
                 // into the iteration loop with the outcome unchanged.
             }
+            // The loop's frame exists before `initialize`, so this `break`
+            // ends this loop: no pass runs, nothing is composed or launched,
+            // and `finalize` still runs once. Unlike `skip`, it is a
+            // successful loop outcome.
+            StackControl::Break { .. } => {
+                let broken = frame.pending_break().unwrap_or_default();
+                guard.defuse();
+                let finalize = guard.execute_event(
+                    LifecycleSignal::Finalize,
+                    &init_ctx.with_signal(LifecycleSignal::Finalize),
+                );
+                // A failed cleanup beats the pending break.
+                if let Some(info) = finalize.evaluation_error.as_ref().or(finalize.action_error.as_ref()) {
+                    return Ok(LoopExecutionResult::failure(
+                        initial_frontmatter,
+                        0,
+                        String::new(),
+                        1,
+                        CompositionError::lifecycle_evaluation("finalize", prompt_path, info),
+                    ));
+                }
+                if let Some(StackControl::Error { reason }) = finalize.control {
+                    return Ok(LoopExecutionResult::failure(
+                        initial_frontmatter,
+                        0,
+                        String::new(),
+                        1,
+                        CompositionError::LifecycleInitializeFailed {
+                            source_path: prompt_path.to_path_buf(),
+                            reason: reason.unwrap_or_else(|| "lifecycle finalize error".to_string()),
+                        },
+                    ));
+                }
+                return Ok(LoopExecutionResult::success(initial_frontmatter, 0, String::new(), 0)
+                    .with_break(broken));
+            }
         }
     }
 
     let mut frontmatter = initial_frontmatter;
-    let mut iteration_count = 0usize;
     let mut last_output = String::new();
-    let mut last_exit_code = 0i32;
     // The prepared snapshot of the most recent iteration's run; the loop's
     // starting snapshot until an iteration reports its own.
     let mut run_context: Option<darkmatter::markdown::compose::ComposeContext> = None;
 
-    for iteration in 1..=max_iterations {
-        // Under post-finalize checking the current frontmatter is the
-        // pre-mutation state for this iteration. `loop.is_last` should be
-        // true exactly when the loop will exit after this iteration, which
-        // is when the condition is falsy against the current frontmatter.
-        let is_last = if iteration == max_iterations {
-            true
-        } else {
-            let pre_mutation_ambient = LoopAmbient::new(
-                iteration,
-                iteration == 1,
-                false,
-                last_output.clone(),
-                last_exit_code,
-            );
-            let pre_mutation_lookup =
-                LoopExpressionLookup::new(
-                    &frontmatter,
-                    &pre_mutation_ambient,
-                    file_resolution_context,
-                    prompt_path,
-                )
-                    .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-                    .with_prepared_context(run_context.as_ref().or(lifecycle_ctx.context))
-                    .with_runtime_state(runtime_state);
-            !evaluate_condition(&config.condition, &pre_mutation_lookup)?
-        };
-        let ambient = LoopAmbient::new(
-            iteration,
-            iteration == 1,
-            is_last,
-            last_output.clone(),
-            last_exit_code,
-        );
-
+    loop {
+        let iteration = frame.count();
         let context = LoopIterationContext {
             iteration,
             frontmatter: frontmatter.clone(),
-            ambient,
+            ambient: frame.ambient(),
         };
 
         // The executor is responsible for emitting start, the terminal event,
@@ -335,42 +329,35 @@ where
             Ok(output) => output,
             Err(error) => {
                 if guard.cancel_if_requested(&init_ctx) {
-                    return Ok(LoopExecutionResult::success(frontmatter, iteration_count + 1, last_output, 130));
+                    return Ok(LoopExecutionResult::success(frontmatter, iteration, last_output, 130));
                 }
-                last_output.clear();
-                last_exit_code = 1;
-                iteration_count += 1;
-                if fail_fast {
-                    return Ok(LoopExecutionResult::failure(
-                        frontmatter,
-                        iteration_count,
-                        last_output,
-                        last_exit_code,
-                        error,
-                    ));
-                }
-                guard.reset_for_next_iteration();
-                continue;
+                // A pass that could not complete is an unhandled failure.
+                return Ok(LoopExecutionResult::failure(
+                    frontmatter,
+                    iteration,
+                    String::new(),
+                    1,
+                    error,
+                ));
             }
         };
 
         if output.terminal_signal == Some(LifecycleSignal::Cancelled)
             || guard.cancel_if_requested(&init_ctx)
         {
-            return Ok(LoopExecutionResult::success(frontmatter, iteration_count + 1, output.output, 130));
+            return Ok(LoopExecutionResult::success(frontmatter, iteration, output.output, 130));
         }
 
         // A proxy surfaced by the iteration's own lifecycle ends the source
         // document *now*: the target is not an extra iteration of this loop
         // (R7), so no loop gate runs and no further iteration begins. Checked
-        // before fail-fast handling on purpose — a proxy selected by a
+        // before failure handling on purpose — a proxy selected by a
         // `failure` stack is a clean handoff, not a failed iteration.
         if let Some(handoff) = output.handoff {
-            iteration_count += 1;
             let exit_code = output.exit_code;
             return Ok(LoopExecutionResult::success(
                 frontmatter,
-                iteration_count,
+                iteration,
                 output.output,
                 exit_code,
             )
@@ -388,11 +375,8 @@ where
         let lifecycle_ctx = &iteration_lifecycle;
 
         last_output = output.output;
-        last_exit_code = output.exit_code;
-        iteration_count += 1;
-        let iteration_rate_limit = output.rate_limit.clone();
-        let iteration_provider = output.provider_id.clone();
-        let iteration_model = output.model_id.clone();
+        let last_exit_code = output.exit_code;
+        frame.record_pass(Value::String(last_output.clone()), last_exit_code);
         let exit_reason = output.exit_reason.clone();
 
         let terminal_signal = output
@@ -402,15 +386,15 @@ where
             } else {
                 Some(LifecycleSignal::Success)
             });
-        let terminal_failed = matches!(
+        // A failed pass that its own `failure` event did not recover is an
+        // unhandled failure: it ends the loop before the gate.
+        if matches!(
             terminal_signal,
             Some(LifecycleSignal::Blocked) | Some(LifecycleSignal::Failure)
-        );
-
-        if terminal_failed && fail_fast {
+        ) {
             return Ok(LoopExecutionResult::failure(
                 frontmatter,
-                iteration_count,
+                iteration,
                 last_output,
                 last_exit_code,
                 output.error.unwrap_or_else(|| {
@@ -420,125 +404,125 @@ where
                         exit_code: last_exit_code,
                         reason: "iteration failed".to_string(),
                         exit_reason,
-                        // The fail-fast fallback: no iteration error was
-                        // attached, so there is no chain to project from.
+                        // No iteration error was attached, so there is no
+                        // chain to project from.
                         snapshot: None,
                     }
                 }),
             ));
         }
 
-        // Rate-limit policy is consulted between iterations, before the loop gate.
-        if !is_last {
-            match decide_rate_limit_action(
-                iteration_rate_limit.as_ref(),
-                on_rate_limit,
-                prompt_path,
-                iteration,
-                iteration_provider,
-                iteration_model,
-                options.interrupt_check,
-                options.pause_reset_margin.unwrap_or(PAUSE_RESET_MARGIN),
-            ) {
-                RateLimitOutcome::Proceed => {}
-                RateLimitOutcome::Interrupted => {}
-                RateLimitOutcome::Abort(error) => {
-                    return Ok(LoopExecutionResult::failure(
-                        frontmatter,
-                        iteration_count,
-                        last_output,
-                        last_exit_code,
-                        error,
-                    ));
-                }
-            }
+        // A `break` in this pass ended it after its cleanup: the loop ends
+        // without its gate, condition, or action.
+        if let Some(broken) = frame.pending_break() {
+            return Ok(LoopExecutionResult::success(frontmatter, iteration, last_output, last_exit_code)
+                .with_break(broken));
         }
 
-        // Post-finalize loop gate: concerns → condition → mutations.
-        let gate_ambient = LoopAmbient::new(
-            iteration,
-            iteration == 1,
-            is_last,
-            last_output.clone(),
-            last_exit_code,
-        );
-        match run_loop_gate(
-            config,
-            prompt_path,
-            &frontmatter,
-            &gate_ambient,
-            fail_fast,
-            base_dir,
-            &mut guard,
+        // The gate and the condition read the pass's effective frontmatter
+        // beneath the loop's control state; actions stage onto the control
+        // state alone.
+        let mut state = output.frontmatter.take().unwrap_or_default();
+        state.extend(frontmatter.clone());
+        let ambient = frame.ambient();
+        let timing = capture_loop_lifecycle_timing(loop_start);
+        let mut gate_ctx = build_loop_stack_context(
+            LifecycleSignal::Loop,
+            &state,
             lifecycle_ctx,
             effect_engine,
             shell_runner,
             emitter,
-            loop_start,
+            base_dir,
             file_resolution_context,
+            Some(&timing),
             current_authority.clone(),
-            runtime_state,
-        )? {
-            LoopGateOutcome::Exit => {
+            Some(&ambient),
+        );
+        gate_ctx.runtime_state = runtime_state;
+        if let LoopGateOutcome::Fail(error) = run_loop_gate(&mut guard, &gate_ctx, prompt_path, iteration) {
+            return Ok(LoopExecutionResult::failure(
+                frontmatter,
+                iteration,
+                last_output,
+                last_exit_code,
+                error,
+            ));
+        }
+
+        // A `break` in the gate ends the loop before its condition.
+        if let Some(broken) = frame.pending_break() {
+            return Ok(LoopExecutionResult::success(frontmatter, iteration, last_output, last_exit_code)
+                .with_break(broken));
+        }
+
+        let lookup = LoopExpressionLookup::new(&state, &ambient, file_resolution_context, prompt_path)
+            .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
+            .with_prepared_context(lifecycle_ctx.context)
+            .with_runtime_state(runtime_state);
+        let decided = frame.decide(&lookup);
+        let decision = match decided {
+            Ok(decision) => decision,
+            Err(error) => {
+                return Ok(LoopExecutionResult::failure(frontmatter, iteration, last_output, last_exit_code, error));
+            }
+        };
+        let next_frontmatter = match decision {
+            LoopDecision::Complete => {
                 return Ok(LoopExecutionResult::success(
                     frontmatter,
-                    iteration_count,
+                    iteration,
                     last_output,
                     last_exit_code,
-                ));
+                )
+                .with_outcome(LoopOutcome::ConditionMet));
             }
-            LoopGateOutcome::Continue(next_frontmatter) => {
-                frontmatter = next_frontmatter;
-            }
-            LoopGateOutcome::Fail(error) => {
+            LoopDecision::Exhausted(error) => {
                 return Ok(LoopExecutionResult::failure(
                     frontmatter,
-                    iteration_count,
+                    iteration,
                     last_output,
                     last_exit_code,
                     error,
-                ));
+                )
+                .with_outcome(LoopOutcome::Exhausted));
             }
-        }
-
-        guard.reset_for_next_iteration();
-
-        if iteration == max_iterations
-            && should_continue_after_cap(
-                config,
-                &frontmatter,
-                iteration + 1,
-                &last_output,
-                last_exit_code,
-                runtime_state,
-                LoopFileResolution {
-                    source_path: prompt_path,
-                    fallback_dir: lifecycle_ctx.launch_area,
-                    context: file_resolution_context,
-                    prepared_context: lifecycle_ctx.context,
-                },
-            )?
-        {
-            return Ok(LoopExecutionResult::failure(
-                frontmatter,
-                iteration_count,
-                last_output,
-                last_exit_code,
-                CompositionError::LoopLimitExceeded {
-                    cap: max_iterations,
-                    prompt_path: PathBuf::from(prompt_path),
+            LoopDecision::Continue => {
+                // The rate-limit policy applies only once another pass is
+                // certain to run, so it never stalls a loop that just ended.
+                match decide_rate_limit_action(
+                    output.rate_limit.as_ref(),
+                    on_rate_limit,
+                    prompt_path,
                     iteration,
-                },
-            ));
-        }
+                    output.provider_id.clone(),
+                    output.model_id.clone(),
+                    options.interrupt_check,
+                    options.pause_reset_margin.unwrap_or(PAUSE_RESET_MARGIN),
+                ) {
+                    RateLimitOutcome::Proceed | RateLimitOutcome::Interrupted => {}
+                    RateLimitOutcome::Abort(error) => {
+                        return Ok(LoopExecutionResult::failure(
+                            frontmatter,
+                            iteration,
+                            last_output,
+                            last_exit_code,
+                            error,
+                        ));
+                    }
+                }
+                match frame.stage_actions(&frontmatter, &lookup) {
+                    Ok(next) => next,
+                    Err(error) => {
+                        return Ok(LoopExecutionResult::failure(frontmatter, iteration, last_output, last_exit_code, error));
+                    }
+                }
+            }
+        };
+        frontmatter = next_frontmatter;
+        guard.reset_for_next_iteration();
+        frame.advance();
     }
-
-    Ok(LoopExecutionResult::success(
-        frontmatter,
-        iteration_count,
-        last_output,
-        last_exit_code,
-    ))
 }
 
 fn execute_loop_catch_protocol(
@@ -575,86 +559,45 @@ fn execute_loop_catch_protocol(
     protocol.finish().expect("loop catch protocol completed")
 }
 
-/// Outcome of the post-finalize loop gate.
-enum LoopGateOutcome {
-    /// The condition is satisfied; continue with the mutated frontmatter.
-    Continue(Map<String, Value>),
-    /// The condition stopped the loop; do not apply mutations.
-    Exit,
-    /// The gate stack raised an explicit `error(...)`: convert the loop's
-    /// final outcome to failure and exit. The condition is **not** evaluated
-    /// and mutations are **not** applied — the error takes precedence over the
-    /// condition, even on a non-final pass.
+/// Outcome of a loop gate.
+pub(crate) enum LoopGateOutcome {
+    /// The gate passed; read the condition.
+    Proceed,
+    /// The gate failed the loop owner. The condition is **not** read and no
+    /// action is staged.
     Fail(CompositionError),
 }
 
-/// Run the post-finalize loop gate.
+/// Run the loop gate that follows a finished pass, through `guard`.
 ///
-/// Executes loop lifecycle concerns against pre-mutation frontmatter, then
-/// evaluates the `while`/`until` condition, then applies mutations only if
-/// the loop should continue. A failed action list commits nothing; it fails
-/// the loop under `fail_fast` and otherwise continues from the pre-action
-/// state.
+/// `gate_ctx` is the owner's `loop` event context, carrying the `loop` values
+/// of the pass that just finished. Every looping primitive shares this: a
+/// document builds the context from its frontmatter, a container from its
+/// lexical roots and runtime state.
 ///
-/// An explicit `error(...)` lifecycle action in the gate stack surfaces as
-/// [`StackControl::Error`] and converts the final outcome to failure
-/// ([`LoopGateOutcome::Fail`]), short-circuiting before the condition and
-/// mutations. An *unintentional* action error does **not** invert the outcome:
-/// `loop` is a terminal-phase event, so `routes_action_error_to_failure`
-/// (consulted via [`LifecycleEventOutcome::routes_to_failure`]) is false for it
-/// and the gate proceeds to the condition with the outcome unchanged.
-#[allow(clippy::too_many_arguments)]
-fn run_loop_gate(
-    config: &LoopConfig,
-    prompt_path: &Path,
-    frontmatter: &Map<String, Value>,
-    ambient: &LoopAmbient,
-    fail_fast: bool,
-    base_dir: Option<&Path>,
+/// An explicit `error(...)` in the gate fails the loop owner
+/// ([`CompositionError::LifecycleLoopGateFailed`]), before the condition. An
+/// evaluation error in the gate (a crashed `when:` or interpolation) fails it
+/// too, as the typed evaluation error. An *unintentional* action error does
+/// not: `loop` is a terminal-phase event, so the gate proceeds to the
+/// condition. Recovery directives are refused here: a gate has no attempt to
+/// re-enter and no document to replace.
+pub(crate) fn run_loop_gate(
     guard: &mut LifecycleRunGuard<'_>,
-    lifecycle_ctx: &LifecycleRuntimeContext<'_>,
-    effect_engine: &darkmatter::effects::EffectEngine,
-    shell_runner: &dyn ShellRunner,
-    emitter: &dyn LifecycleEmitter,
-    loop_start: std::time::Instant,
-    file_resolution_context: &biscuit_file::FileResolutionContext,
-    current: Option<darkmatter::markdown::compose::CurrentAuthority>,
-    runtime_state: Option<&crate::composition::RuntimeState>,
-) -> Result<LoopGateOutcome, CompositionError> {
-    let timing = capture_loop_lifecycle_timing(loop_start);
-    // The gate's stack reads the `loop` global from the same ambient the
-    // condition reads below: the iteration that just finished.
-    let mut loop_ctx = build_loop_stack_context(
-        LifecycleSignal::Loop,
-        frontmatter,
-        lifecycle_ctx,
-        effect_engine,
-        shell_runner,
-        emitter,
-        base_dir,
-        file_resolution_context,
-        Some(&timing),
-        current,
-        Some(ambient),
-    );
-    loop_ctx.runtime_state = runtime_state;
-    let loop_outcome = guard.execute_event(LifecycleSignal::Loop, &loop_ctx);
+    gate_ctx: &StackExecutionContext<'_>,
+    source_path: &Path,
+    iteration: usize,
+) -> LoopGateOutcome {
+    let loop_outcome = guard.execute_event(LifecycleSignal::Loop, gate_ctx);
 
-    // A late-binding evaluation error in the gate stack (a crashed `when:`
-    // guard or interpolation) halts the loop *before* the `while`/`until`
-    // condition is evaluated and before any mutation is applied — the run
-    // cannot trust a condition computed against a document whose gate just
-    // raised. Unlike an unintentional dispatch failure, an evaluation error is
-    // not tolerated on a terminal-phase event (Decision #3). `loop` is a
-    // terminal-phase event, so — like `success`/`failure` — it does NOT
-    // retroactively fire `failure` (the provider already ran); it fires
-    // `finalize` exactly once carrying the error as the `err` global so a
-    // `finalize.stack` can react, then surfaces the typed evaluation error
-    // (precedence: a raise inside `finalize` beats the loop raise).
+    // A late-binding evaluation error in the gate stack halts the loop before
+    // its condition: the run cannot trust a condition computed against state
+    // whose gate just raised. The pass's own `finalize` already ran, so the
+    // catch protocol fires nothing again; it selects the error to surface.
     if let Some(info) = loop_outcome.evaluation_error.as_ref() {
         let result = execute_loop_catch_protocol(
             guard,
-            &loop_ctx,
+            gate_ctx,
             LifecycleSignal::Loop,
             Some(info),
             loop_outcome.clone(),
@@ -666,12 +609,10 @@ fn run_loop_gate(
             .evaluation_error
             .as_ref()
             .expect("evaluation signal carries error info");
-        return Ok(LoopGateOutcome::Fail(
-            CompositionError::lifecycle_evaluation(
-                surfaced_signal.property_name(),
-                prompt_path,
-                surfaced_info,
-            ),
+        return LoopGateOutcome::Fail(CompositionError::lifecycle_evaluation(
+            surfaced_signal.property_name(),
+            source_path,
+            surfaced_info,
         ));
     }
 
@@ -687,73 +628,34 @@ fn run_loop_gate(
     .finish()
     .expect("clean loop gate requires no catch event");
 
-    // An explicit `error(...)` in the gate stack converts the loop's final
-    // outcome to failure and exits — before the condition is evaluated and
-    // before any mutation is applied. Only the explicit `Error` lifecycle
-    // action does this; an unintentional action error leaves the outcome
-    // unchanged because `loop` is a terminal-phase event
-    // (`routes_to_failure(Loop)` is always false).
-    if let Some(StackControl::Error { reason }) = &decision.control {
-        let reason = reason
-            .clone()
-            .unwrap_or_else(|| "lifecycle loop gate error".to_string());
-        return Ok(LoopGateOutcome::Fail(
+    match &decision.control {
+        Some(StackControl::Error { reason }) => LoopGateOutcome::Fail(
             CompositionError::LifecycleLoopGateFailed {
-                source_path: prompt_path.to_path_buf(),
-                reason,
+                source_path: source_path.to_path_buf(),
+                iteration,
+                reason: reason
+                    .clone()
+                    .unwrap_or_else(|| "lifecycle loop gate error".to_string()),
             },
-        ));
-    }
-    // The loop gate runs in the loop engine, which has no provider re-entry,
-    // hand-off, or deferred-queue machinery, so a recovery control here is a
-    // clear failure rather than a silent drop. (Recovery from a completed
-    // iteration belongs in `failure`/`finalize`/`success`.) `Stop` and absence
-    // fall through to the normal condition evaluation.
-    if let Some(StackControl::Defer { .. }) = &decision.control {
-        return Ok(LoopGateOutcome::Fail(
+        ),
+        Some(StackControl::Defer { .. }) => LoopGateOutcome::Fail(
             CompositionError::LifecycleDeferNotImplemented {
-                source_path: prompt_path.to_path_buf(),
+                source_path: source_path.to_path_buf(),
             },
-        ));
-    }
-    let deferred_action = match &decision.control {
-        Some(StackControl::Retry { .. }) => Some("retry"),
-        Some(StackControl::Resume { .. }) => Some("resume"),
-        Some(StackControl::Proxy { .. }) => Some("proxy"),
-        _ => None,
-    };
-    if let Some(action) = deferred_action {
-        return Ok(LoopGateOutcome::Fail(
-            CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                source_path: prompt_path.to_path_buf(),
+        ),
+        Some(control @ (StackControl::Retry { .. } | StackControl::Resume { .. } | StackControl::Proxy { .. })) => {
+            let action = match control {
+                StackControl::Retry { .. } => "retry",
+                StackControl::Resume { .. } => "resume",
+                _ => "proxy",
+            };
+            LoopGateOutcome::Fail(CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                source_path: source_path.to_path_buf(),
                 event: "loop".to_string(),
                 action: action.to_string(),
-            },
-        ));
-    }
-
-    let lookup = LoopExpressionLookup::new(frontmatter, ambient, file_resolution_context, prompt_path)
-        .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-        .with_prepared_context(lifecycle_ctx.context)
-        .with_runtime_state(runtime_state);
-    if !evaluate_condition(&config.condition, &lookup)? {
-        return Ok(LoopGateOutcome::Exit);
-    }
-
-    // Actions stage atomically: a failed action list commits nothing. Under
-    // `fail_fast: false` the loop continues from the pre-action state.
-    match apply_actions(config, frontmatter, ambient.iteration, Some(&lookup)) {
-        Ok(next_frontmatter) => Ok(LoopGateOutcome::Continue(next_frontmatter)),
-        Err(error) if fail_fast => Ok(LoopGateOutcome::Fail(error)),
-        Err(error) => {
-            tracing::warn!(
-                source_path = %prompt_path.display(),
-                iteration = ambient.iteration,
-                %error,
-                "loop action failed under `fail_fast: false`; continuing from the pre-action state"
-            );
-            Ok(LoopGateOutcome::Continue(frontmatter.clone()))
+            })
         }
+        _ => LoopGateOutcome::Proceed,
     }
 }
 
@@ -917,45 +819,6 @@ fn interruptible_sleep(
         let slice = remaining.min(PAUSE_POLL_INTERVAL);
         std::thread::sleep(slice);
     }
-}
-
-fn apply_actions(
-    config: &LoopConfig,
-    frontmatter: &Map<String, Value>,
-    iteration: usize,
-    lookup: Option<&dyn darkmatter::markdown::compose::expression::EvaluationLookup>,
-) -> Result<Map<String, Value>, CompositionError> {
-    let mut stage = ActionStaging::new(frontmatter, iteration, config.actions.len());
-    for (index, action) in config.actions.iter().enumerate() {
-        stage.apply_action(action, index + 1, lookup)?;
-    }
-    Ok(stage.commit_map())
-}
-
-fn should_continue_after_cap(
-    config: &LoopConfig,
-    frontmatter: &Map<String, Value>,
-    next_iteration: usize,
-    last_output: &str,
-    last_exit_code: i32,
-    runtime_state: Option<&crate::composition::RuntimeState>,
-    resolution: LoopFileResolution<'_>,
-) -> Result<bool, CompositionError> {
-    let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
-    let lookup =
-        LoopExpressionLookup::new(frontmatter, &ambient, resolution.context, resolution.source_path)
-            .with_file_ref_fallback_dir(resolution.fallback_dir)
-        .with_prepared_context(resolution.prepared_context)
-        .with_runtime_state(runtime_state);
-    evaluate_condition(&config.condition, &lookup)
-}
-
-#[derive(Clone, Copy)]
-struct LoopFileResolution<'a> {
-    source_path: &'a Path,
-    fallback_dir: Option<&'a Path>,
-    context: &'a biscuit_file::FileResolutionContext,
-    prepared_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
 }
 
 #[cfg(test)]

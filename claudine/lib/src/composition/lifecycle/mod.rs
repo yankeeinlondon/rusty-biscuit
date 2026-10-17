@@ -42,6 +42,7 @@ pub mod cancellation;
 pub mod context;
 pub mod control;
 pub mod executor;
+pub mod prep;
 pub mod runtime;
 mod parse;
 pub mod shell_template;
@@ -1037,6 +1038,27 @@ impl LifecycleConfig {
             LifecycleSignal::Loop => &self.stacks.loop_gate,
             LifecycleSignal::Cancelled => &self.stacks.cancelled,
         }
+    }
+
+    /// Every `prep` target written as a literal, in event and stack order:
+    /// the targets a dry run lists without running. A target written as an
+    /// interpolation is known only when its event fires.
+    pub fn literal_prep_targets(&self) -> Vec<String> {
+        let mut targets = Vec::new();
+        for signal in LifecycleSignal::ALL {
+            actions::for_each_action(self.stack(signal), &mut |action| {
+                if let LifecycleActionKind::LifecycleControl(actions::LifecycleControlAction::Prep {
+                    target: Expr::StringLiteral(target),
+                    ..
+                }) = &action.kind
+                    && ExpressionFinder::find_all_plain(target).is_empty()
+                    && !targets.contains(target)
+                {
+                    targets.push(target.clone());
+                }
+            });
+        }
+        targets
     }
 
     /// Mutable access to the typed stack for a given signal.

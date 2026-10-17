@@ -120,7 +120,6 @@ fn scalar_dsl_action_parses() {
     );
     assert_eq!(config.max_iterations, Some(3));
     assert_eq!(config.max_template, None);
-    assert_eq!(config.fail_fast, None);
 }
 
 #[test]
@@ -466,7 +465,6 @@ fn control_config(condition: &str, actions: Vec<LoopAction>) -> LoopConfig {
         actions,
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: None,
     }
 }

@@ -25,7 +25,7 @@ use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 
 use super::super::lifecycle::action_value_to_expr;
-use super::super::lifecycle::bindings::{LifecycleScope, LifecycleValues, runtime_bindings};
+use super::super::lifecycle::bindings::{LifecycleScope, LifecycleValues, runtime_bindings_in_loop};
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
@@ -151,6 +151,10 @@ pub struct TaskOutcome {
     pub stdout: String,
     /// `true` when this outcome's native `result` was committed to `seq.outputs`.
     pub output_committed: bool,
+    /// `true` when the task's `when:` guard was false: nothing was composed or
+    /// launched, no event fired, and nothing was published. A skipped task
+    /// succeeded.
+    pub skipped: bool,
     /// Runtime state written by this task's stages, in first-write order.
     pub mutations: Vec<RuntimeMutation>,
     /// Wall-clock time across all three stages.
@@ -232,6 +236,10 @@ pub struct PromptTaskRequest {
     /// a group leg's own. The runner composes and launches the prompt
     /// document under its environment. `None` leaves the choice to the runner.
     pub document: Option<crate::invocation_context::InvocationContext>,
+    /// The `loop` values of the innermost looping container around the task,
+    /// which the document reads as `loop.*` unless it loops itself. `None`
+    /// outside every loop.
+    pub loop_values: Option<crate::composition::LoopAmbient>,
 }
 
 /// A composition run opened for a group member or a whole parallel group.
@@ -260,6 +268,10 @@ pub struct PromptRunOutcome {
     pub exit_code: i32,
     /// `true` when the run ended because the user interrupted it.
     pub interrupted: bool,
+    /// `true` when the document produced no result to publish: its
+    /// `initialize` skipped, or a `break` ended it before it launched. A
+    /// withheld success appends nothing to `seq.outputs`.
+    pub withheld: bool,
 }
 
 /// Composes and launches a `prompt:` task's document.
@@ -271,9 +283,26 @@ pub trait PromptTaskRunner: Sync {
         false
     }
 
+    /// Whether a dry run runs `shell:` tasks (`--dry-run-shell`). Without it a
+    /// dry run renders each one instead.
+    fn dry_run_shell(&self) -> bool {
+        false
+    }
+
     /// Check the document's late shell inputs before this task's setup runs.
     fn validate(&self, _request: &PromptTaskRequest) -> Result<(), CompositionError> {
         Ok(())
+    }
+
+    /// The runtime cap override (`--max-iterations`, then
+    /// `CLAUDINE_MAX_ITERATIONS`) for the loop authored in `source`. It
+    /// applies to each loop independently.
+    ///
+    /// ## Errors
+    ///
+    /// A malformed environment value, for a loop that would use it.
+    fn loop_cap_override(&self, _source: &std::path::Path) -> Result<Option<usize>, CompositionError> {
+        Ok(None)
     }
     /// Run one prompt task.
     ///
@@ -337,6 +366,43 @@ impl PromptTaskRunner for UnavailablePromptRunner {
             detail: "this caller executes no prompt documents".to_string(),
         })
     }
+}
+
+/// Evaluate `task`'s `when:` guard against `context`'s frontmatter, runtime
+/// state, and `seq`/`loop`/`group` roots. A task without a guard runs.
+///
+/// The guard is read-only: it is evaluated with shells disabled and no live
+/// document cell, in the task-setup binding scope.
+///
+/// ## Errors
+///
+/// [`CompositionError::TaskWhenEvaluationFailed`], located at the guard,
+/// when it raises.
+pub fn evaluate_task_guard(task: &PreflightTask, context: &StackExecutionContext<'_>) -> Result<bool, CompositionError> {
+    let Some(condition) = &task.when else { return Ok(true) };
+    let disabled = super::super::lifecycle::executor::DisabledShellRunner;
+    let guard = StackExecutionContext {
+        live_frontmatter: None, shell_runner: &disabled,
+        ..context.in_scope(LifecycleScope::TaskSetup)
+    };
+    guard.evaluate_task_guard(condition).map_err(|cause| CompositionError::TaskWhenEvaluationFailed {
+        source_path: task.diagnostic.source_path.clone(),
+        property: super::grammar::child_property(&task.diagnostic.task_property, "when"),
+        cause,
+    })
+}
+
+/// The values a root sequence step's guard reads before the step composes:
+/// the document's authored frontmatter as stored text, under `overrides`
+/// (caller setters, runtime writes, and the reserved overlay).
+pub fn step_guard_frontmatter(
+    authored: &darkmatter::markdown::FrontmatterMap,
+    overrides: &Map<String, Value>,
+) -> Map<String, Value> {
+    let mut state: Map<String, Value> = authored.iter()
+        .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
+    state.extend(overrides.iter().map(|(key, value)| (key.clone(), value.clone())));
+    state
 }
 
 /// Everything one task needs to run.
@@ -424,8 +490,65 @@ impl TaskExecution<'_> {
     /// Never returns `Err`: every failure is part of the task's reported
     /// outcome, because a scheduler must decide continuation from `fail_fast`
     /// rather than from an error propagating out of one task.
+    ///
+    /// A `when:` guard is evaluated first: a false guard skips the task with
+    /// nothing run and nothing published, and a guard that raises fails it.
     pub fn run(&self) -> TaskOutcome {
+        self.run_guarded(None)
+    }
+
+    /// Run a task whose `when:` guard the caller already evaluated as true.
+    pub fn run_admitted(&self) -> TaskOutcome {
         self.run_validated(None)
+    }
+
+    /// Evaluate the task's `when:` guard at its turn: against the task's
+    /// state and its `seq`, `loop`, and `group` roots. A task without a guard
+    /// runs.
+    ///
+    /// ## Errors
+    ///
+    /// [`CompositionError::TaskWhenEvaluationFailed`], located at the guard,
+    /// when it raises.
+    pub fn guard(&self) -> Result<bool, CompositionError> {
+        // A preview shows the guard instead of predicting it: the values it
+        // reads may come from tasks a dry run does not run.
+        if self.prompt.is_dry_run() && let Some(condition) = &self.task.when {
+            let name = self.task.name.as_deref().unwrap_or(&self.task.label);
+            self.dry_run_note(&format!("`{name}` runs when `{condition}` (not evaluated in a dry run)"));
+            return Ok(true);
+        }
+        let frontmatter: Map<String, Value> = self.state.data().iter()
+            .map(|(key, value)| (key.clone(), value.clone())).collect();
+        let seq = self.sequence_binding();
+        let context = StackExecutionContext { frontmatter: &frontmatter, seq: Some(&seq), ..self.stack.with_signal(self.stack.signal) };
+        evaluate_task_guard(self.task, &context)
+    }
+
+    fn run_guarded(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
+        match self.guard() {
+            Ok(true) => self.run_validated(validated),
+            Ok(false) => self.unstarted_outcome(TaskStatus::Succeeded, None),
+            Err(error) => self.unstarted_outcome(TaskStatus::Failed,
+                Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error))),
+        }
+    }
+
+    /// The outcome of a task that never started: a skipped one (`error` is
+    /// `None`), or one whose guard raised.
+    fn unstarted_outcome(&self, status: TaskStatus, error: Option<TaskDiagnostic>) -> TaskOutcome {
+        TaskOutcome {
+            result: Value::Null,
+            status,
+            stdout: String::new(),
+            output_committed: false,
+            skipped: error.is_none(),
+            mutations: Vec::new(),
+            duration: Duration::ZERO,
+            error,
+            secondary_errors: Vec::new(),
+            group_tasks: Vec::new(),
+        }
     }
 
     fn run_validated(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
@@ -439,13 +562,13 @@ impl TaskExecution<'_> {
             secondary_errors,
             group_tasks,
             group_output,
+            withheld,
         } = self.run_stages(validated);
 
-        let publishes = group_output.is_some() || !matches!(self.task.action, PreflightAction::Group(_) | PreflightAction::Sequence(_));
+        let container = matches!(self.task.action, PreflightAction::Group(_) | PreflightAction::Sequence(_));
+        let publishes = !withheld && (group_output.is_some() || !container);
         let result = group_output.unwrap_or_else(|| {
-            if matches!(self.task.action, PreflightAction::Group(_) | PreflightAction::Sequence(_)) {
-                Value::Null
-            } else { Value::String(stdout.clone()) }
+            if container || withheld { Value::Null } else { Value::String(stdout.clone()) }
         });
         let output_committed = status == TaskStatus::Succeeded && publishes && self.runtime.is_some();
         if output_committed {
@@ -457,6 +580,7 @@ impl TaskExecution<'_> {
             status,
             stdout,
             output_committed,
+            skipped: false,
             mutations: self.mutation_delta(&mutations_before),
             duration: started.elapsed(),
             error,
@@ -476,7 +600,7 @@ impl TaskExecution<'_> {
             };
             return StageOutcome { status, error, stdout: outcome.stdout,
                 secondary_errors: outcome.secondary, group_tasks: outcome.group_tasks,
-                group_output: outcome.group_output };
+                group_output: outcome.group_output, withheld: outcome.withheld };
         }
         let mut task = self.task.clone();
         self.graph.settle_task_shell_modes(&mut task);
@@ -549,6 +673,7 @@ impl TaskExecution<'_> {
         let mut stdout = String::new();
         let mut group_tasks: Vec<GroupTaskResult> = Vec::new();
         let mut group_output: Option<Value> = None;
+        let mut withheld = false;
 
         if let Some(items) = &stacks.setup
             && let Some(diagnostic) = self.run_stack(TaskStage::Setup, items, None)
@@ -565,6 +690,7 @@ impl TaskExecution<'_> {
                 stdout = primary.stdout;
                 group_tasks = primary.group_tasks;
                 group_output = primary.group_output;
+                withheld = primary.withheld;
                 secondary.extend(primary.secondary);
                 match primary.result {
                     PrimaryResult::Succeeded => {}
@@ -601,6 +727,7 @@ impl TaskExecution<'_> {
             secondary_errors: secondary,
             group_tasks,
             group_output,
+            withheld,
         }
     }
 
@@ -741,6 +868,44 @@ impl TaskExecution<'_> {
         Ok(ValidatedTask { late, prompt, group: None })
     }
 
+    /// Allocate a looping container's frame before its `initialize`, or
+    /// `None` when it does not loop. A dry run allocates it too, so its one
+    /// previewed pass reads pass 1's `loop` values, and says that the loop's
+    /// repetition is not evaluated.
+    ///
+    /// A templated `max` resolves once, here, against `state` (the
+    /// container's values under the runtime writes made so far), and the
+    /// runtime cap override replaces the authored one.
+    ///
+    /// ## Errors
+    ///
+    /// The cap template's located error, or a malformed override.
+    pub(super) fn open_loop(
+        &self, preflight: Option<&super::preflight::PreflightLoop>, kind: crate::composition::looping::LoopResultKind,
+        state: &Map<String, Value>, runtime: &RuntimeState,
+    ) -> Result<Option<crate::composition::looping::LoopFrame>, CompositionError> {
+        let Some(preflight) = preflight else { return Ok(None) };
+        let mut config = preflight.config.clone();
+        let mut values = state.clone();
+        values.extend(runtime.snapshot().mutations);
+        let ambient = crate::composition::LoopAmbient::new(1, true, false, kind.empty(), 0);
+        let lookup = crate::composition::LoopExpressionLookup::new(
+            &values, &ambient, self.stack.file_resolution_context, &preflight.location.source_path,
+        )
+        .with_file_ref_fallback_dir(self.stack.ctx_base_dir)
+        .with_prepared_context(self.stack.prepared_context)
+        .with_runtime_state(Some(runtime));
+        crate::composition::resolve_templated_loop_max(&mut config, &lookup, &preflight.location)?;
+        let cap = self.prompt.loop_cap_override(&preflight.location.source_path)?;
+        let frame = crate::composition::looping::LoopFrame::new(
+            &config, cap, kind, &preflight.location.source_path, &preflight.location.property,
+        )?;
+        if self.prompt.is_dry_run() {
+            self.dry_run_note(&crate::composition::looping::dry_run_loop_note(&preflight.location.property, &config, frame.max()));
+        }
+        Ok(Some(frame))
+    }
+
     fn prompt_request(&self, path: &std::path::Path, reference: &str) -> Result<PromptTaskRequest, CompositionError> {
         let params = self.evaluate_params()?;
         Ok(PromptTaskRequest {
@@ -774,6 +939,7 @@ impl TaskExecution<'_> {
             frame_writer: self.live.map(|live| live.rendered_writer()),
             run_evidence: self.run_evidence.cloned(),
             document: self.document.cloned(),
+            loop_values: self.stack.loop_values.cloned(),
         })
     }
 
@@ -783,7 +949,9 @@ impl TaskExecution<'_> {
                 PrimaryOutcome::interrupted(trim_transport_newline(&run.stdout).to_string())
             }
             Ok(run) if run.exit_code == 0 => {
-                PrimaryOutcome::succeeded(trim_transport_newline(&run.stdout).to_string())
+                let mut outcome = PrimaryOutcome::succeeded(trim_transport_newline(&run.stdout).to_string());
+                outcome.withheld = run.withheld;
+                outcome
             }
             Ok(run) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(
                 TaskStage::Primary,
@@ -823,6 +991,16 @@ impl TaskExecution<'_> {
                 ));
             }
         };
+        // A preview renders each command as approved (exact bytes, or the
+        // template of a template-mode command) and runs none of them; its
+        // `timeout:` is still validated. The empty result reaches only the
+        // preview, never `seq.outputs`.
+        if self.prompt.is_dry_run() && !self.prompt.dry_run_shell() {
+            for command in commands {
+                self.dry_run_note(&format!("rendered (dry-run): would run `{command}`"));
+            }
+            return PrimaryOutcome::withheld();
+        }
 
         // A document's commands start from its own environment.
         let document_shell = self
@@ -955,6 +1133,13 @@ impl TaskExecution<'_> {
 
     /// Dispatch a `side_effect:` action and capture its textual return.
     fn run_side_effect(&self, action: &Value, authored_set_order: Option<&[String]>) -> PrimaryOutcome {
+        // A preview never writes a file or a runtime value, with or without
+        // `--dry-run-shell`: it shows the action and its arguments as
+        // authored, templates unresolved.
+        if self.prompt.is_dry_run() {
+            self.dry_run_note(&format!("rendered (dry-run): would run `{action}`"));
+            return PrimaryOutcome::withheld();
+        }
         let parsed = match parse_single_action_with_order(
             LifecycleSignal::Start,
             action,
@@ -1070,11 +1255,12 @@ impl TaskExecution<'_> {
     fn verify_preflight_approvals(&self) -> Option<TaskDiagnostic> {
         let document = self.document?;
         let environment = document.document_environment();
+        let writes = self.runtime.map(|runtime| runtime.snapshot().mutations).unwrap_or_default();
         // In the order the stages would run, so the refusal names the first
         // command that would have run changed.
         for stage in [TaskStage::Setup, TaskStage::Primary, TaskStage::Teardown] {
             for approval in self.task.preflight_approvals.iter().filter(|a| a.stage() == stage) {
-                if let Err(error) = approval.verify(environment) {
+                if let Err(error) = approval.verify(environment, &writes) {
                     return Some(TaskDiagnostic::from_composition(stage, &error));
                 }
             }
@@ -1086,7 +1272,7 @@ impl TaskExecution<'_> {
     /// ([`super::preflight::resolve_task_late_values`]), against the task's
     /// state as it stands now: `outputs` and the step's values from
     /// [`Self::state`], `group` from the enclosing group, `loop` from the
-    /// enclosing loop (none today).
+    /// innermost looping container around the task.
     ///
     /// [`Self::state`]: TaskExecution::state
     fn sequence_binding(&self) -> Value {
@@ -1118,7 +1304,7 @@ impl TaskExecution<'_> {
             self.stack.ctx_base_dir,
         )?;
         let seq = self.sequence_binding();
-        let (view, globals) = runtime_bindings(
+        let (view, globals) = runtime_bindings_in_loop(
             LifecycleScope::TaskSetup,
             LifecycleValues {
                 err: None,
@@ -1126,6 +1312,7 @@ impl TaskExecution<'_> {
                 group: self.stack.group,
                 seq: Some(&seq),
             },
+            self.stack.loop_values,
         );
         let session = EvaluationSession::associate(view, self.state, globals)
             .expect("the task scope's view and its runtime entries agree")
@@ -1290,7 +1477,7 @@ impl TaskExecution<'_> {
             self.stack.ctx_base_dir,
         )?;
         let seq = self.sequence_binding();
-        let (view, globals) = runtime_bindings(
+        let (view, globals) = runtime_bindings_in_loop(
             LifecycleScope::TaskSetup,
             LifecycleValues {
                 err: None,
@@ -1298,6 +1485,7 @@ impl TaskExecution<'_> {
                 group: self.stack.group,
                 seq: Some(&seq),
             },
+            self.stack.loop_values,
         );
         SubtreeCompose::new(value, self.state)
             .with_resolution_context(resolution)
@@ -1349,6 +1537,11 @@ impl TaskExecution<'_> {
         }
     }
 
+    /// One line of a dry run's preview, on the status channel.
+    fn dry_run_note(&self, text: &str) {
+        self.stack.emitter.emit_info(text, self.stack.term);
+    }
+
     fn interrupted(&self) -> bool {
         self.interrupt
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
@@ -1378,6 +1571,7 @@ struct StageOutcome {
     secondary_errors: Vec<TaskDiagnostic>,
     group_tasks: Vec<GroupTaskResult>,
     group_output: Option<Value>,
+    withheld: bool,
 }
 
 impl StageOutcome {
@@ -1391,6 +1585,7 @@ impl StageOutcome {
             secondary_errors: Vec::new(),
             group_tasks: Vec::new(),
             group_output: None,
+            withheld: false,
         }
     }
 }
@@ -1412,6 +1607,8 @@ struct PrimaryOutcome {
     /// Diagnostics a member task raised that did not decide the group's
     /// outcome.
     secondary: Vec<TaskDiagnostic>,
+    /// A success with no result to publish (see [`PromptRunOutcome::withheld`]).
+    withheld: bool,
 }
 
 impl PrimaryOutcome {
@@ -1431,6 +1628,11 @@ impl PrimaryOutcome {
         Self::new(stdout, PrimaryResult::Interrupted)
     }
 
+    /// A success with nothing to publish: a dry run's rendered task.
+    fn withheld() -> Self {
+        Self { withheld: true, ..Self::succeeded(String::new()) }
+    }
+
     fn new(stdout: String, result: PrimaryResult) -> Self {
         Self {
             group_binding: None,
@@ -1439,6 +1641,7 @@ impl PrimaryOutcome {
             group_tasks: Vec::new(),
             secondary: Vec::new(),
             group_output: None,
+            withheld: false,
         }
     }
 

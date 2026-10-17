@@ -227,11 +227,10 @@ pub enum LifecycleControlAction {
 
     /// `break` / `break: "reason"` — end the nearest enclosing loop.
     ///
-    /// **Planned at run time:** the grammar accepts it, and executing it is
-    /// refused with [`CompositionError::LifecycleDirectiveNotYetSupported`]
-    /// until loop control lands.
+    /// Firing outside every loop is
+    /// [`CompositionError::LifecycleBreakWithoutLoop`].
     ///
-    /// [`CompositionError::LifecycleDirectiveNotYetSupported`]: crate::composition::CompositionError::LifecycleDirectiveNotYetSupported
+    /// [`CompositionError::LifecycleBreakWithoutLoop`]: crate::composition::CompositionError::LifecycleBreakWithoutLoop
     Break {
         /// Optional reason recorded as the loop's outcome. An authored `""`
         /// is an explicit empty reason, distinct from `None`.
@@ -244,11 +243,11 @@ pub enum LifecycleControlAction {
     /// `prep: "@target.md"` — run another primitive to completion, then
     /// continue the event with the next item.
     ///
-    /// **Planned at run time:** the grammar accepts it, and executing it is
-    /// refused with [`CompositionError::LifecycleDirectiveNotYetSupported`]
-    /// until the shared target runner lands.
+    /// The thread's installed [`PrepRunner`](crate::composition::lifecycle::prep::PrepRunner)
+    /// runs the target; a target that did not return successfully fails the
+    /// event with [`CompositionError::LifecyclePrepFailed`].
     ///
-    /// [`CompositionError::LifecycleDirectiveNotYetSupported`]: crate::composition::CompositionError::LifecycleDirectiveNotYetSupported
+    /// [`CompositionError::LifecyclePrepFailed`]: crate::composition::CompositionError::LifecyclePrepFailed
     Prep {
         /// File reference expression resolving to the target. A literal is
         /// never empty.

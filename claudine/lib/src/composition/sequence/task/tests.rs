@@ -893,6 +893,7 @@ impl FakePrompt {
             stdout: stdout.to_string(),
             exit_code: 0,
             interrupted: false,
+            withheld: false,
         })
     }
     fn with(outcome: PromptRunOutcome) -> Self {
@@ -3541,6 +3542,7 @@ mod prompt_tasks {
             stdout: "partial".to_string(),
             exit_code: 4,
             interrupted: false,
+            withheld: false,
         });
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -3568,6 +3570,7 @@ mod prompt_tasks {
             stdout: "partial".to_string(),
             exit_code: 130,
             interrupted: true,
+            withheld: false,
         });
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -3600,6 +3603,7 @@ mod prompt_tasks {
                 stdout: "partial".to_string(),
                 exit_code,
                 interrupted: true,
+                withheld: false,
             });
             let runtime = Arc::new(RuntimeState::new());
             let mut wiring = Wiring::new(&recorder, &shell);
@@ -3637,6 +3641,7 @@ mod prompt_tasks {
             stdout: "partial".to_string(),
             exit_code: 130,
             interrupted: false,
+            withheld: false,
         });
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -5865,7 +5870,7 @@ mod document_environment {
             .iter()
             .find(|approval| approval.stage() == TaskStage::Primary)
             .expect("the primary command interpolates");
-        match primary.verify(document.document_environment()) {
+        match primary.verify(document.document_environment(), &Default::default()) {
             Err(CompositionError::SequenceShellApprovalChanged {
                 command,
                 approved,

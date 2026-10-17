@@ -12,6 +12,7 @@ use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, 
 use crate::composition::lifecycle::bindings::SequenceBinding;
 use crate::composition::lifecycle::executor::StackExecutionContext;
 use crate::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};
+use crate::composition::looping::{ContainerPassEnd, LoopFrame, LoopResultKind, PassCheckpoint, finish_container_pass};
 use crate::composition::runtime_state::RuntimeState;
 use crate::composition::sequence::preflight::{PreflightAction, PreflightSequence};
 
@@ -31,16 +32,22 @@ impl TaskExecution<'_> {
         };
         let guard = LifecycleRunGuard::new(&sequence.lifecycle, &runtime_context, self.stack.emitter);
         let mut runner = ContainerRunner::new(guard);
-        let result = self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner);
+        let state = self.sequence_frontmatter(sequence).unwrap_or_else(|| self.stack.frontmatter.clone());
+        let result = match self.open_loop(sequence.loop_config.as_ref(), LoopResultKind::Sequence, &state, runtime) {
+            Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut()),
+            Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+        };
         runtime.replace_sequence_scope(outer.seq, outer.outputs);
         result
     }
 
     fn run_sequence_attempts(
         &self, sequence: &PreflightSequence, runtime: &Arc<RuntimeState>, run_id: &str,
-        runner: &mut ContainerRunner<'_>,
+        runner: &mut ContainerRunner<'_>, mut frame: Option<&mut LoopFrame>,
     ) -> PrimaryOutcome {
         let mut signal = LifecycleSignal::Initialize;
+        // Taken as each pass enters `start`; a retry of the pass returns here.
+        let mut checkpoint = PassCheckpoint::take(runtime);
         let mut shell_enabled = false;
         let mut error = None;
         let mut secondary_errors = Vec::new();
@@ -51,6 +58,10 @@ impl TaskExecution<'_> {
         let own_live = sequence.frontmatter.is_some().then(|| std::sync::Mutex::new(Map::new()));
         let live_frontmatter = own_live.as_ref().or(self.stack.live_frontmatter);
         loop {
+            // The `loop` values this container's events and children read:
+            // its own loop's, else the enclosing loop's.
+            let own_ambient = frame.as_deref().map(LoopFrame::ambient);
+            let loop_values = own_ambient.as_ref().or(self.stack.loop_values);
             if !matches!(signal, LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
                 && self.interrupted()
             {
@@ -104,7 +115,7 @@ impl TaskExecution<'_> {
             let stack = StackExecutionContext {
                 shell_runner: if shell_enabled { self.stack.shell_runner } else { &disabled },
                 seq: Some(&seq), runtime_state: Some(runtime.as_ref()), frontmatter: &event_frontmatter,
-                live_frontmatter, source_path: &sequence.origin_path, err: error.as_ref(),
+                live_frontmatter, source_path: &sequence.origin_path, err: error.as_ref(), loop_values,
                 ..self.stack.with_signal(signal)
             };
             let event = if self.prompt.is_dry_run() {
@@ -117,6 +128,7 @@ impl TaskExecution<'_> {
             }
             match event.decision {
                 ContainerEventDecision::Continue if signal == LifecycleSignal::Initialize => {
+                    checkpoint = PassCheckpoint::take(runtime);
                     signal = LifecycleSignal::Start;
                 }
                 ContainerEventDecision::Continue => {
@@ -127,6 +139,11 @@ impl TaskExecution<'_> {
                     for (index, step) in sequence.steps.iter().enumerate() {
                         if self.interrupted() {
                             signal = LifecycleSignal::Cancelled;
+                            break;
+                        }
+                        // A pending `break` starts no later child: neither in
+                        // this container nor in any between it and its loop.
+                        if loop_values.is_some_and(|ambient| ambient.breaks.is_pending()) {
                             break;
                         }
                         let overlay = crate::composition::sequence::build_step_overlay(&plan, index);
@@ -168,7 +185,7 @@ impl TaskExecution<'_> {
                         let frontmatter = state.data().iter().map(|(key,value)| (key.clone(), value.clone())).collect();
                         let child_stack = StackExecutionContext {
                             seq: Some(&seq), runtime_state: Some(runtime.as_ref()),
-                            frontmatter: &frontmatter, live_frontmatter, source_path: &task.origin_path,
+                            frontmatter: &frontmatter, live_frontmatter, source_path: &task.origin_path, loop_values,
                             prepared_context: run.as_ref().map(|opened| &opened.context).or(self.stack.prepared_context),
                             ..self.stack.with_signal(LifecycleSignal::Start)
                         };
@@ -231,7 +248,27 @@ impl TaskExecution<'_> {
                             .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
                         error = runner.primary_error().cloned();
                     } else {
-                        signal = if error.is_some() { LifecycleSignal::Failure } else { LifecycleSignal::Success };
+                        // The pass's own slice of the cumulative outputs is its
+                        // result: its terminal event, `finalize`, and gate read it.
+                        if let Some(frame) = frame.as_deref_mut() {
+                            let outputs = runtime.snapshot().outputs;
+                            let pass = outputs[checkpoint.outputs().min(outputs.len())..].to_vec();
+                            frame.record_pass(Value::Array(pass), i32::from(error.is_some()));
+                        }
+                        let breaking = loop_values.filter(|ambient| ambient.breaks.is_pending());
+                        signal = match (&error, breaking) {
+                            // A failure beats a pending `break`.
+                            (Some(_), breaking) => {
+                                if let Some(ambient) = breaking { ambient.breaks.discard(); }
+                                LifecycleSignal::Failure
+                            }
+                            // A `break` fires no further event but `finalize`.
+                            (None, Some(_)) => {
+                                runner.guard_mut().defuse();
+                                LifecycleSignal::Finalize
+                            }
+                            (None, None) => LifecycleSignal::Success,
+                        };
                     }
                 }
                 ContainerEventDecision::Skip => {
@@ -249,11 +286,47 @@ impl TaskExecution<'_> {
                     return PrimaryOutcome::interrupted(interrupted_stdout).with_secondary(secondary_errors);
                 }
                 ContainerEventDecision::Finished { failed: false } => {
+                    if let Some(frame) = frame.as_deref_mut()
+                        && !self.prompt.is_dry_run()
+                    {
+                        let ambient = frame.ambient();
+                        let mut gate_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
+                        gate_frontmatter.extend(runtime.snapshot().mutations);
+                        let gate_seq = SequenceBinding::container(run_id, runtime.snapshot().outputs).to_value();
+                        let gate = StackExecutionContext {
+                            seq: Some(&gate_seq), runtime_state: Some(runtime.as_ref()), frontmatter: &gate_frontmatter,
+                            live_frontmatter, source_path: &sequence.origin_path, err: None, loop_values: Some(&ambient),
+                            ..self.stack.with_signal(LifecycleSignal::Loop)
+                        };
+                        match finish_container_pass(frame, runner.guard_mut(), &gate, runtime) {
+                            // The break ends this loop: its pass's completed
+                            // results publish, and the parent continues.
+                            Ok(ContainerPassEnd::Broken(broken)) => {
+                                self.stack.emitter.emit_info(&broken.summary(), self.stack.term);
+                            }
+                            Ok(ContainerPassEnd::Continue) => {
+                                runner.begin_next_pass();
+                                checkpoint = PassCheckpoint::take(runtime);
+                                error = None; secondary_errors.clear(); signal = LifecycleSignal::Start;
+                                continue;
+                            }
+                            Ok(ContainerPassEnd::Complete) => {}
+                            // The loop owner failed after the pass settled:
+                            // nothing more runs and nothing is published.
+                            Err(failure) => {
+                                return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &failure))
+                                    .with_secondary(secondary_errors);
+                            }
+                        }
+                    }
                     return PrimaryOutcome::succeeded(String::new())
                         .with_secondary(secondary_errors)
                         .with_group_output(runtime.outputs_value());
                 }
                 ContainerEventDecision::Finished { failed: true } => {
+                    // A failure beats a pending `break`, including one its own
+                    // events or cleanup fired.
+                    if let Some(ambient) = loop_values { ambient.breaks.discard(); }
                     let info = runner.primary_error().cloned().or(error).unwrap_or_else(|| crate::composition::lifecycle::context::LifecycleErrorInfo::from_action_failure(
                         "sequence", "nested sequence failed",
                     ));
@@ -266,7 +339,17 @@ impl TaskExecution<'_> {
                 ContainerEventDecision::Retry { delay, overlay } => {
                     if !delay.is_zero() { std::thread::sleep(delay); }
                     let state = base.clone().unwrap_or_else(|| self.state.data().iter().map(|(key,value)| (key.clone(),value.clone())).collect());
-                    runtime.clear_outputs();
+                    // A looping container replaces only the failed attempt
+                    // of this pass: its outputs and runtime writes return to
+                    // the pass's entry. Without a loop the attempt's results
+                    // reset and its writes survive.
+                    match frame.as_deref_mut() {
+                        Some(frame) => {
+                            frame.retry_pass();
+                            checkpoint.restore(runtime);
+                        }
+                        None => runtime.clear_outputs(),
+                    }
                     if let Err(failure) = runtime.set_batch(self.stack.effect_engine, &overlay, &state) {
                         let diagnostic = TaskDiagnostic { stage: TaskStage::Primary,
                             info: crate::composition::lifecycle::context::LifecycleErrorInfo::from_error_or_action("retry", &failure) };

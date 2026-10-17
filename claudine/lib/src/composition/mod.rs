@@ -120,7 +120,6 @@ pub use looping::{
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use looping::{
     LoopBlock, check_loop_config_keys, extract_control_variables, parse_loop_block,
-    resolve_fail_fast_from_env,
     resolve_loop_config, resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
     resolve_templated_loop_max,
 };

@@ -126,13 +126,12 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      path or variable, correct the function call) or guard it with a \
                      fallback so it evaluates instead of raising.",
                 ),
-                LifecycleEvaluationReason::DirectiveNotYetSupported => (
-                    "lifecycle directive not yet supported",
-                    "A directive that cannot run yet was reached",
-                    "The configuration accepts `break` and `prep`, but running them is \
-                     not built yet, so the run halts rather than skip the directive. \
-                     Remove it, or guard it with a `when` that stays false, until it is \
-                     supported.",
+                LifecycleEvaluationReason::BreakWithoutLoop => (
+                    "lifecycle `break` outside a loop",
+                    "A `break` fired with no enclosing loop",
+                    "`break` ends the nearest loop around the page that fires it: a \
+                     document's own `loop:`, or a looping group or sequence that contains \
+                     it. Add a `loop:` there, or remove the `break`.",
                 ),
             };
             let body = format!(

@@ -99,6 +99,15 @@ impl RuntimeState {
         self.inner.lock().expect(POISONED).outputs.clear();
     }
 
+    /// Return a looping container's retried pass to its entry state: the
+    /// mutation layer it entered with and the first `outputs` entries, which
+    /// earlier passes committed. Position and active handoffs are kept.
+    pub fn restore_pass(&self, mutations: FrontmatterMap, outputs: usize) {
+        let mut inner = self.inner.lock().expect(POISONED);
+        inner.mutations = mutations;
+        inner.outputs.truncate(outputs);
+    }
+
     /// Restore the enclosing lexical accumulator without undoing child mutations.
     pub fn replace_sequence_scope(&self, seq: Option<Value>, outputs: Vec<Value>) {
         let mut inner = self.inner.lock().expect(POISONED);
@@ -115,7 +124,9 @@ impl RuntimeState {
         if inner.proxy_chain.is_empty() {
             inner.proxy_chain.push(biscuit_file::canonicalize_simplified(source).unwrap_or_else(|_| source.to_path_buf()));
         }
-        if !super::lifecycle::control::proxy_handoff_allowed(&inner.proxy_chain, target) {
+        if !super::lifecycle::control::proxy_handoff_allowed(&inner.proxy_chain, target)
+            || super::lifecycle::prep::proxy_reaches_an_active_caller(target)
+        {
             let error = super::error::CompositionError::LifecycleProxyCycle {
                 source_path: source.to_path_buf(), target: authored.into(),
                 chain: inner.proxy_chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),

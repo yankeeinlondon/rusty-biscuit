@@ -41,8 +41,8 @@ pub struct PreflightTask {
     /// The authored `timeout:` value, parsed as a duration at execution time.
     pub timeout: Option<Value>,
     /// The authored `when:` guard, already checked to parse as a condition.
-    /// Static preflight refuses a guarded task until guards are evaluated,
-    /// so no task that runs carries one yet.
+    /// It is evaluated at the task's turn, never during preflight, so a task
+    /// whose guard will be false is still validated and approved.
     pub when: Option<String>,
     /// Effective operation after group defaults and task overrides.
     pub operation: Option<String>,
@@ -318,6 +318,9 @@ pub struct PreflightSequence {
     /// mutations still layer above it. `None` (inline lists, offset and
     /// operator references) keeps the enclosing scope's state.
     pub frontmatter: Option<Map<String, Value>>,
+    /// The sequence's `loop:` controls, when it repeats. Its gate is
+    /// [`Self::lifecycle`]'s `loop` stack.
+    pub loop_config: Option<PreflightLoop>,
 }
 
 /// A resolved group and its member tasks.
@@ -339,6 +342,20 @@ pub struct PreflightGroup {
     pub tasks: Vec<PreflightTask>,
     /// The document the group was authored in.
     pub origin_path: PathBuf,
+    /// The group's `loop:` controls, when it repeats. Its gate is
+    /// [`Self::lifecycle`]'s `loop` stack. Boxed so a group stays the size
+    /// of the other task actions.
+    pub loop_config: Option<Box<PreflightLoop>>,
+}
+
+/// A container's `loop:` controls, frozen at preflight for the invocation,
+/// and where they were authored.
+#[derive(Debug, Clone)]
+pub struct PreflightLoop {
+    /// The iteration controls; a templated `max` is still unresolved.
+    pub config: crate::composition::LoopConfig,
+    /// The authored `loop:` block, for diagnostics.
+    pub location: crate::composition::LoopLocation,
 }
 
 /// How a group's tasks are scheduled.

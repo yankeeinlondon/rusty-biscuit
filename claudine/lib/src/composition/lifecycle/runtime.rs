@@ -521,6 +521,20 @@ impl<'a> ContainerRunner<'a> {
         self.attempt
     }
 
+    /// Re-enter `start` for the next pass of a looping container.
+    ///
+    /// The pass that just finished settled through `finalize`; the next one is
+    /// a fresh attempt with its own retry budget and terminal outcome, while
+    /// `initialize` stays fired for the invocation.
+    pub fn begin_next_pass(&mut self) {
+        self.attempt = 1;
+        self.budget = 0;
+        self.failed = false;
+        self.error = None;
+        self.secondary_errors.clear();
+        self.guard.reset_for_next_iteration();
+    }
+
     /// Execute exactly one guarded event with the caller's current bindings.
     pub fn execute_event(
         &mut self,
@@ -624,6 +638,14 @@ impl<'a> ContainerRunner<'a> {
                     StackControl::Skip => {
                         self.guard.defuse();
                         return Decision::Skip;
+                    }
+                    // A `break` before the children ran: no terminal event
+                    // fires, and `finalize` still runs once.
+                    StackControl::Break { .. }
+                        if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) =>
+                    {
+                        self.guard.defuse();
+                        return Decision::Finalize { failed: self.failed, error: self.error.clone() };
                     }
                     StackControl::Resume { .. } => {
                         return Decision::Abort(LifecycleTransitionAbort::ResumeWithoutSession);

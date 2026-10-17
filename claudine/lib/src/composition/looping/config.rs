@@ -24,27 +24,6 @@ use super::super::types::{
 
 use super::dsl::{LoopIssue, parse_actions, parse_condition_expression, parse_positive_usize};
 
-/// Read the fail-fast setting from a document's environment, with
-/// deprecation support.
-///
-/// Checks `CLAUDINE_FAIL_FAST` first, then falls back to the legacy
-/// `FAIL_FAST` name with a one-time deprecation warning. Like every loop
-/// setting, it reads the map the document captured at entry, so
-/// re-preparation and later iterations see the same value.
-pub fn resolve_fail_fast_from_env(environment: &DocumentEnvironment) -> Option<bool> {
-    if let Some(value) = environment.get("CLAUDINE_FAIL_FAST") {
-        return value.parse().ok();
-    }
-    if let Some(value) = environment.get("FAIL_FAST") {
-        static WARN_ONCE: std::sync::Once = std::sync::Once::new();
-        WARN_ONCE.call_once(|| {
-            tracing::warn!("The FAIL_FAST env var is deprecated. Use CLAUDINE_FAIL_FAST instead.");
-        });
-        return value.parse().ok();
-    }
-    None
-}
-
 /// Read the runtime cap override (`CLAUDINE_MAX_ITERATIONS`) from the
 /// environment of the looping document at `source_path`.
 ///
@@ -357,7 +336,6 @@ fn parse_loop_controls(
         actions,
         max_iterations,
         max_template,
-        fail_fast: None,
         on_rate_limit,
     })
 }

@@ -105,27 +105,26 @@ fn already_emitted_wraps_once_and_delegates_display() {
 }
 
 #[test]
-fn a_refused_directive_renders_as_not_yet_supported_not_as_a_crashed_expression() {
+fn a_break_outside_a_loop_renders_as_its_own_error_not_as_a_crashed_expression() {
     use biscuit_terminal::prelude::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
-    let refusal = CompositionError::LifecycleDirectiveNotYetSupported {
+    let unowned = CompositionError::LifecycleBreakWithoutLoop {
         source_path: PathBuf::from("review.md"),
         property: "start[0].break".to_string(),
-        directive: "break".to_string(),
     };
     let err = CompositionError::LifecycleEvaluationError {
         source_path: PathBuf::from("review.md"),
         event: "start".to_string(),
         surface: "break".to_string(),
-        message: refusal.to_string(),
+        message: unowned.to_string(),
         property: Some("start[0].break".to_string()),
-        reason: LifecycleEvaluationReason::DirectiveNotYetSupported,
+        reason: LifecycleEvaluationReason::BreakWithoutLoop,
         cause: None,
     };
     let rendered = strip_escape_codes(err.status_block(&Terminal::default()).render(&Terminal::default()));
     let prose = rendered.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(prose.contains("lifecycle directive not yet supported"), "{prose}");
-    assert!(prose.contains("is not yet supported at run time"), "{prose}");
+    assert!(prose.contains("lifecycle break outside a loop"), "{prose}");
+    assert!(prose.contains("fired outside any loop"), "{prose}");
     assert!(!prose.contains("crashed expression"), "{prose}");
 }
 

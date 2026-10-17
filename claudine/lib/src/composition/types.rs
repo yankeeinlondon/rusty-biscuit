@@ -64,9 +64,6 @@ pub struct LoopConfig {
     /// configuration that still carries one, so an unresolved cap never falls
     /// back to the default.
     pub max_template: Option<String>,
-    /// Failure behavior of the engine. Authored `loop.fail_fast` is a removed
-    /// key, so a parsed configuration always holds `None`.
-    pub fail_fast: Option<bool>,
     /// Optional per-document policy for what to do when a completed iteration
     /// reports a provider rate-limit signal. `None` falls back to
     /// [`OnRateLimit::Pause`]. Accepted only on a [`LoopOwner::Document`]
@@ -1143,6 +1140,9 @@ pub struct SequenceStepResult {
     /// When the step ran a group, one entry per member task that ran, in
     /// declaration order. Empty for every other step.
     pub tasks: Vec<SequenceTaskResult>,
+    /// Whether the step's `when:` guard was false, so nothing ran. A skipped
+    /// step counts as succeeded.
+    pub skipped: bool,
 }
 
 /// One group member task's contribution to a step summary.
@@ -1158,6 +1158,8 @@ pub struct SequenceTaskResult {
     pub success: bool,
     /// Whether the task was interrupted rather than failed.
     pub interrupted: bool,
+    /// Whether the task's `when:` guard was false, so nothing ran.
+    pub skipped: bool,
     /// Wall-clock duration of the task.
     pub duration: std::time::Duration,
 }

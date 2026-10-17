@@ -59,7 +59,7 @@ mod containers;
 pub use reapproval::PreflightApproval;
 pub use shape::{
     ApprovedCommand, ApprovedSetValue, CommandSiteId, GroupExecution, PreflightAction,
-    PreflightGroup, PreflightSequence, PreflightStep, PreflightTask, PreparedShellSite, ShellSiteKind, SiteMode,
+    PreflightGroup, PreflightLoop, PreflightSequence, PreflightStep, PreflightTask, PreparedShellSite, ShellSiteKind, SiteMode,
     TaskDiagnosticProvenance, TaskPosition,
 };
 
@@ -518,6 +518,9 @@ pub(crate) fn prepare_nested_sequence(
     )?;
     sequence.plan = frozen.plan.clone();
     sequence.steps = frozen.steps.clone();
+    // The loop's controls are frozen for the invocation; its gate is an
+    // event and rereads with the others.
+    sequence.loop_config = frozen.loop_config.clone();
     Ok((sequence, loader.graph))
 }
 
@@ -544,6 +547,7 @@ pub(crate) fn prepare_nested_group(
         &task.authored.child("group"), state, task.position,
     )?;
     group.tasks = frozen.tasks.clone();
+    group.loop_config = frozen.loop_config.clone();
     Ok((group, loader.graph))
 }
 
@@ -950,6 +954,18 @@ impl<'a> Loader<'a> {
             if let Some(value) = events.get(*key) { event_root.insert((*key).into(), value.clone()); }
         }
         let mut lifecycle = parse_lifecycle_config(&Value::Object(event_root), &child_origin)?;
+        // An inline list's loop sits on its task entry; a whole referenced
+        // document's at its root. A selection of steps has no loop.
+        let loop_location = if entered {
+            crate::composition::LoopLocation::document_root(&child_origin)
+        } else {
+            crate::composition::LoopLocation { source_path: origin.to_path_buf(), property: property_child(property, "loop") }
+        };
+        let loop_config = super::grammar::container_loop(&events, crate::composition::LoopOwner::Sequence, &loop_location)?
+            .map(|block| {
+                lifecycle.stacks.loop_gate = block.gate;
+                PreflightLoop { config: block.config, location: loop_location }
+            });
         // A referenced document's events and children read its own authored
         // properties under the invocation's supplied values, exactly what
         // they read when it runs; the caller's frontmatter is not their base.
@@ -970,7 +986,7 @@ impl<'a> Loader<'a> {
             self.step_derived = step_derived;
         }
         if entered { self.leave(); }
-        Ok(PreflightSequence { steps: result?, plan, lifecycle: Box::new(lifecycle), origin_path: child_origin, frontmatter })
+        Ok(PreflightSequence { steps: result?, plan, lifecycle: Box::new(lifecycle), origin_path: child_origin, frontmatter, loop_config })
     }
 
     /// Prepare a nested sequence's events and children. With `own_state`
@@ -1150,6 +1166,12 @@ impl<'a> Loader<'a> {
             if let Some(value) = map.get(*key) { event_root.insert((*key).into(), value.clone()); }
         }
         let mut lifecycle = parse_lifecycle_config(&Value::Object(event_root), origin)?;
+        let loop_location = crate::composition::LoopLocation { source_path: origin.to_path_buf(), property: property_child(property, "loop") };
+        let loop_config = super::grammar::container_loop(map, crate::composition::LoopOwner::Group, &loop_location)?
+            .map(|block| {
+                lifecycle.stacks.loop_gate = block.gate;
+                Box::new(PreflightLoop { config: block.config, location: loop_location })
+            });
         self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
         let owner = self.documents.get(origin).map(|(value, _)| value.clone())
             .unwrap_or_else(|| crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()));
@@ -1244,6 +1266,7 @@ impl<'a> Loader<'a> {
             variables,
             tasks,
             origin_path: origin.to_path_buf(),
+            loop_config,
         };
 
         if group.execution == GroupExecution::Parallel {

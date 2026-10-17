@@ -198,3 +198,31 @@ fn cancellation_scope_inherits_first_cause_and_restores_its_caller() {
     }
     assert!(!cancellation::requested());
 }
+
+#[test]
+fn container_break_before_its_children_fires_only_finalize_once() {
+    for event in ["initialize", "start"] {
+        exercise(json!({
+            event: ["break"],
+            "success": {"stderr": "must not run"},
+            "finalize": {"stderr": "finalize"}
+        }), |runner, stack, emitter| {
+            let ambient = crate::composition::LoopAmbient::new(1, true, false, json!([]), 0);
+            let stack = StackExecutionContext { loop_values: Some(&ambient), ..stack.with_signal(stack.signal) };
+            let mut signal = LifecycleSignal::Initialize;
+            let finalize = loop {
+                match runner.execute_event(signal, &stack).decision {
+                    Decision::Continue => signal = LifecycleSignal::Start,
+                    Decision::Finalize { failed: false, .. } => break runner.execute_event(LifecycleSignal::Finalize, &stack),
+                    other => panic!("{event}: {other:?}"),
+                }
+            };
+            assert_eq!(finalize.decision, Decision::Finished { failed: false }, "{event}");
+            assert!(ambient.breaks.is_pending(), "{event}: the loop reads the break");
+            assert_eq!(runner.execute_event(LifecycleSignal::Finalize, &stack).decision, Decision::Finished { failed: false });
+            let fired: Vec<_> = emitter.signals().into_iter().filter(|signal| *signal == LifecycleSignal::Finalize).collect();
+            assert_eq!(fired.len(), 1, "{event}: finalize runs exactly once");
+            assert!(!emitter.signals().contains(&LifecycleSignal::Success), "{event}");
+        });
+    }
+}

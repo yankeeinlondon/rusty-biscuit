@@ -104,6 +104,18 @@ impl ShellApprovalFailure {
     }
 }
 
+/// Why a task's `when:` guard raised at its turn.
+#[derive(Error, Debug)]
+pub enum TaskGuardFailure {
+    /// The guard no longer parses. Preflight checks it, so this is the
+    /// fail-closed path for a guard that changed after preflight.
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+    /// The guard raised while it was evaluated.
+    #[error(transparent)]
+    Evaluate(#[from] super::lifecycle::context::LifecycleCause),
+}
+
 /// Errors that can occur during composition workflows.
 #[derive(Error, Debug)]
 pub enum CompositionError {
@@ -1331,21 +1343,75 @@ pub enum CompositionError {
         source_path: PathBuf,
     },
 
-    /// A lifecycle stack reached `break` or `prep`. The grammar accepts both,
-    /// but loop control and the returning target call are not wired yet, so
-    /// the directive fails the event instead of being dropped or read as
-    /// `stop`. `no_error` does not suppress it.
+    /// A `break` fired in a page that no loop encloses. Whether a loop
+    /// encloses a `break` is a run-time fact, so the directive fails its
+    /// event when it fires; `no_error` does not suppress it.
     #[error(
-        "lifecycle `{directive}` at `{property}` is not yet supported at run time ({source_path})",
+        "lifecycle `break` at `{property}` fired outside any loop ({source_path}); `break` ends \
+         the nearest enclosing loop of a document, group, or sequence",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
-    LifecycleDirectiveNotYetSupported {
-        /// The prompt file whose stack requested the directive.
+    LifecycleBreakWithoutLoop {
+        /// The file whose stack fired the `break`.
         source_path: PathBuf,
         /// The authored path of the directive, e.g. `start[1].break`.
         property: String,
-        /// `break` or `prep`.
-        directive: String,
+    },
+
+    /// A `prep` target did not return successfully: it failed, ended with a
+    /// non-zero status (a non-zero root `break` code included), or could not
+    /// be resolved, prepared, or approved. The caller's event fails with the
+    /// target's failure as its cause.
+    #[error(
+        "`prep` of `{target}` failed: {message} (`{property}` in {source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecyclePrepFailed {
+        /// The file whose stack made the call.
+        source_path: PathBuf,
+        /// The authored path of the directive, e.g. `initialize[0].prep`.
+        property: String,
+        /// The target reference as the directive evaluated it.
+        target: String,
+        /// What the target reported.
+        message: String,
+        /// The target failure's own diagnostic identity, when its error chain
+        /// carried one. Boxed to keep `CompositionError` small.
+        snapshot: Option<Box<DiagnosticSnapshot>>,
+    },
+
+    /// A `prep` call would re-enter a document with an active call or handoff
+    /// (a self-call, or A calling B calling A), or exceed the hop limit.
+    #[error(
+        "`prep` of `{target}` would re-enter an active call or exceed the hop limit ({limit}); \
+         active chain: {chain} (`{property}` in {source_path})",
+        chain = chain.join(" -> "),
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecyclePrepCycle {
+        /// The file whose stack made the call.
+        source_path: PathBuf,
+        /// The authored path of the directive.
+        property: String,
+        /// The target that would close the cycle or overflow the limit.
+        target: String,
+        /// The active chain of calls (resolved paths, outermost first).
+        chain: Vec<String>,
+        /// The maximum number of hops permitted.
+        limit: usize,
+    },
+
+    /// A `prep` was reached by a caller that runs no targets: an in-process
+    /// library caller with no installed target runner.
+    #[error(
+        "lifecycle `prep` at `{property}` cannot run here: this caller runs no `prep` targets ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecyclePrepUnavailable {
+        /// The file whose stack made the call.
+        source_path: PathBuf,
+        /// The authored path of the directive.
+        property: String,
     },
 
     /// A lifecycle stack requested `defer`, but the runtime could not record
@@ -1507,12 +1573,14 @@ pub enum CompositionError {
     /// leaves the composition outcome unchanged (per the action error-
     /// propagation table) and never produces this variant.
     #[error(
-        "lifecycle `loop` gate raised an error: {reason} ({source_path})",
+        "lifecycle `loop` gate raised an error after pass {iteration}: {reason} ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleLoopGateFailed {
-        /// The prompt file whose `loop:` gate stack raised the error.
+        /// The file whose `loop:` gate stack raised the error.
         source_path: PathBuf,
+        /// The 1-based pass the gate followed.
+        iteration: usize,
         /// Evaluated reason (explicit `error(...)` argument).
         reason: String,
     },
@@ -1998,11 +2066,12 @@ pub enum CompositionError {
     ///
     /// Sequence preflight resolves a command whose values all exist at
     /// approval under the launch environment, before any later task captures
-    /// its own. A task whose captured environment changes that text is refused
-    /// before it runs: resolved text never authorizes other text.
+    /// its own. A task whose captured environment, or a runtime value an
+    /// earlier loop pass wrote, changes that text is refused before it runs:
+    /// resolved text never authorizes other text.
     #[error(
         "shell command `{command}` in {task} was approved at sequence preflight as `{approved}`, \
-         but this task's environment resolves it to `{resolved}` ({changed}); a preflight \
+         but this task now resolves it to `{resolved}` ({changed}); a preflight \
          approval covers only the exact text it approved, so the command was refused before it ran"
     )]
     SequenceShellApprovalChanged {
@@ -2014,8 +2083,9 @@ pub enum CompositionError {
         approved: String,
         /// The text the task's environment resolves the command to.
         resolved: String,
-        /// The environment variables the command names whose values changed,
-        /// or a note that the change is not attributable to a named variable.
+        /// The environment variables and runtime values the command names
+        /// whose values changed, or a note that the change is not attributable
+        /// to a named one.
         changed: String,
     },
 
@@ -2288,23 +2358,6 @@ pub enum CompositionError {
         owner: LoopOwner,
     },
 
-    /// A valid `loop:` on a group or a sequence. The block parses, but
-    /// container repetition is not wired yet, so the run is refused before
-    /// any task, event, or provider runs instead of running the body once.
-    #[error(
-        "the {owner} `loop` at `{property}` is valid but is not yet supported at run time \
-         ({source_path}); container loops are planned, so remove `loop:` until they land",
-        source_path = biscuit_file::to_portable_string(source_path)
-    )]
-    ContainerLoopNotYetSupported {
-        /// The file that holds the `loop:` block.
-        source_path: PathBuf,
-        /// The authored path of the block (`sequence[1].group.loop`).
-        property: String,
-        /// The container that owns the loop.
-        owner: LoopOwner,
-    },
-
     /// `loop` on a task that cannot own one. Only an inline nested sequence's
     /// task entry carries `loop:`; `hint` names where this loop belongs.
     #[error(
@@ -2339,19 +2392,20 @@ pub enum CompositionError {
         source: Option<ParseError>,
     },
 
-    /// A valid task `when:` guard. Guards are not evaluated yet, so the run
-    /// is refused before anything runs: ignoring the guard would run a task
-    /// its author meant to skip.
+    /// A task's `when:` guard raised when its task's turn came: the task
+    /// fails rather than reading the guard as false.
     #[error(
-        "task `when` at `{property}` is valid but is not yet supported at run time \
-         ({source_path}); task guards are planned, so remove `when:` until they land",
+        "task guard `{property}` could not be evaluated ({source_path}): {cause}",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
-    TaskWhenNotYetSupported {
+    TaskWhenEvaluationFailed {
         /// The file that holds the task.
         source_path: PathBuf,
         /// The authored path of the guard (`sequence[0].when`).
         property: String,
+        /// Why the guard raised.
+        #[source]
+        cause: TaskGuardFailure,
     },
 
     /// `when:` at a sequence document's root, or on a group object.
@@ -2407,6 +2461,46 @@ pub enum CompositionError {
         /// The typed parse-or-evaluate failure.
         #[source]
         source: LoopExpressionCause,
+    },
+
+    /// A loop's condition or staged action failed after a pass.
+    ///
+    /// Belongs to the loop owner: nothing of the failing action is committed,
+    /// it is never condition completion, and no terminal event or `finalize`
+    /// runs again for the pass that already finished.
+    #[error(
+        "`{property}` failed after pass {iteration} ({source_path}): {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopEvaluationFailed {
+        /// The file that authors the `loop:` block.
+        source_path: PathBuf,
+        /// The authored key that failed (`loop.until`, `sequence[1].loop.action`).
+        property: String,
+        /// The 1-based pass the condition or action followed.
+        iteration: usize,
+        /// The parse, evaluation, or action failure.
+        #[source]
+        source: Box<CompositionError>,
+    },
+
+    /// A container loop's staged action wrote a key the runtime layer
+    /// refuses (a reserved root, or a key that is not a plain property name).
+    /// Nothing of the action is committed.
+    #[error(
+        "`{property}` failed after pass {iteration} ({source_path}): {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopActionWriteRefused {
+        /// The file that authors the `loop:` block.
+        source_path: PathBuf,
+        /// The authored action key (`loop.action`).
+        property: String,
+        /// The 1-based pass the action followed.
+        iteration: usize,
+        /// Why the runtime layer refused the write.
+        #[source]
+        source: super::runtime_state::RuntimeMutationError,
     },
 
     /// Loop execution exceeded its configured safety cap.
@@ -3747,10 +3841,9 @@ pub enum LifecycleEvaluationReason {
     /// unavailable global, or a function error.
     #[default]
     Expression,
-    /// A directive the configuration accepts but the runtime cannot run yet
-    /// (`break`, `prep`) was reached; see
-    /// [`CompositionError::LifecycleDirectiveNotYetSupported`].
-    DirectiveNotYetSupported,
+    /// A `break` fired outside any loop; see
+    /// [`CompositionError::LifecycleBreakWithoutLoop`].
+    BreakWithoutLoop,
 }
 
 /// What a frontmatter-rooted error's excerpt should focus on.

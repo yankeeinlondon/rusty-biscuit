@@ -381,7 +381,11 @@ fn event_stacks_keep_null_and_empty_dictionary_as_empty() {
 // ── run time ───────────────────────────────────────────────────────────────
 
 /// Run the `start` stack of `frontmatter` through the executor.
-fn run_start(frontmatter: serde_json::Value, emitter: &RecordingEmitter) -> executor::LifecycleEventOutcome {
+fn run_start(
+    frontmatter: serde_json::Value,
+    emitter: &RecordingEmitter,
+    loop_values: Option<&crate::composition::LoopAmbient>,
+) -> executor::LifecycleEventOutcome {
     let config = parse_ok(frontmatter);
     let (settings, messaging, term) = test_ctx();
     let engine_root = tempfile::tempdir().unwrap();
@@ -401,7 +405,7 @@ fn run_start(frontmatter: serde_json::Value, emitter: &RecordingEmitter) -> exec
         timing: None,
         current: None,
         group: None,
-        loop_values: None,
+        loop_values,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
@@ -419,29 +423,124 @@ fn run_start(frontmatter: serde_json::Value, emitter: &RecordingEmitter) -> exec
 }
 
 #[test]
-fn reaching_break_or_prep_is_refused_as_not_yet_supported_and_never_ignored() {
-    for (item, directive) in [
-        (json!("break"), "break"),
-        (json!({"break": {"reason": "done", "code": 2, "no_error": true}}), "break"),
-        (json!({"prep": "@helper.md"}), "prep"),
-        (json!({"prep": {"target": "@helper.md", "no_error": true}}), "prep"),
-    ] {
+fn prep_without_a_target_runner_is_refused_and_never_ignored() {
+    for item in [json!({"prep": "@helper.md"}), json!({"prep": {"target": "@helper.md", "no_error": true}})] {
         let emitter = RecordingEmitter::new();
-        // Guarded, so an item may follow a `break` as well as a `prep`.
         let stack = json!([{"stderr": "before"}, {"when": "true", "then": [item.clone()]}, {"stderr": "after"}]);
-        let outcome = run_start(json!({ "start": stack }), &emitter);
-        assert_eq!(outcome.control, None, "{item}: a refused directive is not a control");
+        let outcome = run_start(json!({ "start": stack }), &emitter, None);
+        assert_eq!(outcome.control, None, "{item}: a returning call is not a control");
         let error = outcome.evaluation_error.unwrap_or_else(|| panic!("{item}: refused at run time"));
-        assert_eq!(error.property.as_deref(), Some(format!("start[1].then[0].{directive}").as_str()), "{item}");
-        assert!(
-            error.msg.contains(&format!("`{directive}`")) && error.msg.contains("not yet supported at run time"),
-            "{item}: {}",
-            error.msg
-        );
+        assert_eq!(error.property.as_deref(), Some("start[1].then[0].prep"), "{item}");
+        assert!(error.msg.contains("this caller runs no `prep` targets"), "{item}: {}", error.msg);
         assert_eq!(
             emitter.actions(),
             vec![EmittedAction::Stderr { signal: LifecycleSignal::Start, text: "before".to_string() }],
             "{item}: the refusal halts the event"
         );
     }
+}
+
+/// A target runner that records each call and fails the targets named in
+/// `failing`.
+struct FakeTargets {
+    calls: std::sync::Mutex<Vec<(String, serde_json::Value)>>,
+    failing: Vec<&'static str>,
+}
+
+impl crate::composition::lifecycle::prep::PrepRunner for FakeTargets {
+    fn run(&self, call: &crate::composition::lifecycle::prep::PrepCall<'_>) -> Result<(), crate::composition::lifecycle::prep::PrepFailure> {
+        let overlay = serde_json::to_value(call.overlay).unwrap();
+        self.calls.lock().unwrap().push((call.target.to_string(), overlay));
+        if self.failing.contains(&call.target) {
+            return Err(crate::composition::lifecycle::prep::PrepFailure { message: "exited with code 3".into(), snapshot: None });
+        }
+        Ok(())
+    }
+}
+
+fn with_targets(failing: Vec<&'static str>) -> (std::sync::Arc<FakeTargets>, crate::composition::lifecycle::prep::PrepScope) {
+    let targets = std::sync::Arc::new(FakeTargets { calls: Default::default(), failing });
+    let scope = crate::composition::lifecycle::prep::install(targets.clone());
+    (targets, scope)
+}
+
+#[test]
+fn prep_returns_to_the_next_item_including_after_its_branch() {
+    let (targets, _scope) = with_targets(Vec::new());
+    let emitter = RecordingEmitter::new();
+    let stack = json!([
+        {"prep": {"target": "@first.md", "with": {"stage": "all"}}},
+        {"stderr": "between"},
+        {"when": "true", "then": [{"prep": "@second.md"}]},
+        {"stderr": "after the branch"},
+    ]);
+    let outcome = run_start(json!({ "start": stack }), &emitter, None);
+    assert_eq!(outcome.evaluation_error, None);
+    assert_eq!(outcome.action_error, None);
+    assert_eq!(outcome.control, None);
+    assert_eq!(
+        *targets.calls.lock().unwrap(),
+        [("@first.md".to_string(), json!({"stage": "all"})), ("@second.md".to_string(), json!({}))]
+    );
+    assert_eq!(
+        emitter.actions(),
+        vec![
+            EmittedAction::Stderr { signal: LifecycleSignal::Start, text: "between".to_string() },
+            EmittedAction::Stderr { signal: LifecycleSignal::Start, text: "after the branch".to_string() },
+        ]
+    );
+}
+
+#[test]
+fn a_failed_target_fails_the_event_with_its_cause_unless_no_error_tolerates_it() {
+    let (_targets, _scope) = with_targets(vec!["@broken.md"]);
+    let emitter = RecordingEmitter::new();
+    let outcome = run_start(json!({ "start": [{"prep": "@broken.md"}, {"stderr": "never"}] }), &emitter, None);
+    let error = outcome.action_error.expect("a failed call is the event's action error");
+    assert!(error.msg.contains("`prep` of `@broken.md` failed: exited with code 3"), "{}", error.msg);
+    assert!(emitter.actions().is_empty(), "the event ends at the failed call");
+
+    let emitter = RecordingEmitter::new();
+    let outcome = run_start(
+        json!({ "start": [{"prep": {"target": "@broken.md", "no_error": true}}, {"stderr": "tolerated"}] }),
+        &emitter,
+        None,
+    );
+    assert_eq!(outcome.action_error, None);
+    assert_eq!(emitter.actions(), vec![EmittedAction::Stderr { signal: LifecycleSignal::Start, text: "tolerated".to_string() }]);
+}
+
+#[test]
+fn a_break_outside_any_loop_is_a_located_error_that_no_error_cannot_suppress() {
+    for item in [json!("break"), json!({"break": {"reason": "done", "code": 2, "no_error": true}})] {
+        let emitter = RecordingEmitter::new();
+        let stack = json!([{"stderr": "before"}, {"when": "true", "then": [item.clone()]}]);
+        let outcome = run_start(json!({ "start": stack }), &emitter, None);
+        assert_eq!(outcome.control, None, "{item}: an unowned break is not a control");
+        let error = outcome.evaluation_error.unwrap_or_else(|| panic!("{item}: an error when it fires"));
+        assert_eq!(error.property.as_deref(), Some("start[1].then[0].break"), "{item}");
+        assert_eq!(error.reason, crate::composition::error::LifecycleEvaluationReason::BreakWithoutLoop, "{item}");
+        assert!(error.msg.contains("fired outside any loop"), "{item}: {}", error.msg);
+        assert_eq!(emitter.actions().len(), 1, "{item}: the error halts the event");
+    }
+}
+
+#[test]
+fn a_break_records_its_reason_and_code_in_the_nearest_loop_and_ends_the_event() {
+    let emitter = RecordingEmitter::new();
+    let ambient = crate::composition::LoopAmbient::new(2, false, false, "", 0);
+    let stack = json!([{"stderr": "before"}, {"when": "true", "then": [{"break": {"reason": "pass {{ loop.count }}", "code": 7}}]}, {"stderr": "after"}]);
+    let outcome = run_start(json!({ "start": stack }), &emitter, Some(&ambient));
+    assert_eq!(outcome.evaluation_error, None);
+    assert_eq!(
+        outcome.control,
+        Some(executor::StackControl::Break { reason: Some("pass 2".to_string()), code: 7 })
+    );
+    assert_eq!(
+        ambient.breaks.pending(),
+        Some(crate::composition::looping::LoopBreak { reason: Some("pass 2".to_string()), code: 7 })
+    );
+    assert_eq!(emitter.actions().len(), 1, "the items after the break do not run");
+    // A copy of the values with its own slot does not see the break.
+    assert!(!ambient.with_isolated_breaks().breaks.is_pending());
 }

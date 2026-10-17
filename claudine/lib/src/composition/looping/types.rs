@@ -14,6 +14,7 @@ use super::super::lifecycle::LifecycleSignal;
 use super::super::runtime_state::LayeredOverrides;
 use super::super::types::OnRateLimit;
 use super::expression::LoopAmbient;
+use super::frame::LoopOutcome;
 use crate::stream::summary::RateLimitInfo;
 
 /// Runtime options that can override per-document loop configuration.
@@ -25,8 +26,6 @@ use crate::stream::summary::RateLimitInfo;
 pub struct LoopExecutionOptions {
     /// Runtime iteration cap override.
     pub max_iterations: Option<usize>,
-    /// Runtime fail-fast override.
-    pub fail_fast: Option<bool>,
     /// Runtime rate-limit policy override. When set, takes precedence over
     /// any per-document [`LoopConfig::on_rate_limit`](super::super::types::LoopConfig::on_rate_limit).
     pub on_rate_limit: Option<OnRateLimit>,
@@ -95,8 +94,7 @@ pub struct LoopIterationOutput {
     pub error: Option<CompositionError>,
     /// Terminal lifecycle signal emitted by this iteration, if any.
     ///
-    /// Used by the loop engine to apply `fail_fast` semantics and to
-    /// sequence the post-`finalize` loop gate.
+    /// A `blocked` or `failure` pass ends the loop before its gate.
     pub terminal_signal: Option<LifecycleSignal>,
     /// Rate-limit signal observed during this iteration, when present.
     ///
@@ -135,6 +133,13 @@ pub struct LoopIterationOutput {
     /// rather than the one the loop started with. `None` keeps the most recent
     /// snapshot the loop has.
     pub context: Option<darkmatter::markdown::compose::ComposeContext>,
+    /// The effective frontmatter the pass composed with, when the executor
+    /// prepared one.
+    ///
+    /// The gate and the condition read it beneath the loop's control state,
+    /// so a gate action or a template filled after the pass reads every
+    /// property the pass had, not only the ones the loop controls.
+    pub frontmatter: Option<Map<String, Value>>,
 }
 
 impl LoopIterationOutput {
@@ -151,6 +156,7 @@ impl LoopIterationOutput {
             model_id: None,
             handoff: None,
             context: None,
+            frontmatter: None,
         }
     }
 
@@ -167,6 +173,7 @@ impl LoopIterationOutput {
             model_id: None,
             handoff: None,
             context: None,
+            frontmatter: None,
         }
     }
 
@@ -236,6 +243,14 @@ pub struct LoopExecutionResult {
     /// A committed handoff is already in the run ledger's chain, so a caller
     /// that ignores this field leaves a hop recorded that no document adopted.
     pub handoff: Option<SurfacedHandoff>,
+    /// How the loop ended on its own terms: its condition, its cap, or a
+    /// `break`. `None` when a failure, handoff, cancellation, or `initialize`
+    /// ended it instead.
+    pub outcome: Option<LoopOutcome>,
+    /// The `break` that ended the loop, when [`Self::outcome`] is
+    /// [`LoopOutcome::Broken`]. Its code is the process exit code only when
+    /// this loop is the root invocation's; the caller decides that.
+    pub broken: Option<super::frame::LoopBreak>,
 }
 
 impl LoopExecutionResult {
@@ -252,6 +267,8 @@ impl LoopExecutionResult {
             last_output,
             error: None,
             handoff: None,
+            outcome: None,
+            broken: None,
         }
     }
 
@@ -269,7 +286,23 @@ impl LoopExecutionResult {
             last_output,
             error: Some(error),
             handoff: None,
+            outcome: None,
+            broken: None,
         }
+    }
+
+    #[must_use]
+    pub(super) fn with_outcome(mut self, outcome: LoopOutcome) -> Self {
+        self.outcome = Some(outcome);
+        self
+    }
+
+    /// End the loop with the `break` that interrupted it.
+    #[must_use]
+    pub(super) fn with_break(mut self, broken: super::frame::LoopBreak) -> Self {
+        self.outcome = Some(LoopOutcome::Broken);
+        self.broken = Some(broken);
+        self
     }
 
     /// Attach the handoff the caller's coordinator must consume.

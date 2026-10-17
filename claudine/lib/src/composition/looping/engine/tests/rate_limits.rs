@@ -21,7 +21,6 @@ fn rate_limit_continue_policy_proceeds_without_pausing() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: Some(OnRateLimit::Continue),
     };
 
@@ -57,7 +56,6 @@ fn rate_limit_abort_policy_halts_with_structured_error() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: Some(OnRateLimit::Abort),
     };
 
@@ -103,7 +101,6 @@ fn rate_limit_pause_with_no_reset_falls_back_to_abort() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: Some(OnRateLimit::Pause),
     };
 
@@ -139,7 +136,6 @@ fn rate_limit_pause_skipped_on_final_iteration() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: Some(OnRateLimit::Pause),
     };
 
@@ -178,7 +174,6 @@ fn rate_limit_default_policy_is_pause() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: None,
     };
 
@@ -211,7 +206,6 @@ fn rate_limit_pause_sleeps_until_reset_then_continues() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: Some(OnRateLimit::Pause),
     };
 
@@ -272,7 +266,6 @@ fn rate_limit_pause_is_interrupt_aware() {
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         max_template: None,
-        fail_fast: None,
         on_rate_limit: Some(OnRateLimit::Pause),
     };
 
