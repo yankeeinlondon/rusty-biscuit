@@ -188,7 +188,7 @@ fn parallel_index(
 /// timings; `None` when unreadable or not valid UTF-8.
 fn read_and_index(path: &Path) -> Option<(DocumentIndex, Duration, IndexTimings)> {
     let read_start = Instant::now();
-    let source = match std::fs::read_to_string(path) {
+    let source = match crate::work_counters::read_to_string(path) {
         Ok(source) => source,
         Err(error) => {
             tracing::debug!("skipping unreadable {}: {error}", path.display());

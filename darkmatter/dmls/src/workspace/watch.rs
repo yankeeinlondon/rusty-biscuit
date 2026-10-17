@@ -113,8 +113,8 @@ pub fn scan_manifests(roots: &[PathBuf]) -> HashMap<PathBuf, u64> {
             let is_manifest = path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
                 sniff::filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES.contains(&name)
             });
-            if is_manifest && let Ok(bytes) = std::fs::read(path) {
-                manifests.insert(path.to_path_buf(), biscuit_hash::xx_hash_bytes(&bytes));
+            if is_manifest && let Ok(bytes) = crate::work_counters::read(path) {
+                manifests.insert(path.to_path_buf(), crate::work_counters::hash_bytes(&bytes));
             }
         }
     }

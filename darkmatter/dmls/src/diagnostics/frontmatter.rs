@@ -106,9 +106,10 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     }
 
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
+        let span = trigger_yaml_span(ctx.text, error).unwrap_or(0..ctx.text.len());
         out.push(diagnostic(
             ctx.source_map
-                .byte_range_to_lsp(0..ctx.text.len())
+                .byte_range_to_lsp(span)
                 .unwrap_or_else(zero_range),
             DiagnosticSeverity::ERROR,
             source::SCHEMA,
@@ -1298,6 +1299,37 @@ fn diagnostic(
 
 /// A zero-width range at the document start (fallback when a span cannot
 /// convert).
+/// The byte span from a claimed trigger envelope's YAML error position to the
+/// end of that line, when the error (directly or inside a trigger load) is
+/// [`SchemaError::TriggerEnvelopeYaml`] with a location.
+///
+/// The library reports a one-based line and a one-based column counted in
+/// characters of the source with any initial BOM removed, so the column is
+/// walked in characters here and the source map converts the byte span into
+/// the negotiated position encoding.
+fn trigger_yaml_span(text: &str, error: &SchemaError) -> Option<std::ops::Range<usize>> {
+    let (line, column) = match error {
+        SchemaError::TriggerEnvelopeYaml { line: Some(line), column, .. } => (*line, column.unwrap_or(1)),
+        SchemaError::TriggerLoad { source, .. } => return trigger_yaml_span(text, source),
+        _ => return None,
+    };
+    let mut line_start = 0;
+    for _ in 1..line {
+        line_start += text[line_start..].find('\n')? + 1;
+    }
+    if line == 1 && text.starts_with('\u{feff}') {
+        line_start = '\u{feff}'.len_utf8();
+    }
+    let line_text = &text[line_start..];
+    let line_end = line_start + line_text.find('\n').unwrap_or(line_text.len());
+    let line_end = if text[..line_end].ends_with('\r') { line_end - 1 } else { line_end };
+    let start = text[line_start..line_end]
+        .char_indices()
+        .nth(column.saturating_sub(1))
+        .map_or(line_end, |(offset, _)| line_start + offset);
+    Some(start..line_end)
+}
+
 fn zero_range() -> Range {
     Range::default()
 }

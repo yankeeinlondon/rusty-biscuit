@@ -453,6 +453,16 @@ For grammar or schema changes, cover:
   and bare-name lookup never falls through to a less local root. DMLS turns
   that `Io` scan error into `SchemaOutcome::Failed` instead of keeping its
   last-good registry (last-good is only for trigger-file load errors).
+- `parse_trigger_envelope_from_str` is the one envelope classifier (discovery,
+  embedded bundles, DMLS authoring, payload-cycle checks); never add a
+  caller-side pre-check. Unparseable YAML is `Ok(None)` unless a provable
+  column-0 `kind: trigger-schema` line claims it (`claims_envelope` skips lines
+  inside multi-line quoted or block scalars and open flow collections), then
+  `SchemaError::TriggerEnvelopeYaml { message, line, column }` (column in
+  characters, BOM excluded) with a YAML hint; `TriggerMatch` stays for grammar
+  and shape errors. A malformed flow mapping is therefore unclaimed. BOM and
+  CRLF are normalized before parsing (libyaml rejects BOM + CRLF as two
+  documents). Tests: `lib/tests/l1/trigger_envelope_claim.rs`.
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and

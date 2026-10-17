@@ -12,17 +12,20 @@
 
 pub mod bench;
 pub mod capabilities;
+pub mod clock;
 pub mod config;
 pub mod context;
 pub mod corpus;
 pub mod diagnostics;
 pub mod graph;
+pub mod log_capture;
 pub mod overlay;
 pub mod providers;
 pub mod router;
 pub mod semantic_legend;
 pub mod source_map;
 pub mod wiki;
+pub mod work_counters;
 pub mod workspace;
 
 pub use bench::{BenchReport, bench_index};

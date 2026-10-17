@@ -93,7 +93,13 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   definition errors; DMLS shows missing required properties only with
   `[schema] strict = true`.
 - `context_build_count()` is a process-wide work counter; L1 tests assert
-  deltas (nextest runs one test per process).
+  deltas (nextest runs one test per process). `work_counters::work_counts()`
+  does the same for DMLS file reads, content hashes, and Markdown document
+  parses; route every new DMLS read/hash through its `read`/`read_to_string`/
+  `hash_bytes` helpers. Timing that decides behavior reads a `clock::Clock`
+  (`ManualClock` in tests). `log_capture::CapturedLogs` captures formatted
+  `tracing` lines: `scoped` sees only the calling thread, `global` sees every
+  thread (once per process).
 - Fixture traps: sniff recognizes a package only under a workspace manifest,
   and counts a declared member whose directory exists even without its own
   manifest. Inline `$schema` `file` is lazy (syntax only); use `file(eager)`

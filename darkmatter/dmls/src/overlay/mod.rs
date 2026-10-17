@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use biscuit_hash::xx_hash_bytes;
 
 use crate::context::DocumentResolution;
+use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::resolve::expand_named_types;
@@ -720,9 +721,9 @@ fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<(PathBuf, u64
     paths
         .filter(|path| seen.insert((*path).clone()))
         .filter_map(|path| {
-            std::fs::read(path)
+            work_counters::read(path)
                 .ok()
-                .map(|bytes| (path.clone(), xx_hash_bytes(&bytes)))
+                .map(|bytes| (path.clone(), work_counters::hash_bytes(&bytes)))
         })
         .collect()
 }
@@ -792,8 +793,8 @@ fn frontmatter_named_types(
 /// reassembly.
 fn deps_unchanged(deps: &[(PathBuf, u64)]) -> bool {
     deps.iter().all(|(path, hash)| {
-        std::fs::read(path)
-            .map(|bytes| xx_hash_bytes(&bytes) == *hash)
+        work_counters::read(path)
+            .map(|bytes| work_counters::hash_bytes(&bytes) == *hash)
             .unwrap_or(false)
     })
 }

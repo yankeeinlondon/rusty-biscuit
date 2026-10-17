@@ -7440,3 +7440,89 @@ fn a_frontmatter_less_document_never_reports_undeclared_properties() {
 
     fixture.shutdown();
 }
+
+/// The 2026-10-17 incident file (`schemas/feature-review.yaml` mid-edit) with
+/// its first comment line replaced by a `kind: trigger-schema` claim and one
+/// character before the line-17 error replaced by a non-BMP character, so the
+/// error stays at character column 93 while its UTF-8 and UTF-16 offsets
+/// differ from each other and from the character count.
+fn claimed_incident_envelope() -> String {
+    let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
+    let mut lines: Vec<String> = incident.split('\n').map(str::to_string).collect();
+    assert!(lines[0].starts_with('#'), "{}", lines[0]);
+    lines[0] = "kind: trigger-schema".to_string();
+    assert!(lines[16].contains("every finding"), "{}", lines[16]);
+    lines[16] = lines[16].replacen("every finding", "😀very finding", 1);
+    lines.join("\n")
+}
+
+/// A claimed envelope that is not valid YAML is diagnosed at the parser's
+/// position, converted into the negotiated encoding (never byte columns).
+#[test]
+fn a_claimed_unparseable_trigger_envelope_is_diagnosed_at_its_yaml_position() {
+    let envelope = claimed_incident_envelope();
+    let line = &envelope.split('\n').nth(16).unwrap();
+    let colon = line.find("): <title>").unwrap() + 1;
+    assert_eq!(line[..colon].chars().count(), 92, "the error stays at character column 93");
+    for (encoding, character) in [
+        ("utf-16", line[..colon].encode_utf16().count()),
+        ("utf-8", colon),
+    ] {
+        let workspace = LspWorkspace::new();
+        init_repository(workspace.path());
+        let schemas = workspace.path().join("schemas");
+        std::fs::create_dir(&schemas).unwrap();
+        let path = schemas.join("broken.yaml");
+        std::fs::write(&path, &envelope).unwrap();
+        let mut params = neovim_like_initialize_params(workspace.path());
+        params["capabilities"]["general"]["positionEncodings"] = json!([encoding]);
+        let mut fixture = LspFixture::start(&workspace);
+        let result = fixture.initialize(params);
+        assert_eq!(result["capabilities"]["positionEncoding"], json!(encoding));
+        let uri = url::Url::from_file_path(&path).unwrap();
+        open(&fixture, uri.as_str(), &envelope);
+
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        let trigger: Vec<&Value> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+            .collect();
+        assert_eq!(trigger.len(), 1, "{encoding}: {diagnostics:#?}");
+        let message = trigger[0]["message"].as_str().unwrap();
+        assert!(message.contains("is not valid YAML at line 17, column 93"), "{encoding}: {message}");
+        assert!(!message.contains("match expression"), "{encoding}: {message}");
+        assert_eq!(
+            trigger[0]["range"]["start"],
+            json!({ "line": 16, "character": character }),
+            "{encoding}: {diagnostics:#?}"
+        );
+        assert_eq!(trigger[0]["range"]["end"]["line"], json!(16), "{encoding}");
+        fixture.shutdown();
+    }
+}
+
+/// The incident file verbatim: an ordinary schema-root file that is not valid
+/// YAML and does not claim the envelope gets no trigger diagnostic.
+#[test]
+fn an_unclaimed_unparseable_schema_root_file_gets_no_trigger_diagnostic() {
+    let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
+    let workspace = LspWorkspace::new();
+    init_repository(workspace.path());
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    let path = schemas.join("feature-review.yaml");
+    std::fs::write(&path, incident).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&path).unwrap();
+    open(&fixture, uri.as_str(), incident);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.iter().all(|diagnostic| {
+            !diagnostic["message"].as_str().unwrap_or_default().contains("trigger-schema")
+        }),
+        "{diagnostics:#?}"
+    );
+    fixture.shutdown();
+}
