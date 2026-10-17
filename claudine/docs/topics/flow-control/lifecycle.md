@@ -804,6 +804,15 @@ A non-zero exit code is an action error unless `no_error: true` is set. A
 `shell` action returns nothing; to branch on a command, read its result with
 `set`.
 
+A `shell` command uses Claudine's own terminal, so it can be interactive:
+`shell: just commit` may launch another `claudine compose` that prompts or
+drives an agent's TUI. When cancellation stops a running command, the command
+and everything it started end together, with one exception on macOS and Linux:
+while Claudine is the terminal's foreground job, the command runs in
+Claudine's own process group so the terminal does not stop it. Ctrl-C still
+reaches everything it started, but a sibling-failure cancellation ends only
+the command itself, not background processes it left running.
+
 #### Shell actions approved by their shape
 
 A `shell` command, or a `set` value's `$( … )` command, with a placeholder can
