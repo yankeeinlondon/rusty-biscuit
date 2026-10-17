@@ -10,9 +10,9 @@
 //! assert the public result only: the exit status, that count, and a stderr
 //! message naming the file that holds the edit.
 //!
-//! A valid container `loop:` and a valid task `when:` are refused before
-//! anything runs: their run-time behavior is planned, and running the body
-//! once or ignoring the guard would be wrong. The contract table is the
+//! A valid container `loop:` runs its passes and a valid task `when:` decides
+//! whether its task runs: each `when` cell has a true and a false edit, so
+//! the effect count proves the guard was read. The contract table is the
 //! feature's `phase-1/matrix-contracts.md`.
 
 use std::fs;
@@ -113,8 +113,11 @@ macro_rules! matrix {
     };
 }
 
-/// What a valid container loop or task guard is refused with.
-const NOT_YET: &str = "is valid but is not yet supported at run time";
+/// A nested sequence written into a referenced formal document cannot be
+/// reread at its turn: the reread resolves the task against the invoking
+/// Markdown file, which does not hold it. The loop is accepted; this
+/// existing reread limitation then fails the step before it runs anything.
+const NESTED_REREAD: &str = "nested sequence disappeared before preparation";
 /// The replacement a removed `loop.fail_fast` names.
 const FAIL_FAST: &str = "a loop has no `fail_fast`";
 /// Why a container loop refuses `on_rate_limit`.
@@ -141,8 +144,8 @@ const LOOP_ON_SEQUENCE_REF: &str = "put `loop:` at that document's root";
 const LOOP_ON_PROMPT: &str = "a prompt task repeats through its document's own frontmatter `loop:`";
 /// A group leg that is not an object.
 const LEG_NOT_OBJECT: &str = "task 1 must be an object";
-/// A group's `start: [break]`, refused when it runs.
-const BREAK_REFUSED: &str = "is not yet supported at run time";
+/// A group's `start: [break]` with no loop around it, an error when it fires.
+const BREAK_OUTSIDE_LOOP: &str = "fired outside any loop";
 /// The inline nested sequence a JSON-family nested-loop cell writes.
 macro_rules! nested_inner {
     () => {
@@ -171,7 +174,7 @@ mod yaml_frontmatter {
     matrix! { CONTROL;
         control_runs_every_task: CONTROL.unedited() => Expect::Runs(3);
 
-        root_loop_is_refused: edit(ROOT, "---\nloop:\n  until: \"true\"\nsequence:\n") => Expect::Rejects { file: "seq.md", says: "the sequence `loop` at `loop` is valid but is not yet supported at run time" };
+        root_loop_runs: edit(ROOT, "---\nloop:\n  until: \"true\"\nsequence:\n") => Expect::Runs(3);
         root_loop_null_is_rejected: edit(ROOT, "---\nloop: null\nsequence:\n") => Expect::Rejects { file: "seq.md", says: LOOP_NOT_OBJECT };
         root_loop_scalar_is_rejected: edit(ROOT, "---\nloop: 5\nsequence:\n") => Expect::Rejects { file: "seq.md", says: LOOP_NOT_OBJECT };
         root_loop_empty_is_rejected: edit(ROOT, "---\nloop: {}\nsequence:\n") => Expect::Rejects { file: "seq.md", says: LOOP_EMPTY };
@@ -182,7 +185,7 @@ mod yaml_frontmatter {
         root_when_is_rejected: edit(ROOT, "---\nwhen: \"true\"\nsequence:\n") => Expect::Rejects { file: "seq.md", says: ROOT_WHEN };
         root_when_null_is_rejected: edit(ROOT, "---\nwhen: null\nsequence:\n") => Expect::Rejects { file: "seq.md", says: ROOT_WHEN };
 
-        group_loop_is_refused: edit(GROUP, "      name: g\n      loop:\n        until: \"true\"\n") => Expect::Rejects { file: "seq.md", says: "the group `loop` at `sequence[1].group.loop` is valid but is not yet supported at run time" };
+        group_loop_runs: edit(GROUP, "      name: g\n      loop:\n        until: \"true\"\n") => Expect::Runs(3);
         group_loop_null_is_rejected: edit(GROUP, "      name: g\n      loop: null\n") => Expect::Rejects { file: "seq.md", says: LOOP_NOT_OBJECT };
         group_loop_list_is_rejected: edit(GROUP, "      name: g\n      loop: [until]\n") => Expect::Rejects { file: "seq.md", says: LOOP_NOT_OBJECT };
         group_loop_empty_is_rejected: edit(GROUP, "      name: g\n      loop: {}\n") => Expect::Rejects { file: "seq.md", says: LOOP_EMPTY };
@@ -192,13 +195,15 @@ mod yaml_frontmatter {
         group_loop_on_rate_limit_is_rejected: edit(GROUP, "      name: g\n      loop: { until: \"true\", on_rate_limit: pause }\n") => Expect::Rejects { file: "seq.md", says: RATE_LIMIT };
         group_when_is_rejected: edit(GROUP, "      name: g\n      when: \"true\"\n") => Expect::Rejects { file: "seq.md", says: GROUP_WHEN };
         group_leg_not_an_object_is_rejected: edit("        - name: leg\n          side_effect: { append_line: [leg.trace, ran] }\n", "        - leg\n") => Expect::Rejects { file: "seq.md", says: LEG_NOT_OBJECT };
-        group_start_break_is_refused_when_it_runs: edit(GROUP, "      name: g\n      start: [break]\n") => Expect::FailsAfter { effects: 1, says: BREAK_REFUSED };
+        group_start_break_outside_a_loop_fails_when_it_fires: edit(GROUP, "      name: g\n      start: [break]\n") => Expect::FailsAfter { effects: 1, says: BREAK_OUTSIDE_LOOP };
 
-        leg_when_is_refused: edit(LEG, "        - name: leg\n          when: \"true\"\n") => Expect::Rejects { file: "seq.md", says: "task `when` at `sequence[1].group.tasks[0].when` is valid but is not yet supported at run time" };
+        leg_when_true_runs_the_leg: edit(LEG, "        - name: leg\n          when: \"true\"\n") => Expect::Runs(3);
+        leg_when_false_skips_the_leg: edit(LEG, "        - name: leg\n          when: \"false\"\n") => Expect::Runs(2);
         leg_when_null_is_rejected: edit(LEG, "        - name: leg\n          when: null\n") => Expect::Rejects { file: "seq.md", says: WHEN_NOT_STRING };
 
-        step_when_is_refused: edit(FIRST, "  - name: first\n    when: \"true\"\n") => Expect::Rejects { file: "seq.md", says: "task `when` at `sequence[0].when` is valid but is not yet supported at run time" };
-        step_when_false_is_refused: edit(FIRST, "  - name: first\n    when: \"false\"\n") => Expect::Rejects { file: "seq.md", says: NOT_YET };
+        step_when_true_runs_the_step: edit(FIRST, "  - name: first\n    when: \"true\"\n") => Expect::Runs(3);
+        step_when_false_skips_the_step: edit(FIRST, "  - name: first\n    when: \"false\"\n") => Expect::Runs(2);
+        step_when_that_raises_fails_the_step: edit(FIRST, "  - name: first\n    when: \"nope(1)\"\n") => Expect::FailsAfter { effects: 0, says: "Unknown function: nope" };
         step_when_null_is_rejected: edit(FIRST, "  - name: first\n    when: null\n") => Expect::Rejects { file: "seq.md", says: WHEN_NOT_STRING };
         step_when_boolean_is_rejected: edit(FIRST, "  - name: first\n    when: false\n") => Expect::Rejects { file: "seq.md", says: WHEN_NOT_STRING };
         step_when_number_is_rejected: edit(FIRST, "  - name: first\n    when: 1\n") => Expect::Rejects { file: "seq.md", says: WHEN_NOT_STRING };
@@ -214,7 +219,7 @@ mod yaml_frontmatter {
         loop_beside_a_group_reference_is_misplaced: edit("    group:\n      name: g\n      tasks:\n        - name: leg\n          side_effect: { append_line: [leg.trace, ran] }\n", "    group: g.yaml\n    loop: { until: \"true\" }\n") => Expect::Rejects { file: "seq.md", says: LOOP_ON_GROUP_REF };
         loop_beside_a_sequence_reference_is_misplaced: edit("    sequence:\n      - name: inner\n        side_effect: { append_line: [inner.trace, ran] }\n", "    sequence: other.yaml\n    loop: { until: \"true\" }\n") => Expect::Rejects { file: "seq.md", says: LOOP_ON_SEQUENCE_REF };
 
-        nested_loop_is_refused: edit(NESTED, "  - name: nested\n    loop:\n      until: \"true\"\n") => Expect::Rejects { file: "seq.md", says: "the sequence `loop` at `sequence[2].loop` is valid but is not yet supported at run time" };
+        nested_loop_runs: edit(NESTED, "  - name: nested\n    loop:\n      until: \"true\"\n") => Expect::Runs(3);
         nested_loop_null_is_rejected: edit(NESTED, "  - name: nested\n    loop: null\n") => Expect::Rejects { file: "seq.md", says: LOOP_NOT_OBJECT };
         nested_loop_empty_is_rejected: edit(NESTED, "  - name: nested\n    loop: {}\n") => Expect::Rejects { file: "seq.md", says: LOOP_EMPTY };
         nested_loop_unknown_key_is_rejected: edit(NESTED, "  - name: nested\n    loop: { untill: \"true\" }\n") => Expect::Rejects { file: "seq.md", says: "unknown `sequence[2].loop.untill` key (did you mean `until`?)" };
@@ -249,7 +254,7 @@ mod standalone_yaml {
     matrix! { CONTROL;
         control_runs_every_task: CONTROL.unedited() => Expect::Runs(3);
 
-        root_loop_is_refused: steps("sequence:\n", "loop:\n  until: \"true\"\nsequence:\n") => Expect::Rejects { file: "steps.yaml", says: "the sequence `loop` at `loop` is valid but is not yet supported at run time" };
+        root_loop_runs: steps("sequence:\n", "loop:\n  until: \"true\"\nsequence:\n") => Expect::Runs(3);
         root_loop_null_is_rejected: steps("sequence:\n", "loop: null\nsequence:\n") => Expect::Rejects { file: "steps.yaml", says: LOOP_NOT_OBJECT };
         root_loop_empty_is_rejected: steps("sequence:\n", "loop: {}\nsequence:\n") => Expect::Rejects { file: "steps.yaml", says: LOOP_EMPTY };
         root_loop_fail_fast_is_removed: steps("sequence:\n", "loop: { until: \"true\", fail_fast: true }\nsequence:\n") => Expect::Rejects { file: "steps.yaml", says: FAIL_FAST };
@@ -258,7 +263,7 @@ mod standalone_yaml {
         root_duplicate_key_is_rejected: steps("sequence:\n", "loop: { until: \"true\" }\nloop: { until: \"false\" }\nsequence:\n") => Expect::Rejects { file: "steps.yaml", says: "duplicate" };
         root_second_document_is_rejected: steps("        side_effect: { append_line: [inner.trace, ran] }\n", "        side_effect: { append_line: [inner.trace, ran] }\n---\nx: 1\n") => Expect::Rejects { file: "steps.yaml", says: "more than one document" };
 
-        group_file_loop_is_refused: group(NAME, "name: g\nloop:\n  until: \"true\"\n") => Expect::Rejects { file: "g.yaml", says: "the group `loop` at `loop` is valid but is not yet supported at run time" };
+        group_file_loop_runs: group(NAME, "name: g\nloop:\n  until: \"true\"\n") => Expect::Runs(3);
         group_file_loop_null_is_rejected: group(NAME, "name: g\nloop: null\n") => Expect::Rejects { file: "g.yaml", says: LOOP_NOT_OBJECT };
         group_file_loop_empty_is_rejected: group(NAME, "name: g\nloop: {}\n") => Expect::Rejects { file: "g.yaml", says: LOOP_EMPTY };
         group_file_loop_unknown_key_is_rejected: group(NAME, "name: g\nloop: { untill: \"true\" }\n") => Expect::Rejects { file: "g.yaml", says: "unknown `loop.untill` key (did you mean `until`?)" };
@@ -268,12 +273,14 @@ mod standalone_yaml {
         group_file_when_is_rejected: group(NAME, "name: g\nwhen: \"true\"\n") => Expect::Rejects { file: "g.yaml", says: GROUP_WHEN };
         group_file_leg_not_an_object_is_rejected: group("  - name: leg\n    side_effect: { append_line: [leg.trace, ran] }\n", "  - leg\n") => Expect::Rejects { file: "g.yaml", says: LEG_NOT_OBJECT };
         group_file_second_document_is_rejected: group("    side_effect: { append_line: [leg.trace, ran] }\n", "    side_effect: { append_line: [leg.trace, ran] }\n---\nx: 1\n") => Expect::Rejects { file: "g.yaml", says: "more than one document" };
-        group_file_start_break_is_refused_when_it_runs: group(NAME, "name: g\nstart: [break]\n") => Expect::FailsAfter { effects: 1, says: BREAK_REFUSED };
+        group_file_start_break_outside_a_loop_fails_when_it_fires: group(NAME, "name: g\nstart: [break]\n") => Expect::FailsAfter { effects: 1, says: BREAK_OUTSIDE_LOOP };
 
-        leg_when_is_refused: group("  - name: leg\n", "  - name: leg\n    when: \"true\"\n") => Expect::Rejects { file: "g.yaml", says: "task `when` at `tasks[0].when` is valid but is not yet supported at run time" };
+        leg_when_true_runs_the_leg: group("  - name: leg\n", "  - name: leg\n    when: \"true\"\n") => Expect::Runs(3);
+        leg_when_false_skips_the_leg: group("  - name: leg\n", "  - name: leg\n    when: \"false\"\n") => Expect::Runs(2);
         leg_when_null_is_rejected: group("  - name: leg\n", "  - name: leg\n    when: null\n") => Expect::Rejects { file: "g.yaml", says: WHEN_NOT_STRING };
 
-        step_when_is_refused: steps(FIRST, "  - name: first\n    when: \"true\"\n") => Expect::Rejects { file: "steps.yaml", says: "task `when` at `sequence[0].when` is valid but is not yet supported at run time" };
+        step_when_true_runs_the_step: steps(FIRST, "  - name: first\n    when: \"true\"\n") => Expect::Runs(3);
+        step_when_false_skips_the_step: steps(FIRST, "  - name: first\n    when: \"false\"\n") => Expect::Runs(2);
         step_when_null_is_rejected: steps(FIRST, "  - name: first\n    when: null\n") => Expect::Rejects { file: "steps.yaml", says: WHEN_NOT_STRING };
         step_when_list_is_rejected: steps(FIRST, "  - name: first\n    when: [\"true\"]\n") => Expect::Rejects { file: "steps.yaml", says: WHEN_NOT_STRING };
         step_when_empty_is_rejected: steps(FIRST, "  - name: first\n    when: \"\"\n") => Expect::Rejects { file: "steps.yaml", says: WHEN_EMPTY };
@@ -282,7 +289,7 @@ mod standalone_yaml {
         loop_on_a_side_effect_task_is_misplaced: steps(FIRST, "  - name: first\n    loop: { until: \"true\" }\n") => Expect::Rejects { file: "steps.yaml", says: LOOP_ON_LEAF };
         loop_beside_a_group_reference_is_misplaced: steps("    group: g.yaml\n", "    group: g.yaml\n    loop: { until: \"true\" }\n") => Expect::Rejects { file: "steps.yaml", says: LOOP_ON_GROUP_REF };
 
-        nested_loop_is_refused: steps(NESTED, "  - name: nested\n    loop:\n      until: \"true\"\n") => Expect::Rejects { file: "steps.yaml", says: "the sequence `loop` at `sequence[2].loop` is valid but is not yet supported at run time" };
+        nested_loop_runs: steps(NESTED, "  - name: nested\n    loop:\n      until: \"true\"\n") => Expect::Runs(3);
         nested_loop_empty_is_rejected: steps(NESTED, "  - name: nested\n    loop: {}\n") => Expect::Rejects { file: "steps.yaml", says: LOOP_EMPTY };
         nested_loop_null_is_rejected: steps(NESTED, "  - name: nested\n    loop: null\n") => Expect::Rejects { file: "steps.yaml", says: LOOP_NOT_OBJECT };
     }
@@ -325,7 +332,7 @@ macro_rules! json_family {
             matrix! { CONTROL;
                 control_runs_every_task: CONTROL.unedited() => Expect::Runs(2);
 
-                root_loop_is_refused: tasks($root, &after($root, "\"loop\": {\"until\": \"true\"}")) => Expect::Rejects { file: $tasks_name, says: "the sequence `loop` at `loop` is valid but is not yet supported at run time" };
+                root_loop_runs: tasks($root, &after($root, "\"loop\": {\"until\": \"true\"}")) => Expect::Runs(2);
                 root_loop_null_is_rejected: tasks($root, &after($root, "\"loop\": null")) => Expect::Rejects { file: $tasks_name, says: LOOP_NOT_OBJECT };
                 root_loop_scalar_is_rejected: tasks($root, &after($root, "\"loop\": 5")) => Expect::Rejects { file: $tasks_name, says: LOOP_NOT_OBJECT };
                 root_loop_empty_is_rejected: tasks($root, &after($root, "\"loop\": {}")) => Expect::Rejects { file: $tasks_name, says: LOOP_EMPTY };
@@ -336,7 +343,8 @@ macro_rules! json_family {
                 root_when_is_rejected: tasks($root, &after($root, "\"when\": \"true\"")) => Expect::Rejects { file: $tasks_name, says: ROOT_WHEN };
                 root_trailing_content_is_rejected: tasks($end, concat!($end, "{}")) => Expect::Rejects { file: $tasks_name, says: $tasks_name };
 
-                step_when_is_refused: tasks($first, &after($first, "\"when\": \"true\"")) => Expect::Rejects { file: $tasks_name, says: "task `when` at `sequence[0].when` is valid but is not yet supported at run time" };
+                step_when_true_runs_the_step: tasks($first, &after($first, "\"when\": \"true\"")) => Expect::Runs(2);
+                step_when_false_skips_the_step: tasks($first, &after($first, "\"when\": \"false\"")) => Expect::Runs(1);
                 step_when_null_is_rejected: tasks($first, &after($first, "\"when\": null")) => Expect::Rejects { file: $tasks_name, says: WHEN_NOT_STRING };
                 step_when_number_is_rejected: tasks($first, &after($first, "\"when\": 0")) => Expect::Rejects { file: $tasks_name, says: WHEN_NOT_STRING };
                 step_when_list_is_rejected: tasks($first, &after($first, "\"when\": [\"true\"]")) => Expect::Rejects { file: $tasks_name, says: WHEN_NOT_STRING };
@@ -347,11 +355,11 @@ macro_rules! json_family {
                 loop_on_a_side_effect_task_is_misplaced: tasks($first, &after($first, "\"loop\": {\"until\": \"true\"}")) => Expect::Rejects { file: $tasks_name, says: LOOP_ON_LEAF };
                 loop_beside_a_group_reference_is_misplaced: tasks($fan, &after($fan, "\"loop\": {\"until\": \"true\"}")) => Expect::Rejects { file: $tasks_name, says: LOOP_ON_GROUP_REF };
                 loop_beside_a_sequence_reference_is_misplaced: tasks($fan_step, "{\"name\": \"fan\", \"sequence\": \"other.json\", \"loop\": {\"until\": \"true\"}}") => Expect::Rejects { file: $tasks_name, says: LOOP_ON_SEQUENCE_REF };
-                nested_loop_is_refused: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {\"until\": \"true\"}, ", nested_inner!(), "}")) => Expect::Rejects { file: $tasks_name, says: "the sequence `loop` at `sequence[0].loop` is valid but is not yet supported at run time" };
+                nested_loop_is_accepted: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {\"until\": \"true\"}, ", nested_inner!(), "}")) => Expect::FailsAfter { effects: 0, says: NESTED_REREAD };
                 nested_loop_empty_is_rejected: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {}, ", nested_inner!(), "}")) => Expect::Rejects { file: $tasks_name, says: LOOP_EMPTY };
                 nested_loop_on_rate_limit_is_rejected: tasks($first_step, concat!("{\"name\": \"first\", \"loop\": {\"until\": \"true\", \"on_rate_limit\": \"pause\"}, ", nested_inner!(), "}")) => Expect::Rejects { file: $tasks_name, says: RATE_LIMIT };
 
-                group_file_loop_is_refused: group($gname, &after($gname, "\"loop\": {\"until\": \"true\"}")) => Expect::Rejects { file: $group_name, says: "the group `loop` at `loop` is valid but is not yet supported at run time" };
+                group_file_loop_runs: group($gname, &after($gname, "\"loop\": {\"until\": \"true\"}")) => Expect::Runs(2);
                 group_file_loop_null_is_rejected: group($gname, &after($gname, "\"loop\": null")) => Expect::Rejects { file: $group_name, says: LOOP_NOT_OBJECT };
                 group_file_loop_empty_is_rejected: group($gname, &after($gname, "\"loop\": {}")) => Expect::Rejects { file: $group_name, says: LOOP_EMPTY };
                 group_file_loop_unknown_key_is_rejected: group($gname, &after($gname, "\"loop\": {\"until\": \"true\", \"colour\": \"red\"}")) => Expect::Rejects { file: $group_name, says: "unknown `loop.colour` key" };
@@ -360,9 +368,10 @@ macro_rules! json_family {
                 group_file_loop_duplicate_key_is_rejected: group($gname, &after($gname, "\"loop\": {\"until\": \"true\", \"max\": 2, \"max\": 3}")) => Expect::Rejects { file: $group_name, says: "duplicate key `max` at `loop`" };
                 group_file_when_is_rejected: group($gname, &after($gname, "\"when\": \"true\"")) => Expect::Rejects { file: $group_name, says: GROUP_WHEN };
                 group_file_leg_not_an_object_is_rejected: group($leg_body, "\"leg\"") => Expect::Rejects { file: $group_name, says: LEG_NOT_OBJECT };
-                group_file_start_break_is_refused_when_it_runs: group($gname, &after($gname, "\"start\": [\"break\"]")) => Expect::FailsAfter { effects: 1, says: BREAK_REFUSED };
+                group_file_start_break_outside_a_loop_fails_when_it_fires: group($gname, &after($gname, "\"start\": [\"break\"]")) => Expect::FailsAfter { effects: 1, says: BREAK_OUTSIDE_LOOP };
 
-                leg_when_is_refused: group($leg, &after($leg, "\"when\": \"true\"")) => Expect::Rejects { file: $group_name, says: "task `when` at `tasks[0].when` is valid but is not yet supported at run time" };
+                leg_when_true_runs_the_leg: group($leg, &after($leg, "\"when\": \"true\"")) => Expect::Runs(2);
+                leg_when_false_skips_the_leg: group($leg, &after($leg, "\"when\": \"false\"")) => Expect::Runs(1);
                 leg_when_map_is_rejected: group($leg, &after($leg, "\"when\": {\"a\": 1}")) => Expect::Rejects { file: $group_name, says: WHEN_NOT_STRING };
                 leg_duplicate_key_is_rejected: group($leg, &after($leg, "\"name\": \"leg\"")) => Expect::Rejects { file: $group_name, says: "duplicate key `name` at `tasks[0]`" };
 
@@ -423,7 +432,8 @@ macro_rules! line_delimited {
             matrix! { CONTROL;
                 control_runs_both_records: CONTROL.unedited() => Expect::Runs(2);
 
-                task_when_is_refused: record_1(TASK, "{\"label\": \"fan\", \"when\": \"true\",") => Expect::Rejects { file: $file, says: "task `when` at `[0].when` is valid but is not yet supported at run time" };
+                task_when_true_runs_the_task: record_1(TASK, "{\"label\": \"fan\", \"when\": \"true\",") => Expect::Runs(2);
+                task_when_false_skips_the_task: record_1(TASK, "{\"label\": \"fan\", \"when\": \"false\",") => Expect::Runs(1);
                 task_when_null_is_rejected: record_1(TASK, "{\"label\": \"fan\", \"when\": null,") => Expect::Rejects { file: $file, says: WHEN_NOT_STRING };
                 task_when_boolean_is_rejected: record_1(TASK, "{\"label\": \"fan\", \"when\": true,") => Expect::Rejects { file: $file, says: WHEN_NOT_STRING };
                 task_when_empty_is_rejected: record_1(TASK, "{\"label\": \"fan\", \"when\": \"\",") => Expect::Rejects { file: $file, says: WHEN_EMPTY };
@@ -432,7 +442,7 @@ macro_rules! line_delimited {
                 task_trailing_content_is_rejected: record_1("]}}", "]}} junk") => Expect::Rejects { file: $file, says: "line 1" };
                 loop_beside_an_inline_group_is_misplaced: record_1(TASK, "{\"label\": \"fan\", \"loop\": {\"until\": \"true\"},") => Expect::Rejects { file: $file, says: LOOP_BESIDE_GROUP };
 
-                group_loop_is_refused: record_1(GROUP, "{\"name\": \"g\", \"loop\": {\"until\": \"true\"},") => Expect::Rejects { file: $file, says: "the group `loop` at `[0].group.loop` is valid but is not yet supported at run time" };
+                group_loop_runs: record_1(GROUP, "{\"name\": \"g\", \"loop\": {\"until\": \"true\"},") => Expect::Runs(2);
                 group_loop_null_is_rejected: record_1(GROUP, "{\"name\": \"g\", \"loop\": null,") => Expect::Rejects { file: $file, says: LOOP_NOT_OBJECT };
                 group_loop_list_is_rejected: record_1(GROUP, "{\"name\": \"g\", \"loop\": [],") => Expect::Rejects { file: $file, says: LOOP_NOT_OBJECT };
                 group_loop_empty_is_rejected: record_1(GROUP, "{\"name\": \"g\", \"loop\": {},") => Expect::Rejects { file: $file, says: LOOP_EMPTY };
@@ -443,10 +453,11 @@ macro_rules! line_delimited {
                 group_when_is_rejected: record_1(GROUP, "{\"name\": \"g\", \"when\": \"true\",") => Expect::Rejects { file: $file, says: GROUP_WHEN };
                 group_leg_not_an_object_is_rejected: record_1("{\"name\": \"leg\", \"side_effect\": {\"append_line\": [\"leg.trace\", \"ran\"]}}", "\"leg\"") => Expect::Rejects { file: $file, says: LEG_NOT_OBJECT };
 
-                leg_when_is_refused: record_1(LEG, "{\"name\": \"leg\", \"when\": \"true\",") => Expect::Rejects { file: $file, says: "task `when` at `[0].group.tasks[0].when` is valid but is not yet supported at run time" };
+                leg_when_true_runs_the_leg: record_1(LEG, "{\"name\": \"leg\", \"when\": \"true\",") => Expect::Runs(2);
+                leg_when_false_skips_the_leg: record_1(LEG, "{\"name\": \"leg\", \"when\": \"false\",") => Expect::Runs(1);
                 leg_when_list_is_rejected: record_1(LEG, "{\"name\": \"leg\", \"when\": [],") => Expect::Rejects { file: $file, says: WHEN_NOT_STRING };
 
-                nested_loop_is_refused: record_1(RECORD_1, "{\"label\": \"fan\", \"loop\": {\"until\": \"true\"}, \"sequence\": [{\"name\": \"inner\", \"side_effect\": {\"append_line\": [\"inner.trace\", \"ran\"]}}]}") => Expect::Rejects { file: $file, says: "the sequence `loop` at `[0].loop` is valid but is not yet supported at run time" };
+                nested_loop_is_accepted: record_1(RECORD_1, "{\"label\": \"fan\", \"loop\": {\"until\": \"true\"}, \"sequence\": [{\"name\": \"inner\", \"side_effect\": {\"append_line\": [\"inner.trace\", \"ran\"]}}]}") => Expect::FailsAfter { effects: 0, says: NESTED_REREAD };
                 nested_loop_empty_is_rejected: record_1(RECORD_1, "{\"label\": \"fan\", \"loop\": {}, \"sequence\": [{\"name\": \"inner\", \"side_effect\": {\"append_line\": [\"inner.trace\", \"ran\"]}}]}") => Expect::Rejects { file: $file, says: LOOP_EMPTY };
             }
         }

@@ -119,6 +119,9 @@ mod level1_structured_error_message;
 // Records prompts with the Unix-only `launch_recorder`.
 #[cfg(unix)]
 mod lifecycle_directive_matrix;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_prep;
 mod lifecycle_downgrade_outcome;
 mod lifecycle_literal_escapes;
 mod lifecycle_message_drain;
@@ -134,6 +137,16 @@ mod loop_cli;
 // Records prompts with the Unix-only `launch_recorder`.
 #[cfg(unix)]
 mod loop_config_matrix;
+// Records prompts with the Unix-only `launch_recorder`, and orders legs with
+// POSIX `sh` loops.
+#[cfg(unix)]
+mod loop_break;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod loop_primitives;
+// Its flaky shell steps are POSIX `sh`.
+#[cfg(unix)]
+mod loop_retry_passes;
 // Installs the `claudine-fake-goose` fixture binary on Windows, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -168,7 +181,9 @@ mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
+mod sequence_dry_run;
 mod steer_cli;
+mod task_guards;
 #[cfg(unix)]
 mod sequence_groups;
 // Reads the `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` seam, which only

@@ -121,7 +121,8 @@ fn recursive_dry_run_fires_no_container_events() {
         .arg(&source).assert().success().get_output().clone();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("forbidden"), "{stdout}");
-    assert_eq!(fs::read_to_string(fixture.cwd().join("shell-ran.txt")).unwrap().trim(), "child");
+    // A dry run renders `shell:` tasks instead of running them.
+    assert!(!fixture.cwd().join("shell-ran.txt").exists());
     assert!(!fixture.cwd().join("provider-ran.txt").exists());
     assert_eq!(fs::read_to_string(&source).unwrap(), document);
     assert!(!fixture.audio_spool().exists());

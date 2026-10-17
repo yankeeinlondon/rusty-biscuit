@@ -920,9 +920,7 @@ Prompt body.
 "#));
     let mut command = fixture.command_std();
     command.args(["compose", "--goose", "--yolo", "--silent"]).arg(&prompt);
-    // Continuation past a failed iteration makes the cancellation, not a
-    // failure, the only thing that can stop the loop.
-    if looping { command.args(["--max-iterations", "2"]).env("CLAUDINE_FAIL_FAST", "false"); }
+    if looping { command.args(["--max-iterations", "2"]); }
     let mut run = SignalledRun::spawn(command, fixture.workspace_path());
     barrier.wait_reached(&mut run, READY_TIMEOUT);
     run.interrupt();

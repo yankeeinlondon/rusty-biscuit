@@ -349,49 +349,6 @@ Body.
     );
 }
 
-/// A valid group `loop:` is refused before any member runs: container loops
-/// are not wired yet, and running the group once would hide that.
-#[test]
-fn a_group_loop_is_refused_before_anything_runs() {
-    let fixture = CliProcessFixture::named("sequence-groups");
-    fake_goose(&fixture);
-    let md = fixture.cwd().join("seq.md");
-    fs::write(
-        &md,
-        r#"---
-sequence:
-  - name: alpha
-    group:
-      name: bundle
-      loop:
-        while: "true"
-      tasks:
-        - name: member
-          shell: "printf 'ran\n' >> trace.txt"
----
-
-Body.
-"#,
-    )
-    .unwrap();
-
-    let (_, stderr, code) = run(
-        &fixture,
-        &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
-    );
-
-    assert_ne!(code, 0, "stderr:\n{stderr}");
-    let flat = stderr.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(
-        flat.contains("loop") && flat.contains("not yet supported"),
-        "the refusal must name the construct; stderr:\n{stderr}"
-    );
-    assert!(
-        trace(fixture.cwd()).is_empty(),
-        "the refusal means nothing ran; stderr:\n{stderr}"
-    );
-}
-
 /// A parallel group really overlaps its members: each task waits until every
 /// sibling has started before any of them can finish. Serial execution cannot
 /// satisfy that barrier.

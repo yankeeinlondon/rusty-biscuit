@@ -1015,25 +1015,6 @@ fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
     assert!(!launched);
 }
 
-/// A valid group `loop` is refused before anything launches: container loops
-/// are not wired yet, and running the group once would hide that.
-#[test]
-#[cfg(unix)]
-fn sequence_refuses_group_loop() {
-    let fixture = CliProcessFixture::named("sequence-cli");
-    let md_file = fixture.cwd().join("seq.md");
-    fs::write(
-        &md_file,
-        "---\nsequence:\n    - name: one\n      group:\n          name: looper\n          loop:\n              while: \"true\"\n          tasks:\n              - shell: echo x\n---\nBody.\n",
-    )
-    .unwrap();
-
-    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
-    let flat = stderr.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("group `loop`") && flat.contains("not yet supported"), "stderr: {stderr}");
-    assert!(!launched);
-}
-
 /// A shell task that depends on `outputs` has no bytes up front, so it is
 /// approved only as a template; with no rule and no terminal to ask, preflight
 /// fails naming the authored command, before any step runs.

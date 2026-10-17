@@ -19,3 +19,12 @@ boxed = "CompositionError"
 tag = "retained"
 reason = """
 The box is required, not incidental: `CompositionError` is large enough that an unboxed `Result<_, CompositionError>` here trips `clippy::result_large_err` across the call graph — the same pressure that forced `InvalidFileReference` to box its *context* instead of its source. Reachability is preserved at the boundary rather than in the type: `loop_control.rs` unboxes with `Report::from(*error)` before the value reaches a `Report`, so the report's root is a `CompositionError` and `as_diagnostic` resolves it. This is exactly the site D-13 found broken — it did `error.into()`, making the root a `Box<CompositionError>` — so the discipline is load-bearing, and it is locked by `effective_diagnostic_render::terminal_proxy_resolution_failure_renders_a_status_block` and `level2_typed_error_render_capture::level2_terminal_proxy_renders_status_block_in_tmux`, both proven to fail when the unbox is reverted."""
+
+[[allow]]
+site = "source_field"
+file = "lib/src/composition/error/mod.rs"
+symbol = "CompositionError::LoopEvaluationFailed"
+boxed = "CompositionError"
+tag = "retained"
+reason = """
+The box is required by recursion: `LoopEvaluationFailed` locates a loop condition or action failure (the loop block's property and the pass) around the condition parser's or action stager's own `CompositionError`, and an enum cannot hold itself unboxed. The wrapper is the registered diagnostic the run reports — its `Display` carries the inner error's text and its fields carry the location the inner variants lack — so nothing is lost when `as_diagnostic` stops at it. A retired `_loop_*` read is deliberately not wrapped (`LoopFrame::evaluation_failed` returns `RemovedGrammar` as is), so that typed hint stays reachable. Locked by `looping::frame::tests::condition_and_action_failures_are_located_at_the_block_and_pass` (the boxed source is the original `InvalidIncrementType`) and `loop_primitives::a_failed_container_action_commits_nothing_and_names_the_pass` (the rendered block names the block, the pass, and the cause)."""

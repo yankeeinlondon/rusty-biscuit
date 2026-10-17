@@ -419,46 +419,6 @@ fn loop_iteration_downgrade_halts_by_default() {
     assert_eq!(run.reason_count(), 1, "{}", run.output);
 }
 
-#[test]
-fn loop_iteration_downgrade_reaches_gate_under_claudine_fail_fast_false() {
-    let fixture = fixture("downgrade-loop-continue");
-    let doc = write_doc(&fixture, "loop.md", &looping_doc());
-
-    // A loop cannot author `fail_fast`; the environment still selects
-    // continuation past a failed iteration.
-    let output = fixture
-        .command()
-        .args(["compose", "--claude", doc.to_str().expect("UTF-8 path")])
-        .env("CLAUDINE_FAIL_FAST", "false")
-        .output()
-        .expect("claudine runs");
-    let run = Run {
-        code: output.status.code(),
-        output: format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ),
-    };
-
-    // Each failed iteration still reaches the gate, whose action advances the
-    // counter, so the condition ends the loop after the counter-2 iteration.
-    assert_eq!(
-        lines_of(&fixture.cwd().join("events.log")),
-        ["iteration 1", "iteration 2", "iteration 3"],
-        "{}",
-        run.output
-    );
-    assert_eq!(run.code, Some(1), "{}", run.output);
-    assert_eq!(
-        run.reason_count(),
-        3,
-        "each failed iteration reports its error once: {}",
-        run.output
-    );
-    assert_eq!(run.error_line_count(), 0, "{}", run.output);
-}
-
 #[cfg(unix)]
 #[test]
 fn inline_success_error_fails_with_one_diagnostic() {
