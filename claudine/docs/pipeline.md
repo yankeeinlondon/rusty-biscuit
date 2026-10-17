@@ -156,7 +156,7 @@ the template body so Darkmatter can run them non-interactively.
 
 | # | Step | Notes |
 |---|------|-------|
-| B5.1 | **Resolve `LoopExecutionOptions`** [M] | `--max-iterations` flag > `loop.max` frontmatter > `CLAUDINE_MAX_ITERATIONS` env. |
+| B5.1 | **Resolve `LoopExecutionOptions`** [M] | `--max-iterations` flag > `CLAUDINE_MAX_ITERATIONS` env > `loop.max` frontmatter > built-in default. |
 | B5.2 | **`resolve_loop_config(source)`** [M] | Returns `Some` when `loop:` frontmatter is present. |
 | B5.3 | **Branch: loop vs single-shot** [M] | When looping, every iteration re-runs B6 → F. When single-shot, B6 → F runs once. |
 

@@ -35,10 +35,11 @@ fn edit(from: &str, to: &str) -> String {
     CONTROL.replacen(from, to, 1)
 }
 
-/// How a cell runs beyond the document: caller setters after the file, and
-/// variables for the child.
+/// How a cell runs beyond the document: options before the file, caller
+/// setters after it, and variables for the child.
 #[derive(Default)]
 struct Invocation {
+    flags: &'static [&'static str],
     setters: &'static [&'static str],
     env: &'static [(&'static str, &'static str)],
 }
@@ -55,7 +56,7 @@ fn check(document: &str, expected: Expect, invocation: Invocation) {
     fs::write(&source, document).unwrap();
     let recordings = launch_recorder::install(&fixture, "claude", "printf 'ok\\n'");
     let mut command = fixture.command();
-    command.args(["compose", "--claude", "--yolo", "--silent"]).arg(&source).args(invocation.setters);
+    command.args(["compose", "--claude", "--yolo", "--silent"]).args(invocation.flags).arg(&source).args(invocation.setters);
     for (name, value) in invocation.env {
         command.env(name, value);
     }
@@ -184,6 +185,12 @@ matrix! {
         CONTROL,
         Invocation { env: &[("CLAUDINE_MAX_ITERATIONS", "ten")], ..Invocation::default() }
         => Expect::RejectsWith("invalid `CLAUDINE_MAX_ITERATIONS` value `ten`");
+    // The flag outranks the variable, so a mistyped variable it overrides is
+    // never read.
+    max_env_unparsable_is_unread_under_the_flag:
+        CONTROL,
+        Invocation { flags: &["--max-iterations", "4"], env: &[("CLAUDINE_MAX_ITERATIONS", "ten")], ..Invocation::default() }
+        => Expect::Completes(3);
     max_env_zero_is_rejected:
         CONTROL,
         Invocation { env: &[("CLAUDINE_MAX_ITERATIONS", "0")], ..Invocation::default() }

@@ -366,7 +366,7 @@ Every loop is bounded so a runaway condition cannot hang indefinitely.
 - **Per-loop override:** `loop.max: <N>` on the primitive.
 - **Per-run override:** `--max-iterations <N>` on the CLI, or the `CLAUDINE_MAX_ITERATIONS` environment variable.
 
-Precedence is **CLI > environment > frontmatter > built-in default**. A `CLAUDINE_MAX_ITERATIONS` that is not a positive integer (`0`, `ten`) fails a looping run before its first iteration rather than being ignored.
+Precedence is **CLI > environment > frontmatter > built-in default**. A `CLAUDINE_MAX_ITERATIONS` that is not a positive integer (`0`, `ten`) fails a looping run that would use it before its first iteration, rather than being ignored; under `--max-iterations` the variable is never read.
 
 `max` may be a whole-value template. It is resolved **once**, before the first iteration, against the values the document's frontmatter resolves with: its own defaults, with the caller's setters and `--set` applied.
 

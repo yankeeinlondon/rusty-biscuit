@@ -1028,14 +1028,16 @@ fn build_and_run_loop(
         return Ok(None);
     };
     // Cap precedence: `--max-iterations`, then `CLAUDINE_MAX_ITERATIONS`, then
-    // the authored `max`, then the engine default. The variable is checked
-    // whenever a loop runs, so a mistyped value is refused even under the flag.
-    let env_cap = claudine::composition::resolve_max_iterations_from_env(
-        document_epoch.environment(),
-        &source.resolved_path,
-    )?;
+    // the authored `max`, then the engine default. The variable is read only
+    // when the flag is absent, so a mistyped value fails exactly the runs that
+    // would use it.
     let mut loop_options = loop_options;
-    loop_options.max_iterations = loop_options.max_iterations.or(env_cap);
+    if loop_options.max_iterations.is_none() {
+        loop_options.max_iterations = claudine::composition::resolve_max_iterations_from_env(
+            document_epoch.environment(),
+            &source.resolved_path,
+        )?;
+    }
     document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::LoopCondition,
     );
