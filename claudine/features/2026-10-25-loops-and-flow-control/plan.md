@@ -3,7 +3,7 @@ kind: plan
 area: claudine
 created: 2026-10-12
 total_phases: 6
-phase: 1
+phase: 3
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -18,8 +18,99 @@ docs_created_during_phase_1:
     - claudine/features/2026-10-25-loops-and-flow-control/phase-1/matrix-contracts.md
     - claudine/features/2026-10-25-loops-and-flow-control/spike/README.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/lifecycle_directive_matrix.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/loop_config_matrix.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/signatures.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/dsl.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/rate_limits.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/path_function_contracts.rs
+docs_updated_during_phase_2:
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/remote-url-references.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/compose.md
 packages:
+    - claudine
     - claudine-cli
+    - darkmatter
+    - darkmatter-cli
+    - dmls
 ---
 
 # Loops and flow control implementation plan
@@ -145,7 +236,7 @@ The `implemented` examples deliberately retain the specified expression semantic
 
 ### Wave 3 — parallel implementation
 
-- [ ] **Configuration grammar**
+- [x] **Configuration grammar**
   - Prerequisite: Phase 1 checkpoint. Extend loop parsing to every permitted primitive location; parse templated caps for one-time resolution using existing option/env precedence. Reject loop `fail_fast`, invalid/unknown keys, conflicting conditions/aliases, and mixed gate forms with typed, located diagnostics and suggestions.
   - Add `break`/`prep` arguments to shared actions, signatures, validators, action enumeration, and `claudine/schemas/` partials. Permit non-final `prep`; retain last-item placement for unconditional terminating directives. Reject both under `cancelled` and preserve shell-free initialization checks.
   - Parse `when` as a reserved task option, not step data; reject sequence-root `when` and unsupported task loop locations. Retain current task `params` spelling.
@@ -231,7 +322,7 @@ The coordinator reserves shared request/options/result structs and patches them 
 
 ### Wave 9 — parallel prompt and documentation work
 
-- [ ] **Review prompt migration**
+- [ ] **Review prompt migration** *(deferred by the author's 2026-10-17 ruling: `prompts/review-loop.md` was retired and `just fix` stays the loop; skip this task and acceptance criterion 11, see the implementation log's Phase 2 rulings)*
   - Rewrite `prompts/review-loop.md` as the specified looping sequence, using current task `params`. Guard implementation, keep review as a group of one, and capture review counter/path in the group's start layer for the successful state merge.
   - Use presence-aware pre-review counter validation, require a previously absent numbered file, an increment of exactly one, and actual boolean flags. Recurrence wins over ready; error before repair/stage/commit for malformed, missing, stale, or pre-existing files. Never delete a pre-existing review to make rehearsal succeed.
   - Preserve caller-file/space-safe sibling paths and fresh explicit file reads. Keep cap 5 semantics: at most five reviews and repairs; an unverified final repair exhausts. Ensure implementation's own multi-phase loop runs fully as a prompt task.
@@ -244,7 +335,7 @@ The coordinator reserves shared request/options/result structs and patches them 
 
 ### Wave 10 — serial fixture integration
 
-- [ ] **Workflow rehearsals**
+- [ ] **Workflow rehearsals** *(the `review-loop.md` rehearsals are deferred with the migration; the empty-staged-commit check and the four shipped-prompt suites still apply)*
   - Derive frozen behavior fixtures from the migrated prompts and preserve their load-bearing schema/loop/body semantics. Refresh route hashes through the existing Darkmatter/biscuit-hash workflow only after checking fixture deltas; include provenance and initialize fixtures.
   - Use recording stub providers, private CWD/home/spool, and scratch Git repositories. Rehearse an unimplemented two-phase plan through one repair/commit then ready, and an already implemented spec becoming ready without implementation/commit launches.
   - Cover recurrence exit 2, both flags true, ready on the last permitted pass, cap exhaustion exit 1, invalid flags/counters/files, existing next-numbered review, caller spec outside prompt directories, and names containing spaces. For the commit behavior, record/stub commit execution so no test needs a signing prompt.

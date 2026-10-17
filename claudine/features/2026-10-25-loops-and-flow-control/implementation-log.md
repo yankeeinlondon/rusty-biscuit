@@ -15,73 +15,115 @@ docs_created_during_phase_1:
     - claudine/features/2026-10-25-loops-and-flow-control/phase-1/matrix-contracts.md
     - claudine/features/2026-10-25-loops-and-flow-control/spike/README.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/lifecycle_directive_matrix.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/loop_config_matrix.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/signatures.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/dsl.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/rate_limits.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/path_function_contracts.rs
+docs_updated_during_phase_2:
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/remote-url-references.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/compose.md
 packages:
+    - claudine
     - claudine-cli
+    - darkmatter
+    - darkmatter-cli
+    - dmls
 human_review: false
-human_review_items:
-    - |-
-      **Should `loop.on_rate_limit` stay, and where?** (decide before Phase 2)
-
-      Today a looping *document* can say what to do when the AI provider reports it is being rate-limited: `pause` until the limit resets (the default), `abort` with exit code 75, or `continue`. The `--on-rate-limit` flag sets the same thing. This feature lets groups and sequences loop too, but the new loop grammar in the spec never mentions this key. Phase 2 rewrites the loop parser, so it has to know whether to keep the key.
-
-      - **Option A: keep it for documents only; reject it on group and sequence loops.** *Recommended.*
-        - Pros: nothing that works today breaks. The key only means something where a provider stream exists, and a group or sequence has none. A container that names the key gets a clear error instead of a setting that silently does nothing.
-        - Cons: the loop grammar is slightly different for documents than for containers.
-        - Detail: the pause is applied only after the loop has decided to run another pass, which replaces today's guess about the last pass.
-      - **Option B: keep it everywhere; on a container, pass it to the documents inside.**
-        - Pros: the grammar is the same everywhere.
-        - Cons: this is new behavior the spec does not describe. It is unclear which document's rate limit should pause a whole group.
-      - **Option C: remove it.**
-        - Pros: the simplest grammar.
-        - Cons: removes working rate-limit recovery. Its tests and its documentation in five pages would go too. No shipped prompt uses it, so nothing in the repository breaks.
-
-      I recommend **A**, because it keeps current behavior and needs no new behavior to be designed.
-    - |-
-      **Should `file_exists()` report errors instead of answering `false`?** (decide before Phase 2's path work)
-
-      `file_exists(path)` is a Darkmatter expression function. Today it answers `false` whenever it cannot look. That includes a permission-denied folder, a malformed path, a missing home or vault setting, or a failed download. The spec says such errors must never be turned into "the file is missing". The function's own documentation, however, promises it "never errors", and three existing tests check that.
-
-      - **Option A: errors become errors; a genuinely absent file is still `false`.** *Recommended.*
-        - Pros: it matches the spec. A permissions problem can no longer make a loop guard or the review loop's "review file already exists?" check give the wrong answer silently.
-        - Cons: it changes a documented contract. Three tests and the docs change, and any prompt that relied on `false` for a bad path now fails loudly.
-      - **Option B: keep `false` for everything.**
-        - Pros: no change.
-        - Cons: it contradicts the spec, and a permission error can still look like "missing".
-
-      I recommend **A**, because the review loop depends on this check to refuse a stale or pre-existing review file.
-    - |-
-      **The review loop: one agent or two?** (decide before Phase 5; it does not block Phases 2–4)
-
-      The live `prompts/review-loop.md` takes two inputs, `review_agent` and `repair_agent`, so reviews and repairs can use different AI agents. The spec's rewritten version takes a single `agent` for every step.
-
-      - **Option A: follow the spec (one `agent`).**
-        - Pros: simpler, and it matches the finalized spec.
-        - Cons: you can no longer use, say, one agent to review and another to repair.
-      - **Option B: keep both inputs in the migrated prompt.** *Recommended.*
-        - Pros: keeps a capability that exists today, and the change is small.
-        - Cons: a departure from the spec's example, which would be recorded in the implementation log.
-
-      I recommend **B**, because it keeps the separate review and repair agents that exist today. If you prefer the spec's single input, choose A.
+human_review_items: []
 message_to_agent: |-
-  Phase 1 delivered inventories, rulings, a spike, and a contract matrix; read them before coding. They are in `claudine/features/2026-10-25-loops-and-flow-control/phase-1/` and `spike/README.md`:
-  - `dependency-audit.md` §3 (seams), §6 (every loose loop verb's signature), and §7 (owner per shared file).
-  - `path-inventory.md` §5–6 (path fixture table and the exact change sites for `absolute`/`dirname`).
-  - `coverage-inventory.md` §2 (test registration: `autotests = false`, add `mod` lines) and §6 (acceptance criterion → test → task).
-  - `matrix-contracts.md`: every robustness cell, marked covered, Phase N, or N/A.
+  Phase 2 landed the grammar; Phases 3 and 4 land the behavior. Every author ruling is recorded in the log's Phase 2 section; none is open.
 
-  Key facts:
-  1. The worktree carries **uncommitted** sequence-containers review fixes (about 20 claudine files and 3 untracked L1 tests). Build on them; never stash or reset them.
-  2. `on_rate_limit` is awaiting the author's ruling (human review). Preserve its current behavior until it is decided.
-  3. `claudine/cli/tests/l1/loop_config_matrix.rs` is the YAML-frontmatter matrix traversal: a `matrix!` macro with one test per cell, each a one-edit change to the `CONTROL` fixture. When Phase 2 lands a change, add its pending cells from `matrix-contracts.md` as rows. The largest group is 11 `LoopInvalid` errors that do not name the document; the check requires a rejection's stderr to contain `count.md`. Write the other formats' traversals (standalone YAML, JSON, JSON5, JSONL/NDJSON) the same way once container and task grammar exist. JSON-family duplicate keys are last-wins today and must become errors.
-  4. Spike contracts:
-     - A break settles a container with `guard_mut().defuse()` and then one `finalize`.
-     - `prep` is a returning action through an injected runner beside `shell_runner`, not a `StackControl`.
-     - `RuntimeState` needs a pass-checkpoint restore of mutations and outputs that keeps `proxy_chain`.
-     - Call ancestry reuses `enter_container_proxy`'s RAII guard.
-     - No deadline carrier exists; add an absolute-instant `CallDeadline`.
-     - `LoopAmbient.last_output` must become a `Value`.
-  5. `launch_recorder` is Unix-only, so prompt-recording tests are `cfg(unix)`.
-  6. Stale comment for the executor owner: `StackExecutionContext::scope` (`lifecycle/executor.rs:579`) still mentions task setup/teardown.
+  1. **"Grammar ahead of behavior" refusals.** Each valid-but-unbuilt construct is refused at exactly one site; remove it in the change that lands the behavior:
+     - container `loop:` → `sequence/grammar.rs::container_loop` (`ContainerLoopNotYetSupported`), Phase 3;
+     - task `when:` → `sequence/grammar.rs::task_when` (`TaskWhenNotYetSupported`), Phase 4. The guard is validated but **not stored** on the preflight task; Phase 4's "Task guard binding" adds that field;
+     - lifecycle `break`/`prep` → `lifecycle/executor.rs::resolve_control` (`LifecycleDirectiveNotYetSupported`), Phase 4.
+  2. **Loop configuration API** (`composition/looping/config.rs`, types in `types.rs`): `parse_loop_block(value, LoopOwner, &LoopLocation) -> LoopBlock { config, gate }`, `resolve_templated_loop_max` (a templated `max` stays in `LoopConfig::max_template` until resolved once; the engine refuses an unresolved one), `check_loop_config_keys`. `LoopInvalid` is located (`source_path`, `property`).
+  3. **Loop-level fail-fast is gone from the grammar** (`loop.fail_fast` is `RemovedGrammar`), but the engine still honors `CLAUDINE_FAIL_FAST`; tests that relied on authored `fail_fast` set that variable. Phase 3's state machine removes loop-level fail-fast; group `fail_fast` stays.
+  4. **`on_rate_limit` is document-only** (author ruling). Keep document recovery unchanged in the new engine.
+  5. **Test scope.** Run only the tests for what you change while working; the area's full `just test`/`just lint` runs once at the end of the phase, by the orchestrator, with no subagent running. New robustness matrices follow `prompts/_input-robustness.md`: field shapes once per validator, in-process through the public result; document shapes once per loader; spawn the CLI only to prove wiring. The 303 existing subprocess matrix cells (`loop_config_matrix`, `lifecycle_directive_matrix`, `sequence_grammar_matrix`) may be folded into that form when you touch them; do not grow them per field and per format.
+  6. **Schema edits reach Darkmatter.** `darkmatter-cli`'s `schema_validate` tests and `dmls`'s `nested_span_tests` read `claudine/schemas/`; run them when a schema changes.
+
+
 ---
 
 # Implementation Log for 2026-10-25-loops-and-flow-control (6 phases)
@@ -314,6 +356,52 @@ the conservative way below and listed again for the author.
   an ignored `when:` would run a guarded task and an ignored container loop
   would reproduce the run-once defect. The refusal is removed by the change
   that lands each behavior.
+
+### Author rulings (2026-10-17)
+
+The author confirmed or settled every open decision before Phase 3:
+
+1. **`loop.on_rate_limit`:** documents only; a group or sequence `loop:` naming it is a located error. Confirms the Phase 2 ruling.
+2. **`file_exists()` probe failures are errors**; a genuinely absent file (or a directory) is `false`. Confirms the Phase 2 ruling.
+3. **`file_exists()` takes `string | null`.** `null` (an optional reference never supplied) is `false`; any other non-string argument is a type error. Implemented in this phase.
+4. **`absolute()` on a recursive `%` reference:** an existing match returns its path; no match is a `not_found` error (path-inventory row 6b).
+5. **A `break` reason may interpolate** (`Expr`, like `error`'s reason), departing from the plan's `Option<String>`.
+6. **A malformed `CLAUDINE_MAX_ITERATIONS` fails only runs that would use it**; under `--max-iterations` it is never read. Implemented in this phase.
+7. **The review-loop migration is deferred.** `prompts/review-loop.md` was retired; `just fix` stays the loop. Phase 5 skips "Review prompt migration" and acceptance criterion 11 (see the Phase 5 note below). The one-agent-or-two question is moot.
+
+### What Phase 2 delivered
+
+- **Loop configuration** (`looping/config.rs`): one parser for every owner (`parse_loop_block` with `LoopOwner` and a located `LoopLocation`), strict shapes, did-you-mean for unknown keys, `fail_fast` as removed grammar, `on_rate_limit` document-only, templated `max` resolved once.
+- **Lifecycle directives:** `break` (reason, code `0..=255`) and `prep` (target, `with`) parse everywhere but `cancelled`; non-final `prep` is permitted; both are refused at run time in `executor.rs::resolve_control` until Phase 4. `gate: null` and `gate: {}` are parser errors.
+- **Sequence and group grammar:** container `loop:` on group objects, sequence roots, and inline nested sequences, validated then refused (`ContainerLoopNotYetSupported`); task `when:` validated then refused (`TaskWhenNotYetSupported`); `TaskLoopMisplaced` for a `loop` on any other task; `WhenMisplaced` at a sequence root or on a group object; JSON-family duplicate keys rejected before the lossy value conversion (`sequence/data.rs`, `DuplicateScan`).
+- **Schemas:** `claudine/schemas/{action,lifecycle,claudine}.yaml` carry the new keys, with planned markers for run-time refusal.
+- **Darkmatter path contracts:** `absolute` builds a missing target's first candidate and rejects HTTP(S); `dirname` and the file-index family keep an absolute input's anchor; `file_exists` reports probe failures.
+- **Robustness matrices:** `loop_config_matrix` (YAML frontmatter), `lifecycle_directive_matrix`, and `sequence_grammar_matrix` (YAML frontmatter, standalone YAML, JSON, JSON5, JSONL, NDJSON), each a control row plus one-edit cells asserting the public result.
+
+### Deviations
+
+- `break` reason is an expression (ruling 5).
+- The task guard is validated but not stored on the preflight task; Phase 4 adds the field.
+- `file_exists`'s permission-error row is Unix-only; Windows would need an ACL fixture.
+- The matrices were written before the robustness rule changed (field shapes once per validator, in process); they spawn one process per cell, and 23 NDJSON cells repeat the JSONL ones through the same loader.
+
+### Process note
+
+Phase 2's first run took over three hours instead of 30–40 minutes. Three parallel subagents each ran the full claudine suite (about 10,000 tests) on one host, and its load average reached about 200; timing tests then failed or timed out, and each failure triggered another full rerun. Every timed-out test passed when rerun alone. `prompts/_headless-orchestration.md` and the `rust-testing` skill now require subagents to run only their slice's tests, with the full suite once per phase by the orchestrator.
+
+### Verification (macOS, 2026-10-17)
+
+Run one at a time, with no other build or test on the host:
+
+- `just test` in `claudine/`: 10,226 passed, 9 skipped.
+- `just lint` in `claudine/`: clean (the only warning is the macOS linker's unwind-table notice).
+- `just check-tier-coverage claudine`: 0 stranded.
+- `just test` in `darkmatter/`: 10,127 passed, 10 skipped, after two test fixes for Phase 2's schema changes: `darkmatter-cli`'s `schema_validate` test now expects the union message for `loop.max: 0` (the field is a count or a `{{ cap }}` template), and `dmls`'s `lifecycle_inventory_matches_the_authored_claudine_schema` now treats `fail_fast` as removed grammar the parser recognizes but the schema omits.
+- `just lint` in `darkmatter/`: clean.
+- Darkmatter's other dependents (biscuit-icon, biscuit-speaks, messenger, playa, research, sniff) were not run: none uses the changed expression functions, and Phase 2's only Darkmatter API change is additive.
+- Not run: native Windows, Linux, and WSL2 for the final tree. The path-contract work was cross-checked on native Windows in its own worktree; CI covers the rest.
+
+Phase 2 status: complete, ready for review. Phase 3 starts from `phase: 3` in the plan.
 
 ### Note for Phase 5: the review loop changed after this spec closed
 
