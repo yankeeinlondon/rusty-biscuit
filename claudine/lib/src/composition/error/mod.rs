@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 use super::frontmatter_excerpt::FrontmatterExcerpt;
 use super::sequence::task::RunawayTrip;
-use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
+use super::types::{LoopOwner, ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
 use crate::diagnostics::{
     Category, Diagnostic, DiagnosticRole, DiagnosticSnapshot, Disposition, Origin, code_spec,
     null_detail_for,
@@ -1331,6 +1331,23 @@ pub enum CompositionError {
         source_path: PathBuf,
     },
 
+    /// A lifecycle stack reached `break` or `prep`. The grammar accepts both,
+    /// but loop control and the returning target call are not wired yet, so
+    /// the directive fails the event instead of being dropped or read as
+    /// `stop`. `no_error` does not suppress it.
+    #[error(
+        "lifecycle `{directive}` at `{property}` is not yet supported at run time ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleDirectiveNotYetSupported {
+        /// The prompt file whose stack requested the directive.
+        source_path: PathBuf,
+        /// The authored path of the directive, e.g. `start[1].break`.
+        property: String,
+        /// `break` or `prep`.
+        directive: String,
+    },
+
     /// A lifecycle stack requested `defer`, but the runtime could not record
     /// the prompt in the deferred-execution queue.
     ///
@@ -1532,8 +1549,8 @@ pub enum CompositionError {
         /// `failure[0].when`, `start[1].set.metadata.files[2]`), when the
         /// executor located it.
         property: Option<String>,
-        /// Why evaluation failed; selects the remediation hint. Zero-sized
-        /// while it has one variant, so it costs `CompositionError` nothing.
+        /// Why evaluation failed; selects the remediation hint. A fieldless
+        /// enum, so it costs `CompositionError` one byte at most.
         reason: LifecycleEvaluationReason,
         /// The typed evaluation failure (the Darkmatter error is its source),
         /// when the expression layer raised one.
@@ -2214,24 +2231,170 @@ pub enum CompositionError {
     SequenceInteractiveRejected(PathBuf),
 
     // -- Loop errors -----------------------------------------------------------
-    /// The `loop` frontmatter value is invalid.
-    #[error("invalid loop definition: {0}")]
-    LoopInvalid(String),
+    /// A `loop:` block's configuration is invalid.
+    ///
+    /// Raised before the loop starts, for a document, group, or sequence loop
+    /// alike. `property` is the authored path of the offending key (`loop.max`,
+    /// `tasks[2].loop.until`), or of the block itself when the block is wrong
+    /// as a whole; `message` names keys by the same rooted path.
+    #[error(
+        "invalid loop definition ({source_path}): {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopInvalid {
+        /// The file that holds the `loop:` block.
+        source_path: PathBuf,
+        /// The authored path of the offending key or block.
+        property: String,
+        /// What is wrong, naming the key.
+        message: String,
+    },
+
+    /// A templated `loop.max` failed to parse or evaluate during its one
+    /// resolution before the loop starts.
+    #[error(
+        "invalid loop definition ({source_path}): `{property}` template `{template}` failed \
+         to {stage}: {source}",
+        source_path = biscuit_file::to_portable_string(source_path),
+        stage = source.stage()
+    )]
+    LoopMaxTemplateInvalid {
+        /// The file that holds the `loop:` block.
+        source_path: PathBuf,
+        /// The authored path of the cap (`loop.max`).
+        property: String,
+        /// The template as authored.
+        template: String,
+        /// The typed parse-or-evaluate failure.
+        #[source]
+        source: LoopExpressionCause,
+    },
+
+    /// `on_rate_limit` under a container's `loop:`.
+    ///
+    /// The policy reads the rate-limit signal a provider reports on a
+    /// document iteration; a group or sequence pass has no such signal.
+    #[error(
+        "`{property}` is not accepted on a {owner} loop ({source_path}); `on_rate_limit` \
+         applies only to a document loop, whose provider reports rate limits",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopRateLimitPolicyNotAccepted {
+        /// The file that holds the `loop:` block.
+        source_path: PathBuf,
+        /// The authored path of the key (`tasks[2].loop.on_rate_limit`).
+        property: String,
+        /// The container that owns the loop.
+        owner: LoopOwner,
+    },
+
+    /// A valid `loop:` on a group or a sequence. The block parses, but
+    /// container repetition is not wired yet, so the run is refused before
+    /// any task, event, or provider runs instead of running the body once.
+    #[error(
+        "the {owner} `loop` at `{property}` is valid but is not yet supported at run time \
+         ({source_path}); container loops are planned, so remove `loop:` until they land",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    ContainerLoopNotYetSupported {
+        /// The file that holds the `loop:` block.
+        source_path: PathBuf,
+        /// The authored path of the block (`sequence[1].group.loop`).
+        property: String,
+        /// The container that owns the loop.
+        owner: LoopOwner,
+    },
+
+    /// `loop` on a task that cannot own one. Only an inline nested sequence's
+    /// task entry carries `loop:`; `hint` names where this loop belongs.
+    #[error(
+        "`{property}` is not accepted here ({source_path}): {hint}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    TaskLoopMisplaced {
+        /// The file that holds the task.
+        source_path: PathBuf,
+        /// The authored path of the misplaced key (`sequence[0].loop`).
+        property: String,
+        /// Where the loop belongs instead.
+        hint: String,
+    },
+
+    /// A task's `when:` guard is not a non-empty string holding a valid
+    /// expression.
+    #[error(
+        "invalid task guard `{property}` ({source_path}): {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    TaskWhenInvalid {
+        /// The file that holds the task.
+        source_path: PathBuf,
+        /// The authored path of the guard (`sequence[0].when`).
+        property: String,
+        /// What is wrong.
+        message: String,
+        /// The expression parse failure, when the guard is a string that
+        /// does not parse.
+        #[source]
+        source: Option<ParseError>,
+    },
+
+    /// A valid task `when:` guard. Guards are not evaluated yet, so the run
+    /// is refused before anything runs: ignoring the guard would run a task
+    /// its author meant to skip.
+    #[error(
+        "task `when` at `{property}` is valid but is not yet supported at run time \
+         ({source_path}); task guards are planned, so remove `when:` until they land",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    TaskWhenNotYetSupported {
+        /// The file that holds the task.
+        source_path: PathBuf,
+        /// The authored path of the guard (`sequence[0].when`).
+        property: String,
+    },
+
+    /// `when:` at a sequence document's root, or on a group object.
+    #[error(
+        "`{property}` is not accepted here ({source_path}): {hint}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    WhenMisplaced {
+        /// The file that holds the key.
+        source_path: PathBuf,
+        /// The authored path of the key (`when`, `sequence[0].group.when`).
+        property: String,
+        /// Why it cannot go there, and where a guard goes instead.
+        hint: String,
+    },
+
+    /// `CLAUDINE_MAX_ITERATIONS` holds something other than a positive
+    /// integer while a loop reads it as its runtime cap override.
+    #[error(
+        "invalid `CLAUDINE_MAX_ITERATIONS` value `{value}` for the loop of {source_path}: \
+         {reason}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopMaxIterationsEnvInvalid {
+        /// The looping document.
+        source_path: PathBuf,
+        /// The variable's value as read.
+        value: String,
+        /// Why it is not a cap.
+        reason: String,
+    },
 
     /// A `loop.while` / `loop.until` condition failed to parse or evaluate.
     ///
-    /// The typed sibling of [`LoopInvalid`], which is a bare newtype with no
-    /// slot for a cause. Unlike the lifecycle shape family, this variant derives
+    /// Raised while the loop runs, so it carries the typed cause rather than a
+    /// location. Unlike the lifecycle shape family, this variant derives
     /// its prose at `Display` time from `kind`, `condition`, and the cause's
     /// stage rather than storing a `message`: it is the only renderer of that
     /// prose, so a second copy would be a field that can drift from the one
-    /// string that reads it. Byte-identical to the `LoopInvalid(format!(…))` it
-    /// replaces.
+    /// string that reads it.
     ///
     /// Staged here for the looping burn-down batch, which owns
     /// `looping/expression.rs`; see `features/2026-07-13-error-propogation/burndown-triage.md`.
-    ///
-    /// [`LoopInvalid`]: CompositionError::LoopInvalid
     #[error(
         "invalid loop definition: failed to {stage} loop.{kind} `{condition}`: {source}",
         stage = source.stage()
@@ -2745,6 +2908,21 @@ pub enum SequenceLoadCause {
         /// The underlying parse failure.
         #[source]
         source: serde_json::Error,
+    },
+    /// A JSON-family mapping repeats a key. JSON parsers keep the last value,
+    /// which would silently discard authored configuration, so the file is
+    /// rejected instead.
+    #[error(
+        "{}duplicate key `{key}` at `{path}`; each key may appear once per object",
+        line.map(|line| format!("line {line}: ")).unwrap_or_default()
+    )]
+    DuplicateKey {
+        /// The repeated key.
+        key: String,
+        /// The path of the object holding it (`<root>`, `sequence[1].group`).
+        path: String,
+        /// The one-based line of the JSONL/NDJSON record, when line-delimited.
+        line: Option<usize>,
     },
     /// Building or running the step-state schema validator failed.
     ///
@@ -3466,6 +3644,11 @@ impl CompositionError {
             CompositionError::RemovedGrammar { path, .. } => {
                 Some(FrontmatterHighlight::Property(path.clone()))
             }
+            CompositionError::LoopInvalid { property, .. }
+            | CompositionError::LoopMaxTemplateInvalid { property, .. }
+            | CompositionError::LoopRateLimitPolicyNotAccepted { property, .. } => {
+                Some(FrontmatterHighlight::Property(property.clone()))
+            }
             CompositionError::PromptPropertyMissing
             | CompositionError::PromptPropertyWrongType(_) => {
                 Some(FrontmatterHighlight::Property("prompt".to_string()))
@@ -3564,6 +3747,10 @@ pub enum LifecycleEvaluationReason {
     /// unavailable global, or a function error.
     #[default]
     Expression,
+    /// A directive the configuration accepts but the runtime cannot run yet
+    /// (`break`, `prep`) was reached; see
+    /// [`CompositionError::LifecycleDirectiveNotYetSupported`].
+    DirectiveNotYetSupported,
 }
 
 /// What a frontmatter-rooted error's excerpt should focus on.

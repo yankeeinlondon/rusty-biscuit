@@ -85,6 +85,7 @@ impl Fixture {
             action: PreflightAction::Shell { commands: vec!["true".to_string()] },
             params: Map::new(),
             timeout: None,
+            when: None,
             operation: None,
             flow: None,
             setup: None,

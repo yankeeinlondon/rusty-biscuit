@@ -53,14 +53,84 @@ pub struct LoopConfig {
     pub condition: LoopCondition,
     /// Actions applied to frontmatter after each completed iteration.
     pub actions: Vec<LoopAction>,
-    /// Optional per-document positive iteration cap.
+    /// The authored positive iteration cap, once known.
+    ///
+    /// `None` while [`Self::max_template`] still waits for resolution, and
+    /// when `max` is absent.
     pub max_iterations: Option<usize>,
-    /// Optional per-document failure behavior.
+    /// A templated `max` (`"{{ cap }}"`) as authored, awaiting its one
+    /// resolution before the loop starts
+    /// ([`super::looping::resolve_templated_loop_max`]). The engine refuses a
+    /// configuration that still carries one, so an unresolved cap never falls
+    /// back to the default.
+    pub max_template: Option<String>,
+    /// Failure behavior of the engine. Authored `loop.fail_fast` is a removed
+    /// key, so a parsed configuration always holds `None`.
     pub fail_fast: Option<bool>,
     /// Optional per-document policy for what to do when a completed iteration
     /// reports a provider rate-limit signal. `None` falls back to
-    /// [`OnRateLimit::Pause`].
+    /// [`OnRateLimit::Pause`]. Accepted only on a [`LoopOwner::Document`]
+    /// loop.
     pub on_rate_limit: Option<OnRateLimit>,
+}
+
+/// The primitive that owns a `loop:` block.
+///
+/// The owner decides which keys the block accepts: `on_rate_limit` reads a
+/// provider's rate-limit signal, so only a document loop has one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopOwner {
+    /// A Markdown document's frontmatter `loop:`.
+    Document,
+    /// A group object's `loop:`, beside `tasks:`.
+    Group,
+    /// A sequence document's root `loop:` or an inline nested sequence's task
+    /// entry `loop:`.
+    Sequence,
+}
+
+impl LoopOwner {
+    /// The owner's name as diagnostics spell it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Document => "document",
+            Self::Group => "group",
+            Self::Sequence => "sequence",
+        }
+    }
+}
+
+impl fmt::Display for LoopOwner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Where a `loop:` block was authored: its file and the authored path of the
+/// block itself (`loop` at a document or sequence root, `tasks[2].loop` on a
+/// task entry). Every loop configuration error names both, and key paths in
+/// its message are rooted at `property`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopLocation {
+    /// The file that holds the block.
+    pub source_path: PathBuf,
+    /// The authored path of the `loop:` block.
+    pub property: String,
+}
+
+impl LoopLocation {
+    /// The `loop:` block at the root of `source_path`'s frontmatter.
+    pub fn document_root(source_path: impl Into<PathBuf>) -> Self {
+        Self {
+            source_path: source_path.into(),
+            property: "loop".to_string(),
+        }
+    }
+
+    /// The authored path of `key` inside this block (`tasks[2].loop.max`).
+    pub fn key(&self, key: &str) -> String {
+        format!("{}.{key}", self.property)
+    }
 }
 
 /// Policy for how the loop engine reacts to a rate-limit signal observed on

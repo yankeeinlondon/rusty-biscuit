@@ -349,10 +349,10 @@ Body.
     );
 }
 
-/// A group carrying `loop:` is rejected during preflight — before any member
-/// runs — because iteration commit semantics are not ratified.
+/// A valid group `loop:` is refused before any member runs: container loops
+/// are not wired yet, and running the group once would hide that.
 #[test]
-fn a_group_loop_is_rejected_before_anything_runs() {
+fn a_group_loop_is_refused_before_anything_runs() {
     let fixture = CliProcessFixture::named("sequence-groups");
     fake_goose(&fixture);
     let md = fixture.cwd().join("seq.md");
@@ -381,13 +381,14 @@ Body.
     );
 
     assert_ne!(code, 0, "stderr:\n{stderr}");
+    let flat = stderr.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        stderr.contains("loop"),
-        "the rejection must name the construct; stderr:\n{stderr}"
+        flat.contains("loop") && flat.contains("not yet supported"),
+        "the refusal must name the construct; stderr:\n{stderr}"
     );
     assert!(
         trace(fixture.cwd()).is_empty(),
-        "preflight rejection means nothing ran; stderr:\n{stderr}"
+        "the refusal means nothing ran; stderr:\n{stderr}"
     );
 }
 

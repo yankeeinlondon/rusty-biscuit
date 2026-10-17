@@ -61,12 +61,38 @@ pub fn normalize_plan(
     invocation_path: &Path,
     document_fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
+    normalize_plan_at(items, source, invocation_path, document_fail_fast, "sequence")
+}
 
+/// [`normalize_plan`] for a list authored at `list_property` in the file that
+/// declares it (`sequence`, `sequence[1].sequence`, or empty for a file whose
+/// root is the list), which locates task-grammar diagnostics. That file is
+/// `source`'s path for a referenced source, otherwise `invocation_path`.
+///
+/// ## Errors
+///
+/// As [`normalize_plan`].
+pub fn normalize_plan_at(
+    items: &[Value],
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+    list_property: &str,
+) -> Result<SequencePlan, CompositionError> {
     let strictness = source.strictness();
+    // Task grammar names the file that holds the list, which for a
+    // referenced source is not the invoking document.
+    let declaring_path = match &source {
+        SequenceSource::External { path } | SequenceSource::DataFile { path } => path.as_path(),
+        _ => invocation_path,
+    };
     let parsed: Vec<ParsedStep> = items
         .iter()
         .enumerate()
-        .map(|(index, item)| parse_item(index, item, strictness, invocation_path))
+        .map(|(index, item)| {
+            let property = format!("{list_property}[{index}]");
+            parse_item(index, item, strictness, declaring_path, &property)
+        })
         .collect::<Result<_, _>>()?;
 
     let ids = generate_ids(parsed.iter().map(|p| p.name.as_str()));
@@ -115,6 +141,7 @@ fn parse_item(
     item: &Value,
     strictness: Strictness,
     origin: &Path,
+    property: &str,
 ) -> Result<ParsedStep, CompositionError> {
     match item {
         Value::String(s) => Ok(ParsedStep {
@@ -123,7 +150,7 @@ fn parse_item(
             extra: Map::new(),
             executable: None,
         }),
-        Value::Object(map) => parse_object_step(index, map, item, strictness, origin),
+        Value::Object(map) => parse_object_step(index, map, item, strictness, origin, property),
         // `null` is a typed error under both contracts: leniency coerces a
         // value that *is* something into a name, it does not invent one.
         Value::Null => Err(CompositionError::SequenceNullItem { index }),
@@ -160,8 +187,9 @@ fn parse_object_step(
     raw: &Value,
     strictness: Strictness,
     origin: &Path,
+    property: &str,
 ) -> Result<ParsedStep, CompositionError> {
-    super::grammar::validate_task_grammar(map, origin)?;
+    super::grammar::validate_task_grammar(map, origin, property)?;
     let name = match map.get("name") {
         Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
         // Foreign data may carry a non-string `name` (a numeric id, say); a

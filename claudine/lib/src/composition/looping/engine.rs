@@ -89,6 +89,15 @@ where
             );
         }
     }
+    if let Some(template) = &config.max_template {
+        return Err(CompositionError::LoopInvalid {
+            source_path: prompt_path.to_path_buf(),
+            property: "loop.max".to_string(),
+            message: format!(
+                "`loop.max` template `{template}` was not resolved before the loop started"
+            ),
+        });
+    }
     let max_iterations = options
         .max_iterations
         .or(config.max_iterations)

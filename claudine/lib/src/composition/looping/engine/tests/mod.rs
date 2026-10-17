@@ -42,6 +42,7 @@ fn counter_loop(max: usize) -> LoopConfig {
         condition: LoopCondition::While(format!("counter < {max}")),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     }

@@ -204,6 +204,7 @@ fn computes_is_last_when_max_iterations_is_stopping_condition() {
         condition: LoopCondition::While("true".into()),
         actions: vec![],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -243,6 +244,7 @@ fn fail_fast_false_continues_after_iteration_failure() {
         condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: Some(false),
         on_rate_limit: None,
     };
@@ -260,7 +262,11 @@ fn fail_fast_false_continues_after_iteration_failure() {
                 Ok(LoopIterationOutput::failure(
                     "failed",
                     42,
-                    CompositionError::LoopInvalid("iteration failed".into()),
+                    CompositionError::LoopInvalid {
+                        source_path: "loop.md".into(),
+                        property: "loop".into(),
+                        message: "iteration failed".into(),
+                    },
                 ))
             } else {
                 Ok(LoopIterationOutput::success("ok"))
@@ -290,7 +296,11 @@ fn fail_fast_true_stops_after_iteration_failure() {
             Ok(LoopIterationOutput::failure(
                 "failed",
                 9,
-                CompositionError::LoopInvalid("iteration failed".into()),
+                CompositionError::LoopInvalid {
+                        source_path: "loop.md".into(),
+                        property: "loop".into(),
+                        message: "iteration failed".into(),
+                    },
             ))
         },
     )
@@ -300,7 +310,7 @@ fn fail_fast_true_stops_after_iteration_failure() {
     assert_eq!(result.final_exit_code, 9);
     assert!(matches!(
         result.error,
-        Some(CompositionError::LoopInvalid(_))
+        Some(CompositionError::LoopInvalid { .. })
     ));
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(0)));
 }
@@ -314,6 +324,7 @@ fn fail_fast_false_discards_failed_action_stage() {
             LoopAction::Increment("bad".into()),
         ],
         max_iterations: None,
+        max_template: None,
         fail_fast: Some(false),
         on_rate_limit: None,
     };
@@ -354,6 +365,7 @@ fn set_template_renders_against_post_executor_iteration_state() {
             },
         ],
         max_iterations: Some(2),
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -385,6 +397,7 @@ fn counter_below_five_runs_six_iterations() {
         condition: LoopCondition::While("counter < 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -412,6 +425,7 @@ fn until_loop_runs_until_condition_met() {
         condition: LoopCondition::Until("counter >= 2".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -439,6 +453,7 @@ fn until_loop_with_counter_reaches_target() {
         condition: LoopCondition::Until("counter >= 3".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -467,6 +482,7 @@ fn append_accumulates_log_across_iterations() {
             value: json!({"event": "tick"}),
         }],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -497,6 +513,7 @@ fn last_output_and_last_exit_code_propagate() {
         condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -536,6 +553,7 @@ fn last_exit_code_reflects_failure_in_next_iteration() {
         condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![],
         max_iterations: None,
+        max_template: None,
         fail_fast: Some(false),
         on_rate_limit: None,
     };
@@ -551,7 +569,11 @@ fn last_exit_code_reflects_failure_in_next_iteration() {
                 Ok(LoopIterationOutput::failure(
                     "bad",
                     7,
-                    CompositionError::LoopInvalid("boom".into()),
+                    CompositionError::LoopInvalid {
+                        source_path: "loop.md".into(),
+                        property: "loop".into(),
+                        message: "boom".into(),
+                    },
                 ))
             } else {
                 Ok(LoopIterationOutput::success("ok"))
@@ -584,6 +606,7 @@ fn until_file_exists_resolves_against_prompt_parent() {
         condition: LoopCondition::Until("file_exists('artifact')".into()),
         actions: vec![],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -609,3 +632,33 @@ fn until_file_exists_resolves_against_prompt_parent() {
 }
 
 // ── Rate-limit policy tests ──────────────────────────────────────────
+
+#[test]
+fn an_unresolved_cap_template_is_refused_before_any_iteration() {
+    let config = LoopConfig {
+        condition: LoopCondition::While("true".into()),
+        actions: vec![],
+        max_iterations: None,
+        max_template: Some("{{ cap }}".into()),
+        fail_fast: None,
+        on_rate_limit: None,
+    };
+    let launches = RefCell::new(0);
+    let err = run_loop(
+        Path::new("loop.md"),
+        &config,
+        Map::new(),
+        LoopExecutionOptions::default(),
+        |_| {
+            *launches.borrow_mut() += 1;
+            Ok(LoopIterationOutput::success("ok"))
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(*launches.borrow(), 0, "the default cap is never used in its place");
+    assert!(
+        matches!(&err, CompositionError::LoopInvalid { property, .. } if property == "loop.max"),
+        "got {err:?}"
+    );
+}

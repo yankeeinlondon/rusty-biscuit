@@ -1015,11 +1015,11 @@ fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
     assert!(!launched);
 }
 
-/// Group `loop` commit semantics are unratified, so a group carrying `loop`
-/// is blocked with an actionable error instead of invented semantics.
+/// A valid group `loop` is refused before anything launches: container loops
+/// are not wired yet, and running the group once would hide that.
 #[test]
 #[cfg(unix)]
-fn sequence_rejects_group_loop() {
+fn sequence_refuses_group_loop() {
     let fixture = CliProcessFixture::named("sequence-cli");
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
@@ -1029,7 +1029,8 @@ fn sequence_rejects_group_loop() {
     .unwrap();
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
-    assert!(stderr.contains("group `loop`"), "stderr: {stderr}");
+    let flat = stderr.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("group `loop`") && flat.contains("not yet supported"), "stderr: {stderr}");
     assert!(!launched);
 }
 

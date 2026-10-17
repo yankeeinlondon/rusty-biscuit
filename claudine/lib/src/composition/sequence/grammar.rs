@@ -20,6 +20,7 @@ use serde_json::Value;
 
 use super::super::error::CompositionError;
 use super::super::json_util::json_type_name;
+use super::super::types::{LoopLocation, LoopOwner};
 
 /// A classified `sequence:` frontmatter value, before any I/O or evaluation.
 #[derive(Debug, Clone, PartialEq)]
@@ -394,8 +395,10 @@ pub const CONTAINER_EVENT_KEYS: &[&str] = &["initialize", "start", "success", "f
 /// Inline containers are validated transitively, an inline group's events and
 /// legs included, so a nested container's events fail here, before the root
 /// `initialize` runs, at any depth. Referenced containers are judged when
-/// static preflight loads them.
-pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
+/// static preflight loads them. `property` is the task's authored path in
+/// `origin` (`sequence[1]`, or empty for a file whose root is the task); it
+/// locates the task `when`/`loop` diagnostics.
+pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
     for key in ["setup", "teardown", "execution", "fail_fast"] {
         if let Some(value) = map.get(key) {
             return Err(removed_task_key(key, value, origin));
@@ -409,16 +412,31 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
         });
     }
     validate_container_events(map, origin)?;
+    task_when(map, origin, property)?;
+    task_loop(map, origin, property)?;
     if let Some(Value::Object(group)) = map.get("group") {
+        let group_property = child_property(property, "group");
         validate_container_events(group, origin)?;
-        for leg in group.get("tasks").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_object) {
-            validate_task_grammar(leg, origin)?;
+        group_object_grammar(group, origin, &group_property)?;
+        for (index, leg) in group.get("tasks").and_then(Value::as_array).into_iter().flatten().enumerate() {
+            let Value::Object(leg) = leg else {
+                // Same wording as `build_group`, which judges a group file's
+                // legs; here the file is the one declaring the inline group.
+                return Err(CompositionError::SequenceGroupInvalid {
+                    group: group.get("name").and_then(Value::as_str).unwrap_or("<inline>").to_string(),
+                    origin: origin.to_path_buf(),
+                    problem: format!("task {} must be an object, got {}", index + 1, json_type_name(leg)),
+                });
+            };
+            validate_task_grammar(leg, origin, &format!("{group_property}.tasks[{index}]"))?;
         }
     }
     if let Some(value) = map.get("sequence") {
         match value {
             Value::Array(items) => {
-                super::normalize::normalize_plan(items, super::model::SequenceSource::Inline, origin, true)?;
+                super::normalize::normalize_plan_at(
+                    items, super::model::SequenceSource::Inline, origin, true, &child_property(property, "sequence"),
+                )?;
             }
             Value::String(_) => {
                 if !matches!(classify_source(value)?, SequenceSourceSpec::Reference(_)) {
@@ -429,6 +447,119 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
         }
     }
     Ok(())
+}
+
+/// Join an authored property path and a child key; an empty parent is the
+/// document root.
+pub(crate) fn child_property(parent: &str, child: &str) -> String {
+    if parent.is_empty() { child.to_string() } else { format!("{parent}.{child}") }
+}
+
+/// Validate a task's `when:` guard, then refuse it.
+///
+/// The guard must be a non-empty string that parses with the same condition
+/// grammar as a lifecycle `when`. A valid guard is refused with
+/// [`CompositionError::TaskWhenNotYetSupported`] until guard evaluation is
+/// built; this function is the one place that refusal lives.
+///
+/// ## Errors
+///
+/// [`CompositionError::TaskWhenInvalid`] for a non-string, empty, or
+/// unparsable guard.
+fn task_when(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    let Some(value) = map.get("when") else { return Ok(()) };
+    let property = child_property(property, "when");
+    let invalid = |message: String, source| CompositionError::TaskWhenInvalid {
+        source_path: origin.to_path_buf(), property: property.clone(), message, source,
+    };
+    match value {
+        Value::String(text) if text.trim().is_empty() => {
+            return Err(invalid("`when` must not be an empty expression; remove the key to run the task unconditionally".into(), None));
+        }
+        Value::String(text) => {
+            darkmatter::markdown::compose::expression::parse_condition(text).map_err(|source| {
+                invalid(format!("`when` is not a valid expression: {source}"), Some(source))
+            })?;
+        }
+        other => return Err(invalid(format!("`when` must be an expression string, got {}", json_type_name(other)), None)),
+    }
+    Err(CompositionError::TaskWhenNotYetSupported { source_path: origin.to_path_buf(), property })
+}
+
+/// Place a task-level `loop:`: an inline nested sequence's loop is a sequence
+/// loop and goes to [`container_loop`]; on any other task it is misplaced, and
+/// the error names where that task's loop belongs.
+fn task_loop(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    if !map.contains_key("loop") {
+        return Ok(());
+    }
+    if matches!(map.get("sequence"), Some(Value::Array(_))) {
+        return container_loop(map, LoopOwner::Sequence, &LoopLocation { source_path: origin.to_path_buf(), property: child_property(property, "loop") });
+    }
+    let executable = super::reserved::EXECUTABLE_KEYS.iter().copied().find(|key| map.contains_key(*key));
+    let hint = match executable {
+        Some("group") if map.get("group").is_some_and(Value::is_object) => {
+            "a group's loop goes on its group object, beside `tasks:` (`group: { loop: …, tasks: […] }`)"
+        }
+        Some("group") => "this task references a group; put `loop:` in that group file's object, beside its `tasks:`",
+        Some("sequence") => "this task references a sequence document; put `loop:` at that document's root, beside its `sequence:`",
+        Some("prompt") => "a prompt task repeats through its document's own frontmatter `loop:`; or wrap the task in an inline `sequence:` and put `loop:` beside that",
+        Some("task") => "this task references a task file; wrap it in an inline `sequence:` and put `loop:` beside that",
+        Some(_) => "shell and side-effect tasks repeat only inside a looping container; wrap the task in an inline `sequence:` and put `loop:` beside that",
+        None => "a step that runs the document body has no loop of its own; put `loop:` at the sequence document's root, or on an inline `sequence:` or a `group:` object",
+    };
+    Err(CompositionError::TaskLoopMisplaced { source_path: origin.to_path_buf(), property: child_property(property, "loop"), hint: hint.into() })
+}
+
+/// Check a group object's own keys: `loop:` goes to [`container_loop`], and
+/// `when:` is a task key, not a group key.
+pub(crate) fn group_object_grammar(group: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    if group.contains_key("when") {
+        return Err(CompositionError::WhenMisplaced {
+            source_path: origin.to_path_buf(), property: child_property(property, "when"),
+            hint: "`when` is a task key; put it beside `group:` on the task that runs the group".into(),
+        });
+    }
+    container_loop(group, LoopOwner::Group, &LoopLocation { source_path: origin.to_path_buf(), property: child_property(property, "loop") })
+}
+
+/// Check the root keys of a sequence document (Markdown frontmatter, a
+/// standalone YAML file, or a referenced formal document) that belong to this
+/// grammar rather than to the lifecycle parser.
+///
+/// `when:` is rejected: the document body is not a step, so it has nothing to
+/// guard. `loop:` is a sequence loop, validated and then refused like every
+/// container loop (`container_loop`). Run this
+/// before the root's lifecycle events are parsed, so a malformed root loop
+/// gets the loop parser's diagnostic rather than a lifecycle one.
+///
+/// ## Errors
+///
+/// [`CompositionError::WhenMisplaced`] for a root `when`; for a root `loop`,
+/// the loop parser's errors or
+/// [`CompositionError::ContainerLoopNotYetSupported`].
+pub fn validate_sequence_root(root: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
+    if root.contains_key("when") {
+        return Err(CompositionError::WhenMisplaced {
+            source_path: origin.to_path_buf(), property: "when".into(),
+            hint: "a sequence document's body is not a step, so its root takes no guard; `when` is a task key, written beside a step's executable".into(),
+        });
+    }
+    container_loop(root, LoopOwner::Sequence, &LoopLocation::document_root(origin))
+}
+
+/// Validate the container `loop:` in `map`, if any, then refuse it.
+///
+/// The block is parsed in full with `owner`'s grammar, so an invalid loop is
+/// its own located error. A valid block is refused with
+/// [`CompositionError::ContainerLoopNotYetSupported`] until container
+/// repetition is built; this function is the one place that refusal lives.
+pub(crate) fn container_loop(map: &serde_json::Map<String, Value>, owner: LoopOwner, location: &LoopLocation) -> Result<(), CompositionError> {
+    let Some(value) = map.get("loop") else { return Ok(()) };
+    super::super::looping::parse_loop_block(value, owner, location)?;
+    Err(CompositionError::ContainerLoopNotYetSupported {
+        source_path: location.source_path.clone(), property: location.property.clone(), owner,
+    })
 }
 
 /// Parse each container event `map` carries, one at a time.

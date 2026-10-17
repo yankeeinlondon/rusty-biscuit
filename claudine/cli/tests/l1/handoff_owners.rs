@@ -140,6 +140,25 @@ fn compose(fixture: &CliProcessFixture, doc: &Path) -> Run {
     run(fixture, &["compose", "--claude", doc.to_str().expect("UTF-8 path")])
 }
 
+/// [`compose`] with `CLAUDINE_FAIL_FAST=false`, so a loop continues past a
+/// failed iteration. A loop cannot author `fail_fast`.
+fn compose_continuing(fixture: &CliProcessFixture, doc: &Path) -> Run {
+    let output = fixture
+        .command()
+        .args(["compose", "--claude", doc.to_str().expect("UTF-8 path")])
+        .env("CLAUDINE_FAIL_FAST", "false")
+        .output()
+        .expect("claudine runs");
+    Run {
+        code: output.status.code(),
+        output: format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+    }
+}
+
 #[test]
 fn loop_success_proxy_hands_off_after_one_iteration() {
     let fixture = fixture("handoff-loop-success");
@@ -650,8 +669,8 @@ fn sequence_start_proxy_replaces_the_container_before_any_body_step() {
 }
 
 /// The ledger records committed handoffs, never requests. Iteration 1's proxy
-/// is refused as a cycle and fails that iteration; with `fail_fast: false` the
-/// loop continues, and iteration 2's legitimate proxy is adopted rather than
+/// is refused as a cycle and fails that iteration; with `CLAUDINE_FAIL_FAST=false`
+/// the loop continues, and iteration 2's legitimate proxy is adopted rather than
 /// refused against an entry the refusal left behind.
 #[test]
 fn a_refused_request_leaves_no_entry_for_the_next_one_to_collide_with() {
@@ -661,7 +680,7 @@ fn a_refused_request_leaves_no_entry_for_the_next_one_to_collide_with() {
         &fixture,
         "loop.md",
         concat!(
-            "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n    fail_fast: false\n",
+            "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n",
             "success:\n",
             "    - when: \"loop.count == 1\"\n      then:\n          - append_line: [\"events.log\", \"refused request\"]\n          - proxy: ./loop.md\n",
             "    - when: \"loop.count == 2\"\n      then:\n          - append_line: [\"events.log\", \"legitimate request\"]\n          - proxy: ./target.md\n",
@@ -669,7 +688,7 @@ fn a_refused_request_leaves_no_entry_for_the_next_one_to_collide_with() {
         ),
     );
 
-    let run = compose(&fixture, &source);
+    let run = compose_continuing(&fixture, &source);
 
     let mut expected = vec!["refused request", "legitimate request"];
     expected.extend(TARGET_TRAIL);
@@ -698,7 +717,7 @@ fn refused_then_legitimate_row(name: &str, refused_action: &str, refusal: &str) 
         "loop.md",
         &format!(
             concat!(
-                "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n    fail_fast: false\n",
+                "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n",
                 "success:\n",
                 "    - when: \"loop.count == 1\"\n      then:\n          - append_line: [\"events.log\", \"refused request\"]\n          - {}\n",
                 "    - when: \"loop.count == 2\"\n      then:\n          - append_line: [\"events.log\", \"legitimate request\"]\n          - proxy: ./target.md\n",
@@ -708,7 +727,7 @@ fn refused_then_legitimate_row(name: &str, refused_action: &str, refusal: &str) 
         ),
     );
 
-    let run = compose(&fixture, &source);
+    let run = compose_continuing(&fixture, &source);
 
     let mut expected = vec!["refused request", "legitimate request"];
     expected.extend(TARGET_TRAIL);

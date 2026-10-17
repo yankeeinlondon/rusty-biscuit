@@ -119,8 +119,10 @@ pub use looping::{
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use looping::{
-    extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
-    resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
+    LoopBlock, check_loop_config_keys, extract_control_variables, parse_loop_block,
+    resolve_fail_fast_from_env,
+    resolve_loop_config, resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
+    resolve_templated_loop_max,
 };
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{
@@ -185,7 +187,8 @@ pub use sequence::{
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
-    InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, ModelHint,
+    InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, LoopLocation,
+    LoopOwner, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,

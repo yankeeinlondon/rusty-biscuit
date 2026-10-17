@@ -640,11 +640,11 @@ mod blocked {
         assert!(matches!(outer.tasks[0].action, PreflightAction::Group(_)));
     }
 
-    /// Group `loop` commit semantics are unratified (spec → Open Questions), so
-    /// a group carrying `loop` is rejected rather than executed with invented
-    /// semantics. This is the Phase 1 clean-break guard, now reachable.
+    /// A valid group `loop` parses, but container repetition is not wired
+    /// yet, so the run is refused before preflight rather than running the
+    /// group once.
     #[test]
-    fn group_loop_is_rejected() {
+    fn group_loop_is_refused() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         let source = write_legacy_source(
@@ -667,10 +667,10 @@ mod blocked {
         assert!(
             matches!(
                 &error,
-                CompositionError::SequenceUnsupportedConstruct { construct, .. }
-                    if construct.contains("group `loop`")
+                CompositionError::ContainerLoopNotYetSupported { property, owner: crate::composition::LoopOwner::Group, .. }
+                    if property == "sequence[0].group.loop"
             ),
-            "group `loop` must be blocked with a typed error; got: {error}",
+            "a valid group `loop` must be refused with a typed, located error; got: {error}",
         );
     }
 
@@ -2004,7 +2004,8 @@ mod template_position {
     }
 
     /// A document property named like a late root, read through `fm.`, is the
-    /// document's value and resolves now.
+    /// document's value and resolves now. (`group`, not `loop`: a sequence
+    /// document's root `loop:` is its own loop, not data.)
     #[test]
     fn an_fm_read_of_a_late_root_name_is_a_document_value() {
         let dir = TempDir::new().unwrap();
@@ -2013,8 +2014,8 @@ mod template_position {
             "seq.md",
             &[
                 ("outputs_dir", json!("o")),
-                ("loop", json!({ "max": 1 })),
-                ("sequence", json!([{ "name": "one", "shell": "echo {{ fm.loop.max }}" }])),
+                ("group", json!({ "max": 1 })),
+                ("sequence", json!([{ "name": "one", "shell": "echo {{ fm.group.max }}" }])),
             ],
             "Body.\n",
         );

@@ -576,8 +576,9 @@ pub struct StackExecutionContext<'a> {
     /// The event being processed.
     pub signal: LifecycleSignal,
     /// The binding scope expressions evaluate in; `None` is the event
-    /// `signal` names. A sequence task's `setup:`/`teardown:` stack sets its
-    /// own scope ([`Self::in_scope`]) because it reuses the step's context.
+    /// `signal` names. A sequence `side_effect:` task's action sets its own
+    /// scope ([`Self::in_scope`]) because it runs in the step's context, not in
+    /// a document event.
     pub scope: Option<LifecycleScope>,
     /// Composed frontmatter — the base namespace for expression evaluation.
     pub frontmatter: &'a Map<String, Value>,
@@ -2082,6 +2083,21 @@ impl StackExecutionContext<'_> {
                 delay: self.render_message(delay, fm).map_err(classify)?,
                 reason: self.eval_opt_string(reason.as_ref(), fm).map_err(classify)?,
             },
+            // The one refusal point for both directives, on every surface that
+            // runs a stack (events, the loop gate, containers). The caller
+            // reports it as an evaluation error, which `no_error` cannot
+            // suppress, so the directive is never skipped or read as `stop`.
+            C::Break { .. } | C::Prep { .. } => {
+                let mut info = LifecycleErrorInfo::from_composition_error(
+                    &CompositionError::LifecycleDirectiveNotYetSupported {
+                        source_path: self.source_path.to_path_buf(),
+                        property: location.path().to_string(),
+                        directive: verb.to_string(),
+                    },
+                );
+                info.reason = LifecycleEvaluationReason::DirectiveNotYetSupported;
+                return Err(info);
+            }
         })
     }
 

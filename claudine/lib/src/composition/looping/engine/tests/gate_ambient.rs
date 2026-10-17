@@ -60,6 +60,7 @@ fn loop_gate_concerns_read_just_finished_iteration_ambient_on_every_pass() {
         condition: LoopCondition::Until("loop.count >= 2".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: Some(false),
         on_rate_limit: None,
     };
@@ -124,7 +125,11 @@ fn loop_gate_concerns_read_just_finished_iteration_ambient_on_every_pass() {
                 LoopIterationOutput::failure(
                     output,
                     3,
-                    CompositionError::LoopInvalid("iteration 1 failed".into()),
+                    CompositionError::LoopInvalid {
+                        source_path: "loop.md".into(),
+                        property: "loop".into(),
+                        message: "iteration 1 failed".into(),
+                    },
                 )
             } else {
                 LoopIterationOutput::success(output)

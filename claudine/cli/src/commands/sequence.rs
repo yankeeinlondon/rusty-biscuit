@@ -328,6 +328,11 @@ fn run_sequence_inner(
     let mut authored_values: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter()
         .map(|(key, value)| (key.clone(), value.clone())).collect();
     if let Some(serde_json::Value::Object(values)) = &set_overrides { authored_values.extend(values.clone()); }
+    // The root `loop:` reads as lifecycle verbs below; the sequence grammar
+    // judges it (and a root `when:`) first, with the loop parser's messages.
+    let document_root: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter()
+        .map(|(key, value)| (key.clone(), value.clone())).collect();
+    composition::sequence::grammar::validate_sequence_root(&document_root, &source.resolved_path)?;
     let authored = serde_json::Value::Object(authored_values);
     let lifecycle = composition::lifecycle::parse_lifecycle_config(&authored, &source.resolved_path)?;
     composition::lifecycle::bindings::reject_removed_sequence_reads(

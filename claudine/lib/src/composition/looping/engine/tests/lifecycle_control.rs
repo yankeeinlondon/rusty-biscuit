@@ -407,6 +407,7 @@ fn loop_gate_explicit_error_fails_and_exits_without_mutation() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -464,6 +465,7 @@ fn loop_gate_unintentional_error_does_not_invert_outcome() {
         condition: LoopCondition::Until("counter > 1".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -507,6 +509,7 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -697,6 +700,7 @@ fn loop_gate_evaluation_error_fires_finalize_with_err() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };
@@ -762,6 +766,7 @@ fn loop_gate_evaluation_error_with_finalize_raise_surfaces_finalize() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
+        max_template: None,
         fail_fast: None,
         on_rate_limit: None,
     };

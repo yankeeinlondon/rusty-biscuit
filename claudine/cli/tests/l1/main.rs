@@ -116,6 +116,9 @@ mod level1_review_router_partial_pty;
 mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_directive_matrix;
 mod lifecycle_downgrade_outcome;
 mod lifecycle_literal_escapes;
 mod lifecycle_message_drain;
@@ -244,6 +247,7 @@ mod wrap_watchdog_timeout;
 
 mod sequence_containers;
 mod sequence_frozen_graph;
+mod sequence_grammar_matrix;
 mod sequence_referenced_state;
 mod sequence_deep_cancelled;
 

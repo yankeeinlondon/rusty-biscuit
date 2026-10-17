@@ -16,8 +16,9 @@
 //!
 //! [`LifecycleActionKind`] mirrors the action inventory:
 //!
-//! - [`LifecycleControlAction`] — the flow-control directives. One ends the
-//!   whole event, so it is the last item of its list.
+//! - [`LifecycleControlAction`] — the flow-control directives. Every one
+//!   except `prep` ends the whole event, so it is the last item of its list;
+//!   `prep` returns to the item after it.
 //! - [`CommunicationAction`] — `say`/`speak`/`effect`/`message`/`notify`/
 //!   `stderr`/`stdout`/`info`/`warn`/`success`.
 //! - [`ShellAction`] — bespoke shell commands.
@@ -120,12 +121,19 @@ impl LifecycleAction {
     pub fn is_lifecycle_control(&self) -> bool {
         matches!(self.kind, LifecycleActionKind::LifecycleControl(_))
     }
+
+    /// Returns `true` when this action is a directive that ends its event, so
+    /// nothing may follow it unconditionally in its list. `prep` is the one
+    /// directive that returns.
+    pub fn ends_event(&self) -> bool {
+        matches!(&self.kind, LifecycleActionKind::LifecycleControl(control) if !control.returns())
+    }
 }
 
 /// The typed body of a lifecycle action.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LifecycleActionKind {
-    /// Lifecycle control action — terminates stack processing for the event.
+    /// Lifecycle control action — a flow-control directive.
     LifecycleControl(LifecycleControlAction),
 
     /// Communication action (TTS / sound / message / status line).
@@ -147,7 +155,9 @@ pub enum LifecycleActionKind {
 /// A flow-control directive.
 ///
 /// The first one reached **ends the entire event**, wherever it sits — at a
-/// stack root or inside a nested `then`/`else` body. The "Where valid" matrix
+/// stack root or inside a nested `then`/`else` body — except `prep`, a
+/// returning call after which the event continues
+/// ([`LifecycleControlAction::returns`]). The "Where valid" matrix
 /// that governs which events each variant may appear in is encoded in
 /// [`LifecycleControlAction::is_valid_for`].
 #[derive(Debug, Clone, PartialEq)]
@@ -214,6 +224,39 @@ pub enum LifecycleControlAction {
         /// Optional human-readable reason.
         reason: Option<Expr>,
     },
+
+    /// `break` / `break: "reason"` — end the nearest enclosing loop.
+    ///
+    /// **Planned at run time:** the grammar accepts it, and executing it is
+    /// refused with [`CompositionError::LifecycleDirectiveNotYetSupported`]
+    /// until loop control lands.
+    ///
+    /// [`CompositionError::LifecycleDirectiveNotYetSupported`]: crate::composition::CompositionError::LifecycleDirectiveNotYetSupported
+    Break {
+        /// Optional reason recorded as the loop's outcome. An authored `""`
+        /// is an explicit empty reason, distinct from `None`.
+        reason: Option<Expr>,
+        /// Exit code when the loop it ends is the root invocation's; authored
+        /// `0..=255`, `0` when omitted.
+        code: u8,
+    },
+
+    /// `prep: "@target.md"` — run another primitive to completion, then
+    /// continue the event with the next item.
+    ///
+    /// **Planned at run time:** the grammar accepts it, and executing it is
+    /// refused with [`CompositionError::LifecycleDirectiveNotYetSupported`]
+    /// until the shared target runner lands.
+    ///
+    /// [`CompositionError::LifecycleDirectiveNotYetSupported`]: crate::composition::CompositionError::LifecycleDirectiveNotYetSupported
+    Prep {
+        /// File reference expression resolving to the target. A literal is
+        /// never empty.
+        target: Expr,
+        /// Frontmatter overlay for the target, with `proxy.with` semantics.
+        /// Empty when `with:` was omitted or authored as `{}`.
+        with: WithOverlay,
+    },
 }
 
 impl LifecycleControlAction {
@@ -227,7 +270,15 @@ impl LifecycleControlAction {
             Self::Retry { .. } => "retry",
             Self::Resume { .. } => "resume",
             Self::Defer { .. } => "defer",
+            Self::Break { .. } => "break",
+            Self::Prep { .. } => "prep",
         }
+    }
+
+    /// Returns `true` for a directive that returns to the next item instead of
+    /// ending its event: only `prep`.
+    pub fn returns(&self) -> bool {
+        matches!(self, Self::Prep { .. })
     }
 
     /// Returns `true` when this control action is permitted in the given

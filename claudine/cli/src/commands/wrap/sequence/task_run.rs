@@ -269,6 +269,7 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         action,
         params,
         timeout,
+        when,
         operation,
         flow,
         setup,
@@ -290,7 +291,7 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         approved_set_values: _,
     } = task;
     push_json_scan(
-        &(name, label, params, timeout, operation, flow, setup, teardown),
+        &(name, label, params, timeout, when, operation, flow, setup, teardown),
         scan,
     );
     push_action_scan(action, scan);

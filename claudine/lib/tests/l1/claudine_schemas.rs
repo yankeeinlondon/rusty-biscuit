@@ -369,7 +369,6 @@ fn parser_bare_verbs() -> BTreeSet<String> {
 
 const ACTION_EXPORTS: &[&str] = &["communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"];
 const CATEGORIES: &[&str] = &["communicate", "flow", "shell", "expression"];
-const PLANNED: &[&str] = &["break", "prep"];
 
 macro_rules! shipped_bundle {
     () => {
@@ -387,7 +386,7 @@ pub(crate) use shipped_bundle;
 // ── AC2: inventories ───────────────────────────────────────────────────────
 
 #[test]
-fn hand_verbs_equal_the_parser_inventory_plus_the_planned_verbs() {
+fn hand_verbs_equal_the_parser_inventory() {
     let bundle = [("action.yaml", include_str!("../../../schemas/action.yaml").to_string())];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", CATEGORIES);
@@ -399,12 +398,8 @@ fn hand_verbs_equal_the_parser_inventory_plus_the_planned_verbs() {
         .collect();
     let parser = parser_hand_verbs();
 
-    let planned: BTreeSet<String> = hand.difference(&parser).cloned().collect();
-    assert_eq!(
-        planned,
-        PLANNED.iter().map(|verb| verb.to_string()).collect::<BTreeSet<_>>(),
-        "the schema's hand verbs minus the parser's are exactly the planned verbs"
-    );
+    let unparsed: BTreeSet<&String> = hand.difference(&parser).collect();
+    assert!(unparsed.is_empty(), "action types the parser does not accept: {unparsed:?}");
     let missing: BTreeSet<&String> = parser.difference(&hand).collect();
     assert!(missing.is_empty(), "parser verbs missing from the action types: {missing:?}");
 
@@ -418,13 +413,22 @@ fn hand_verbs_equal_the_parser_inventory_plus_the_planned_verbs() {
         }
     }
 
-    // Planned verbs say so where an author sees them.
-    for verb in ["defer", "break", "prep"] {
+    // A verb the parser accepts but the runtime refuses says so where an
+    // author sees it: `defer` is planned, and `break` and `prep` fail when
+    // they run (`LifecycleDirectiveNotYetSupported`).
+    let descriptions_of = |verb: &str| {
         let mut descriptions = Vec::new();
         collect_descriptions(&types["flow"]["properties"][verb], &mut descriptions);
+        descriptions
+    };
+    let defer = descriptions_of("defer");
+    assert!(defer.iter().any(|description| description.contains("planned")), "`defer` is described as planned: {defer:?}");
+    for verb in ["break", "prep"] {
+        let descriptions = descriptions_of(verb);
         assert!(
-            descriptions.iter().any(|description| description.contains("planned")),
-            "`{verb}` is described as planned: {descriptions:?}"
+            descriptions.iter().any(|description| description.contains("running it fails"))
+                && !descriptions.iter().any(|description| description.contains("planned") || description.contains("not yet accepted")),
+            "`{verb}` is described as accepted and refused at run time: {descriptions:?}"
         );
     }
 }
@@ -443,7 +447,7 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
     for (export, expected_generated) in [("expression", &catalogs), ("bundle", &catalogs), ("initialize-bundle", &catalogs)] {
         let generated: BTreeSet<String> = property_names(&types[export])
             .into_iter()
-            .filter(|verb| !hand.contains(verb) && !PLANNED.contains(&verb.as_str()) && verb != "when" && verb != "no_error")
+            .filter(|verb| !hand.contains(verb) && verb != "when" && verb != "no_error")
             .collect();
         assert_eq!(&generated, expected_generated, "`{export}` lists every catalog verb once");
         for verb in &generated {
@@ -466,7 +470,14 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
     for verb in &catalogs {
         assert!(loop_keys.contains(verb), "`loop` lists `{verb}`");
     }
-    assert_eq!(present(&lifecycle["loop"]["properties"]["max"])["type"], "integer", "`loop.max` is the iteration count");
+    let max_arms = arms_of(&lifecycle["loop"]["properties"]["max"]);
+    assert_eq!(max_arms.len(), 2, "`loop.max` is a count or a template: {max_arms:?}");
+    assert!(max_arms.iter().any(|arm| arm["type"] == "integer"), "`loop.max` is the iteration count");
+    assert!(
+        max_arms.iter().any(|arm| arm["type"] == "string" && arm["pattern"].is_string()),
+        "`loop.max` may be a whole-value interpolation"
+    );
+    assert!(!loop_keys.contains("fail_fast"), "a loop has no `fail_fast`");
 }
 
 #[test]
@@ -1198,6 +1209,35 @@ fn sequence_container_schema_contract() {
     }
 }
 
+/// Task guards and container loops are typed by shape only: a guard is
+/// non-empty text, a container loop an object. The task and loop parsers
+/// judge their contents.
+#[test]
+fn task_when_and_container_loop_schema_shapes() {
+    let files = shipped_bundle!();
+    let repo = SchemaRepo::new(&files);
+    let discovered = repo.discover().expect("shipped schema corpus loads");
+    let trigger = include_str!("../../../schemas/claudine.yaml");
+    let inline = include_str!("../../../schemas/inline-compose.yaml");
+    for (name, yaml, valid) in [
+        ("task-when", "cancelled: []\nsequence: [{name: a, shell: x, when: 'ready && n > 1'}]", true),
+        // A scalar such as `when: 5` passes as text here; the task parser
+        // rejects every non-string guard.
+        ("task-when-list", "cancelled: []\nsequence: [{name: a, shell: x, when: [ready]}]", false),
+        ("task-when-empty", "cancelled: []\nsequence: [{name: a, shell: x, when: ''}]", false),
+        ("leg-when-map", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x, when: {a: 1}}]}}]", false),
+        ("group-loop", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true'}}}]", true),
+        ("group-loop-scalar", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x}], loop: 5}}]", false),
+        ("nested-loop-list", "cancelled: []\nsequence: [{name: child, sequence: [], loop: [until]}]", false),
+        ("root-loop", "loop: {until: 'true'}\nsequence: [{name: a, shell: x, when: ready}]", true),
+    ] {
+        let path = repo.write_document(&format!("shape-{name}.md"), &format!("---\n{yaml}\n---\n"));
+        let judged = discovered.judge(&path, trigger, inline).unwrap();
+        assert!(judged.claudine, "{name}: selects shipped trigger");
+        assert_eq!(judged.report.valid, valid, "{name}: {:?}", judged.report);
+    }
+}
+
 // ── Forbidden cancellation actions at every container boundary ─────────────
 
 /// One well-formed item per flow directive that section 4 excludes from
@@ -1270,6 +1310,56 @@ fn forbidden_cancelled_items_are_well_formed_start_actions() {
             .expect("judged")
             .report;
         assert!(report.valid, "`{verb}` is a valid `start` action: {:?}", problems(&report));
+    }
+}
+
+/// The schema and the lifecycle parser agree on every `break` and `prep`
+/// shape in a `start` stack: what one accepts, the other accepts. An explicit
+/// `null` on an optional key reads as absent to the schema, so `prep: null`
+/// is the parser's alone to reject (its unit tests cover it).
+#[test]
+fn break_and_prep_shapes_agree_between_schema_and_parser() {
+    const SHAPES: &[(&str, bool)] = &[
+        ("[break]", true),
+        ("[{break: null}]", true),
+        ("[{break: []}]", true),
+        ("[{break: done}]", true),
+        ("[{break: ''}]", true),
+        ("[{break: {reason: done, code: 0}}]", true),
+        ("[{break: {code: 255, no_error: true}}]", true),
+        ("[{break: {code: 256}}]", false),
+        ("[{break: {code: -1}}]", false),
+        ("[{break: {code: 1.5}}]", false),
+        ("[{break: {code: '2'}}]", false),
+        ("[{break: {reason: [a]}}]", false),
+        ("[{break: {exit: 2}}]", false),
+        ("[{break: 5}]", false),
+        ("[{prep: '@a.md'}, {info: after}]", true),
+        ("[{prep: {target: '@a.md', with: {}}}]", true),
+        ("[{prep: {target: '@a.md', with: {stage: all}, no_error: true}}]", true),
+        ("[prep]", false),
+        ("[{prep: ''}]", false),
+        ("[{prep: {with: {}}}]", false),
+        ("[{prep: {target: ''}}]", false),
+        ("[{prep: {target: '@a.md', with: [a]}}]", false),
+        ("[{prep: {target: '@a.md', args: 1}}]", false),
+    ];
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    for (index, (items, valid)) in SHAPES.iter().enumerate() {
+        let path = repo.write_document(&format!("directive-{index}.md"), &format!("---\nstart: {items}\n---\n"));
+        let report = discovered
+            .judge(
+                &path,
+                include_str!("../../../schemas/claudine.yaml"),
+                include_str!("../../../schemas/inline-compose.yaml"),
+            )
+            .expect("judged")
+            .report;
+        assert_eq!(report.valid, *valid, "schema verdict for `start: {items}`: {:?}", problems(&report));
+        let markdown = Markdown::try_from(path.as_path()).expect("document loads");
+        let parsed = parse_lifecycle_config(&frontmatter_json(&markdown), &path);
+        assert_eq!(parsed.is_ok(), *valid, "parser verdict for `start: {items}`: {parsed:?}");
     }
 }
 

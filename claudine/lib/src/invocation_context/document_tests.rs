@@ -182,7 +182,10 @@ fn assert_document_reads(fixture: &Fixture, prepared: &Prepared, dir: &str) {
         crate::composition::prepared_environment(&prepared.composition),
         fixture.map(dir),
     );
-    assert_eq!(resolve_max_iterations_from_env(environment), Some(if dir == "a" { 3 } else { 7 }));
+    assert_eq!(
+        resolve_max_iterations_from_env(environment, std::path::Path::new("loop.md")).unwrap(),
+        Some(if dir == "a" { 3 } else { 7 }),
+    );
     assert_eq!(resolve_fail_fast_from_env(environment), Some(dir == "a"));
     assert_eq!(
         resolve_pause_reset_margin_from_env(environment),

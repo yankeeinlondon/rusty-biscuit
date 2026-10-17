@@ -132,6 +132,7 @@ fn make_guard<'a>(
 
 mod action_shape_control;
 mod audio_emission;
+mod break_prep;
 mod diagnostics;
 mod container_runtime;
 mod grammar;

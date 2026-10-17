@@ -513,7 +513,7 @@ fn a_reference_cycle_reports_every_hop() {
 }
 
 #[test]
-fn a_group_carrying_loop_is_rejected() {
+fn a_group_carrying_loop_is_refused() {
     let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
@@ -523,8 +523,8 @@ fn a_group_carrying_loop_is_rejected() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("group `loop`"),
-        "commit semantics are unratified, so this is blocked rather than invented; stderr:\n{stderr}"
+        stderr.contains("group `loop`") && stderr.contains("not yet supported at run time"),
+        "a valid group loop is refused rather than run once; stderr:\n{stderr}"
     );
 }
 

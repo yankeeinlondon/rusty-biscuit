@@ -379,12 +379,12 @@ exit 0
 }
 
 // ============================================================================
-// Loop with failing iteration and fail_fast=false
+// Loop with failing iteration under CLAUDINE_FAIL_FAST=false
 // ============================================================================
 
 #[cfg(unix)]
 #[test]
-fn compose_loop_fail_fast_false_continues_after_failure() {
+fn compose_loop_continues_after_failure_under_claudine_fail_fast_false() {
     let fixture = CliProcessFixture::named("loop-cli");
     let count_path = fixture.cwd().join("call-count.txt");
 
@@ -396,7 +396,6 @@ loop:
   while: "counter < 2"
   actions:
     - "increment(counter)"
-  fail_fast: false
 ---
 Count is {{counter}}
 "#,
@@ -420,9 +419,12 @@ exit 0
 "#,
     );
 
+    // A loop cannot author `fail_fast`; the environment still selects
+    // continuation past a failed iteration.
     fixture
         .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
+        .env("CLAUDINE_FAIL_FAST", "false")
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -431,17 +433,17 @@ exit 0
     assert_eq!(
         calls.trim(),
         "3",
-        "fail_fast=false should continue after iteration 1 fails (3 total: 1 fail, 2 ok, 3 ok)"
+        "CLAUDINE_FAIL_FAST=false should continue after iteration 1 fails (3 total: 1 fail, 2 ok, 3 ok)"
     );
 }
 
 // ============================================================================
-// Loop with failing iteration and fail_fast=true
+// Loop with failing iteration, by default
 // ============================================================================
 
 #[cfg(unix)]
 #[test]
-fn compose_loop_fail_fast_true_stops_on_first_failure() {
+fn compose_loop_stops_on_first_failure_by_default() {
     let fixture = CliProcessFixture::named("loop-cli");
     let count_path = fixture.cwd().join("call-count.txt");
 
@@ -453,7 +455,6 @@ loop:
   while: "counter < 3"
   actions:
     - "increment(counter)"
-  fail_fast: true
 ---
 Count is {{counter}}
 "#,
@@ -485,7 +486,7 @@ exit 7
     assert_eq!(
         calls.trim(),
         "1",
-        "fail_fast=true should stop after first failing iteration"
+        "a loop stops after its first failing iteration"
     );
 }
 

@@ -118,7 +118,8 @@ pub struct LifecycleErrorInfo {
 
     /// Why an event-time evaluation failed, recovered by downcasting the reported
     /// error itself to [`LifecycleExprError`](super::executor::LifecycleExprError)
-    /// (the source chain is not walked).
+    /// (the source chain is not walked), or set by the executor when it refuses
+    /// a directive it cannot run yet.
     /// Not projected into `err.*`.
     pub reason: LifecycleEvaluationReason,
 

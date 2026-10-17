@@ -21,10 +21,12 @@
 # typed, and a grandchild list is left to the task parser. Every typed
 # container types `cancelled` with `cancelled-stack`. Its other events keep
 # the list/dictionary shape only: a full `stack` per event on every inlined
-# container multiplies the compiled schema (see docs/topics/schemas.md).
+# container multiplies the compiled schema (see docs/topics/schemas.md). For
+# the same reason a container `loop` is typed as an object only, not with the
+# `loop` type and its gate `stack`.
 kind: schema
 types:
-    bare-verb: "enum(stop, skip, error, retry, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor) -> a zero-argument verb written as a bare list item"
+    bare-verb: "enum(stop, skip, error, retry, break, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor) -> a zero-argument verb written as a bare list item"
     loose-body:
         - "unknown[] -> a list of actions, checked only by the lifecycle parser"
         - "{ <string>: unknown } -> a dictionary of verbs, checked only by the lifecycle parser"
@@ -130,9 +132,10 @@ types:
             - "string -> an iteration action such as increment(iteration)"
             - loop-action
             - "loop-action-entry[]"
-        max: "number(integer; min(1)) -> the most iterations to run"
-        fail_fast: "boolean -> stop the loop at the first failed iteration"
-        on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit"
+        max:
+            - "number(integer; min(1)) -> the most iterations to run"
+            - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
+        on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
         gate: "stack -> the lifecycle stack run after each iteration; never beside loose verb keys"
         no_error: "boolean -> keep the loop running when one of the loose actions fails"
         say: "string -> speak the text aloud through text-to-speech"
@@ -165,8 +168,8 @@ types:
         break:
             - null
             - "unknown[](max(0))"
-            - "string -> planned: leave the loop or sequence with this reason; not yet accepted by the parser"
-        prep: "string -> planned: prepare the target prompt (a file reference such as @prompts/next.md or a whole-value interpolation); not yet accepted by the parser"
+            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); running it fails until loop control is built"
+        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; running it fails until the target runner is built"
         shell: "shell -> run a shell command (never in initialize)"
         set: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
         append_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
@@ -404,6 +407,8 @@ types:
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command timeout"
+        when: "string(not-empty) -> the task's guard, a condition expression (planned: validated now, refused at run time until guards are evaluated)"
+        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it (planned: refused at run time until container loops run)"
         "<string>": "unknown -> authored step state; the task parser rejects reserved keys"
         initialize: loose-body
         start: loose-body
@@ -421,6 +426,7 @@ types:
         flow: "string -> default flow for prompt legs"
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
+        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it (planned: refused at run time until container loops run)"
         initialize: loose-body
         start: loose-body
         blocked: loose-body
@@ -449,6 +455,8 @@ types:
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command timeout"
+        when: "string(not-empty) -> the task's guard, a condition expression (planned: validated now, refused at run time until guards are evaluated)"
+        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it (planned: refused at run time until container loops run)"
         "<string>": "unknown -> authored step state; the task parser rejects reserved keys"
         initialize: loose-body
         start: loose-body
@@ -466,6 +474,7 @@ types:
         flow: "string -> default flow for prompt legs"
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
+        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it (planned: refused at run time until container loops run)"
         initialize: loose-body
         start: loose-body
         blocked: loose-body

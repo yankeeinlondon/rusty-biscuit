@@ -905,7 +905,7 @@ fn cancelled_prompt_start(looping: bool) {
     );
     let prompt = fixture.cwd().join("prompt.md");
     let start = serde_json::to_string(&barrier.block_snippet()).unwrap();
-    let loop_config = if looping { "loop: { while: 'true', fail_fast: false }\n" } else { "" };
+    let loop_config = if looping { "loop: { while: 'true' }\n" } else { "" };
     write(&prompt, &format!(r#"---
 {loop_config}start: [{{ shell: {start} }}]
 failure:
@@ -920,7 +920,9 @@ Prompt body.
 "#));
     let mut command = fixture.command_std();
     command.args(["compose", "--goose", "--yolo", "--silent"]).arg(&prompt);
-    if looping { command.args(["--max-iterations", "2"]); }
+    // Continuation past a failed iteration makes the cancellation, not a
+    // failure, the only thing that can stop the loop.
+    if looping { command.args(["--max-iterations", "2"]).env("CLAUDINE_FAIL_FAST", "false"); }
     let mut run = SignalledRun::spawn(command, fixture.workspace_path());
     barrier.wait_reached(&mut run, READY_TIMEOUT);
     run.interrupt();

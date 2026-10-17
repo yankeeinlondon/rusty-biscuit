@@ -195,6 +195,17 @@ fn walk_action<'a>(
                     operand(prefix.field("reason"), reason);
                 }
             }
+            LifecycleControlAction::Break { reason, .. } => {
+                if let Some(reason) = reason {
+                    operand(prefix.field("reason"), reason);
+                }
+            }
+            LifecycleControlAction::Prep { target, with } => {
+                operand(prefix.field("target"), target);
+                for (key, value) in with.iter() {
+                    walk_with_value(value, &prefix.field("with").map_key(key.as_str()), &mut operand);
+                }
+            }
             LifecycleControlAction::Stop | LifecycleControlAction::Skip => {}
         },
         LifecycleActionKind::Communication(comm) => operand(prefix.field("text"), &comm.text),

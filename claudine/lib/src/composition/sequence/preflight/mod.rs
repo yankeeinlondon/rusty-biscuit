@@ -839,14 +839,20 @@ impl<'a> Loader<'a> {
             }
             ExecutableField::Task => {
                 let reference = expect_reference(value, "task", label)?;
-                return self.load_external_task(
+                let mut task = self.load_external_task(
                     &reference,
                     origin,
                     label,
                     state,
                     group_defaults,
                     placement,
-                );
+                )?;
+                // The referencing site's guard decides whether the reference
+                // runs at all, so it stands above one the task file declares.
+                if let Some(when) = option_string(options, "when") {
+                    task.when = Some(when);
+                }
+                return Ok(task);
             }
         };
 
@@ -866,6 +872,7 @@ impl<'a> Loader<'a> {
             action,
             params: option_map(options, "params"),
             timeout: options.get("timeout").cloned(),
+            when: option_string(options, "when"),
             operation,
             flow,
             setup: options.get("setup").cloned(),
@@ -905,8 +912,9 @@ impl<'a> Loader<'a> {
         use super::grammar::{SequenceSourceSpec, classify_source};
         let (plan, child_origin, child_authored, events, entered, frontmatter) = match classify_source(value)? {
             SequenceSourceSpec::Inline(items) => {
-                let mut plan = super::normalize::normalize_plan(
+                let mut plan = super::normalize::normalize_plan_at(
                     &items, super::model::SequenceSource::Inline, origin, true,
+                    &property_child(property, "sequence"),
                 )?;
                 plan.authored = authored.child("sequence");
                 (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false, None)
@@ -1015,7 +1023,7 @@ impl<'a> Loader<'a> {
         let root = expect_object(&document, "task file", &path)?;
 
         expect_kind(&root, "task", &path)?;
-        let (field, value, options) = parse_task_object(&root, &path)?;
+        let (field, value, options) = parse_task_object(&root, &path, "")?;
 
         let nested_label = format!(
             "{label} → task `{}`",
@@ -1063,14 +1071,14 @@ impl<'a> Loader<'a> {
                 // A catalog selects one named entry, so the group's authored
                 // root is that entry's pointer, not the file root.
                 let selected_entry = name.clone();
-                let (group_map, group_authored) = match name {
+                let (group_map, group_authored, group_property) = match name {
                     Some(name) => {
                         let (index, map) = select_catalog_group(&root, &name, &path)?;
-                        (map, document_authored.child("groups").at(index))
+                        (map, document_authored.child("groups").at(index), format!("groups[{index}]"))
                     }
                     None => {
                         expect_kind(&root, "group", &path)?;
-                        (root.clone(), document_authored)
+                        (root.clone(), document_authored, String::new())
                     }
                 };
 
@@ -1083,7 +1091,7 @@ impl<'a> Loader<'a> {
                     &group_map,
                     &path,
                     &nested_label,
-                    "",
+                    &group_property,
                     &group_authored,
                     state,
                     position,
@@ -1124,15 +1132,9 @@ impl<'a> Loader<'a> {
             problem,
         };
 
-        // Container loops belong to the later loops-and-flow-control feature.
-        if map.contains_key("loop") {
-            return Err(CompositionError::SequenceUnsupportedConstruct {
-                construct: format!("group `loop` (in group `{name}`)"),
-                detail: "iteration commit semantics for group loops are not ratified yet; \
-                         remove `loop:` or express the repetition as separate sequence steps"
-                    .to_string(),
-            });
-        }
+        // A group file or catalog entry reaches the group grammar only here;
+        // an inline group was already checked with its task.
+        super::grammar::group_object_grammar(map, origin, property)?;
 
         if let Some(value) = map.get("execution") {
             return Err(super::grammar::removed_task_key("execution", value, origin));
@@ -1210,9 +1212,9 @@ impl<'a> Loader<'a> {
                 .filter(|name| !name.trim().is_empty())
                 .ok_or_else(|| invalid(format!("tasks[{index}].name must be a non-empty string; every leg needs a name")))?;
             if !leg_names.insert(leg_name) { return Err(invalid(format!("duplicate leg name `{leg_name}` at tasks[{index}]; use unique names"))); }
-            let (field, value, options) = parse_task_object(task_map, origin)?;
-            let task_label = format!("{label} → task {} of group `{name}`", index + 1);
             let task_property = property_child(property, &format!("tasks[{index}]"));
+            let (field, value, options) = parse_task_object(task_map, origin, &task_property)?;
+            let task_label = format!("{label} → task {} of group `{name}`", index + 1);
             let mut leg = self.load_task(
                 field,
                 &value,
@@ -2161,6 +2163,7 @@ fn select_catalog_group(
 fn parse_task_object(
     map: &Map<String, Value>,
     origin: &Path,
+    property: &str,
 ) -> Result<(ExecutableField, Value, Map<String, Value>), CompositionError> {
     let invalid = |problem: String| CompositionError::SequenceReferenceInvalid {
         context: "task".to_string(),
@@ -2168,7 +2171,7 @@ fn parse_task_object(
         problem,
     };
 
-    super::grammar::validate_task_grammar(map, origin)?;
+    super::grammar::validate_task_grammar(map, origin, property)?;
     let executables: Vec<&str> = map
         .keys()
         .map(String::as_str)

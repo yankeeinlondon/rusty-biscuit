@@ -140,18 +140,27 @@ fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file()
         format!("{portable_package}/fixes/case/spec.md"),
         "the specification mention must identify the caller's spec; prompt:\n{absent_design_prompt}"
     );
-    // Paths derived from the caller's file project to the repository-relative
-    // display form, whatever spelling the temp repository carries.
-    for expected in [
-        "**Iteration:** 4",
-        "**Review:** @packages/example/fixes/case/review-4.md",
-        "**Log File:** packages/example/fixes/case/log.md",
-    ] {
-        assert!(
-            absent_design_prompt.contains(expected),
-            "the target omitted {expected:?}; prompt:\n{absent_design_prompt}"
-        );
-    }
+    assert!(
+        absent_design_prompt.contains("**Iteration:** 4"),
+        "the target omitted the iteration; prompt:\n{absent_design_prompt}"
+    );
+    // `dirname` of the absolute caller file keeps its absolute anchor, so the
+    // derived siblings are absolute paths beside the caller's spec.
+    let derived = |prompt: &str, label: &str| -> String {
+        let line = prompt
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(label))
+            .unwrap_or_else(|| panic!("the target omitted {label:?}; prompt:\n{prompt}"));
+        canonical_portable(std::path::Path::new(line.trim()))
+    };
+    assert_eq!(
+        derived(&absent_design_prompt, "- **Review:** @"),
+        format!("{portable_package}/fixes/case/review-4.md"),
+    );
+    assert_eq!(
+        derived(&absent_design_prompt, "- **Log File:** "),
+        format!("{portable_package}/fixes/case/log.md"),
+    );
     assert!(
         !absent_design_prompt.contains("**Design:**"),
         "an absent optional design must not render; prompt:\n{absent_design_prompt}"
@@ -161,9 +170,10 @@ fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file()
     let _ = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
     let present_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
-    assert!(
-        present_design_prompt.contains("**Design:** @packages/example/fixes/case/design.md"),
-        "the target must derive a present design beside the caller's spec; prompt:\n{present_design_prompt}"
+    assert_eq!(
+        derived(&present_design_prompt, "- **Design:** @"),
+        format!("{portable_package}/fixes/case/design.md"),
+        "the target must derive a present design beside the caller's spec",
     );
 }
 

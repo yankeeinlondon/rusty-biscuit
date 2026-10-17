@@ -40,6 +40,10 @@ pub struct PreflightTask {
     pub params: Map<String, Value>,
     /// The authored `timeout:` value, parsed as a duration at execution time.
     pub timeout: Option<Value>,
+    /// The authored `when:` guard, already checked to parse as a condition.
+    /// Static preflight refuses a guarded task until guards are evaluated,
+    /// so no task that runs carries one yet.
+    pub when: Option<String>,
     /// Effective operation after group defaults and task overrides.
     pub operation: Option<String>,
     /// Effective flow after group defaults and task overrides.

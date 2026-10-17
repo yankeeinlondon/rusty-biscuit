@@ -891,11 +891,11 @@ fn cancelled_rejects_null_instead_of_silently_opting_in() {
 fn cancelled_rejects_recovery_and_other_control_actions() {
     for action in [json!("skip"), json!("error"), json!("retry"),
         json!({"resume": "continue"}), json!({"proxy": "next.md"}),
-        json!({"defer": "1s"}), json!("prep"), json!("break")] {
+        json!({"defer": "1s"}), json!({"prep": "next.md"}), json!("break")] {
         let error = parse_err(json!({"cancelled": [action.clone()]}));
         assert!(matches!(error,
             CompositionError::LifecycleActionPlacement { ref event, .. } if event == "cancelled"
-        ) || matches!(error, CompositionError::LifecycleUnknownVerb { .. }), "{action}: {error:?}");
+        ), "{action}: {error:?}");
     }
 }
 
