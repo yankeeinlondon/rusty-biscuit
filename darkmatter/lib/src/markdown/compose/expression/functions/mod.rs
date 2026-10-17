@@ -1620,14 +1620,17 @@ pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
     Ok(Value::String(path.to_string_lossy().to_string()))
 }
 
-/// `file_exists(file) -> bool` — whether a reference names an existing file.
+/// `file_exists(file: string | null) -> bool` — whether a reference names an
+/// existing file.
 ///
 /// A well-formed reference with no matching regular file (including one that
-/// names a directory) is `false`, as is a null or non-string argument.
+/// names a directory) is `false`, and so is `null`: an optional reference that
+/// was never supplied names no file.
 ///
 /// ## Errors
 ///
-/// A failure to answer is never reported as absence. An invalid reference, a
+/// An argument that is neither a string nor `null` is a type error, never
+/// `false`. A failure to answer is never reported as absence. An invalid reference, a
 /// tree escape, a missing home/vault/repository anchor, and a candidate probe
 /// I/O failure (a permission error, for example) are typed file-reference
 /// errors. An HTTP(S) URL is `true` once fetched; a denied or failed fetch is
@@ -1637,10 +1640,7 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
     if any_null(args) {
         return Ok(Value::Bool(false));
     }
-    let raw = match require_string("file_exists", &args[0]) {
-        Ok(s) => s,
-        Err(_) => return Ok(Value::Bool(false)),
-    };
+    let raw = require_string_expr("file_exists", &args[0])?;
     if is_remote_url(raw) {
         return match ctx.fetch_remote_text(raw) {
             Ok(Some(_)) => Ok(Value::Bool(true)),

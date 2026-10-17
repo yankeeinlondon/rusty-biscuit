@@ -555,3 +555,20 @@ fn windows_absolute_inputs_keep_a_portable_drive_anchor() {
     let dirname = to_portable_string(spec.parent().unwrap());
     assert!(!dirname.contains('\\') && dirname.contains(':'), "{dirname}");
 }
+
+#[test]
+fn file_exists_takes_an_optional_string() {
+    let f = fixture();
+    let lookup = Lookup { context: ResolutionContext::new(repo_context(&f)), reference: String::new() };
+    let call = |argument: &str| evaluate(&parse(&format!("file_exists({argument})")).unwrap(), &lookup);
+
+    // An optional reference that was never supplied names no file.
+    assert_eq!(call("null").unwrap(), Value::Bool(false));
+    for argument in ["123", "true", "false"] {
+        let error = call(argument).unwrap_err();
+        assert!(
+            error.to_string().contains("file_exists() requires string arguments"),
+            "file_exists({argument}) must be a type error, not false: {error}"
+        );
+    }
+}

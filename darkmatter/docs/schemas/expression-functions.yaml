@@ -1064,8 +1064,9 @@ functions:
       order: 58
       description:
           Returns true when the file exists (local or remote URL) and false when
-          it is absent; an invalid reference, missing context, probe failure, or
-          failed remote fetch is an error.
+          it is absent or the argument is null; a non-string argument, an invalid
+          reference, missing context, probe failure, or failed remote fetch is an
+          error.
       overloads:
           - parameters:
                 - name: file
