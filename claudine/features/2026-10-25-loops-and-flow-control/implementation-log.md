@@ -314,3 +314,27 @@ the conservative way below and listed again for the author.
   an ignored `when:` would run a guarded task and an ignored container loop
   would reproduce the run-once defect. The refusal is removed by the change
   that lands each behavior.
+
+### Note for Phase 5: the review loop changed after this spec closed
+
+Recorded 2026-10-17, outside this feature's own work, so the Phase 5 "Review
+prompt migration" task does not undo it.
+
+- **`prompts/review-loop.md` was deleted on purpose.** It had never run, and
+  the loop in use is `just fix` (`just/review.just`). Spec §11 and acceptance
+  criterion 11 describe migrating a file that no longer exists; settle with
+  the author whether Phase 5 recreates it as a looping sequence or migrates
+  `just fix` instead, before starting that task.
+- **A ready review now gets one follow-up pass.** `implement-suggestions.md`
+  fixes the review's small medium and low findings, records the rest and
+  every observation in the area's `fixes/_unscheduled/<spec>-follow-ups/`
+  backlog, and marks the review `implemented`; no review follows it.
+  `just fix` runs that pass after a ready review and on a rerun whose ready
+  review is still open. Review frontmatter `findings` now lists every
+  priority (`<ID> (<priority>): <title>`); only a high finding makes `ready`
+  false.
+- **This departs from spec §11**, whose loop breaks on `ready` before any
+  repair, and from criterion 11's "first review ready, no commit step
+  launches". The departure is intended: whatever replaces `just fix` must
+  keep the follow-up pass. `claudine/cli/tests/prompts/review_fix_rehearsal.rs`
+  is the behavioral contract to carry over.
