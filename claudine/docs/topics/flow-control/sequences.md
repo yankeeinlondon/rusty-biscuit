@@ -29,6 +29,27 @@ Nested containers execute recursively. An empty nested list returns an empty
 array and still runs its container lifecycle. Only an inline list can carry container lifecycle events
 on its task; a reference carries those events in its referenced document.
 
+A container's `loop:` goes in one of three places: on a group object beside
+`tasks:`, at a sequence document's root beside `sequence:`, or on an inline
+nested sequence's task entry beside `sequence: [ … ]`. The block uses the
+[loop grammar](./looping.md#frontmatter-shape) and is checked when the
+sequence is resolved (a group file's when preflight loads it). **Planned:**
+container loops do not run yet, so a valid one is refused with a typed,
+located "not yet supported at run time" error before any task, event, or
+provider runs, rather than running its body once.
+
+```yaml
+sequence:
+    - name: retry-build
+      loop: { until: "built", max: 3 }   # inline nested sequence: accepted, refused at run time
+      sequence:
+          - name: build
+            shell: just build
+    - name: lint
+      shell: just lint
+      loop: { until: "clean" }           # error: a shell task takes no `loop:`
+```
+
 ### What a referenced sequence reads
 
 A sequence referenced by file is a document: its events, its conditions, its
@@ -133,8 +154,18 @@ simply requires every step to carry an executable.
 
 Optional task fields: `name`, `params:`
 (user setters passed to a `prompt` document), `timeout:` (per shell command),
-`operation:`, `flow:`. A field that cannot affect the chosen executable — say
-`params:` on a `shell:` task — is a typed error, not a silent no-op.
+`operation:`, `flow:`, and `when:` (any task). A field that cannot affect the
+chosen executable — say `params:` on a `shell:` task — is a typed error, not a
+silent no-op.
+
+`when:` is a task option, never step state. It must be a non-empty string
+that parses as a condition expression, the same surface as a lifecycle item's
+`when`; `null`, a boolean, a number, a list, a map, `""`, or an unparsable
+expression is a typed error naming the task's property (`sequence[0].when`).
+**Planned:** guards are not evaluated yet, so a valid `when:` is refused before
+anything runs, rather than ignored. A `when:` at the sequence document's root
+is always an error: the document's body is not a step. On a group object it is
+also an error; put it beside `group:` on the task.
 
 ```yaml
 ---
@@ -309,6 +340,13 @@ JSONL/NDJSON take operators but never an offset:
 ```yaml
 sequence: list.ndjson::map(color, name)
 ```
+
+An object that repeats a key is an error in every format. YAML reports it
+itself; for JSON, JSON5, JSONL, and NDJSON, which would otherwise keep only
+the last value, the error names the file, the key, and the object's path
+(``duplicate key `name` at `sequence[0]` ``), plus the line for JSONL and
+NDJSON. JSON5 comments remain ordinary content, and a valid next JSONL record
+is unaffected by an error report about an earlier one.
 
 ### String list formats
 
@@ -708,9 +746,9 @@ or `variables` scoping around one task.
 A group leg may itself declare a group or a sequence task. Each leg receives
 a private in-memory runtime branch; siblings share the filesystem.
 
-**Group `loop` is blocked.** Iteration commit semantics are unratified, so a
-group carrying `loop` is rejected at preflight with a typed, actionable error
-rather than left to implementation judgment.
+**Group `loop` is planned.** A group object's `loop:` is checked with the loop
+grammar, then refused before anything runs; see
+[Container grammar](#container-grammar).
 
 ### Task references and lifecycle events
 
@@ -893,8 +931,9 @@ switch sets, and a reportable field in Claudine's logs.
 
 ## Remaining planned behavior
 
-**Planned:** generalized container loops and persisted checkpoint/resume.
-Group `loop` is currently rejected. Recursive containers, their lifecycle
+**Planned:** generalized container loops, task `when:` guards, and persisted
+checkpoint/resume. A valid container `loop:` or task `when:` is validated, then
+refused before anything runs. Recursive containers, their lifecycle
 events, cancellation, and native array/dictionary results are implemented.
 
 

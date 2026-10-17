@@ -155,7 +155,7 @@ model: sonnet
 | Action type | Verbs |
 |---|---|
 | `communicate` | `say`, `speak`, `effect`, `message`, `notify`, `stderr`, `stdout`, `info`, `warn`, `success` |
-| `flow` | `stop`, `skip`, `error`, `proxy`, `retry`, `resume`, `defer`, plus the planned `break` and `prep` |
+| `flow` | `stop`, `skip`, `error`, `proxy`, `retry`, `resume`, `defer`, `break`, `prep` |
 | `shell` | `shell` |
 | `expression` | `set`, plus every Darkmatter side-effect verb (`set_frontmatter`, `append_line`, …) and expression function |
 
@@ -330,6 +330,12 @@ type into every place that uses it, so a type cannot contain itself:
   like a document's events copies a full action catalog into every container
   and makes each validation several times slower.
 
+A task's `when:` and a container's `loop:` (on a group object, or on an
+inline nested sequence's task) are typed by shape only: the guard is
+non-empty text and the loop is an object. Typing a container loop with the
+document `loop` type would inline its gate `stack` into every container. The
+task and loop parsers check the contents.
+
 A referenced sequence or group file (`sequence: "@tasks.yaml"`) is not
 Markdown, so no schema judges it; the task parser checks it when the
 sequence is prepared.
@@ -369,10 +375,13 @@ start:
     - set_frontmatter: [a, b, c]    # schema valid; the parser judges the arguments
 ```
 
-`break` and `prep` are **planned**. The schema accepts them (`break: "done"`,
-`prep: "@prompts/next.md"`), but the parser does not accept them yet, so a
-document using them fails before it runs. `defer` parses but is not executed
-yet.
+`break` and `prep` are accepted by the schema and the parser alike
+(`break: "done"`, `break: { reason: done, code: 2 }`,
+`prep: "@prompts/next.md"`); the schema checks `code` is an integer from 0 to
+255 and `prep`'s target is a non-empty string. Running either is **planned**:
+reaching one fails the event with `LifecycleDirectiveNotYetSupported`. `defer`
+parses but is not executed yet either. The schema reads `prep: null` as
+absent, so that spelling is left to the parser, which rejects it.
 
 ### Optional inputs and open metadata
 

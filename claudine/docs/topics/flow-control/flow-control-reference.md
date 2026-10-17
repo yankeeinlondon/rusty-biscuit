@@ -13,7 +13,7 @@ Placement is checked once, at parse time: `skip` is accepted only in `initialize
 | `blocked` (from compose pre-flight) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
 | `loop` (the iteration gate) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
 
-`stop` works in every event. `error` is rejected in `cancelled`. Recovery in the `finalize` after cancellation raises a typed cancellation-recovery error and launches no work. `defer` fails with `LifecycleDeferNotImplemented` in every event until its scheduler exists.
+`stop` works in every event. `error` is rejected in `cancelled`. Recovery in the `finalize` after cancellation raises a typed cancellation-recovery error and launches no work. `defer` fails with `LifecycleDeferNotImplemented` in every event until its scheduler exists. `break` and `prep` fail with `LifecycleDirectiveNotYetSupported` in every event and in the loop gate until loop control and the target runner exist; `no_error` does not suppress the refusal.
 
 The unsupported cells have no re-entry point to return to, so they raise a typed error instead of quietly doing nothing. Put those recoveries on `start`, `success`, `failure`, or `finalize`.
 
@@ -93,7 +93,7 @@ The target must exist. A missing target fails with a typed `Unresolvable file re
 - on `proxy` it parameterizes the **target** of the handoff;
 - on `retry` it parameterizes the **fresh re-read of the same document** for the retried attempt (see [Retry overlays](#retry-overlays)).
 
-`resume` takes no `with:`: it continues a live session rather than reading a document anew. `prep` will accept one when it is built (**planned**).
+`resume` takes no `with:`: it continues a live session rather than reading a document anew. `prep` accepts one with `proxy`'s rules (its call is **planned** at run time).
 
 ```yaml
 success:

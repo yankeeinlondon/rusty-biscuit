@@ -61,7 +61,7 @@ the primitive has not reached `start`.
 
 Cancellation bypasses `failure` recovery. In a looping prompt, it also skips
 the loop gate and mutations and prevents another iteration, even with
-`fail_fast: false` and a true continuation condition. A recovery directive in the following
+`CLAUDINE_FAIL_FAST=false` and a true continuation condition. A recovery directive in the following
 `finalize` raises a typed cancellation-recovery error and starts no new work.
 Cleanup errors are secondary diagnostics: cancellation remains terminal and
 Ctrl-C still exits `130`. A timeout during ordinary execution remains a failure;
@@ -322,7 +322,15 @@ A directive ends the whole event, so an action written after an unconditional
 directive could never run. Within any one list (the event's list, a `then`
 body, or an `else` body) an item that always fires a directive must be the
 **last** item; otherwise parsing fails with `LifecycleActionOrder`, naming the
-directive.
+directive. `prep` is the exception: it returns to the next item, so anything
+may follow it.
+
+```yaml
+start:
+  - prep: "@prompts/_git/stage-all.md"   # returns
+  - info: "staged"                       # legal after prep
+  - break                                # an ending directive: last
+```
 
 A `when` item never counts as unconditional, even when both of its bodies end
 in a directive, so an item after it is legal:
@@ -773,7 +781,7 @@ The `verb(args)` spelling (`say(All done)`, `shell(git push)`, `set_frontmatter(
 
 ### Flow Control Actions
 
-Seven directives change what the run does next instead of producing a side effect: `stop`, `skip`, `error`, `retry`, `resume`, `proxy`, and `defer` (`defer` is **planned**: it parses, and fails with `LifecycleDeferNotImplemented` when it fires). The first one that fires ends the whole event, and an unconditional directive must be the last item in its list (see [Flow-control placement](#flow-control-placement)). `skip` is valid only in `initialize`; `cancelled` permits only `stop` from this directive set.
+Nine directives change what the run does next instead of producing a side effect: `stop`, `skip`, `error`, `retry`, `resume`, `proxy`, `defer`, `break`, and `prep`. Three are **planned** at run time: they parse, and fail when they fire, `defer` with `LifecycleDeferNotImplemented` and `break` and `prep` with `LifecycleDirectiveNotYetSupported`. The first one that fires ends the whole event, except `prep`, which returns; an unconditional directive other than `prep` must be the last item in its list (see [Flow-control placement](#flow-control-placement)). `skip` is valid only in `initialize`; `cancelled` permits only `stop` from this directive set.
 
 See [Flow Control](flow-control.md) for what each directive does and when to use it, and the [Flow Control Reference](flow-control-reference.md) for runtime limits, retry and resume re-entry, and `proxy` handoffs, including the `with:` overlays on `proxy` and `retry`.
 
@@ -1104,8 +1112,8 @@ command or treat it as authored lifecycle instructions.
 A sequence stops on an unhandled failure. To continue, wrap optional work in
 a one-leg group with `fail_fast: false`; that group handles its leg failure
 and publishes its result, allowing later sequence steps to run. The group can
-report the failed leg through `group.failed`. Loop continuation still uses the
-loop's own `fail_fast: false`. `no_error` only covers lifecycle side-effect failures;
+report the failed leg through `group.failed`. A loop has no `fail_fast`: a
+failed iteration is an unhandled failure unless a `failure` event handles it. `no_error` only covers lifecycle side-effect failures;
 it does not repair an unconfirmed provider transaction. The diagnostic-specific
 sequence example and recovery checks remain planned until populated detail
 reaches both `failure` and `finalize`.
@@ -1133,7 +1141,7 @@ start:
 
 ## Loop Gate Concerns
 
-The `loop` property carries both iteration controls (`while`/`until`, `action`/`actions`, `max`, `fail_fast`, `on_rate_limit`) and lifecycle concerns. The lifecycle concerns fire on every gate pass, the point at which the loop condition is checked, including the final pass that exits the loop.
+The `loop` property carries both iteration controls (`while`/`until`, `action`/`actions`, `max`, and, on a document, `on_rate_limit`) and lifecycle concerns. The lifecycle concerns fire on every gate pass, the point at which the loop condition is checked, including the final pass that exits the loop.
 
 A `loop:` block spells its lifecycle concerns in one of two ways, never both:
 
@@ -1167,6 +1175,8 @@ A `loop:` block spells its lifecycle concerns in one of two ways, never both:
 
 Mixing loose verb keys with `gate:` in one `loop:` block, and `when` at the
 loop root, are both `LifecycleStackInvalidShape`; a guard belongs in `gate:`.
+Unlike an event, `gate:` is never `null` or `{}`: both are
+`LifecycleStackInvalidShape`, and `gate: []` is the explicit empty gate.
 `action`/`actions` at the loop root are the iteration mutations, not lifecycle
 grammar.
 

@@ -67,7 +67,13 @@ and every node carries its authored `LifecyclePath`
 bundle expands in a fixed canonical order at parse time. Every retired spelling
 (the old stack/aggregator keys, the speech-ordering flag, communication
 `message`/`sound`/`route` parameters, and the retired loop-value names) is
-`CompositionError::RemovedGrammar` with a replacement hint. The parser
+`CompositionError::RemovedGrammar` with a replacement hint. The directive
+verbs live in one list (`signatures.rs::LIFECYCLE_CONTROL_VERBS`); `prep` is
+the one directive that returns (`LifecycleControlAction::returns`), so it is
+exempt from the last-item rule. `break` and `prep` parse today and are refused
+in one place at run time (`executor.rs::resolve_control`,
+`LifecycleDirectiveNotYetSupported`, an evaluation error `no_error` cannot
+suppress). A loop `gate:` is never `null` or `{}`. The parser
 slice (`lifecycle/{parse,action_shape,actions,validate,signatures,source_map}.rs`)
 is lift-ready: `lib/tests/l1/lifecycle_lift_ready_guard.rs` fails if it names a
 Claudine runtime type, so the caller injects the effect catalog
@@ -81,6 +87,19 @@ it over the retained proxy overlay (retry wins a shared key). The retried
 attempt's preflight read only looks at it and `materialize_harness_prompt`
 consumes it, so it applies to exactly one transition; resume and proxy
 adoption clear it.
+
+**Loop configuration.** Every owner's `loop:` parses through
+`looping/config.rs`: `resolve_loop_config` for a document,
+`parse_loop_block(value, LoopOwner, &LoopLocation)` for a group or sequence
+(controls plus the gate, via `lifecycle::parse_loop_gate`). Errors are located
+`LoopInvalid { source_path, property, message }` with `property` rooted at the
+block (`tasks[2].loop.max`); `loop.fail_fast` is `RemovedGrammar`;
+`on_rate_limit` is document-only (`LoopRateLimitPolicyNotAccepted`). A
+templated `max` stays in `LoopConfig::max_template` until
+`resolve_templated_loop_max` resolves it once (the engine refuses an
+unresolved one). `check_loop_config_keys` runs before the launch's schema
+verdict so key typos get the loop parser's did-you-mean.
+
 The `claudine` executable intercepts Playa scheduler/delegate modes and the
 biscuit-speaks preparation-helper mode before normal CLI bootstrap, so queued
 audio is serialized and survives the requesting Claudine process.
@@ -232,7 +251,15 @@ may themselves be containers. Groups reject `execution:` (concurrency is implici
 unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
 Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
-grammar. The CLI rejects `--fail-fast` before source loading, keeps explicit
+grammar. Container `loop:` (group object, sequence-document root, inline
+nested sequence task) and task `when:` are grammar ahead of behavior:
+`sequence/grammar.rs` validates them (`container_loop`, `task_when`,
+`validate_sequence_root`, located by `normalize_plan_at`'s property path in
+the declaring file), then refuses a valid one with
+`ContainerLoopNotYetSupported`/`TaskWhenNotYetSupported`; those two functions
+are the only refusal sites. Sequence-root `when:` and `loop` on any other task
+are permanent errors. JSON-family sources reject duplicate keys in
+`sequence/data.rs` (`DuplicateScan`) before the `serde_json::Value` conversion. The CLI rejects `--fail-fast` before source loading, keeps explicit
 provider `--` tails opaque, and no longer injects `CLAUDINE_FAIL_FAST`.
 `cancelled` is a cleanup-only lifecycle event. Presence, including `[]` or
 `{}`, opts running group legs into sibling-failure cancellation; null is

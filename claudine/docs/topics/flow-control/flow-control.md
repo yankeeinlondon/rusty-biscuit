@@ -37,14 +37,14 @@ The pieces:
 | [`resume`](#resume) | Sends a follow-up message to the same agent session. |
 | [`proxy`](#proxy) | Hands the run to a different prompt document as _proxy_ for itself. |
 | [`defer`](#defer) | **Planned:** suspends the whole run and schedules it to resume later, typically after a rate-limit window passes. |
-| [`break`](#break) | **Planned:** leaves the innermost enclosing loop. |
-| [`prep`](#prep) | **Planned:** runs another executable primitive to prepare the environment, then returns control to the caller. |
+| [`break`](#break) | **Planned at run time:** leaves the innermost enclosing loop. |
+| [`prep`](#prep) | **Planned at run time:** runs another executable primitive to prepare the environment, then returns control to the caller. |
 
-Directives marked **planned** are part of the documented design and are not yet implemented; `defer` additionally waits on scheduling in the `rendezvous` daemon.
+Directives marked **planned** are part of the documented design and do not run yet. `defer` waits on scheduling in the `rendezvous` daemon. `break` and `prep` are already parsed and validated like every other directive, so a malformed one is reported before anything runs; reaching a valid one fails the event with a typed `LifecycleDirectiveNotYetSupported` error ("not yet supported at run time"), never a silent skip or a `stop`.
 
 ## Rules that apply to every directive
 
-**A directive ends the whole event.** When a directive runs, nothing after it runs, in its own list or in any list that encloses it: a `retry` inside a nested `else` ends the event just as a `retry` at the top does. That is why an unconditional directive must be the **last** item in its list (a `when` item never counts as unconditional), and why a dictionary of verbs can hold at most one directive. Put any messages you want to show *before* the directive:
+**A directive ends the whole event, except `prep`.** When a directive runs, nothing after it runs, in its own list or in any list that encloses it: a `retry` inside a nested `else` ends the event just as a `retry` at the top does. That is why an unconditional directive must be the **last** item in its list (a `when` item never counts as unconditional), and why a dictionary of verbs can hold at most one directive. `prep` is a call that returns, so items may follow it, even unconditionally; in a dictionary it still counts as the one directive and runs after the dictionary's other verbs. Put any messages you want to show *before* an ending directive:
 
 ```yaml
 failure:
@@ -130,7 +130,7 @@ If neither `failure` nor `finalize` recovers the run with `retry`, `resume`, or 
 |-------------------------|---------|
 | `compose` / `inline-compose` | Exits `1` and prints `Error: <reason>` once. |
 | A `sequence` step | The failure reaches the enclosing container. Without recovery the sequence stops. |
-| A `loop:` iteration | The iteration fails; `fail_fast` decides whether the loop continues. |
+| A `loop:` iteration | The iteration fails, and the loop stops unless a `failure` event handles it. |
 
 A recovery that works reports the recovered attempt's outcome, so a `retry` that succeeds exits `0` with no error left over from the earlier attempt. Messages that already fired, such as a `success` `info:` line, are kept. Without a reason, the error reads `lifecycle success error`.
 
@@ -270,7 +270,7 @@ Nothing else in the run happens while it is suspended: no later events fire, no 
 
 ## `break`
 
-> **Planned.** Not yet a lifecycle verb: until it is built, a `break` in an event is rejected as an unknown verb.
+> **Planned at run time.** Claudine parses and validates `break` in every event except `cancelled`, and in the loop gate. Until loop control is built, reaching a `break` fails the event with `LifecycleDirectiveNotYetSupported`; `no_error` does not suppress it.
 
 Leaves the innermost enclosing [loop](looping.md). The loop may belong to a different primitive than the one raising `break`: a document that is one task of a looped group ends the group's loop, and a group that is one step of a looped sequence ends the sequence's loop. With nested loops, only the innermost one ends; an outer loop continues and checks its own condition as usual.
 
@@ -290,12 +290,14 @@ A loop that ended through `break` is a distinct outcome from "condition met" and
 
 | Parameter | Required | Meaning |
 |-----------|----------|---------|
-| `reason` | no | Human-readable explanation, recorded as the loop's outcome. This is the short-form value. |
-| `code` | no | Process exit code, an integer from `0` to `255`, for a loop that ends through this `break`. |
+| `reason` | no | Human-readable explanation, recorded as the loop's outcome. This is the short-form value. `""` is an explicit empty reason. |
+| `code` | no | Process exit code, an integer from `0` to `255`, for a loop that ends through this `break`. Default `0`. |
+
+The accepted spellings are a bare `- break`, `break: null` or `break: []` (no reason), `break: "reason"`, and the long form `break: { reason, code, no_error }`. A reason must be text: a number, a list, or a mapping is an error, and so is `break: [reason]`. `code` must be a YAML integer in range; `256`, `-1`, `1.5`, `"2"`, and `null` are errors, as is any other parameter. An unconditional `break` must be the last item in its list.
 
 ## `prep`
 
-> **Planned.** Not yet a lifecycle verb: until it is built, a `prep` in an event is rejected as an unknown verb.
+> **Planned at run time.** Claudine parses and validates `prep` in every event except `cancelled`, and in the loop gate. Until the shared target runner is built, reaching a `prep` fails the event with `LifecycleDirectiveNotYetSupported`; `no_error` does not suppress it.
 
 Runs another executable primitive to _prepare_ the environment, then returns control to the caller. Where `proxy` is a hand-off, `prep` is a call: the target runs to completion, and the caller's event continues with the item after the directive as if nothing had intervened.
 
@@ -310,7 +312,7 @@ initialize:
       - skip
 ```
 
-What comes back: only what the target wrote to disk. `prep` does not merge the target's frontmatter or runtime state into the caller; the caller reads any result the same way it reads any file. Inside a sequence the target's final output is appended to `seq.outputs`, so `{{ last(seq.outputs) }}` also works.
+What comes back: only what the target wrote to disk. `prep` does not merge the target's frontmatter or runtime state into the caller; the caller reads any result the same way it reads any file. The target's output is reported under its own invocation and is not appended to the caller's `seq.outputs`.
 
 The target is prepared exactly as a `proxy` target is: its own `initialize`, its own validation, its own shell approval. Inside a sequence that approval happens at the sequence's preflight along with every other referenced document. A `prep` from `initialize` is allowed even though `initialize` itself is shell-free, because any shell runs inside the target under the target's approval.
 
@@ -320,6 +322,8 @@ A target that fails fails the caller's current event, and the run proceeds throu
 |-----------|----------|---------|
 | `target` | **yes** | The document, group, or sequence to run first. This is the short-form value. |
 | `with` | no | Frontmatter values for the target, as for `proxy`. Long form only. |
+
+The accepted spellings are `prep: "@target.md"` and the long form `prep: { target, with, no_error }`. The target must be a non-empty string (a file reference or a whole-value `{{ … }}`); a missing, empty, numeric, or list target is an error. `with` follows `proxy.with` exactly: omitted means no overlay, `with: {}` is an explicit empty overlay, and `null`, a string, or a list is an error. A `prep` in `initialize` is not a shell, so it passes the shell-free check while a `shell` beside it is still refused.
 
 ## Choosing a directive
 
@@ -332,8 +336,8 @@ A target that fails fails the caller's current event, and the run proceeds throu
 | The document has nothing to do on this run | `skip` (from `initialize`) |
 | The rest of the event should not run | `stop` |
 | The agent hit a rate limit and the run should wait it out | `defer` (planned) |
-| The loop has done its job early, or should stop for a human to look | `break` (planned) |
-| Another prompt must run first, and control should come back | `prep` (planned) |
+| The loop has done its job early, or should stop for a human to look | `break` (planned at run time) |
+| Another prompt must run first, and control should come back | `prep` (planned at run time) |
 
 These combine well across events. For example, `success` can raise `error` when an artifact is missing, and `finalize` can then `retry` once. The [verify-then-retry example](lifecycle.md#verify-an-artifact-on-success-then-retry-once-from-finalize) shows the full document.
 
