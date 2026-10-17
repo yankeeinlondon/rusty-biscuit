@@ -5,7 +5,6 @@ $schema:
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
     spec_name: string -> the name of the spec (which is really just the spec's folder name)
-    in_loop: boolean -> set by the `review-loop` sequence; when true this review opts out if the previous review already ended the loop
     next_spec: file(match(**/*spec*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT spec in the sequence
     next_plan: file(match(**/*plan*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT plan in the sequence
     human_in_the_loop: string[] -> filled out with review items when it has determined that a human review is required
@@ -48,14 +47,6 @@ next_plan: |-
 
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
-initialize:
-    # Inside the review-loop sequence the step list is static, so a review
-    # whose predecessor already closed the loop opts out here and launches
-    # nothing. A direct `claudine compose` never sets `in_loop`.
-    - when: "in_loop && previous_review && frontmatter(previous_review, 'ready') == true"
-      then:
-          - message: "review #{{iteration}} skipped: {{basename(previous_review)}} already marked `{{parent_dir(spec)}}` production ready"
-          - skip
 start:
     message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
@@ -322,6 +313,8 @@ For every high or medium finding:
   category, or count), follow that value to the decisions within the boundary
   that accept, reject, or classify with it. Each one is a site; the reader
   alone is not the sweep
+
+Low findings get an ID too, without a sweep.
 
 Do not stop at the first high finding. Finish the sweep, then write. Every
 blocking finding goes in the titled findings and the frontmatter `findings`

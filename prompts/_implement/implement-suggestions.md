@@ -6,7 +6,6 @@ $schema:
     iteration: number(required;default(1)) -> what _iteration_ of the review/implement cycle that we are on
     log: file -> the log file we're writing to while working on the implementation
     retry: string -> if you're retrying this prompt after a failure then pass in what you know about prior progress
-    in_loop: boolean -> set by the `review-loop` sequence; when true this step opts out once the review it would implement has ended the loop
 description: |-
     Implements the findings in a review which was conducted to determine the drift between
     what was actually implemented versus the specification that was being targetted in that
@@ -16,27 +15,31 @@ review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
 log: {{ dirname(spec) + '/log.md' }}
 # is the review "production ready"?
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
+# open medium/low findings and observations on a ready review, before its
+# follow-up pass marks the review `implemented`
+followups: |-
+    {{
+        ready == true && frontmatter(review, 'implemented') != true
+            ? length(frontmatter(review, 'findings') || []) + length(frontmatter(review, 'observations') || [])
+            : 0
+    }}
 
 design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
 yolo: true
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:
-    # Inside the review-loop sequence the step list is static; a repair
-    # whose review is ready opts out here instead of launching an agent to
-    # write one log line.
-    - when: "in_loop && ready == true"
-      then:
-          - message: "repair of review #{{iteration}} skipped: `{{parent_dir(spec)}}` is production ready"
-          - skip
     - ensure_file: '{{log}}'
 
 start:
     message: "🏃 implementing _findings_ from review #{{ file_index(review) }} in `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
 success:
-    - when: "ready == true"
+    - when: "ready == true && frontmatter(review, 'implemented') == true"
       then:
-          - message: "review #{{ file_index(review) }} of `{{ parent_dir(review) }}` is already production ready; no repair was needed"
+          - message: "🧹  follow-up pass for review #{{ file_index(review) }} of `{{ parent_dir(review) }}` finished; anything left is in the area's `fixes/_unscheduled/` backlog"
+    - when: "ready == true && frontmatter(review, 'implemented') != true"
+      then:
+          - message: "review #{{ file_index(review) }} of `{{ parent_dir(review) }}` is production ready; no repair was needed"
     - when: "ready != true && frontmatter(review, 'implemented') == true"
       then:
           - message: "✅  implemented all review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}`; ready for independent verification (area: **{{ctx.area || ctx.repo }}**, wt: **{{ ctx.worktree }}**, branch: **{{ctx.branch}}**)"
@@ -120,18 +123,34 @@ In order to track progress of this task we are using the '{{log}}' as a log file
 > - be sure to use the Markdown H2/H3 headings recommended so that the document has the right structure
 
 ::block when="ready"
-The review was marked as being **production ready** so there is no longer a need to continue the review-to-implement loop.
+The review marked the {{feature_or_fix}} **production ready**, so no further review will run. What it still lists is cheapest to fix now, while the code is fresh, and must not be lost if it is not.
 
-- add the following entries to the log file ({{log}}):
-    - `- the review found in '{{review}}' indicated that the specification is **production ready**!`
-    - `- the specification file used to define the functional/non-functional target of all this work can be found at '{{spec}}'`
-- there are times in which a review can mark the work as "production ready" but still have some findings that should be considered as follow on work
-    - when this is the case we need to document this in the log file:
-        - `- while the review found this feature to be production ready, it did have findings worth looking at for follow on work:`
-        - the as a nested list add the "name" of each findings
-        - `- refer to the review file -- {{review}} -- for more details`
+- add to the log file ({{log}}) under `## Follow-up Pass for Review #{{iteration}}`:
+    - `- the review found in '{{review}}' indicated that the specification is **production ready**`
+    - `- the specification can be found at '{{spec}}'`
 
-Now explain to the user the current state of this review/implement cycle and exit.
+::block when="followups > 0"
+### Follow-up pass
+
+This is one pass with no review after it. In the log, build a `### Finding Ledger` table (`| ID | Finding | Disposition | Evidence or reason |`) with one row for every medium and low finding in the review's `findings` list and every entry in its `observations` list, then:
+
+- **fix every medium and low finding whose repair is small and inside the code this spec added or changed**. This is the default, not an option. Name the defect class and fix its sibling sites in the same code too, with a test for each; a fixed instance whose sibling is left is still open
+- record as **deferred**, with a one-sentence reason, a finding whose repair is large next to its harm, needs a design decision, or reaches outside the spec's code
+- do not repair observations in this pass; carry each one to the backlog below
+- run the focused tests for each repair, then `just test` and `just lint` once in each affected package area after the final change
+
+Then record everything still open, so it reaches planning instead of a log:
+
+- write a backlog entry at `fixes/_unscheduled/{{ kebab_case(without_date(parent_dir(spec))) }}-follow-ups/spec.md` inside the package area that owns the spec (the directory containing the spec's `features/` or `fixes/` directory); append to it if it exists, and match the frontmatter of the other specs in that `_unscheduled/` directory
+- give each deferred finding and each observation its own section: its ID and title, the defect in a sentence or two, where it is, why it was not fixed now, and what fixing it looks like. Link to {{review}} for detail
+- when nothing is left open, write no backlog entry
+
+Finish by setting the review's `implemented` to `true` and `implemented_by` to `{{ ctx.agent }}/{{ ctx.model }}`, so later repair steps in the loop do not repeat this pass, and report what was fixed, what was deferred, and the backlog entry's path.
+::end-block
+
+::block when="followups == 0"
+The review has no open follow-ups: it listed none, or its follow-up pass already ran. Explain the current state of this review/implement cycle and exit.
+::end-block
 ::end-block
 
 
@@ -236,8 +255,11 @@ or code that exists only to satisfy synthetic payloads. Propose documenting
 the limitation instead. Each such layer is new surface the next review can
 find an edge in.
 
-Observations and medium or low findings never require a repair; take one only
-when it is a small, surgical change inside the spec's code.
+Fix medium and low findings in this cycle too when the repair is small and
+inside the spec's code; that is the default, and it never needs another
+review. Record a larger one as **deferred** with its reason. Observations are
+not repaired here; the follow-up pass on the ready review carries them to the
+backlog.
 
 ::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
 **This review reports a recurring finding class.** Its `## Recurrence` section
