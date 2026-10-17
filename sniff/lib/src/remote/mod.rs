@@ -1,8 +1,10 @@
 //! Remote repository inspection via git hosting providers.
 //!
 //! This module provides normalized types and traits for querying remote git
-//! hosting providers (GitHub, GitLab, Gitea, Bitbucket). It uses the generated
-//! API clients in `schematic-schema` for all HTTP operations.
+//! hosting providers (GitHub, GitLab, Gitea, Bitbucket). The
+//! [`RemoteRepoProvider`] implementations send through the generated API
+//! clients in `schematic-schema`; [`FocusedProviderClient`], which also backs
+//! the [`blocking`] queries, sends its own requests.
 //!
 //! ## Feature Flag
 //!
@@ -44,6 +46,7 @@
 mod bitbucket;
 pub mod blocking;
 mod check_status;
+mod envelope;
 mod focused;
 mod gitea;
 mod github;

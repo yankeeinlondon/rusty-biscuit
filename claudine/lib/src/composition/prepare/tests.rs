@@ -65,6 +65,30 @@ fn make_source(
 }
 
 #[test]
+fn file_links_prompts_export_both_listings_without_render_metadata() {
+    let dir = TempDir::new().unwrap();
+    for (folder, file) in [("modes", "mode-1004.md"), ("osc", "osc-8.md")] {
+        fs::create_dir(dir.path().join(folder)).unwrap();
+        fs::write(dir.path().join(folder).join(file), "# Standard\n").unwrap();
+    }
+    let body = "# Resources\n\n### Modes Standards\n\n::file-links ./modes/*.md\n\n### OSC Standards\n\n::file-links ./osc/*.md\n\n## After\n\nKeep **this** text.\n";
+    let direct = make_source(&dir, &[], body);
+    let inline = make_source(&dir, &[("prompt", json!(body))], "Edit this document.");
+    let context = crate::test_support::context_at(dir.path());
+    let prompts = [
+        prepare_direct(&direct, PrepareOptions::new(context.clone())).unwrap().prompt,
+        prepare_inline(&inline, PrepareOptions::new(context)).unwrap().prompt,
+    ];
+    for prompt in prompts {
+        assert!(!prompt.contains("bt:render-tree"), "internal metadata leaked into prompt");
+        assert!(!prompt.contains("::file-links"));
+        assert!(prompt.contains("[mode-1004.md](modes/mode-1004.md)"), "{prompt}");
+        assert!(prompt.contains("[osc-8.md](osc/osc-8.md)"), "{prompt}");
+        assert!(prompt.contains("## After\n\nKeep **this** text."));
+    }
+}
+
+#[test]
 fn direct_composition_uses_effective_frontmatter() {
     let dir = TempDir::new().unwrap();
     let source = make_source(

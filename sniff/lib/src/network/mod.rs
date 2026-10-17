@@ -1078,7 +1078,11 @@ fn interface_name_for_ipv4(
 /// }
 /// ```
 pub fn detect_network_filtered() -> Result<NetworkInfo> {
-    let mut info = detect_network()?;
+    detect_network().map(retain_up_non_loopback)
+}
+
+/// Drops loopback and down interfaces, and the aggregated addresses they own.
+fn retain_up_non_loopback(mut info: NetworkInfo) -> NetworkInfo {
     info.interfaces
         .retain(|i| !i.flags.is_loopback && i.flags.is_up);
 
@@ -1094,12 +1098,25 @@ pub fn detect_network_filtered() -> Result<NetworkInfo> {
         .v6
         .retain(|addr| retained_names.contains(addr.interface.as_str()));
 
-    Ok(info)
+    info
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Local interfaces only. `detect_network()` adds a live WAN IP lookup
+    // (with the `network` feature, up to two HTTP requests of 2 s each) that
+    // none of the tests below assert on; `test_detect_network_returns_info`
+    // keeps that entry point covered.
+    fn local_network() -> NetworkInfo {
+        detect_network_with_request(&NetworkRequest::interfaces_only()).unwrap()
+    }
+
+    /// What `detect_network_filtered()` returns, over local interfaces only.
+    fn local_network_filtered() -> NetworkInfo {
+        retain_up_non_loopback(local_network())
+    }
 
     #[test]
     fn test_detect_network_returns_info() {
@@ -1120,7 +1137,7 @@ mod tests {
 
     #[test]
     fn test_loopback_is_detected() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         if !info.permission_denied {
             let has_loopback = info.interfaces.iter().any(|i| i.flags.is_loopback);
             assert!(has_loopback, "Should detect loopback interface");
@@ -1129,7 +1146,7 @@ mod tests {
 
     #[test]
     fn test_primary_interface_not_loopback() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         if let Some(ref primary) = info.primary_interface {
             let iface = info.interfaces.iter().find(|i| &i.name == primary);
             assert!(iface.is_some());
@@ -1139,7 +1156,7 @@ mod tests {
 
     #[test]
     fn test_filtered_excludes_loopback() {
-        let info = detect_network_filtered().unwrap();
+        let info = local_network_filtered();
         for iface in &info.interfaces {
             assert!(!iface.flags.is_loopback);
         }
@@ -1147,7 +1164,7 @@ mod tests {
 
     #[test]
     fn test_filtered_excludes_down_interfaces() {
-        let info = detect_network_filtered().unwrap();
+        let info = local_network_filtered();
         for iface in &info.interfaces {
             assert!(iface.flags.is_up);
         }
@@ -1155,7 +1172,7 @@ mod tests {
 
     #[test]
     fn test_interface_has_name() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         if !info.permission_denied {
             for iface in &info.interfaces {
                 assert!(!iface.name.is_empty());
@@ -1183,7 +1200,7 @@ mod tests {
 
     #[test]
     fn test_non_loopback_has_mac_address() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         if !info.permission_denied {
             // At least one non-loopback interface should have a MAC address
             // (on most systems with physical or virtual network hardware)
@@ -1219,7 +1236,7 @@ mod tests {
 
     #[test]
     fn test_ip_addresses_count_matches_per_interface_sum() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         if !info.permission_denied {
             // Sum of per-interface IPv4 addresses should equal aggregated v4 count
             let per_iface_v4: usize = info.interfaces.iter().map(|i| i.ipv4_addresses.len()).sum();
@@ -1241,7 +1258,7 @@ mod tests {
 
     #[test]
     fn test_ip_addresses_interface_attribution_is_valid() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         if !info.permission_denied {
             // Collect all interface names
             let interface_names: std::collections::HashSet<&str> =
@@ -1531,7 +1548,7 @@ mod tests {
     fn test_ip_addresses_are_valid_ip_strings() {
         use std::net::{Ipv4Addr, Ipv6Addr};
 
-        let info = detect_network().unwrap();
+        let info = local_network();
         if !info.permission_denied {
             // Every IPv4 address should parse as valid Ipv4Addr
             for addr in &info.ip_addresses.v4 {
@@ -1560,7 +1577,7 @@ mod tests {
         // On every supported platform `getifaddrs` reports a netmask for
         // both IPv4 and IPv6 addresses, so once we have any non-empty
         // result the prefix should be present and within range.
-        let info = detect_network().unwrap();
+        let info = local_network();
         if info.permission_denied {
             return;
         }
@@ -1610,7 +1627,7 @@ mod tests {
 
     #[test]
     fn test_ip_addresses_per_interface_prefix_matches_aggregate() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         if info.permission_denied {
             return;
         }
@@ -1645,7 +1662,7 @@ mod tests {
 
     #[test]
     fn test_filtered_ip_addresses_match_retained_interfaces() {
-        let info = detect_network_filtered().unwrap();
+        let info = local_network_filtered();
         if !info.permission_denied {
             // Collect retained interface names (non-loopback, up)
             let retained_names: std::collections::HashSet<&str> =
@@ -1673,7 +1690,7 @@ mod tests {
 
             // Verify no loopback addresses appear in filtered result
             // (loopback interfaces are filtered out, so their addresses should be too)
-            let unfiltered = detect_network().unwrap();
+            let unfiltered = local_network();
             let loopback_names: std::collections::HashSet<&str> = unfiltered
                 .interfaces
                 .iter()
@@ -1701,7 +1718,7 @@ mod tests {
 
     #[test]
     fn test_ip_addresses_json_serialization() {
-        let info = detect_network().unwrap();
+        let info = local_network();
         let json = serde_json::to_string(&info).expect("NetworkInfo should serialize to JSON");
 
         // JSON should contain ip_addresses field with v4 and v6 arrays
@@ -1951,7 +1968,7 @@ mod tests {
     #[test]
     fn test_primary_interface_with_real_system_interfaces() {
         // Integration test: verify the fix works with actual detected interfaces
-        let info = detect_network().unwrap();
+        let info = local_network();
         if !info.permission_denied && info.interfaces.len() > 1 {
             // If we have multiple interfaces, primary should not be a known virtual pattern
             if let Some(ref primary) = info.primary_interface {

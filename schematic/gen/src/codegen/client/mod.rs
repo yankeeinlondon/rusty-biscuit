@@ -13,8 +13,12 @@
 
 mod helpers;
 mod methods;
+mod shared_auth;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use helpers::to_snake_case;
+pub use shared_auth::generate_request_auth_helpers;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -66,7 +70,6 @@ pub fn generate_request_method_with_suffix(api: &RestApi, request_suffix: &str) 
     let has_empty = api.endpoints.iter().any(|e| e.response.is_empty());
 
     let auth_setup = helpers::generate_auth_setup(api);
-    let auth_helpers = helpers::generate_auth_helper_methods();
 
     // Generate shared helper method
     let build_request_method =
@@ -105,7 +108,6 @@ pub fn generate_request_method_with_suffix(api: &RestApi, request_suffix: &str) 
 
     quote! {
         impl #struct_name {
-            #auth_helpers
             #build_request_method
             #merge_headers_method
             #json_method

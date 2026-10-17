@@ -1,27 +1,79 @@
-//! Pagination types for API endpoints.
+//! Pagination: how a list endpoint pages, described once per API.
 //!
-//! This module provides [`PaginationStyle`] for common pagination request patterns
-//! and [`PaginationResponse`] for describing how APIs signal pagination state in responses.
+//! An API declares a default [`Strategy`] for its lists
+//! ([`RestApi::default_pagination`](crate::RestApi::default_pagination)) and
+//! one table of [`PaginationException`] rows keyed by endpoint id
+//! ([`RestApi::pagination_exceptions`](crate::RestApi::pagination_exceptions)).
+//! [`resolve`] decides each endpoint: a row first; otherwise a GET with an
+//! explicit `Vec<T>` response inherits the default; otherwise it is not a
+//! list. [`caller_knobs`] lists the controls the generated client exposes,
+//! [`param_adoptions`] the declared parameters a strategy manages, and
+//! [`validate_pagination`] the rules a definition must satisfy.
+//!
+//! A strategy is one of four kinds ([`PageStrategy`]: page number, offset,
+//! cursor, next link) plus shared dimensions: constants, totals, terminal
+//! values, the follow-up request shape, a server-side [`Session`], and
+//! [`Partition`]s. Followed links obey the API's
+//! [`CrossOrigin`](crate::CrossOrigin) policy.
+//!
+//! [`PaginationStyle`] and [`PaginationResponse`] are superseded by this model.
+//! They remain only because existing definitions still materialize query
+//! parameters through
+//! [`EndpointParams::with_pagination`](crate::EndpointParams::with_pagination);
+//! nothing generates a pager from them.
 //!
 //! ## Examples
 //!
 //! ```
-//! use schematic_define::pagination::PaginationStyle;
+//! use schematic_define::pagination::{
+//!     Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource,
+//! };
 //!
-//! // GitHub-style pagination
-//! let style = PaginationStyle::github();
-//!
-//! // Cursor-based pagination
-//! let style = PaginationStyle::cursor("after", Some("limit"), 20);
+//! let default = Strategy::page_number("page", MoreSignal::link_rel("next"))
+//!     .page_size(PageSize::new("per_page").server_default(30).max(100))
+//!     .build();
+//! let exceptions = vec![PaginationException::new(
+//!     "ListWorkflowRuns",
+//!     Collection::at("workflow_runs")
+//!         .item_type("WorkflowRun")
+//!         .paginate(default.clone().total(ValueSource::body("total_count"))),
+//! )];
 //! ```
+
+mod collection;
+mod resolve;
+mod selector;
+mod strategy;
+mod validate;
+
+pub use collection::{Alternate, Collection, Pagination, PaginationException};
+pub use resolve::{
+    AdoptionOutcome, Direction, Knob, ManagedRole, ParamAdoption, ParamLocation, Resolution,
+    ResolutionOrigin, ResolvedList, adopted_params, caller_knobs, param_adoptions, resolve,
+    root_array_item_type, strategy_knobs,
+};
+pub use selector::{ItemSelector, JsonPath, Step};
+pub use strategy::{
+    Boundary, Carry, CountUnit, CursorBuilder, CursorLeg, CursorPart, CursorSource,
+    CursorStrategy, FixedParam, FollowUp, IndexBase, InputParam, KeepAlive, LinkSource,
+    MoreSignal, NextLinkBuilder, NextLinkStrategy, OffsetBuilder, OffsetStrategy,
+    PageNumberBuilder, PageNumberStrategy, PageSize, PageStrategy, Partition, Polarity, Session,
+    SessionOpen, SessionStep, Strategy, ValueSource,
+};
+pub use validate::{
+    PaginationDiagnostic, PaginationError, PaginationRuleGroup, validate_pagination,
+    validate_strategy,
+};
 
 use serde::{Deserialize, Serialize};
 
 use crate::params::{ParamDef, ParamStyle, QueryParamType};
 
-/// Common pagination patterns for API endpoints.
+/// Common pagination request patterns, superseded by [`Strategy`].
 ///
-/// Provides standardized pagination parameter definitions for common API patterns.
+/// Only [`Self::to_query_params`] has an effect: it materializes ordinary query
+/// parameters, which a [`Strategy`] may adopt. No pager is generated from this
+/// type, and its per-vendor defaults are not the providers' real ones.
 ///
 /// ## Examples
 ///
@@ -260,7 +312,8 @@ impl PaginationStyle {
     }
 }
 
-/// Describes how an API signals pagination state in responses.
+/// How an API signals pagination state in responses, superseded by
+/// [`Strategy`]. Nothing reads it.
 ///
 /// ## Examples
 ///

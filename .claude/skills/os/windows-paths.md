@@ -31,6 +31,12 @@ against that, never against `to_string_lossy()`.
      `ls-files --exclude-from=`. `scripts/ci-build-archive.rs` cannot depend
      on `biscuit_file` (it runs on every scope calculation), so it carries its
      own `fn canonical_path`; everywhere else use `biscuit_file`.
+   - trybuild (1.0.122) canonicalizes path dependencies this way, so its
+     `$<DEPENDENCY>` rewrite never matches the `C:/…` path rustc prints: a
+     `.stderr` snapshot naming another crate's source keeps the raw path and
+     mismatches on Windows only (`$DIR` is unaffected).
+     `schematic/schema/tests/compile_fail.rs` leaves those cases out on
+     Windows.
 2. **Test expectations built from raw `canonicalize` fail against simplified
    production output** (left `C:\…`, right `\\?\C:\…`). Build the expected
    value with `canonicalize_simplified`.

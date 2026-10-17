@@ -13,7 +13,8 @@
 //! - [`RestMethod`] - HTTP methods (GET, POST, PUT, etc.)
 //! - [`AuthStrategy`] - Legacy single-strategy authentication model
 //! - [`AuthPolicy`] - Explicit auth methods plus environment fallback policy
-//! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo)
+//! - [`CrossOrigin`] - Policy for following redirects and next-page links to other origins
+//! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo); no generated code reads it
 //! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
 //! - [`ApiRequest`] - Request body type definitions (JSON, FormData, UrlEncoded, Text, Binary)
 //! - [`FormField`] - Form field definitions for multipart and URL-encoded requests
@@ -57,15 +58,18 @@
 //! - [`ParamDef`] - Single parameter definition
 //! - [`QueryParamType`] - Parameter value type
 //! - [`ParamStyle`] - Parameter serialization style
-//! - [`PaginationStyle`] - Common pagination request patterns
-//! - [`PaginationResponse`] - How APIs signal pagination state in responses
+//! - [`PaginationStyle`] - Legacy pagination query parameters, superseded by
+//!   [`pagination::Strategy`]
+//! - [`PaginationResponse`] - Legacy response pagination signal; nothing reads it
+//!
+//! List pagination is authored per API through the [`pagination`] module.
 //!
 //! ## Examples
 //!
 //! Define a simple API with bearer token authentication:
 //!
 //! ```
-//! use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse};
+//! use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 //!
 //! let api = RestApi {
 //!     name: "OpenAI".to_string(),
@@ -94,6 +98,11 @@
 //!     request_suffix: None,
 //!     version: None,
 //!     env_mapping: None,
+//!     cross_origin: CrossOrigin::default(),
+//!     request_id_header: None,
+//!     secret_names: vec![],
+//!     default_pagination: None,
+//!     pagination_exceptions: vec![],
 //! };
 //!
 //! assert_eq!(api.name, "OpenAI");
@@ -133,6 +142,7 @@
 //! See `schematic_definitions::anthropic` for a comprehensive example.
 
 pub mod auth;
+pub mod cross_origin;
 pub mod headers;
 pub mod models;
 pub mod oauth;
@@ -152,6 +162,7 @@ pub mod openapi;
 pub use auth::{
     ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy,
 };
+pub use cross_origin::CrossOrigin;
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,

@@ -8,14 +8,6 @@ use super::helpers::get_module_path;
 use crate::output::ws_modules::ws_definition_modules;
 
 /// Assembles the prelude.rs content for the schema crate.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions to include
-///
-/// ## Returns
-///
-/// A TokenStream containing the prelude.rs code.
 pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
     assemble_prelude_with_options(apis, true)
 }
@@ -26,11 +18,10 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         .iter()
         .map(|api| {
             let module_name = format_ident!("{}", get_module_path(api));
-            let client_name = format_ident!("{}", api.name);
-            let request_enum = format_ident!("{}Request", api.name);
+            let client = format_ident!("{}", api.name);
 
             quote! {
-                pub use crate::#module_name::{#client_name, #request_enum};
+                pub use crate::#module_name::#client;
             }
         })
         .collect();
@@ -51,7 +42,7 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
 
     let client_list: Vec<String> = apis
         .iter()
-        .map(|api| format!("//! - [`{name}`] + [`{name}Request`]", name = api.name))
+        .map(|api| format!("//! - [`{name}`]", name = api.name))
         .collect();
     let client_list_str = client_list.join("\n");
     let client_list_tokens: TokenStream = client_list_str.parse().unwrap_or_default();
@@ -70,18 +61,19 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
     quote! {
         //! Convenient re-exports for working with generated API clients.
         //!
-        //! This prelude exports the client structs, request enums, and shared error
-        //! types. Response types are **not** re-exported here to avoid naming conflicts.
-        //! Import them from specific API modules instead:
+        //! This prelude exports each API's client struct, and
+        //! the runtime types every call uses. Request, call, and response
+        //! types are **not** re-exported here to avoid naming conflicts. An
+        //! endpoint method needs none of them imported; when one must be
+        //! named, import it from its API module:
         //!
         //! ```text
-        //! use schematic_schema::openai::Model;
-        //! use schematic_schema::anthropic::CreateMessageResponse;
+        //! use schematic_schema::openai::{ListModelsCall, ListModelsRequest, ListModelsResponse};
         //! ```
         //!
         //! ## Re-exports
         //!
-        //! **Clients and request enums:**
+        //! **API clients:**
         //!
         #client_list_tokens
         //!
@@ -89,37 +81,27 @@ pub fn assemble_prelude_with_options(apis: &[&RestApi], include_ws_helpers: bool
         //!
         #ws_helper_list_tokens
         //!
-        //! **Shared types:**
-        //!
-        //! - [`SchematicError`] - Error type for all API operations
-        //! - [`RequestParts`] - Low-level request decomposition tuple
+        //! **Runtime types:** [`Call`], [`CallError`], [`CallOptions`],
+        //! [`Credential`], [`Deadline`], [`FullCall`], [`OriginPolicy`],
+        //! [`Response`], [`RawResponse`], and [`TransportError`] from
+        //! [`schematic_runtime`].
         //!
         //! ## Examples
         //!
         //! ```text
         //! use schematic_schema::prelude::*;
         //!
-        //! #[tokio::main]
-        //! async fn main() -> Result<(), SchematicError> {
-        //!     let client = OpenAI::new();
-        //!
-        //!     // Typed request with new()
-        //!     let models = client.list_models().await?;
-        //!
-        //!     // Ergonomic From<&str> for single-param endpoints
-        //!     use schematic_schema::openai::{RetrieveModelRequest, Model};
-        //!     let model: Model = client
-        //!         .request(RetrieveModelRequest::from("gpt-4"))
-        //!         .await?;
-        //!
-        //!     Ok(())
-        //! }
+        //! let client = OpenAI::new();
+        //! let model = client.retrieve_model("gpt-4").await?;
+        //! println!("{}", model.id);
         //! ```
 
-        // Shared types
-        pub use crate::shared::{RequestParts, SchematicError};
+        pub use schematic_runtime::{
+            Call, CallError, CallOptions, Credential, Deadline, FullCall, OriginPolicy, RawResponse,
+            Response, TransportError,
+        };
 
-        // API clients and request types
+        // API clients
         #(#api_reexports)*
 
         // WebSocket definition helpers

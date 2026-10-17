@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no authored page size
+ --> tests/fixtures/compile_fail/pager_page_size_not_authored.rs
+  |
+  |     let _ = client.send(ListItems).pager().page_size(10);
+  |                                            ^^^^^^^^^ `.page_size(..)` needs a `PageSize` in the definition
+  |
+help: the trait `PageSizeKnob` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_page_size_not_authored.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` declares no page size, so its pager has no `.page_size(..)`
+note: required by a bound in `Pager::<'a, A, R>::page_size`
+ --> src/pager/pages.rs
+  |
+  |     pub fn page_size(mut self, size: u32) -> Self
+  |            --------- required by a bound in this associated function
+  |     where
+  |         R: PageSizeKnob,
+  |            ^^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::page_size`

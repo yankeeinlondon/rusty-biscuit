@@ -135,6 +135,7 @@ struct Fake {
     task_reads: HashMap<u32, usize>,
     /// Every capacity a descriptor listing was asked for.
     capacities: Vec<usize>,
+    cwd_calls: usize,
 }
 
 impl Fake {
@@ -186,6 +187,7 @@ impl Source for &mut Fake {
     }
 
     fn cwd(&mut self, pid: u32) -> Result<Option<Vnode>, Fault> {
+        self.cwd_calls += 1;
         self.process(pid)?.cwd.clone()
     }
 }
@@ -578,6 +580,43 @@ fn a_budget_expiring_between_descriptors_keeps_what_was_read() {
             .iter()
             .any(|l| l.kind == LimitationKind::BudgetExhausted)
     );
+}
+
+#[test]
+fn a_budget_expiring_during_descriptors_never_starts_the_cwd_read() {
+    let scene = scene();
+    let scripted = || {
+        Scripted::new(START)
+            .open(3, &scene.root.join("file.txt"), FREAD)
+            .open(4, &scene.root.join("sub/b.txt"), FREAD)
+            .cwd(&scene.root.join("sub"))
+    };
+    let mut control = Fake::default().with(PID, scripted());
+    control.query(&scene.root, &PathUsageOptions::default());
+    assert_eq!(control.cwd_calls, 1, "an unexpired query reads the cwd");
+
+    let mut fake = Fake::default().with(PID, scripted());
+    // The first per-descriptor check passes; the second finds it expired.
+    let mut backend =
+        super::tests::ExpiringDuringInspection::new(LibprocBackend::with_source(&mut fake), 1);
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    let report = run(&scene.root, &PathUsageOptions::default(), &mut backend, &budget, chrono::Utc::now())
+        .expect("report");
+
+    assert_eq!(fake.cwd_calls, 0, "the cwd read started after the budget expired");
+    let handles = evidence(&report, EvidenceKind::OpenHandle);
+    assert_eq!(handles.len(), 1, "{report:#?}");
+    assert_eq!(paths(handles[0]), vec![scene.root.join("file.txt")]);
+    assert!(evidence(&report, EvidenceKind::WorkingDirectory).is_empty());
+    let cwd = coverage(&report, Mechanism::WorkingDirectories);
+    assert_eq!(cwd.status, CoverageStatus::NotAttempted, "{cwd:#?}");
+    assert_eq!(cwd.attempted, Some(0));
+    assert_eq!(limitation_count(cwd, LimitationKind::BudgetExhausted), 1);
+    let open = coverage(&report, Mechanism::OpenHandles);
+    assert_eq!(open.status, CoverageStatus::Partial);
+    assert_eq!(limitation_count(open, LimitationKind::BudgetExhausted), 1);
+    assert!(report.budget_exhausted);
+    assert_eq!(report.outcome, Outcome::Usable);
 }
 
 /// Live `libproc` on macOS.

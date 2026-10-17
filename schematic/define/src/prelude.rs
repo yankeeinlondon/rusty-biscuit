@@ -24,6 +24,11 @@
 //!     request_suffix: None,
 //!     version: None,
 //!     env_mapping: None,
+//!     cross_origin: CrossOrigin::default(),
+//!     request_id_header: None,
+//!     secret_names: vec![],
+//!     default_pagination: None,
+//!     pagination_exceptions: vec![],
 //! };
 //! ```
 //!
@@ -46,8 +51,13 @@
 //! ```
 
 pub use crate::auth::{AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
+pub use crate::cross_origin::CrossOrigin;
 pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
-pub use crate::pagination::{PaginationResponse, PaginationStyle};
+pub use crate::pagination::{
+    Carry, Collection, CursorLeg, CursorSource, FollowUp, InputParam, KeepAlive, LinkSource,
+    MoreSignal, PageSize, PaginationException, PaginationResponse, PaginationStyle, Partition,
+    Session, SessionStep, Strategy, ValueSource,
+};
 pub use crate::params::EndpointParams;
 pub use crate::request::{ApiRequest, FormField, FormFieldKind};
 pub use crate::response::ApiResponse;

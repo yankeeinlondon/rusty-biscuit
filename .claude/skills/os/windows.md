@@ -91,6 +91,41 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   shim adds a `cmd.exe` launch to every call, so a fake git in a fixture should
   be an `.exe` (`claudine-fake-relay` with `"forward": true`), and a fixture
   repository's config is cheaper written straight into `.git/config`.
+- **`git` on `PATH` is a launcher that starts a second process.**
+  `<top>\cmd\git.exe` (`compat/win32/git-wrapper.c`) sets `MSYSTEM`,
+  `PLINK_PROTOCOL`, `HOME` (when unset), and a `PATH` prefix of
+  `<top>\mingw64\bin;<top>\usr\bin;%HOME%\bin;`, then starts
+  `<top>\mingw64\bin\git.exe` and waits: 100 × `git --version` took 2.7 s
+  through it versus 1.6 s direct. Calling the real binary bare is not
+  equivalent (it puts `%HOME%\bin` first); setting the four variables the
+  launcher's way is. `worktree::git::command()` does that, resolved once per
+  process, and falls back to plain `git` for other layouts or a
+  `<top>\etc\git-bash.config`. `where.exe git` lists both; the first is the
+  launcher.
+- **The first `gix` open in a process starts three processes** unless
+  `EXEPATH` is set: gix-path runs `git --exec-path` through the launcher to
+  find the system config (launcher, real `git.exe`, `conhost.exe`; cached per
+  process). Git Bash sets `EXEPATH`; SSH, PowerShell, and CI shells do not, so
+  `wt` sets it to the launcher layout's `<top>` in `main`. In a short-lived
+  process that opens no other repository, "read it in-process" turns one
+  `rev-parse` into three. Diagnose with `GIT_TRACE2_EVENT=<dir>` (one file per
+  git process, with `cmd_ancestry`; a parent that wrote no trace is the
+  launcher).
+- **Defender is about a quarter of a parallel test run's CPU on
+  `build-win-native`** (`MsMpEng` 120–145 of ~575 CPU-s; Search, `System`,
+  and `svchost` another 80–90). Roughly 5 ms per process start, 2–5 ms per
+  fresh `%TEMP%` file, 31–36 ms per `git init`. Mostly asynchronous, so it
+  hides in a lone test and shows as 2–3× inflation in a full parallel run.
+  The hosted `windows-latest` image disables real-time monitoring, so this
+  host is slower than CI per process. Never change the host's Defender
+  settings; cut processes and fresh files.
+- **Fresh files are slow to write and slower to read back.** A ~400-file
+  libgit2 fixture took 1.9 s as loose objects, and `Index::add_all` over the
+  fresh tree 1.2 s (7 ms on macOS). For a `git2` fixture, add a mempack
+  backend (`odb.add_new_mempack_backend(1000)`), `dump` it once into
+  `odb.packwriter()`, reopen, stage only the paths each step changed, and
+  write the index and branch once (sniff's `build_large_monorepo`: 6.5 s →
+  2.1 s, identical commit IDs).
 - **A refused loopback connection takes about 2 s.** Windows retries the SYN
   to a closed `127.0.0.1` port before reporting refusal, so a test that
   expects a refused request to fail inside a deadline passes alone and fails
@@ -134,8 +169,9 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   `Child::kill` ends only the launcher. The orphans hold the stderr pipe (a
   reader waiting for EOF blocks) and their working directory (which then
   cannot be deleted). `taskkill /T /F /PID <pid>` releases everything, under
-  SSH too. On Unix the pipe half is fixed with `process_group(0)` and a
-  negative-PID `SIGKILL`.
+  SSH too, or spawn the real `git.exe` directly (as `worktree::git::command()`
+  does) so `Child::kill` means what it says. On Unix the pipe half is fixed
+  with `process_group(0)` and a negative-PID `SIGKILL`.
 - **The main thread gets a 1 MiB stack.** Symptom: a spawned binary dies with
   `0xC00000FD` (`STATUS_STACK_OVERFLOW`, `code=-1073741571`) and empty stderr,
   Windows only, because large debug-build frames overflow a call chain that
@@ -192,6 +228,60 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   `worktree/cli/tests/powershell_wrapper_exec.rs`). A windowless way to get
   a "window launched inside the directory" is a ConPTY child
   ([windows-console.md](windows-console.md)).
+- **The holder takes its directory handle after `spawn` returns,** so a usage
+  query right after `spawn` can find nothing under load. Pipe the holder's
+  stdout and read its first byte before querying
+  (`remove::usage::tests::a_real_query_names_a_process_working_in_the_checkout`).
+  On Unix the directory is set before `spawn` returns.
+- **A directory rename denied by use looks like a permission error.** With
+  `SetFileInformationByHandle(FileRenameInfo, ReplaceIfExists = FALSE)` (ReFS
+  and NTFS), the `DELETE` open always succeeds; the rename then fails with
+  `ERROR_ACCESS_DENIED` (5), not a sharing violation, for any open file in the
+  subtree (even with `FILE_SHARE_DELETE`), a subdirectory handle, or a child's
+  cwd. A handle on the directory itself or a `ReadDirectoryChangesW` watch on
+  it or its parent does not block it, and the tested ACL denies did not either,
+  so a 5 almost always means "in use" but cannot prove it. Without
+  replacement, an existing destination gives 183 and a cross-volume move 17;
+  `std::fs::rename` instead **replaces** an existing empty directory or file.
+
+## Directory change notifications
+
+Measured with `wt remove`'s own `ReadDirectoryChangesW` adapter
+(`worktree/lib/src/remove/observation/read_directory_changes.rs`) on
+`build-win-native`:
+
+- **Overflow is a zero-byte completion, not an error.** Treat it and
+  `ERROR_NOTIFY_ENUM_DIR` as lost coverage, and any other completion error
+  as the watch ending; a watcher that drops either cannot tell coverage
+  was lost.
+- **A watch follows its directory across a rename,** so its paths keep the
+  old name. A recursive watch on the parent reports both names.
+- **Delivery is FIFO per handle:** a marker after 2,000 creates arrived last.
+- An open `FILE_SHARE_DELETE` watch does not leave a deleted directory
+  delete-pending (its read completes with an error), but close the handle
+  first anyway (`wt`'s `release_admin`).
+- **The action is ambiguous.** `FILE_ACTION_MODIFIED` covers content,
+  attributes, and timestamps; a move between two directories of a recursive
+  watch is `REMOVED` plus `ADDED`; only a same-directory rename is
+  `RENAMED_OLD_NAME`/`RENAMED_NEW_NAME`.
+- **ReFS differs from NTFS.** A rename onto an existing file (Git's
+  `index.lock` → `index`) is the source's `REMOVED` plus the target's
+  `MODIFIED`. A directory deleted with POSIX semantics
+  (`std::fs::remove_dir_all`) raises **no notification**; never infer it still
+  exists. `ReadDirectoryChangesExW(…, ReadDirectoryNotifyExtendedInformation)`
+  fails with `ERROR_INVALID_FUNCTION` (1) on ReFS, so a watcher has no entry
+  types there and must say "unknown".
+- **On `build-win-native`, temp is NTFS `C:` and checkouts are ReFS `B:`.**
+  To exercise `B:`, put the fixture under `env!("CARGO_MANIFEST_DIR")`
+  (`on_refs_a_directory_removed_with_posix_semantics_is_not_reported` runs
+  only there).
+- **Overlapped reads belong to the issuing thread;** Windows cancels a
+  thread's I/O when it exits, so issue each read on the thread that waits.
+- **A watcher must never open what it watches, not even to stat it.** A
+  half-millisecond `symlink_metadata` inside the tree made concurrent
+  directory renames fail with 5 (3 of 300 under load, 0 without the watch).
+  Take the type from `FILE_NOTIFY_EXTENDED_INFORMATION.FileAttributes`
+  (`ReadDirectoryChangesExW`, NTFS only) instead.
 
 ## The `windows-latest` leg
 
@@ -280,6 +370,18 @@ sees; use a filtered Medium-integrity token or a desktop session.
   allows it is unverified, and the `filesystem::query` case-sensitivity test
   fails rather than skips where it cannot.
 
+## Reading another process's loaded modules
+
+- **`GetModuleFileNameExW` costs about 130 µs per module** because it walks
+  the loader list from the head each call (700 ms over 5,300 modules).
+  Reading `PEB.Ldr` → `InMemoryOrderModuleList` → `FullDllName` once via
+  `NtQueryInformationProcess` takes about 70 ms. A 64-bit reader sees only a
+  WOW64 process's 64-bit list.
+- **`GetMappedFileNameW` is not the loaded path.** Image sections are shared
+  per file, so for a hard-linked DLL or EXE it names whichever link mapped
+  first; a prefilter on it missed a hard-linked test child. `\Device\…` is
+  not absolute to `Path::is_absolute`; spell it `\\?\GLOBALROOT\Device\…`.
+
 ## Asking which processes have a path open
 
 The safe alternative to resolving other processes' handles: open the path
@@ -305,12 +407,39 @@ yourself and ask the kernel who holds it.
   milliseconds per call whether or not anything holds the path. Calls scale
   nearly linearly across threads, so walk large trees in parallel and in
   priority order.
+- **Sniff ships this** (`filesystem/query/win32_paths.rs`): identity read
+  through the same handle with replacements rejected, pointer-aligned
+  response storage, at most eight scoped workers, and a holder first seen
+  after enumeration reconfirmed through the file side before it gets a
+  creation token (otherwise identity-uncertain).
 - **Never open a pipe path to probe it.** Even `GetFileAttributesW` on
   `\\.\pipe\…` connects to a waiting server as a client; take the entry type
-  from the directory walk.
+  from the directory walk. Sniff rejects local, UNC, and GLOBALROOT pipe
+  namespaces before root metadata lookup.
 - **Restart Manager (`RmGetList`) is worse for the same question:** no
   directory or long-path support, slower per path, and a missing path returns
   success with an empty list.
+
+### Transient system holders and `wt remove`
+
+- **`SearchProtocolHost.exe` briefly opens fresh `%TEMP%` files** even though
+  the index scope excludes `AppData`: 40–112 of 216 files in a full
+  `worktree-cli` run, first seen 47 ms–1.34 s after creation, each hold
+  ~10–17 ms. `attrib +I` on the fixture root did not help. A `wt remove`
+  usage query landing in a hold pauses the removal (exit 3); it is rare (2 in
+  ~300 runs) but hits users too. `cross-check --os windows` runs from an
+  archive under `%TEMP%`, so every test path is exposed there.
+- **`wt remove` rechecks once:** when every holder is `SearchProtocolHost.exe`,
+  `SearchFilterHost.exe`, or `SearchIndexer.exe` by full image path in
+  `GetSystemDirectoryW`'s directory (compare case-insensitively), it waits
+  500 ms and queries once more; any other holder refuses at once. See the
+  worktree skill's `lifecycle.md`. Do not add test retries, `#[cfg]` skips,
+  or slow markers for it; a refusal naming it after the recheck is a new
+  finding.
+- Before blaming such a holder for a rename that fails with 5, rule out the
+  process itself: the query never lists the caller's PID, so an empty list
+  points at an in-process handle (see
+  [Directory change notifications](#directory-change-notifications)).
 
 ## COM lifetime and cpal
 
@@ -328,3 +457,29 @@ yourself and ask the kernel who holds it.
 - **A host with no sound hardware still lists one `SWD\MMDEVAPI` endpoint**
   while `Win32_SoundDevice` is empty; cpal reports no output device and playa
   surfaces that error instead of falling back to host players.
+
+## aws-lc aborting the process on its first random bytes under load
+
+- **Symptom:** `0xc0000409` with empty output (nextest `ABORT`), native
+  Windows under parallel load only. A debugger shows `Subcode: 0x7
+  FAST_FAIL_FATAL_APP_EXIT`: CRT `abort()`, not a buffer overrun.
+- **Cause:** aws-lc (`aws-lc-sys` 0.40, behind reqwest's `rustls`,
+  `tokio-rustls`'s `aws_lc_rs`, rustls's default provider) seeds from CPU
+  jitter, and its once-per-process jitter setup aborts when health tests fail
+  on a saturated CPU. TLS clients hit it first (ClientHello session ID), but
+  any aws-lc user is exposed.
+- **Numbers:** 25 aborts in 100 stressed runs of four loopback-TLS tests;
+  0 in 1,000 with `AWS_LC_SYS_NO_JITTER_ENTROPY=1` (OS generator). That
+  variable changes aws-lc's build fingerprint, so a one-off probe rebuilds
+  aws-lc twice.
+- **Not the cause** (do not retry): reqwest's built-in rustls path, the
+  platform verifier, stack size, or the server's provider.
+- **Capturing the stack:** run the test binary under `cdbX64.exe -cf
+  cmds.txt <test.exe> <name> --exact` with `sxe -c
+  ".lastevent;.reload;kc 80;~*kc 40;q" -c2 "<same>" c0000409` and `g`, in 12
+  parallel `pwsh -File` loops, stopping at the first log with `Security check
+  failure` (not an `.echo` marker: cdb echoes the command file). Static
+  functions show as the nearest export. Kill leftovers with
+  `Get-Process cdb, <test exe> | Stop-Process`.
+- The four loopback-TLS tests in `schematic/runtime/tests/l1/builder.rs`
+  carry `#[cfg_attr(windows, ignore = "…")]`; macOS, Linux, and WSL2 run them.

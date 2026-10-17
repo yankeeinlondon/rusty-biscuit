@@ -52,6 +52,14 @@ impl Budget {
         budget
     }
 
+    /// From now on, lets `checks` more calls to [`expired`](Self::expired)
+    /// pass before reporting expiry, so a test can expire the budget partway
+    /// through a phase it reaches through the full query.
+    #[cfg(test)]
+    pub(crate) fn expire_after_further_checks(&self, checks: i64) {
+        self.checks_before_expiry.store(checks, Ordering::SeqCst);
+    }
+
     /// Calls to [`expired`](Self::expired) made so far on a budget from
     /// [`expiring_after_checks`](Self::expiring_after_checks)`(i64::MAX)`.
     #[cfg(test)]

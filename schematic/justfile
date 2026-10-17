@@ -47,12 +47,13 @@ default:
     just --list | grep -v 'default'
     echo
 
-# build schematic packages (define, definitions, gen, oauth)
+# build schematic packages (define, definitions, gen, oauth, runtime)
 build *args="":
     @just _build schematic-define "Schematic Define" {{ args }}
     @just _build schematic-gen "Schematic Generation" {{ args }}
     @just _build schematic-definitions "Schematic Definitions" {{ args }}
     @just _build schematic-oauth "Schematic OAuth" {{ args }}
+    @just _build schematic-runtime "Schematic Runtime" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
@@ -64,11 +65,30 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity_all "schematic-define --all-features; schematic-definitions; schematic-gen; schematic-oauth"
+    @just _sanity_all "schematic-define --all-features; schematic-definitions; schematic-gen; schematic-oauth; schematic-runtime"
 
-# run tests for schematic packages
+# run tests for schematic packages (L1, then the fresh-output and compile-fail guards)
 test *args="":
-    @just _test_all "schematic-define --all-features; schematic-gen; schematic-definitions; schematic-oauth" {{ args }}
+    @just _test_all "schematic-define --all-features; schematic-gen; schematic-definitions; schematic-oauth; schematic-runtime" {{ args }}
+    @just test-fresh-output {{ args }}
+    @just test-compile-fail {{ args }}
+
+# These are schematic-gen's `slow_` L1 tests, which the shared L1 filter leaves
+# out (archive consumers have no Cargo), so `test` runs them here and the CI
+# build job runs this recipe before producing the test archive.
+#
+# compile freshly generated client crates offline, outside the checkout
+test-fresh-output *args="":
+    @cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/(^|::)slow_/)' {{ args }}
+
+# These are schematic-runtime's `slow_` L1 tests: trybuild runs Cargo to
+# compare each case with its expected compiler diagnostic, which an archive
+# consumer cannot, so the shared L1 filter leaves them out and `test` runs
+# them here.
+#
+# check that misusing the runtime API fails to compile with the intended diagnostic
+test-compile-fail *args="":
+    @cargo nextest run -p schematic-runtime --test l1 --no-tests=fail -E 'test(/(^|::)slow_/)' {{ args }}
 
 # List every test Nextest marks SLOW (see the shared `_slow_tests`).
 slow-tests *args="":
@@ -108,6 +128,7 @@ test-real *args="":
     @just _test_real schematic-definitions {{ args }}
     @just _test_real schematic-gen {{ args }}
     @just _test_real schematic-oauth {{ args }}
+    @just _test_real schematic-runtime {{ args }}
 
 # Criterion benches: schematic crates are code-generation focused with no algorithmic hot paths.
 bench:
@@ -119,6 +140,7 @@ coverage *args="":
     @just _coverage schematic-definitions {{ args }}
     @just _coverage schematic-gen {{ args }}
     @just _coverage schematic-oauth {{ args }}
+    @just _coverage schematic-runtime {{ args }}
 
 # Doctests for schematic crates.
 doctest *args="":
@@ -126,6 +148,7 @@ doctest *args="":
     @just _doctest schematic-definitions {{ args }}
     @just _doctest schematic-gen {{ args }}
     @just _doctest schematic-oauth {{ args }}
+    @just _doctest schematic-runtime {{ args }}
 
 # not applicable: schematic has no cargo-fuzz targets
 fuzz:
@@ -150,7 +173,7 @@ check-drift:
     @echo "Checking Artifact Drift"
     @echo "-----------------------"
     @echo ""
-    @cargo test -p schematic-gen artifact_drift -- --ignored
+    @cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/^artifact_drift::/) | test(=fresh_output_compile::slow_real_apis_compile_offline)'
 
 # run clippy on schematic packages
 lint:
@@ -158,6 +181,7 @@ lint:
     @just _lint schematic-gen
     @just _lint schematic-definitions
     @just _lint schematic-oauth
+    @just _lint schematic-runtime
 
 # generate OpenAI API client code (dry-run preview)
 generate-dry-run:
@@ -171,7 +195,11 @@ generate-dry-run:
 #
 # Rewrites definitions/src/openai/{mod,types}.rs. Run `just generate` afterwards
 # to rebuild the client and the exported artifacts. The Assistants family is
-# excluded: OpenAI has superseded it with Responses + Conversations.
+# excluded: OpenAI has superseded it with Responses + Conversations. The
+# request-id header is not declared by OpenAPI; the vendored spec's examples
+# read `x-request-id` from responses. OpenAPI cannot express pagination either:
+# it lives in the hand-written overlay definitions/src/openai_pagination.rs,
+# which the import never writes and the emitted `define_openai_api()` applies.
 import-openai:
     @echo ""
     @echo "Importing OpenAI Definition"
@@ -183,7 +211,9 @@ import-openai:
         --module-path openai \
         --definitions-out definitions/src/openai \
         --exclude-path /assistants \
-        --exclude-path /threads
+        --exclude-path /threads \
+        --request-id-header x-request-id \
+        --overlay crate::openai_pagination::apply
 
 # generate all API clients to schematic/schema
 generate:
@@ -195,7 +225,7 @@ generate:
         --openapi-out openapi --postman-out postman -v
     @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema" "Schematic"
 
-# generate a single API client to schematic/schema
+# regenerate one API's module group in schema/, openapi/, and postman/, keeping every other module
 generate-one api:
     @echo ""
     @echo "Generating {{ api }} API Client"

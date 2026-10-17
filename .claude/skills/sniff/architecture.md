@@ -44,9 +44,9 @@ Two additive seeded entry points consume this owner:
 The ordinary `detect_with_plan` and `detect_filesystem_with_request` APIs stay
 ambient compatibility paths and acquire an observation when Git is requested.
 Seeded execution performs no upward Git discovery; Git identity, shared-walk
-root selection, and later `detect_git` / `detect_file_changes` projections all
-reuse the retained handle. A retained absence or failure is projected without
-retrying discovery.
+root selection, and later `detect_git` / `detect_file_changes` /
+`detect_merge_conflicts` projections all reuse the retained handle. A retained
+absence or failure is projected without retrying discovery.
 
 `FilesystemObservation::for_root` rebases a present observation to another
 directory in the same worktree without Git discovery. It uses canonical,

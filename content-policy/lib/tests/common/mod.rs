@@ -6,12 +6,12 @@
 /// `update_policy`, by short name. Each read is an `include_bytes!`, so an
 /// edit to one of them schedules the tests that use this list.
 pub const MIGRATED_DOCUMENTS: [(&str, &[u8]); 20] = [
-    ("tm/about", include_bytes!("../../../../biscuit-terminal/docs/research/terminal-multiplexing/about.md")),
-    ("tm/cmux", include_bytes!("../../../../biscuit-terminal/docs/research/terminal-multiplexing/cmux.md")),
-    ("tm/ghostty", include_bytes!("../../../../biscuit-terminal/docs/research/terminal-multiplexing/ghostty.md")),
-    ("tm/tmux", include_bytes!("../../../../biscuit-terminal/docs/research/terminal-multiplexing/tmux.md")),
-    ("tm/wezterm", include_bytes!("../../../../biscuit-terminal/docs/research/terminal-multiplexing/wezterm.md")),
-    ("tm/zellij", include_bytes!("../../../../biscuit-terminal/docs/research/terminal-multiplexing/zellij.md")),
+    ("tm/about", include_bytes!("../../../../biscuit-terminal/docs/research/multiplexing/about.md")),
+    ("tm/cmux", include_bytes!("../../../../biscuit-terminal/docs/research/multiplexing/cmux.md")),
+    ("tm/ghostty", include_bytes!("../../../../biscuit-terminal/docs/research/multiplexing/ghostty.md")),
+    ("tm/tmux", include_bytes!("../../../../biscuit-terminal/docs/research/multiplexing/tmux.md")),
+    ("tm/wezterm", include_bytes!("../../../../biscuit-terminal/docs/research/multiplexing/wezterm.md")),
+    ("tm/zellij", include_bytes!("../../../../biscuit-terminal/docs/research/multiplexing/zellij.md")),
     ("playa/Android", include_bytes!("../../../../.claude/skills/playa/audio-programming/Android.md")),
     ("playa/crates", include_bytes!("../../../../.claude/skills/playa/audio-programming/crates.md")),
     ("playa/IOS", include_bytes!("../../../../.claude/skills/playa/audio-programming/IOS.md")),

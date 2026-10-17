@@ -1,24 +1,31 @@
 //! Code generation modules for schematic.
 //!
 //! This module contains generators that produce Rust source code from
-//! REST API definitions. Each submodule handles a specific component
-//! of the generated API client.
+//! REST API definitions. Generated clients are thin: request execution lives
+//! in the hand-written `schematic-runtime` crate, and generated code declares
+//! only what is specific to each API.
 //!
 //! ## Submodules
 //!
-//! - [`api_struct`] - Generates the main API client struct with constructors
-//! - [`client`] - Generates the async `request()` method with auth handling
-//! - [`error`] - Generates the `SchematicError` enum for runtime errors
-//! - [`request_enum`] - Generates the unified request enum for all endpoints
-//! - [`request_structs`] - Generates per-endpoint request structs
+//! - [`api_struct`] - Generates each API's client struct, tag type, and
+//!   API-specific items
+//! - [`endpoint_methods`] - Generates each endpoint's method on its API
+//!   struct and the call type it returns
+//! - [`request_structs`] - Generates per-endpoint request structs and their
+//!   `schematic_runtime::EndpointSpec` implementations
+//! - [`pagination`] - Generates the `schematic_runtime::pager::Paginated`
+//!   and capability marker impls of paginated list endpoints
+//! - [`shared`] - Generates the request-side helpers of `shared.rs`
 //!
 //! ## Code Generation Flow
 //!
 //! 1. Each endpoint gets a request struct via [`generate_request_struct`]
-//! 2. All request structs are unified in an enum via [`generate_request_enum`]
-//! 3. The API struct is created via [`generate_api_struct`]
-//! 4. The request method is generated via [`generate_request_method`]
-//! 5. The error type is generated via [`generate_error_type`]
+//! 2. Each paginated endpoint gets its pager impls via
+//!    [`generate_pagination_impls`]
+//! 3. Each API gets its client struct and tag via [`generate_api_struct`]
+//! 4. Each API gets its endpoint methods and call types via
+//!    [`generate_endpoint_methods`]
+//! 5. `shared.rs` gets the request helpers via [`generate_request_helpers`]
 //!
 //! ## Output Format
 //!
@@ -29,25 +36,20 @@
 //! See [`crate::output`] for the assembly and file writing logic.
 
 pub mod api_struct;
-pub mod client;
-pub mod error;
+pub mod endpoint_methods;
 pub mod module_docs;
-pub mod request_enum;
+pub mod pagination;
 pub mod request_structs;
-pub mod traits;
-pub mod variant;
+pub mod shared;
 
 pub use api_struct::generate_api_struct;
-pub use client::{generate_request_method, generate_request_method_with_suffix};
-pub use error::{
-    generate_error_type, generate_request_parts_type, generate_response_kind_type,
-};
+pub use endpoint_methods::generate_endpoint_methods;
 pub use module_docs::ModuleDocBuilder;
 pub(crate) use module_docs::lines_to_doc_comments;
-pub use request_enum::{generate_request_enum, generate_request_enum_with_suffix};
 pub use request_structs::{
-    generate_request_struct, generate_request_struct_with_options,
+    PLACEHOLDER_API_MARKER, generate_request_struct, generate_request_struct_with_options,
     generate_request_struct_with_suffix,
 };
-pub use traits::{generate_paginated_impl, generate_paginated_trait};
-pub use variant::generate_variant_types;
+pub(crate) use request_structs::generate_request_struct_with_defaults;
+pub use shared::generate_request_helpers;
+pub use pagination::generate_pagination_impls;

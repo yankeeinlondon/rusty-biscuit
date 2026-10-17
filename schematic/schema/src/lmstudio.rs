@@ -6,7 +6,7 @@
 //!
 //! ## Authentication
 //!
-//! Uses Bearer token authentication via the `Authorization` header. Set via environment variable: `LM_API_TOKEN`.
+//! Uses Bearer token authentication via the `Authorization` header.
 //!
 //! ## Features
 //!
@@ -26,10 +26,13 @@
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), SchematicError> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = LmStudio::new();
-//!     let response = client.list_models().await?;
-//!     println!("{:?}", response);
+//!     let data = client.list_models().await?;
+//!
+//!     // the whole response: status, headers, and request id as well
+//!     let response = client.list_models().full().await?;
+//!     println!("{}", response.meta);
 //!     Ok(())
 //! }
 //! ```
@@ -39,11 +42,55 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = LmStudio::with_base_url("https://staging.example.com/v1");
+//! let client = LmStudio::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::lmstudio::*;
-use crate::shared::{RequestParts, SchematicError};
+/// The LmStudio API: LM Studio v1 native REST API for local LLM inference and model management
+///
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct LmStudio(schematic_runtime::Client<LmStudioApi>);
+/// The tag of the [`LmStudio`] API: each of its request types names it as `EndpointSpec::Api`, so that [`LmStudio`] sends only this API's requests. Callers never write it.
+pub enum LmStudioApi {}
+impl schematic_runtime::Api for LmStudioApi {
+    const NAME: &'static str = "LmStudio";
+}
+schematic_runtime::api_client!(LmStudio, LmStudioApi);
+impl LmStudio {
+    /// The base URL a client uses unless `base_url` sets another.
+    pub const BASE_URL: &'static str = "http://localhost:1234";
+    /// The API's documentation, when the definition names it.
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://lmstudio.ai/docs/developer/rest",
+    );
+    /// What the API tells the runtime: its base URL, how it accepts
+    /// credentials, its cross-origin policy, its secret names, and its
+    /// request-id header.
+    pub fn definition() -> schematic_runtime::ApiDefinition {
+        schematic_runtime::ApiDefinition::new(Self::BASE_URL)
+            .auth(
+                schematic_runtime::AuthConfig::none()
+                    .accept(schematic_runtime::CredentialPlacement::Bearer {
+                        header: None,
+                    }),
+            )
+    }
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
+    }
+}
+impl Default for LmStudio {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 /// Request for `Chat` endpoint.
 ///
 /// ## Example
@@ -68,41 +115,40 @@ impl ChatRequest {
     pub fn new(body: ChatBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/api/v1/chat".to_string();
-        Ok((
-            "POST",
-            path,
-            crate::shared::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
-            ),
-            vec![],
-        ))
-    }
 }
 impl From<ChatBody> for ChatRequest {
     fn from(body: ChatBody) -> Self {
         Self { body }
     }
 }
-impl crate::shared::EndpointSpec for ChatRequest {
-    type Response = bytes::Bytes;
+impl schematic_runtime::EndpointSpec for ChatRequest {
+    type Api = LmStudioApi;
+    type Success = bytes::Bytes;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Binary;
     const ENDPOINT_ID: &'static str = "Chat";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/api/v1/chat".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Json(
+                serde_json::to_string(&self.body)
+                    .map_err(|_| {
+                        schematic_runtime::InvalidArgument::new(
+                            "the request body cannot be serialized as JSON",
+                        )
+                    })?,
+            ),
+        })
+    }
 }
 /// Request for `ListModels` endpoint.
 ///
@@ -116,29 +162,27 @@ impl crate::shared::EndpointSpec for ChatRequest {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
-impl ListModelsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/api/v1/models".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
-    }
-}
-impl crate::shared::EndpointSpec for ListModelsRequest {
-    type Response = ListModelsResponse;
+impl schematic_runtime::EndpointSpec for ListModelsRequest {
+    type Api = LmStudioApi;
+    type Success = ListModelsResponse;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Json<ListModelsResponse>;
     const ENDPOINT_ID: &'static str = "ListModels";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/api/v1/models".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
+    }
 }
 /// Request for `LoadModel` endpoint.
 ///
@@ -164,41 +208,40 @@ impl LoadModelRequest {
     pub fn new(body: LoadModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/api/v1/models/load".to_string();
-        Ok((
-            "POST",
-            path,
-            crate::shared::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
-            ),
-            vec![],
-        ))
-    }
 }
 impl From<LoadModelBody> for LoadModelRequest {
     fn from(body: LoadModelBody) -> Self {
         Self { body }
     }
 }
-impl crate::shared::EndpointSpec for LoadModelRequest {
-    type Response = LoadModelResponse;
+impl schematic_runtime::EndpointSpec for LoadModelRequest {
+    type Api = LmStudioApi;
+    type Success = LoadModelResponse;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Json<LoadModelResponse>;
     const ENDPOINT_ID: &'static str = "LoadModel";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/api/v1/models/load".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Json(
+                serde_json::to_string(&self.body)
+                    .map_err(|_| {
+                        schematic_runtime::InvalidArgument::new(
+                            "the request body cannot be serialized as JSON",
+                        )
+                    })?,
+            ),
+        })
+    }
 }
 /// Request for `UnloadModel` endpoint.
 ///
@@ -224,41 +267,40 @@ impl UnloadModelRequest {
     pub fn new(body: UnloadModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/api/v1/models/unload".to_string();
-        Ok((
-            "POST",
-            path,
-            crate::shared::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
-            ),
-            vec![],
-        ))
-    }
 }
 impl From<UnloadModelBody> for UnloadModelRequest {
     fn from(body: UnloadModelBody) -> Self {
         Self { body }
     }
 }
-impl crate::shared::EndpointSpec for UnloadModelRequest {
-    type Response = UnloadModelResponse;
+impl schematic_runtime::EndpointSpec for UnloadModelRequest {
+    type Api = LmStudioApi;
+    type Success = UnloadModelResponse;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Json<UnloadModelResponse>;
     const ENDPOINT_ID: &'static str = "UnloadModel";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/api/v1/models/unload".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Json(
+                serde_json::to_string(&self.body)
+                    .map_err(|_| {
+                        schematic_runtime::InvalidArgument::new(
+                            "the request body cannot be serialized as JSON",
+                        )
+                    })?,
+            ),
+        })
+    }
 }
 /// Request for `DownloadModel` endpoint.
 ///
@@ -284,41 +326,40 @@ impl DownloadModelRequest {
     pub fn new(body: DownloadModelBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/api/v1/models/download".to_string();
-        Ok((
-            "POST",
-            path,
-            crate::shared::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
-            ),
-            vec![],
-        ))
-    }
 }
 impl From<DownloadModelBody> for DownloadModelRequest {
     fn from(body: DownloadModelBody) -> Self {
         Self { body }
     }
 }
-impl crate::shared::EndpointSpec for DownloadModelRequest {
-    type Response = bytes::Bytes;
+impl schematic_runtime::EndpointSpec for DownloadModelRequest {
+    type Api = LmStudioApi;
+    type Success = bytes::Bytes;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Binary;
     const ENDPOINT_ID: &'static str = "DownloadModel";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/api/v1/models/download".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Json(
+                serde_json::to_string(&self.body)
+                    .map_err(|_| {
+                        schematic_runtime::InvalidArgument::new(
+                            "the request body cannot be serialized as JSON",
+                        )
+                    })?,
+            ),
+        })
+    }
 }
 /// Request for `GetDownloadStatus` endpoint.
 ///
@@ -344,1098 +385,409 @@ impl GetDownloadStatusRequest {
     pub fn new(body: DownloadStatusBody) -> Self {
         Self { body }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/api/v1/models/download/status".to_string();
-        Ok((
-            "POST",
-            path,
-            crate::shared::RequestBody::Json(
-                serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
-            ),
-            vec![],
-        ))
-    }
 }
 impl From<DownloadStatusBody> for GetDownloadStatusRequest {
     fn from(body: DownloadStatusBody) -> Self {
         Self { body }
     }
 }
-impl crate::shared::EndpointSpec for GetDownloadStatusRequest {
-    type Response = DownloadStatusResponse;
+impl schematic_runtime::EndpointSpec for GetDownloadStatusRequest {
+    type Api = LmStudioApi;
+    type Success = DownloadStatusResponse;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Json<DownloadStatusResponse>;
     const ENDPOINT_ID: &'static str = "GetDownloadStatus";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/api/v1/models/download/status".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Json(
+                serde_json::to_string(&self.body)
+                    .map_err(|_| {
+                        schematic_runtime::InvalidArgument::new(
+                            "the request body cannot be serialized as JSON",
+                        )
+                    })?,
+            ),
+        })
+    }
 }
-/// Request enum for LmStudio API.
+/// A call to the `Chat` endpoint, returned by [`LmStudio::chat`].
 ///
-/// Each variant wraps a strongly-typed request struct.
-pub enum LmStudioRequest {
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ChatCall<'a>(schematic_runtime::Call<'a, LmStudioApi, ChatRequest>);
+impl<'a> ChatCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, LmStudioApi, ChatRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ChatCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        LmStudioApi,
+        ChatRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `ListModels` endpoint, returned by [`LmStudio::list_models`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct ListModelsCall<'a>(
+    schematic_runtime::Call<'a, LmStudioApi, ListModelsRequest>,
+);
+impl<'a> ListModelsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, LmStudioApi, ListModelsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        LmStudioApi,
+        ListModelsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `LoadModel` endpoint, returned by [`LmStudio::load_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LoadModelCall<'a>(schematic_runtime::Call<'a, LmStudioApi, LoadModelRequest>);
+impl<'a> LoadModelCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(self) -> schematic_runtime::FullCall<'a, LmStudioApi, LoadModelRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LoadModelCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        LmStudioApi,
+        LoadModelRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `UnloadModel` endpoint, returned by [`LmStudio::unload_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct UnloadModelCall<'a>(
+    schematic_runtime::Call<'a, LmStudioApi, UnloadModelRequest>,
+);
+impl<'a> UnloadModelCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, LmStudioApi, UnloadModelRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for UnloadModelCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        LmStudioApi,
+        UnloadModelRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `DownloadModel` endpoint, returned by [`LmStudio::download_model`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct DownloadModelCall<'a>(
+    schematic_runtime::Call<'a, LmStudioApi, DownloadModelRequest>,
+);
+impl<'a> DownloadModelCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, LmStudioApi, DownloadModelRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for DownloadModelCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        LmStudioApi,
+        DownloadModelRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetDownloadStatus` endpoint, returned by [`LmStudio::get_download_status`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetDownloadStatusCall<'a>(
+    schematic_runtime::Call<'a, LmStudioApi, GetDownloadStatusRequest>,
+);
+impl<'a> GetDownloadStatusCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, LmStudioApi, GetDownloadStatusRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetDownloadStatusCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        LmStudioApi,
+        GetDownloadStatusRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl LmStudio {
     /// Chat completion with SSE streaming support
-    Chat(ChatRequest),
+    ///
+    /// `POST /api/v1/chat`
+    ///
+    /// Returns a [`ChatCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: ChatBody`: the request body
+    pub fn chat(&self, body: ChatBody) -> ChatCall<'_> {
+        ChatCall(self.0.send(ChatRequest::new(body)))
+    }
     /// List available models
-    ListModels(ListModelsRequest),
+    ///
+    /// `GET /api/v1/models`
+    ///
+    /// Returns a [`ListModelsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn list_models(&self) -> ListModelsCall<'_> {
+        ListModelsCall(self.0.send(ListModelsRequest::default()))
+    }
     /// Load a model into memory
-    LoadModel(LoadModelRequest),
+    ///
+    /// `POST /api/v1/models/load`
+    ///
+    /// Returns a [`LoadModelCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: LoadModelBody`: the request body
+    pub fn load_model(&self, body: LoadModelBody) -> LoadModelCall<'_> {
+        LoadModelCall(self.0.send(LoadModelRequest::new(body)))
+    }
     /// Unload a model from memory
-    UnloadModel(UnloadModelRequest),
+    ///
+    /// `POST /api/v1/models/unload`
+    ///
+    /// Returns a [`UnloadModelCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: UnloadModelBody`: the request body
+    pub fn unload_model(&self, body: UnloadModelBody) -> UnloadModelCall<'_> {
+        UnloadModelCall(self.0.send(UnloadModelRequest::new(body)))
+    }
     /// Download a model from HuggingFace with SSE progress
-    DownloadModel(DownloadModelRequest),
+    ///
+    /// `POST /api/v1/models/download`
+    ///
+    /// Returns a [`DownloadModelCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `body: DownloadModelBody`: the request body
+    pub fn download_model(&self, body: DownloadModelBody) -> DownloadModelCall<'_> {
+        DownloadModelCall(self.0.send(DownloadModelRequest::new(body)))
+    }
     /// Check the status of a download job
-    GetDownloadStatus(GetDownloadStatusRequest),
-}
-impl LmStudioRequest {
-    /// Converts the request into (method, path, body, headers) parts.
     ///
-    /// Delegates to the inner request struct's `into_parts()` method.
+    /// `POST /api/v1/models/download/status`
     ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        match self {
-            Self::Chat(req) => req.into_parts(),
-            Self::ListModels(req) => req.into_parts(),
-            Self::LoadModel(req) => req.into_parts(),
-            Self::UnloadModel(req) => req.into_parts(),
-            Self::DownloadModel(req) => req.into_parts(),
-            Self::GetDownloadStatus(req) => req.into_parts(),
-        }
-    }
-    /// Returns the endpoint identifier for this request.
-    ///
-    /// This is used internally for response hook lookup.
-    #[must_use]
-    pub fn endpoint_id(&self) -> &'static str {
-        match self {
-            Self::Chat(_) => <ChatRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::ListModels(_) => {
-                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::LoadModel(_) => {
-                <LoadModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::UnloadModel(_) => {
-                <UnloadModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::DownloadModel(_) => {
-                <DownloadModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::GetDownloadStatus(_) => {
-                <GetDownloadStatusRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-        }
-    }
-    /// Returns how this endpoint's response body is decoded.
-    ///
-    /// The generic `request::<T>()` decodes JSON; it consults this to
-    /// reject text, binary, and empty endpoints up front.
-    #[must_use]
-    pub fn response_kind(&self) -> crate::shared::ResponseKind {
-        match self {
-            Self::Chat(_) => crate::shared::ResponseKind::Binary,
-            Self::ListModels(_) => crate::shared::ResponseKind::Json,
-            Self::LoadModel(_) => crate::shared::ResponseKind::Json,
-            Self::UnloadModel(_) => crate::shared::ResponseKind::Json,
-            Self::DownloadModel(_) => crate::shared::ResponseKind::Binary,
-            Self::GetDownloadStatus(_) => crate::shared::ResponseKind::Json,
-        }
-    }
-}
-impl From<ChatRequest> for LmStudioRequest {
-    fn from(req: ChatRequest) -> Self {
-        Self::Chat(req)
-    }
-}
-impl From<ListModelsRequest> for LmStudioRequest {
-    fn from(req: ListModelsRequest) -> Self {
-        Self::ListModels(req)
-    }
-}
-impl From<LoadModelRequest> for LmStudioRequest {
-    fn from(req: LoadModelRequest) -> Self {
-        Self::LoadModel(req)
-    }
-}
-impl From<UnloadModelRequest> for LmStudioRequest {
-    fn from(req: UnloadModelRequest) -> Self {
-        Self::UnloadModel(req)
-    }
-}
-impl From<DownloadModelRequest> for LmStudioRequest {
-    fn from(req: DownloadModelRequest) -> Self {
-        Self::DownloadModel(req)
-    }
-}
-impl From<GetDownloadStatusRequest> for LmStudioRequest {
-    fn from(req: GetDownloadStatusRequest) -> Self {
-        Self::GetDownloadStatus(req)
-    }
-}
-/// LM Studio v1 native REST API for local LLM inference and model management client.
-pub struct LmStudio {
-    client: reqwest::Client,
-    base_url: String,
-    /// Environment variable names for authentication credentials.
-    env_auth: Vec<String>,
-    /// Authentication strategy for this API client.
-    auth_strategy: schematic_define::AuthStrategy,
-    /// Effective authentication policy for this API client.
-    auth_policy: schematic_define::AuthPolicy,
-    /// Environment variable for Basic auth username.
-    env_username: Option<String>,
-    /// Headers builder with environment variable support for credentials.
-    headers: schematic_define::Headers,
-    /// Variant-specific hooks for response customization.
-    variant_hooks: crate::shared::VariantHooks,
-}
-impl LmStudio {
-    /// Base URL for the API.
-    pub const BASE_URL: &'static str = "http://localhost:1234";
-    /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some(
-        "https://lmstudio.ai/docs/developer/rest",
-    );
-    /// Creates a new API client with the default base URL.
-    pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
-            base_url: Self::BASE_URL.to_string(),
-            env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Creates a new API client with a custom base URL.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// let client = Api::with_base_url("http://localhost:8080/v1");
-    /// ```
-    pub fn with_base_url(base_url: impl Into<String>) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
-            base_url: base_url.into(),
-            env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Creates a new API client with a pre-configured reqwest client.
-    ///
-    /// Use this when you need custom timeouts, connection pools, or middleware.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// let custom_client = reqwest::Client::builder()
-    ///     .timeout(std::time::Duration::from_secs(60))
-    ///     .build()
-    ///     .unwrap();
-    /// let api = Api::with_client(custom_client);
-    /// ```
-    pub fn with_client(client: reqwest::Client) -> Self {
-        Self {
-            client,
-            base_url: Self::BASE_URL.to_string(),
-            env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Creates a new API client with a pre-configured reqwest client and custom base URL.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// let custom_client = reqwest::Client::builder()
-    ///     .timeout(std::time::Duration::from_secs(60))
-    ///     .build()
-    ///     .unwrap();
-    /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
-    /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
-        Self {
-            client,
-            base_url: base_url.into(),
-            env_auth: vec!["LM_API_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Returns a reference to the underlying HTTP client.
-    ///
-    /// Use this for custom requests that aren't covered by the generated methods,
-    /// such as paginated endpoints that require query parameters.
-    pub fn http_client(&self) -> &reqwest::Client {
-        &self.client
-    }
-    /// Returns the base URL for this API client.
-    pub fn api_base_url(&self) -> &str {
-        &self.base_url
-    }
-    /// Returns the effective authentication policy for this client.
-    pub fn auth_policy(&self) -> &schematic_define::AuthPolicy {
-        &self.auth_policy
-    }
-    /// Returns OAuth2 provider metadata, if this client accepts OAuth tokens.
-    pub fn oauth_config(&self) -> Option<&schematic_define::OAuth2Config> {
-        self.auth_policy.oauth2()
-    }
-    /// Returns the API key header name and value for authentication.
-    ///
-    /// Returns `None` if the authentication strategy is not `ApiKey`
-    /// or if the API key environment variable is not set.
-    pub fn api_key_header(&self) -> Option<(String, String)> {
-        let (header, value_prefix) = self
-            .auth_policy
-            .explicit
-            .iter()
-            .find_map(|method| match method {
-                schematic_define::AuthMethod::ApiKey { header, value_prefix } => {
-                    Some((header.clone(), value_prefix.clone()))
-                }
-                _ => None,
-            })
-            .or_else(|| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| (api_key.header.clone(), None))
-            })?;
-        self.headers
-            .env_mapping()
-            .api_key
-            .as_ref()
-            .and_then(|api_key| {
-                api_key
-                    .names
-                    .names()
-                    .iter()
-                    .find_map(|env_name| std::env::var(env_name).ok())
-            })
-            .map(|value| {
-                let value = format!(
-                    "{}{}", value_prefix.clone().unwrap_or_default(), value
-                );
-                (header, value)
-            })
-    }
-    /// Creates a variant builder for customizing this API client.
-    ///
-    /// The builder pattern allows fluent configuration of:
-    /// - Base URL (for proxies, mock servers, or different environments)
-    /// - Authentication credentials (different env var names)
-    /// - Authentication strategy
-    /// - Response hooks for JSON transformation and mutation
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// use schematic_define::UpdateStrategy;
-    ///
-    /// let api = Api::new();
-    ///
-    /// // Create a variant pointing to a staging server with a response hook
-    /// let staging = api.variant()
-    ///     .base_url("https://staging.api.com/v1")
-    ///     .env_auth(vec!["STAGING_API_KEY".to_string()])
-    ///     .mutate_response::<ListModelsRequest>(|ctx, response| {
-    ///         response.data.retain(|m| !m.id.contains("deprecated"));
-    ///         Ok(())
-    ///     })
-    ///     .build();
-    /// ```
-    #[must_use]
-    pub fn variant(&self) -> LmStudioVariantBuilder<'_> {
-        LmStudioVariantBuilder::new(self)
-    }
-    /// Creates a variant of this API client with different configuration.
-    ///
-    /// This is a convenience method equivalent to:
-    /// ```text
-    /// api.variant()
-    ///     .base_url(base_url)
-    ///     .env_auth(env_auth)
-    ///     .auth_update(strategy)
-    ///     .build()
-    /// ```
+    /// Returns a [`GetDownloadStatusCall`]: chain optional values and per-call settings on it, then `.await` it to send.
     ///
     /// ## Arguments
     ///
-    /// * `base_url` - New base URL for this variant
-    /// * `env_auth` - New environment variable names for credentials
-    /// * `strategy` - How to update the auth strategy:
-    ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
-    ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
-    pub fn variant_with(
+    /// - `body: DownloadStatusBody`: the request body
+    pub fn get_download_status(
         &self,
-        base_url: impl Into<String>,
-        env_auth: Vec<String>,
-        strategy: schematic_define::UpdateStrategy,
-    ) -> Self {
-        self.variant()
-            .base_url(base_url)
-            .env_auth(env_auth)
-            .auth_update(strategy)
-            .build()
-    }
-    /// Creates a variant of this API client with custom headers configuration.
-    ///
-    /// This is a convenience method for creating variants with fully customized
-    /// headers, including environment variable mapping for credentials.
-    ///
-    /// ## Arguments
-    ///
-    /// * `headers` - Headers builder with environment mapping configured
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// use schematic_define::{Headers, EnvMapping, EnvList};
-    ///
-    /// let custom_headers = Headers::default()
-    ///     .with_env_mapping(EnvMapping {
-    ///         bearer_token: Some(EnvList::single("STAGING_TOKEN")),
-    ///         basic_user: None,
-    ///         basic_pass: None,
-    ///         api_key: None,
-    ///     })
-    ///     .header("X-Environment", "staging");
-    ///
-    /// let staging_client = api.variant_with_headers(custom_headers);
-    /// ```
-    pub fn variant_with_headers(&self, headers: schematic_define::Headers) -> Self {
-        self.variant().headers_builder(headers).build()
-    }
-    /// Returns a clone of this client configured with an explicit bearer token.
-    #[must_use]
-    pub fn bearer_token(&self, token: impl Into<String>) -> Self {
-        self.variant()
-            .headers_builder(self.headers.clone().use_bearer_token(token))
-            .build()
-    }
-}
-impl Default for LmStudio {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-/// Builder for creating customized variants of the API client.
-///
-/// Use [`#struct_name::variant()`] to create a builder, then chain
-/// configuration methods and call [`build()`](Self::build) to create
-/// the variant client.
-pub struct LmStudioVariantBuilder<'a> {
-    base: &'a LmStudio,
-    base_url: Option<String>,
-    env_auth: Option<Vec<String>>,
-    auth_update: schematic_define::UpdateStrategy,
-    headers: Option<schematic_define::Headers>,
-    pre_response_json: Option<std::sync::Arc<crate::shared::PreResponseJsonHook>>,
-    response_mutators: std::collections::HashMap<
-        &'static str,
-        std::sync::Arc<dyn crate::shared::AnyResponseMutator>,
-    >,
-}
-impl<'a> LmStudioVariantBuilder<'a> {
-    /// Creates a new variant builder from the base API client.
-    fn new(base: &'a LmStudio) -> Self {
-        Self {
-            base,
-            base_url: None,
-            env_auth: None,
-            auth_update: schematic_define::UpdateStrategy::NoChange,
-            headers: None,
-            pre_response_json: None,
-            response_mutators: std::collections::HashMap::new(),
-        }
-    }
-    /// Sets the base URL for the variant.
-    ///
-    /// If not set, the original client's base URL is used.
-    #[must_use]
-    pub fn base_url(mut self, url: impl Into<String>) -> Self {
-        self.base_url = Some(url.into());
-        self
-    }
-    /// Sets the environment variable names for authentication.
-    ///
-    /// If not set, the original client's env_auth is used.
-    #[must_use]
-    pub fn env_auth(mut self, env_auth: Vec<String>) -> Self {
-        self.env_auth = Some(env_auth);
-        self
-    }
-    /// Sets how the authentication strategy should be updated.
-    ///
-    /// - `UpdateStrategy::NoChange` - Keep current auth strategy (default)
-    /// - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
-    #[must_use]
-    pub fn auth_update(mut self, strategy: schematic_define::UpdateStrategy) -> Self {
-        self.auth_update = strategy;
-        self
-    }
-    /// Sets custom headers for the variant using a Headers builder.
-    ///
-    /// This replaces the entire headers configuration, including environment
-    /// variable mapping. If not set, the original client's headers are used.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// use schematic_define::{Headers, EnvMapping, EnvList};
-    ///
-    /// let custom = Headers::default()
-    ///     .with_env_mapping(EnvMapping {
-    ///         bearer_token: Some(EnvList::single("STAGING_KEY")),
-    ///         basic_user: None,
-    ///         basic_pass: None,
-    ///         api_key: None,
-    ///     })
-    ///     .header("X-Custom", "value");
-    ///
-    /// let variant = api.variant().headers_builder(custom).build();
-    /// ```
-    #[must_use]
-    pub fn headers_builder(mut self, headers: schematic_define::Headers) -> Self {
-        self.headers = Some(headers);
-        self
-    }
-    /// Sets a pre-response JSON transformation hook.
-    ///
-    /// This hook runs after receiving an HTTP response but before
-    /// deserializing to the response type. Use it to reshape JSON
-    /// payloads to match expected structures.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// // Unwrap a { data: ... } envelope
-    /// variant.pre_response_json(|ctx, json| {
-    ///     Ok(json.get("data").cloned().unwrap_or(json))
-    /// })
-    /// ```
-    #[must_use]
-    pub fn pre_response_json<F>(mut self, hook: F) -> Self
-    where
-        F: Fn(
-                &crate::shared::ResponseContext,
-                serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
-            + 'static,
-    {
-        self.pre_response_json = Some(std::sync::Arc::new(hook));
-        self
-    }
-    /// Registers a response mutation hook for a specific endpoint.
-    ///
-    /// This hook runs after deserializing the response and can mutate
-    /// the response object in place. The endpoint is identified by its
-    /// request type.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
-    ///     response.data.retain(|m| !m.id.contains("deprecated"));
-    ///     Ok(())
-    /// })
-    /// ```
-    #[must_use]
-    pub fn mutate_response<R, F>(mut self, hook: F) -> Self
-    where
-        R: crate::shared::EndpointSpec,
-        R::Response: Send + Sync + 'static,
-        F: Fn(
-                &crate::shared::ResponseContext,
-                &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
-    {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
-        self
-    }
-    /// Builds the variant API client with the configured options.
-    ///
-    /// Options not explicitly set will inherit from the base client.
-    #[must_use]
-    pub fn build(self) -> LmStudio {
-        let auth_update = self.auth_update.clone();
-        let auth_policy = match auth_update.clone() {
-            schematic_define::UpdateStrategy::NoChange => self.base.auth_policy.clone(),
-            schematic_define::UpdateStrategy::ChangeTo(ref auth) => {
-                schematic_define::AuthPolicy::from_auth_strategy(auth)
-            }
-            _ => self.base.auth_policy.clone(),
-        };
-        let auth_strategy = match auth_update.clone() {
-            schematic_define::UpdateStrategy::NoChange => self.base.auth_strategy.clone(),
-            schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
-            _ => self.base.auth_strategy.clone(),
-        };
-        let has_env_auth_override = self.env_auth.is_some();
-        let env_auth = self.env_auth.unwrap_or_else(|| self.base.env_auth.clone());
-        let headers = match self.headers {
-            Some(headers) => headers,
-            None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
-                self.base
-                    .headers
-                    .clone()
-                    .with_env_mapping(
-                        schematic_define::RestApi::legacy_env_mapping_for(
-                            &auth_strategy,
-                            &env_auth,
-                            self.base.env_username.as_deref(),
-                        ),
-                    )
-            }
-            None => self.base.headers.clone(),
-        };
-        LmStudio {
-            client: self.base.client.clone(),
-            base_url: self.base_url.unwrap_or_else(|| self.base.base_url.clone()),
-            env_auth,
-            auth_strategy,
-            auth_policy,
-            env_username: self.base.env_username.clone(),
-            headers,
-            variant_hooks: crate::shared::VariantHooks {
-                pre_response_json: self.pre_response_json,
-                response_mutators: self.response_mutators,
-            },
-        }
-    }
-}
-impl LmStudio {
-    fn auth_is_required(&self) -> bool {
-        !self.auth_policy.explicit.is_empty() || self.auth_policy.env_fallback.is_some()
-    }
-    fn accepted_explicit_auth_methods(&self) -> Vec<String> {
-        self.auth_policy
-            .explicit
-            .iter()
-            .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => {
-                    match header.as_deref() {
-                        Some(header) => format!("an explicit bearer token in `{header}`"),
-                        None => "an explicit bearer token".to_string(),
-                    }
-                }
-                schematic_define::AuthMethod::ApiKey { header, .. } => {
-                    format!("an explicit API key in `{header}`")
-                }
-                schematic_define::AuthMethod::Basic => {
-                    "explicit basic auth credentials".to_string()
-                }
-                schematic_define::AuthMethod::OAuth2(_) => {
-                    "an explicit OAuth access token".to_string()
-                }
-                _ => "explicit authentication".to_string(),
-            })
-            .collect()
-    }
-    fn env_fallback_var_names(&self) -> Vec<String> {
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .bearer_token
-                    .as_ref()
-                    .map(|list| list.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| api_key.names.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let mut vars = Vec::new();
-                if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
-                    vars.extend(user.names().iter().cloned());
-                }
-                if let Some(pass) = self.headers.env_mapping().basic_pass.as_ref() {
-                    vars.extend(pass.names().iter().cloned());
-                }
-                vars
-            }
-            None => Vec::new(),
-            _ => Vec::new(),
-        }
-    }
-    fn authentication_required_error(&self) -> SchematicError {
-        let explicit_methods = self.accepted_explicit_auth_methods();
-        let env_fallback_vars = self.env_fallback_var_names();
-        let mut options = Vec::new();
-        if !explicit_methods.is_empty() {
-            options.push(explicit_methods.join(", "));
-        }
-        if !env_fallback_vars.is_empty() {
-            options
-                .push(
-                    format!(
-                        "set one of the fallback env vars `{}`", env_fallback_vars
-                        .join("`, `")
-                    ),
-                );
-        }
-        let mut message = if options.is_empty() {
-            "Authentication required.".to_string()
-        } else {
-            format!("Authentication required: {}.", options.join(" or "))
-        };
-        if self.auth_policy.oauth2().is_some() {
-            message
-                .push_str(
-                    " Obtain the OAuth token with schematic-oauth, then inject it with `.oauth_token(...)`.",
-                );
-        }
-        SchematicError::AuthenticationRequired {
-            message,
-            explicit_methods,
-            env_fallback_vars,
-        }
-    }
-    fn apply_env_fallback(
-        &self,
-        headers: schematic_define::Headers,
-    ) -> schematic_define::Headers {
-        let env_mapping = self.headers.env_mapping().clone();
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping
-                    .bearer_token
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                match (token, header.as_deref()) {
-                    (Some(token), Some(header)) => {
-                        headers.use_bearer_token_with_header(token, header)
-                    }
-                    (Some(token), None) => headers.use_bearer_token(token),
-                    _ => headers,
-                }
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header, value_prefix }) => {
-                let key = env_mapping
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|name| std::env::var(name).ok())
-                    });
-                match key {
-                    Some(key) => {
-                        let value = format!(
-                            "{}{}", value_prefix.clone().unwrap_or_default(), key
-                        );
-                        headers.header(header.clone(), value)
-                    }
-                    None => headers,
-                }
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping
-                    .basic_user
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                let password = env_mapping
-                    .basic_pass
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                match (username, password) {
-                    (Some(username), Some(password)) => {
-                        headers.use_basic_auth(username, password)
-                    }
-                    _ => headers,
-                }
-            }
-            None => headers,
-            _ => headers,
-        }
-    }
-    fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header
-                    .as_deref()
-                    .map_or_else(
-                        || headers.has_authorization(),
-                        |header| headers.has_header(header),
-                    )
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header, .. }) => {
-                headers.has_header(header)
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),
-            None => false,
-            _ => false,
-        }
-    }
-    fn resolve_request_headers(&self) -> Result<Vec<(String, String)>, SchematicError> {
-        let mut headers = self.headers.clone();
-        if !headers.has_explicit_auth() {
-            headers = self.apply_env_fallback(headers);
-        }
-        if self.auth_is_required() && !headers.has_explicit_auth()
-            && !self.headers_satisfy_fallback(&headers)
-        {
-            return Err(self.authentication_required_error());
-        }
-        headers.build().map_err(SchematicError::from)
-    }
-    /// Builds and sends an HTTP request, returning the raw response plus context.
-    ///
-    /// This is an internal helper method used by the public request methods.
-    /// Returns both the response and the context needed for hook processing.
-    async fn build_and_send_request(
-        &self,
-        request: impl Into<LmStudioRequest>,
-    ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
-        let request = request.into();
-        let endpoint_id = request.endpoint_id();
-        let (method, path, body, endpoint_headers) = request.into_parts()?;
-        let url = format!("{}{}", self.base_url, path);
-        let mut req_builder = match method {
-            "GET" => self.client.get(&url),
-            "POST" => self.client.post(&url),
-            "PUT" => self.client.put(&url),
-            "PATCH" => self.client.patch(&url),
-            "DELETE" => self.client.delete(&url),
-            "HEAD" => self.client.head(&url),
-            "OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url),
-            _ => return Err(SchematicError::UnsupportedMethod(method.to_string())),
-        };
-        let api_headers = self.resolve_request_headers()?;
-        let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
-        for (key, value) in merged_headers {
-            req_builder = req_builder.header(key.as_str(), value.as_str());
-        }
-        req_builder = match body {
-            crate::shared::RequestBody::Empty => req_builder,
-            crate::shared::RequestBody::Json(json) => {
-                req_builder.header("Content-Type", "application/json").body(json)
-            }
-            crate::shared::RequestBody::Multipart(parts) => {
-                let mut form = reqwest::multipart::Form::new();
-                for part in parts {
-                    form = match part {
-                        crate::shared::FormPart::Text { name, value } => {
-                            form.text(name, value)
-                        }
-                        crate::shared::FormPart::Json { name, value } => {
-                            let field = reqwest::multipart::Part::text(value)
-                                .mime_str("application/json")
-                                .map_err(|e| {
-                                    SchematicError::SerializationError(e.to_string())
-                                })?;
-                            form.part(name, field)
-                        }
-                        crate::shared::FormPart::File { name, file } => {
-                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
-                                .file_name(file.file_name);
-                            if let Some(mime) = file.mime {
-                                field = field
-                                    .mime_str(&mime)
-                                    .map_err(|e| {
-                                        SchematicError::SerializationError(e.to_string())
-                                    })?;
-                            }
-                            form.part(name, field)
-                        }
-                    };
-                }
-                req_builder.multipart(form)
-            }
-            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
-            crate::shared::RequestBody::Raw { content_type, bytes } => {
-                req_builder.header("Content-Type", content_type).body(bytes)
-            }
-        };
-        let response = req_builder.send().await?;
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body_text = response.text().await.unwrap_or_default();
-            return Err(SchematicError::ApiError {
-                status,
-                body: body_text,
-            });
-        }
-        let status = response.status().as_u16();
-        let headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-        let ctx = crate::shared::ResponseContext::new(
-            endpoint_id,
-            method,
-            path.clone(),
-            url,
-            status,
-            headers,
-        );
-        Ok((response, ctx))
-    }
-    /// Merges API-level and endpoint-level headers.
-    ///
-    /// Endpoint headers override API headers for matching keys (case-insensitive).
-    /// Returns a new Vec with the merged headers.
-    fn merge_headers(
-        api_headers: &[(String, String)],
-        endpoint_headers: &[(String, String)],
-    ) -> Vec<(String, String)> {
-        let mut result: Vec<(String, String)> = Vec::new();
-        for (api_key, api_value) in api_headers {
-            let has_override = endpoint_headers
-                .iter()
-                .any(|(k, _)| k.eq_ignore_ascii_case(api_key));
-            if !has_override {
-                result.push((api_key.clone(), api_value.clone()));
-            }
-        }
-        for (key, value) in endpoint_headers {
-            result.push((key.clone(), value.clone()));
-        }
-        result
-    }
-    /// Executes an API request expecting a JSON response.
-    ///
-    /// Takes any request type that can be converted into the request enum
-    /// and returns the deserialized response. If response hooks are configured
-    /// via the variant builder, they will be applied.
-    ///
-    /// ## Hooks
-    ///
-    /// If configured via `variant()`:
-    /// - `pre_response_json` - Transforms JSON before deserialization
-    /// - `mutate_response` - Mutates the response after deserialization
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    /// - The response body cannot be deserialized as JSON
-    /// - A hook returns an error
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
-        &self,
-        request: impl Into<LmStudioRequest>,
-    ) -> Result<T, SchematicError> {
-        let request = request.into();
-        match request.response_kind() {
-            crate::shared::ResponseKind::Json => {}
-            crate::shared::ResponseKind::Text => {
-                return Err(SchematicError::WrongResponseDecoder {
-                    endpoint_id: request.endpoint_id(),
-                    kind: "text",
-                    expected_method: "request_text",
-                });
-            }
-            crate::shared::ResponseKind::Binary => {
-                return Err(SchematicError::WrongResponseDecoder {
-                    endpoint_id: request.endpoint_id(),
-                    kind: "binary",
-                    expected_method: "request_bytes",
-                });
-            }
-            crate::shared::ResponseKind::Empty => {
-                return Err(SchematicError::WrongResponseDecoder {
-                    endpoint_id: request.endpoint_id(),
-                    kind: "empty",
-                    expected_method: "request_empty",
-                });
-            }
-        }
-        let (response, ctx) = self.build_and_send_request(request).await?;
-        let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
-        let has_mutator = self
-            .variant_hooks
-            .response_mutators
-            .contains_key(ctx.endpoint_id);
-        if has_pre_hook || has_mutator {
-            let bytes = response.bytes().await?;
-            let mut json_value: serde_json::Value = serde_json::from_slice(&bytes)?;
-            if let Some(ref hook) = self.variant_hooks.pre_response_json {
-                json_value = hook(&ctx, json_value)?;
-            }
-            let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self
-                .variant_hooks
-                .response_mutators
-                .get(ctx.endpoint_id)
-            {
-                mutator.mutate(&ctx, &mut result)?;
-            }
-            Ok(result)
-        } else {
-            let result = response.json::<T>().await?;
-            Ok(result)
-        }
-    }
-    /// Executes an API request expecting a binary response.
-    ///
-    /// Returns the raw bytes of the response body. Use this for endpoints
-    /// that return binary data like audio files, images, or ZIP archives.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request_bytes(
-        &self,
-        request: impl Into<LmStudioRequest>,
-    ) -> Result<bytes::Bytes, SchematicError> {
-        let (response, _ctx) = self.build_and_send_request(request).await?;
-        let bytes = response.bytes().await?;
-        Ok(bytes)
-    }
-    /// Convenience method for the `Chat` endpoint.
-    ///
-    /// Chat completion with SSE streaming support
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn chat(
-        &self,
-        request: ChatRequest,
-    ) -> Result<bytes::Bytes, SchematicError> {
-        self.request_bytes(request).await
-    }
-    /// Convenience method for the `DownloadModel` endpoint.
-    ///
-    /// Download a model from HuggingFace with SSE progress
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn download_model(
-        &self,
-        request: DownloadModelRequest,
-    ) -> Result<bytes::Bytes, SchematicError> {
-        self.request_bytes(request).await
+        body: DownloadStatusBody,
+    ) -> GetDownloadStatusCall<'_> {
+        GetDownloadStatusCall(self.0.send(GetDownloadStatusRequest::new(body)))
     }
 }

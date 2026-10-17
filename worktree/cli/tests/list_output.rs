@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(repo)
         .args(args)
         .status()
@@ -16,16 +16,14 @@ fn run_git(repo: &Path, args: &[&str]) {
 
 fn init_repo(path: &Path) {
     run_git(path, &["init", "-q", "-b", "main"]);
-    for (key, value) in [
-        ("user.email", "test@example.com"),
-        ("user.name", "Test User"),
-        ("commit.gpgsign", "false"),
-        ("gc.auto", "0"),
-        ("core.fsmonitor", "false"),
-        ("core.commitGraph", "false"),
-    ] {
-        run_git(path, &["config", key, value]);
-    }
+    // The settings appended in one write, in place of a `git config` process
+    // per key.
+    let settings = "[user]\n\temail = test@example.com\n\tname = Test User\n[commit]\n\tgpgsign = false\n\
+                    [gc]\n\tauto = 0\n[core]\n\tfsmonitor = false\n\tcommitGraph = false\n";
+    let config = path.join(".git").join("config");
+    let mut text = fs::read_to_string(&config).expect("read git config");
+    text.push_str(settings);
+    fs::write(&config, text).expect("write git config");
 }
 
 fn commit(path: &Path, file: &str, contents: &str) {
@@ -47,7 +45,12 @@ impl Home {
     }
 
     fn wt(&self, cwd: &Path, args: &[&str]) -> Output {
-        Command::new(biscuit_test_harness::bin_exe!("wt"))
+        self.command(cwd, args).output().expect("wt should run")
+    }
+
+    fn command(&self, cwd: &Path, args: &[&str]) -> Command {
+        let mut command = Command::new(biscuit_test_harness::bin_exe!("wt"));
+        command
             .current_dir(cwd)
             .args(args)
             .env("HOME", self.dir.path())
@@ -57,10 +60,38 @@ impl Home {
             .env_remove("WT_SHELL_WRAPPER")
             .env("NO_COLOR", "1")
             .env_remove("FORCE_COLOR")
-            .env_remove("CLICOLOR_FORCE")
-            .output()
-            .expect("wt should run")
+            .env_remove("CLICOLOR_FORCE");
+        command
     }
+}
+
+/// `wt` reads repository metadata in-process with gix, which on Windows ran
+/// `git --exec-path` (through Git for Windows' launcher, with a hidden
+/// console) once per process to find the system configuration, unless
+/// `EXEPATH` names the installation. `wt` names it, so no run asks.
+#[cfg(windows)]
+#[test]
+fn a_listing_never_asks_git_for_its_exec_path() {
+    let repo = tempfile::tempdir().expect("repo dir");
+    init_repo(repo.path());
+    commit(repo.path(), "a.txt", "a");
+    let traces = tempfile::tempdir().expect("trace dir");
+    let home = Home::new();
+    let output = home
+        .command(repo.path(), &["list"])
+        .env_remove("EXEPATH")
+        .env_remove("GIT_EXEC_PATH")
+        .env("GIT_TRACE2_EVENT", traces.path())
+        .output()
+        .expect("wt should run");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let started: Vec<String> = fs::read_dir(traces.path())
+        .expect("trace dir")
+        .map(|entry| fs::read_to_string(entry.expect("entry").path()).expect("trace file"))
+        .collect();
+    assert!(!started.is_empty(), "the listing ran git, and each git process wrote a trace");
+    let asked = started.iter().filter(|trace| trace.contains("\"--exec-path\"")).count();
+    assert_eq!(asked, 0, "{started:#?}");
 }
 
 #[test]
@@ -242,7 +273,7 @@ fn worktrees_git_cannot_read_are_crossed_and_explained_without_repair() {
     fs::remove_file(unlinked.join(".git")).expect("unlink");
     fs::remove_dir_all(&missing).expect("remove directory");
     let porcelain = || {
-        let output = Command::new("git").current_dir(&main).args(["worktree", "list", "--porcelain"]).output().unwrap();
+        let output = worktree::git::command().current_dir(&main).args(["worktree", "list", "--porcelain"]).output().unwrap();
         String::from_utf8(output.stdout).unwrap()
     };
     let records_before = porcelain();

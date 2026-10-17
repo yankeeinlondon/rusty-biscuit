@@ -1,0 +1,180 @@
+kind: sequence
+template:
+    intro: "{{ name }} ({{url}})"
+    slug: "{{dasherize(name)}}"
+    file: "{{slug}}.md"
+sequence:
+    - name: Wezterm
+      url: "https://wezterm.org/"
+      os:
+          - linux
+          - macos
+          - windows
+          - freebsd
+          - netbsd
+    - name: Ghostty
+      url: "https://ghostty.org/"
+      os:
+          - linux
+          - macos
+    - name: iTerm2
+      url: "https://iterm2.com/"
+      os:
+          - macos
+    - name: cmux
+      url: "https://cmux.com/"
+      os:
+          - macos
+    - name: kitty
+      url: "https://sw.kovidgoyal.net/kitty/"
+      os:
+          - macos
+          - linux
+          - freebsd
+    - name: konsole
+      url: "https://konsole.kde.org/"
+      os:
+          - linux
+          - macos
+          - windows
+          - freebsd
+    - name: AppleTerminal
+      url: "https://support.apple.com/guide/terminal/welcome/mac"
+      os:
+          - macos
+    - name: Alacritty
+      url: "https://alacritty.org/"
+      os:
+          - macos
+          - windows
+          - linux
+          - freebsd
+          - openbsd
+    - name: Contour
+      url: "https://contour-terminal.org/"
+      os:
+          - linux
+          - macos
+          - windows
+          - freebsd
+          - openbsd
+    - name: Foot
+      url: "https://codeberg.org/dnkl/foot"
+      os:
+          - linux
+          - freebsd
+    - name: GNOME Terminal
+      url: "https://wiki.gnome.org/Apps/Terminal"
+      os:
+          - linux
+          - freebsd
+    - name: Termius
+      url: "https://termius.com/"
+      os:
+          - linux
+          - macos
+          - windows
+          - ios
+          - android
+    - name: Warp
+      url: "https://www.warp.dev/"
+      os:
+          - linux
+          - macos
+          - windows
+    - name: Windows Terminal
+      url: "https://learn.microsoft.com/en-us/windows/terminal/"
+      os:
+          - windows
+    - name: Tabby
+      url: "https://tabby.sh/"
+      os:
+          - linux
+          - macos
+          - windows
+    - name: Hyper
+      url: "https://hyper.is/"
+      os:
+          - linux
+          - macos
+          - windows
+    - name: PuTTY
+      url: "https://www.chiark.greenend.org.uk/~sgtatham/putty/"
+      os:
+          - windows
+          - linux
+          - macos
+          - freebsd
+    - name: MobaXterm
+      url: "https://mobaxterm.mobatek.net/"
+      os:
+          - windows
+    - name: SecureCRT
+      url: "https://www.vandyke.com/products/securecrt/"
+      os:
+          - linux
+          - macos
+          - windows
+    - name: ConEmu
+      url: "https://conemu.github.io/"
+      os:
+          - windows
+    - name: Cmder
+      url: "https://cmder.app/"
+      os:
+          - windows
+    - name: mintty
+      url: "https://mintty.github.io/"
+      os:
+          - windows
+    - name: Terminator
+      url: "https://gnome-terminator.org/"
+      os:
+          - linux
+          - freebsd
+    - name: Tilix
+      url: "https://gnunn1.github.io/tilix-web/"
+      os:
+          - linux
+          - freebsd
+    - name: Xfce Terminal
+      url: "https://docs.xfce.org/apps/xfce4-terminal/start"
+      os:
+          - linux
+          - freebsd
+    - name: GNOME Console
+      url: "https://apps.gnome.org/Console/"
+      os:
+          - linux
+          - freebsd
+    - name: Guake
+      url: "https://guake.github.io/"
+      os:
+          - linux
+          - freebsd
+    - name: Yakuake
+      url: "https://apps.kde.org/yakuake/"
+      os:
+          - linux
+          - freebsd
+    - name: xterm
+      url: "https://invisible-island.net/xterm/"
+      os:
+          - linux
+          - macos
+          - freebsd
+          - openbsd
+          - netbsd
+          - solaris
+    - name: rxvt-unicode
+      url: "https://software.schmorp.de/pkg/rxvt-unicode.html"
+      os:
+          - linux
+          - freebsd
+          - openbsd
+          - netbsd
+    - name: Terminology
+      url: "https://www.enlightenment.org/about-terminology"
+      os:
+          - linux
+          - freebsd

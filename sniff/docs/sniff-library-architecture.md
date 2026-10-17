@@ -88,6 +88,14 @@ Every subsection has a real-world cost. The table below captures approximate lat
 | **Programs** | All 10 categories (parallel, shared executable index) | 200-800ms | Separate API |
 | **Services** | Init system detection + service list | 50-200ms | Separate API |
 
+Two of these costs are paid per process and do not shrink with reuse inside one run. On macOS the
+first CoreAudio call initializes the audio HAL for the process, and that setup is serialized across
+processes: on a development Mac with seven third-party HAL plug-ins, one process took about 1 s,
+three started together about 2.4 s each, and six about 4.6 s each. The WAN IP lookup is bounded at
+2 s per endpoint and tries up to two, so an unreachable pair costs up to 4 s. A caller (or a test)
+that does not read audio devices or the WAN address should leave them out of the request
+(`.include_audio(false)` or `HardwareRequest::summary()`; `NetworkRequest::interfaces_only()`).
+
 Programs and Services are not part of `DetectionPlan` because they have no dependency on the filesystem base directory and their results are system-global rather than project-scoped. They are accessed through `ProgramsInfo::detect()` and `ServiceManager::detect()` respectively.
 
 ## Request Types

@@ -2765,13 +2765,54 @@ class RecorderPublicationTests(ObservationFixture):
         path.write_text(json.dumps(receipt))
         completed = subprocess.run(
             [sys.executable, str(Path(local_evidence.__file__).with_name("observation_notes.py")),
-             "publish-receipt", "--receipt", str(path), "--head", self.head,
-             "--environment", "macos-latest", "--no-push"],
+             "publish-receipt", "--receipt", str(path), "--plan", str(self.plan_path),
+             "--head", self.head, "--environment", "macos-latest", "--no-push"],
             capture_output=True, text=True,
         )
         self.assertEqual(4, completed.returncode, completed.stderr)
         self.assertIn("local only", completed.stderr)
         self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_a_hook_receipt_is_published_only_with_the_plan_it_ran_under(self) -> None:
+        receipt, _ = self.recorded_receipt()
+        path = self.root / "receipt.json"
+        path.write_text(json.dumps(receipt))
+        completed = subprocess.run(
+            [sys.executable, str(OBSERVATION_NOTES), "publish-receipt", "--receipt", str(path),
+             "--head", self.head, "--environment", "macos-latest", "--no-push"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(2, completed.returncode, completed.stderr)
+        self.assertIn("--plan", completed.stderr)
+        self.assertEqual([], self.accepted_keys())
+
+    def test_a_hook_observation_carries_the_feature_arguments_its_package_ran_with(self) -> None:
+        receipt, _ = self.recorded_receipt()
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        for package in plan["packages"]:
+            if package["package"] == "alpha":
+                package["test_args"] = "--features remote"
+        observation, = observation_notes.receipt_observations(
+            receipt, package_features=observation_notes.hook_features(plan)
+        )
+        self.assertEqual("--features remote", observation["features"])
+        # The plan keys alpha's build on the same string, so the verifier
+        # accepts the cell; an observation without it is refused, which every
+        # hook observation was before it recorded its features.
+        planned = {**plan["cells"][0], "build": "alpha-build"}
+        featured_plan = {
+            "cells": [planned],
+            "builds": [{"key": "alpha-build", "identity": {"features": "--features remote"}}],
+        }
+        key = ("alpha", "macos-latest", "L1")
+        self.assertIsNone(
+            local_evidence._observation_refusal(observation, key, featured_plan, "alpha/macos-latest/L1")
+        )
+        bare, = observation_notes.receipt_observations(receipt)
+        self.assertIn(
+            "ran with features ''",
+            local_evidence._observation_refusal(bare, key, featured_plan, "alpha/macos-latest/L1"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -3119,7 +3160,8 @@ class RigFailureAndIncompleteTests(RigCellFixture):
     def test_a_hook_receipt_cannot_name_a_predecessor(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(OBSERVATION_NOTES), "publish-receipt", "--receipt", "r.json",
-             "--head", self.head, "--environment", "macos-latest", "--retry-of", "ab" * 32],
+             "--plan", "plan.json", "--head", self.head, "--environment", "macos-latest",
+             "--retry-of", "ab" * 32],
             cwd=self.root, capture_output=True, text=True, timeout=60,
         )
         self.assertEqual(2, completed.returncode)

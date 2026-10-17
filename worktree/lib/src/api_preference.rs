@@ -102,8 +102,8 @@ impl Preferences {
     }
 }
 
-/// `~/.wt.json`, through the same home-directory lookup as `~/.worktree.json`
-/// (`%USERPROFILE%` on native Windows).
+/// `~/.wt.json` under the OS home directory (`dirs::home_dir`). Unlike
+/// `~/.worktree.json`, it ignores `USERPROFILE` on native Windows.
 pub fn preference_path() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".wt.json"))
 }

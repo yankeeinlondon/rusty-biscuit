@@ -1,50 +1,57 @@
 //! Integration tests for the HuggingFace Hub API client.
 //!
-//! These tests use wiremock to mock HTTP responses and verify
-//! that the generated client makes correct requests.
+//! These tests use wiremock to mock HTTP responses and verify that the
+//! generated client makes correct requests, reports non-2xx replies inside the
+//! envelope, and runs the client's response hooks on JSON endpoints only.
 
-#![allow(
-    clippy::needless_borrows_for_generic_args,
-    clippy::field_reassign_with_default
-)]
+mod common;
 
-use schematic_schema::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
-use schematic_schema::shared::SchematicError;
-use wiremock::matchers::{header, method, path};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use common::EnvGuard;
+use schematic_schema::huggingface::{CreateRepoBody, WhoAmIRequest};
+use schematic_schema::prelude::*;
+use schematic_schema::schematic_runtime::{
+    AuthMethod, ErrorKind, HookError, Outcome, ResponseMeta,
+};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Helper to set up environment for tests.
-fn setup_test_env() {
-    // SAFETY: Tests run in isolation, setting env vars is safe here
-    unsafe {
-        std::env::set_var("HF_TOKEN", "test-token");
-    }
+const TOKEN_VARS: [&str; 3] = ["HF_TOKEN", "HUGGING_FACE_API_KEY", "HF_API_KEY"];
+
+fn client(base_url: &str) -> HuggingFaceHub {
+    HuggingFaceHub::new()
+        .base_url(base_url)
+        .build()
+        .expect("client builds")
 }
 
-/// Test that ListModels request is formatted correctly.
+/// `ListModels` hits `GET /models` and decodes an empty list.
 #[tokio::test]
-async fn test_list_models_request() {
-    setup_test_env();
+async fn list_models_request() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
         .and(path("/models"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .expect(1)
         .mount(&mock_server)
         .await;
 
-    let client = HuggingFaceHub::with_base_url(&mock_server.uri());
+    let response = client(&mock_server.uri())
+        .list_models()
+        .full()
+        .await
+        .expect("a response head arrived");
 
-    let request = HuggingFaceHubRequest::ListModels(Default::default());
-    let result: Result<Vec<serde_json::Value>, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
+    assert_eq!(response.meta.request.endpoint_id, "ListModels");
+    assert!(response.into_result().expect("success").is_empty());
 }
 
-/// Test that GetModel correctly substitutes path parameter.
+/// `GetModel` substitutes its path parameter.
 #[tokio::test]
-async fn test_get_model_path_parameter() {
-    setup_test_env();
+async fn get_model_path_parameter() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -53,58 +60,57 @@ async fn test_get_model_path_parameter() {
             "modelId": "bert-base-uncased",
             "downloads": 1000000
         })))
+        .expect(1)
         .mount(&mock_server)
         .await;
 
-    let client = HuggingFaceHub::with_base_url(&mock_server.uri());
+    let model = client(&mock_server.uri())
+        .get_model("bert-base-uncased")
+        .await
+        .expect("success");
 
-    let mut request: schematic_schema::huggingface::GetModelRequest = Default::default();
-    request.repo_id = "bert-base-uncased".to_string();
-
-    let request = HuggingFaceHubRequest::GetModel(request);
-    let result: Result<serde_json::Value, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
+    assert_eq!(model.model_id, "bert-base-uncased");
+    assert_eq!(model.downloads, 1_000_000);
 }
 
-/// Test that CreateRepo sends correct request body.
+/// `CreateRepo` sends its body as JSON.
 #[tokio::test]
-async fn test_create_repo_request_body() {
-    use schematic_schema::huggingface::{CreateRepoBody, CreateRepoRequest};
-
-    setup_test_env();
+async fn create_repo_request_body() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
         .and(path("/repos/create"))
-        .and(wiremock::matchers::body_json(serde_json::json!({
+        .and(body_json(serde_json::json!({
             "name": "my-test-model",
             "private": true
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "url": "https://huggingface.co/test-user/my-test-model"
         })))
+        .expect(1)
         .mount(&mock_server)
         .await;
-
-    let client = HuggingFaceHub::with_base_url(&mock_server.uri());
 
     let body = CreateRepoBody {
         name: "my-test-model".to_string(),
         private: true,
         ..Default::default()
     };
+    let repo = client(&mock_server.uri())
+        .create_repo(body)
+        .await
+        .expect("success");
 
-    let request = HuggingFaceHubRequest::CreateRepo(CreateRepoRequest { body });
-    let result: Result<serde_json::Value, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
+    assert_eq!(repo.url, "https://huggingface.co/test-user/my-test-model");
 }
 
-/// Test that Authorization header is present when API key is set.
+/// The `HF_TOKEN` fallback is sent as a bearer token and reported as its
+/// source.
 #[tokio::test]
-async fn test_auth_header_present() {
-    setup_test_env();
+#[serial_test::serial]
+async fn auth_header_present_from_env_fallback() {
+    let env = EnvGuard::clear(&TOKEN_VARS);
+    env.set("HF_TOKEN", "test-token");
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -114,44 +120,219 @@ async fn test_auth_header_present() {
             "type": "user",
             "name": "testuser"
         })))
+        .expect(1)
         .mount(&mock_server)
         .await;
 
-    let client = HuggingFaceHub::with_base_url(&mock_server.uri());
+    let response = client(&mock_server.uri())
+        .who_am_i()
+        .full()
+        .await
+        .expect("a response head arrived");
 
-    let request = HuggingFaceHubRequest::WhoAmI(Default::default());
-    let result: Result<serde_json::Value, _> = client.request(request).await;
-
-    assert!(result.is_ok(), "Request failed: {:?}", result.err());
+    assert_eq!(
+        response.meta.request.auth,
+        AuthMethod::EnvVar("HF_TOKEN".to_string())
+    );
+    assert_eq!(response.into_result().expect("success").name, "testuser");
 }
 
-/// Test that API errors are properly propagated.
+/// A 404 is a response, not a transport error: the envelope carries the
+/// status and the provider's body unchanged, and an awaited call returns
+/// them as `CallError::Api`.
 #[tokio::test]
-async fn test_api_error_handling() {
-    setup_test_env();
+async fn not_found_is_an_envelope_failure_with_status_and_body() {
     let mock_server = MockServer::start().await;
+    let body = br#"{"error":"Repository not found"}"#;
 
     Mock::given(method("GET"))
         .and(path("/models/nonexistent-model"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(body.as_slice(), "application/json"))
+        .mount(&mock_server)
+        .await;
+
+    let client = client(&mock_server.uri());
+    let response = client
+        .get_model("nonexistent-model")
+        .full()
+        .await
+        .expect("a 404 is a response, not a transport error");
+
+    assert_eq!(response.meta.status.as_u16(), 404);
+    let error = response.error().expect("failure outcome");
+    assert!(
+        matches!(error.kind, ErrorKind::Undeclared),
+        "kind: {}",
+        error.kind
+    );
+    assert_eq!(error.body.as_ref(), body.as_slice());
+    assert!(!response.is_decode_failure());
+
+    match client.get_model("nonexistent-model").await {
+        Err(CallError::Api { error, meta }) => {
+            assert!(matches!(error.kind, ErrorKind::Undeclared), "kind: {}", error.kind);
+            assert_eq!(error.body.as_ref(), body.as_slice());
+            assert_eq!(meta.status.as_u16(), 404);
+            assert_eq!(meta.request.endpoint_id, "GetModel");
+        }
+        other => panic!("expected CallError::Api, got {other:?}"),
+    }
+}
+
+/// The client-global `pre_response_json` hook reshapes a successful JSON body
+/// before it is decoded into the endpoint's success type.
+#[tokio::test]
+async fn pre_response_json_reshapes_body_before_decode() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/whoami-v2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "envelope": { "name": "wrapped-user" }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let client = HuggingFaceHub::new()
+        .base_url(mock_server.uri())
+        .pre_response_json(|_meta: &ResponseMeta, mut value: serde_json::Value| {
+            value
+                .get_mut("envelope")
+                .map(serde_json::Value::take)
+                .ok_or(HookError::new())
+        })
+        .build()
+        .expect("client builds");
+    let user = client
+        .who_am_i()
+        .await
+        .expect("the hook made the body decodable");
+
+    assert_eq!(user.name, "wrapped-user");
+}
+
+/// A `mutate_response::<WhoAmIRequest>` mutator runs on `WhoAmI` and not on
+/// `GetUser`, although both decode into the same `UserInfo` type.
+#[tokio::test]
+async fn mutate_response_runs_only_for_its_endpoint() {
+    let mock_server = MockServer::start().await;
+    let user = serde_json::json!({ "name": "someone", "fullname": "Original Name" });
+
+    Mock::given(method("GET"))
+        .and(path("/whoami-v2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(user.clone()))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/someone"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(user))
+        .mount(&mock_server)
+        .await;
+
+    let client = HuggingFaceHub::new()
+        .base_url(mock_server.uri())
+        .mutate_response::<WhoAmIRequest, _>(|meta, user| {
+            assert_eq!(meta.request.endpoint_id, "WhoAmI");
+            user.fullname = Some("Mutated Name".to_string());
+            Ok(())
+        })
+        .build()
+        .expect("client builds");
+
+    let whoami = client.who_am_i().await.expect("success");
+    let other = client.get_user("someone").await.expect("success");
+
+    assert_eq!(whoami.fullname.as_deref(), Some("Mutated Name"));
+    assert_eq!(other.fullname.as_deref(), Some("Original Name"));
+}
+
+/// A hook that refuses the body turns the outcome into `ErrorKind::Hook` and
+/// keeps the original body bytes; awaited directly, that is a
+/// `CallError::Api` although the status is 200.
+#[tokio::test]
+async fn refusing_hook_yields_hook_failure_with_original_body() {
+    let mock_server = MockServer::start().await;
+    let body = br#"{"name":"someone"}"#;
+
+    Mock::given(method("GET"))
+        .and(path("/whoami-v2"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body.as_slice(), "application/json"))
+        .mount(&mock_server)
+        .await;
+
+    let client = HuggingFaceHub::new()
+        .base_url(mock_server.uri())
+        .mutate_response::<WhoAmIRequest, _>(|_, _| Err(HookError::new()))
+        .build()
+        .expect("client builds");
+    let response = client
+        .who_am_i()
+        .full()
+        .await
+        .expect("a response head arrived");
+
+    assert_eq!(response.meta.status.as_u16(), 200);
+    match client.who_am_i().await {
+        Err(CallError::Api { error, meta }) => {
+            assert!(matches!(error.kind, ErrorKind::Hook), "kind: {}", error.kind);
+            assert_eq!(error.body.as_ref(), body.as_slice());
+            assert_eq!(meta.status.as_u16(), 200);
+        }
+        other => panic!("expected CallError::Api, got {other:?}"),
+    }
+    match &response.outcome {
+        Outcome::Failure(error) => {
+            assert!(
+                matches!(error.kind, ErrorKind::Hook),
+                "kind: {}",
+                error.kind
+            );
+            assert_eq!(error.body.as_ref(), body.as_slice());
+        }
+        Outcome::Success(_) => panic!("a refused body must not be a success"),
+    }
+}
+
+/// The global hook is skipped for a non-2xx reply and for a text endpoint.
+#[tokio::test]
+async fn pre_response_json_skips_error_replies_and_text_endpoints() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/models/missing"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({"error": "x"})))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/models/some-model/resolve/main/README.md"))
         .respond_with(
-            ResponseTemplate::new(404)
-                .set_body_json(serde_json::json!({"error": "Repository not found"})),
+            ResponseTemplate::new(200).set_body_raw(r#"{"looks":"like json"}"#, "application/json"),
         )
         .mount(&mock_server)
         .await;
 
-    let client = HuggingFaceHub::with_base_url(&mock_server.uri());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let client = HuggingFaceHub::new()
+        .base_url(mock_server.uri())
+        .pre_response_json(move |_: &ResponseMeta, value: serde_json::Value| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Ok(value)
+        })
+        .build()
+        .expect("client builds");
 
-    let mut request: schematic_schema::huggingface::GetModelRequest = Default::default();
-    request.repo_id = "nonexistent-model".to_string();
+    let missing = client
+        .get_model("missing")
+        .full()
+        .await
+        .expect("a response head arrived");
+    let readme = client
+        .get_model_readme("some-model", "main")
+        .await
+        .expect("a text endpoint decodes any content type");
 
-    let request = HuggingFaceHubRequest::GetModel(request);
-    let result: Result<serde_json::Value, _> = client.request(request).await;
-
-    assert!(result.is_err());
-    if let Err(SchematicError::ApiError { status, .. }) = result {
-        assert_eq!(status, 404);
-    } else {
-        panic!("Expected ApiError, got {:?}", result);
-    }
+    assert_eq!(missing.meta.status.as_u16(), 404);
+    assert_eq!(readme, r#"{"looks":"like json"}"#);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }

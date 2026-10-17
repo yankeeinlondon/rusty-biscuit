@@ -57,6 +57,17 @@ any checkout that is not `plan.head`, or whose tracked tree is dirty.
   directly. Pass several substrings instead, for example
   `just cross-check claudine --os windows claudine_schemas composition::schema`.
   A filtered run is targeted evidence only.
+- **Suites that run Cargo themselves** (trybuild compile-fail, fresh-output
+  compiles) are `slow_`, which the L1 recipe's filter excludes, so an archive-mode run
+  cannot select them; a crate outside the workspace has no archive at all. Run them in
+  native mode with a build flag:
+  `./scripts/cross-check.sh --os all schematic-runtime --all-features --test l1 -E 'test(/(^|::)slow_/)'`,
+  or `… schematic-schema --all-features --manifest-path schematic/schema/Cargo.toml`
+  for the generated crate. Schematic's fresh-output guard builds `--offline`
+  against `schematic/schema/Cargo.lock`, so a host whose Cargo cache lacks a
+  crate fails it with "failed to download … --offline was specified". That is
+  a cache gap: `cargo fetch --manifest-path schematic/schema/Cargo.toml` on
+  that host fills it, as CI's build job does.
 - **Check what ran.** Before you trust a result, check the banner
   `cross-check: <pkg> @ origin/<branch> (<sha>) + N changed file(s) as <rev>`.
   `--no-tests=pass` means a green leg does not prove that a `cfg`-gated test

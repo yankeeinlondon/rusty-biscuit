@@ -54,10 +54,13 @@ pub fn generate_response_context() -> TokenStream {
             /// The HTTP method used (e.g., "GET", "POST").
             pub method: &'static str,
 
-            /// The URL path with parameters substituted.
+            /// The request path with path parameters substituted.
+            ///
+            /// Declared query parameters are not part of it; they appear only in
+            /// [`url`](Self::url).
             pub path: String,
 
-            /// The full request URL.
+            /// The full request URL, including the encoded query.
             pub url: String,
 
             /// The HTTP status code from the response.

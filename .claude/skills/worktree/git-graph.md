@@ -111,15 +111,50 @@ A lane's boundary (the first commit below it) is classified too, sharing one
   first-parent chain (`History::chain_distance`). A malformed, unknown, or
   off-chain value is ignored; an unknown one in a shallow clone is a gap. So a
   branch created at an already merged tip stays unconnected, with the notice.
-- Cost: an ordinary lane pays two extra Git calls (`--is-ancestor` and one
-  first-parent chain); the `--ancestry-path` call is skipped when the boundary
-  is on the candidate's first-parent chain.
+- Cost: an ordinary lane asks two extra questions (`--is-ancestor` and one
+  first-parent chain); the `--ancestry-path` question is skipped when the
+  boundary is on the candidate's first-parent chain.
+
+### Questions answered in-process (`topology/commits.rs`)
+
+- Every `History` method is a **question named by its Git command**
+  (`merge-base --is-ancestor`, `rev-list --first-parent --count A..tip`, …).
+  `Commits` (one per gather, a `Mutex` shared by the gather's threads)
+  answers it from `gix` commit reads; the command itself runs only when
+  `Commits::open` returns `None` (gix cannot open the repository, or a grafts
+  file or `refs/replace/` would make Git see other parents). A graph gather
+  therefore starts **no git process**; verbose's two `git log` listings
+  still do.
+- The answers are Git's, not merely equivalent: reachability and merge bases
+  port `paint_down_to_common` (commit-date queue, ties first in first out),
+  several best bases are ordered newest first with ties after earlier ones
+  (Git's `commit_list_insert_by_date`), a `shallow`-file commit has no
+  parents, and `A..tip` along a first-parent chain is the leading run of
+  commits no stop reaches (monotone, so found by doubling plus bisection).
+  Exclusion uses every parent of a stop, as Git's `--first-parent --not`
+  does. Don't "simplify" any of these: the parity tests below catch it.
+- `shallow` is "the `shallow` file exists", even empty, as Git reads it (gix's
+  own `is_shallow` wants it non-empty).
+- Every question passes through `crate::questions::ask` whichever way it is
+  answered: recorded in test builds, and failed by `recorder::fail_matching`.
+  Count history with `questions::start_recording`/`finish_recording`; the
+  `recorder` log now shows only real processes.
+- Parity: `graph::tests::with_each_history` runs a `History` test against both
+  answerers; `in_process_history_agrees_with_git_on_*` compares every view of
+  each fixture with `graph::history_through_git::enter()` (forces Git for the
+  whole process, `count-git`/tests only); `in_process_merge_bases_pick_the_base_git_prints`
+  pins the tie-break; the CLI's `gather_failing` gathers both ways.
+- Keep `parallel`/`locate`'s thread fan-out for the Git path only; in-process
+  answers run sequentially (they hold one lock).
+
 
 ### Failure handling (never drop a verified fact)
 
-- Git's exit 1 ("no") is read through
-  `worktree::git::git_command_allow_no_match` and trusted only when
-  `rev-parse --is-shallow-repository` says `false`.
+- A "no" (Git's exit 1, read through
+  `worktree::git::git_command_in_allow_no_match`, or the in-process `false`)
+  is trusted only when the shallow question says `false`. In-process walks
+  (`Commits::reaches` inside a range) are not questions and never apply this
+  rule; only `History::is_ancestor`/`merge_base` do, as before.
 - Any failure, unparseable line, or shallow "no" is a `GatherGap`: it sets
   `GraphFacts::incomplete` and never drops the graph or a verified fact.
   - A failed reread past an accepted earlier merge keeps the previous window
@@ -127,8 +162,9 @@ A lane's boundary (the first commit below it) is classified too, sharing one
   - An unreadable default-lane window still places its anchors
     (`first_parent_entries` is infallible); only a lane whose first
     `lane_window` failed is drawn empty.
-- Tests fail one Git call with `worktree::git::recorder::fail_matching`
-  (feature `count-git`; `git_command`/`git_command_allow_no_match` only), as in
+- Tests fail one question with `worktree::git::recorder::fail_matching`
+  (feature `count-git`), matched on the Git command's arguments; it fails the
+  in-process answer and the Git process alike, as in
   `git_graph::tests::a_failed_reread_after_an_accepted_merge_keeps_the_edge_and_its_source`.
 
 ## Layout (`GitGraph`)

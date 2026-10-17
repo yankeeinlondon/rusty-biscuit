@@ -173,3 +173,27 @@ runs:
 `scripts/cross-check.sh` sets both, so the recipe survives a down NAS. A slow
 login shell (and a slow first tmux capture) while the share is down is the
 host, not the test.
+
+## Source snapshots and stale archive binaries
+
+A tar overlay keeps the source host's modification times. When they predate
+a package's existing build artifacts, Cargo can reuse an older test binary,
+so the archive silently omits a new test the area run included. Touch the
+overlaid sources with the guest clock (or clean that package in the private
+target) before building the archive, and compare the expected test names with
+the PASS listing. `--extract-to` needs an existing destination directory.
+
+## drvfs volumes reject `RENAME_NOREPLACE`; inotify instances are scarce
+
+Measured 2026-10-11 on the WSL guest:
+
+- **`renameat2(RENAME_NOREPLACE)` returns `EINVAL` on drvfs** (`/mnt/<drive>`,
+  9p), even for a move to an absent name; ext4 and tmpfs support it. An
+  existing destination still returns `EEXIST` (the VFS checks it first), so
+  `EEXIST` does not prove support, and a drvfs permission failure also returns
+  `EINVAL`. Code that must move without replacing treats `EINVAL` as
+  "unsupported here" and refuses before changing anything.
+- **`max_user_instances` is 128** (`max_user_watches` 524288,
+  `max_queued_events` 16384; `BUILD_LINUX` allows 65536 instances). Each inotify instance counts, so
+  many concurrent watchers hit `EMFILE` there long before they would on
+  `BUILD_LINUX`.

@@ -1,0 +1,41 @@
+error[E0599]: no variant, associated function, or constant named `allow_any` found for enum `OriginPolicy` in the current scope
+ --> tests/fixtures/compile_fail/allow_any_needs_the_danger_name.rs
+  |
+  |     let _constructor = OriginPolicy::allow_any();
+  |                                      ^^^^^^^^^ variant, associated function, or constant not found in `OriginPolicy`
+  |
+note: if you're trying to build a new `OriginPolicy` consider using one of the following associated functions:
+      OriginPolicy::same_origin
+      OriginPolicy::allow_origins
+      OriginPolicy::allow_without_credentials
+      OriginPolicy::danger_allow_any
+      OriginPolicy::deny
+ --> src/origin.rs
+  |
+  |       pub fn same_origin() -> Self {
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  | /     pub fn allow_origins<I, S>(origins: I) -> Self
+  | |     where
+  | |         I: IntoIterator<Item = S>,
+  | |         S: Into<String>,
+  | |________________________^
+...
+  |       pub fn allow_without_credentials() -> Self {
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  |       pub fn danger_allow_any() -> Self {
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  |       pub fn deny() -> Self {
+  |       ^^^^^^^^^^^^^^^^^^^^^
+help: there is an associated function `danger_allow_any` with a similar name
+  |
+7 |     let _constructor = OriginPolicy::danger_allow_any();
+  |                                      +++++++
+
+error[E0599]: no variant, associated function, or constant named `AllowAny` found for enum `OriginPolicy` in the current scope
+ --> tests/fixtures/compile_fail/allow_any_needs_the_danger_name.rs
+  |
+  |     let _variant = OriginPolicy::AllowAny;
+  |                                  ^^^^^^^^ variant, associated function, or constant not found in `OriginPolicy`

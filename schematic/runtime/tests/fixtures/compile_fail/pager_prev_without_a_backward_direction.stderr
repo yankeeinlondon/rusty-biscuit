@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no backward direction
+ --> tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.rs
+  |
+  |     let _ = pages.prev();
+  |                   ^^^^ `prev()` needs a backward cursor leg or a previous link in the definition
+  |
+help: the trait `HasPrev` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` authors no backward direction
+note: required by a bound in `schematic_runtime::pager::Pages::<'a, A, R>::prev`
+ --> src/pager/pages.rs
+  |
+  |     pub async fn prev(&mut self) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>>
+  |                  ---- required by a bound in this associated function
+  |     where
+  |         R: HasPrev,
+  |            ^^^^^^^ required by this bound in `Pages::<'a, A, R>::prev`

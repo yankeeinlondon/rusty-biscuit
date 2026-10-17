@@ -5,6 +5,7 @@ mod perf_support;
 use predicates::prelude::*;
 use std::fs;
 use std::path::Path;
+#[cfg(unix)]
 use std::process::Command;
 use std::time::Duration;
 
@@ -29,7 +30,7 @@ fn temp_repo() -> tempfile::TempDir {
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(repo)
         .args(args)
         .status()
@@ -356,7 +357,7 @@ fn list_perf_reports_a_local_only_group_that_reconciles() {
 #[test]
 #[serial]
 fn list_perf_reports_the_remote_group_from_the_real_renderer() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Open(vec![]));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
 
@@ -388,7 +389,7 @@ fn list_perf_reports_the_remote_group_from_the_real_renderer() {
 #[test]
 #[serial]
 fn a_perf_listing_carries_its_workers_own_report() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
 

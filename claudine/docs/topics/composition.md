@@ -342,6 +342,21 @@ matrix, supported token shapes, and the open-questions list.
 
 Direct composition takes a Markdown file, composes it through Darkmatter, and sends the composed content as a prompt to an agentic CLI. Composition does not rewrite the source; lifecycle actions and the provider may mutate files.
 
+Prepared direct and inline prompts use plain Markdown. Generated components
+such as `::file-links` retain their Markdown lists and portable links; internal
+render-tree metadata is removed before dry-run output or provider delivery.
+For example, two directives produce two independent listings:
+
+```markdown
+### Modes
+
+::file-links ./modes/*.md
+
+### OSC
+
+::file-links ./osc/*.md
+```
+
 ```sh
 claudine compose @commit.md
 claudine compose --codex @commit.md
@@ -925,7 +940,7 @@ Turning dry run into lifecycle simulation is an explicit non-goal. **Composition
 
 Dry-run output follows Unix stream conventions so `claudine compose --dry-run doc.md > body.md` captures only the body:
 
-- **stdout** — the composed document body (the data product).
+- **stdout** — the composed document body as plain Markdown, matching the prompt sent to the provider.
 - **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
 
 The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set, and shown exactly as authored: Markdown such as `**bold**` or `_emphasis_` in it is not interpreted, so a file name like `_pr/open.md` keeps every character), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).

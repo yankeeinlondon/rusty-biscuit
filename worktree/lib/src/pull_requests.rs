@@ -605,7 +605,6 @@ fn save(path: &Path, file: &StoreFile) -> Result<(), WorktreeError> {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::process::Command;
     use std::rc::Rc;
 
     use super::*;
@@ -627,7 +626,7 @@ mod tests {
     }
 
     fn git(repo: &Path, args: &[&str]) {
-        let status = Command::new("git").arg("-C").arg(repo).args(args).status().expect("git should run");
+        let status = crate::git::command().arg("-C").arg(repo).args(args).status().expect("git should run");
         assert!(status.success(), "git {args:?} failed");
     }
 

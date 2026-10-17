@@ -22,7 +22,7 @@ impl DeviceDiscovery for EversoloDiscovery {
         timeout: Duration,
     ) -> Option<DeviceMetadata> {
         let eversolo_host = parse_host(host).ok()?;
-        let client = Eversolo::new(eversolo_host.to_string(), port);
+        let client = Eversolo::new(eversolo_host.to_string(), port).ok()?;
 
         let result = tokio::time::timeout(timeout, async {
             let model = client.get_model().await.ok()?;

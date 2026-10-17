@@ -31,10 +31,13 @@
 //! use schematic_schema::prelude::*;
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), SchematicError> {
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = SamsungSmartTv::new();
-//!     let response = client.get_device_info().await?;
-//!     println!("{:?}", response);
+//!     let data = client.get_device_info().await?;
+//!
+//!     // the whole response: status, headers, and request id as well
+//!     let response = client.get_device_info().full().await?;
+//!     println!("{}", response.meta);
 //!     Ok(())
 //! }
 //! ```
@@ -44,11 +47,49 @@
 //! ```text
 //! use schematic_schema::prelude::*;
 //!
-//! let client = SamsungSmartTv::with_base_url("https://staging.example.com/v1");
+//! let client = SamsungSmartTv::new().base_url("https://staging.example.com/v1");
 //! ```
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::samsung_smart_tv::*;
-use crate::shared::{RequestParts, SchematicError};
+/// The SamsungSmartTv API: Samsung Smart TV LAN API (S95C-focused modern Tizen subset)
+///
+/// Create a client with [`new`](Self::new), which never fails, and
+/// chain settings onto it. Settings are validated by
+/// [`build`](Self::build), or else by the first send, which reports
+/// an invalid one as `TransportErrorKind::InvalidClient`.
+#[derive(Clone, Debug)]
+pub struct SamsungSmartTv(schematic_runtime::Client<SamsungSmartTvApi>);
+/// The tag of the [`SamsungSmartTv`] API: each of its request types names it as `EndpointSpec::Api`, so that [`SamsungSmartTv`] sends only this API's requests. Callers never write it.
+pub enum SamsungSmartTvApi {}
+impl schematic_runtime::Api for SamsungSmartTvApi {
+    const NAME: &'static str = "SamsungSmartTv";
+}
+schematic_runtime::api_client!(SamsungSmartTv, SamsungSmartTvApi);
+impl SamsungSmartTv {
+    /// The base URL a client uses unless `base_url` sets another.
+    pub const BASE_URL: &'static str = "http://192.168.1.1:8001";
+    /// The API's documentation, when the definition names it.
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html",
+    );
+    /// What the API tells the runtime: its base URL, how it accepts
+    /// credentials, its cross-origin policy, its secret names, and its
+    /// request-id header.
+    pub fn definition() -> schematic_runtime::ApiDefinition {
+        schematic_runtime::ApiDefinition::new(Self::BASE_URL)
+    }
+    /// A client with the API's defaults and default headers. With no
+    /// credential set, a send reads the API's environment variables,
+    /// and with none present it is sent anonymously.
+    pub fn new() -> Self {
+        Self(schematic_runtime::Client::new(Self::definition()))
+    }
+}
+impl Default for SamsungSmartTv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 /// Request for `GetDeviceInfo` endpoint.
 ///
 /// ## Example
@@ -61,29 +102,27 @@ use crate::shared::{RequestParts, SchematicError};
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDeviceInfoRequest {}
-impl GetDeviceInfoRequest {
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/api/v2/".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
-    }
-}
-impl crate::shared::EndpointSpec for GetDeviceInfoRequest {
-    type Response = SamsungDeviceInfoResponse;
+impl schematic_runtime::EndpointSpec for GetDeviceInfoRequest {
+    type Api = SamsungSmartTvApi;
+    type Success = SamsungDeviceInfoResponse;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Json<SamsungDeviceInfoResponse>;
     const ENDPOINT_ID: &'static str = "GetDeviceInfo";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/api/v2/".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
+    }
 }
 /// Request for `GetServerLogs` endpoint.
 ///
@@ -97,29 +136,27 @@ impl crate::shared::EndpointSpec for GetDeviceInfoRequest {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetServerLogsRequest {}
-impl GetServerLogsRequest {
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = "/logs/".to_string();
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
-    }
-}
-impl crate::shared::EndpointSpec for GetServerLogsRequest {
-    type Response = String;
+impl schematic_runtime::EndpointSpec for GetServerLogsRequest {
+    type Api = SamsungSmartTvApi;
+    type Success = String;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Text;
     const ENDPOINT_ID: &'static str = "GetServerLogs";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = "/logs/".to_string();
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
+    }
 }
 /// Request for `LaunchApplicationById` endpoint.
 ///
@@ -141,26 +178,6 @@ impl LaunchApplicationByIdRequest {
     pub fn new(app_id: impl Into<String>) -> Self {
         Self { app_id: app_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
-        );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
-    }
 }
 impl From<&str> for LaunchApplicationByIdRequest {
     fn from(param: &str) -> Self {
@@ -172,9 +189,29 @@ impl From<String> for LaunchApplicationByIdRequest {
         Self { app_id: param }
     }
 }
-impl crate::shared::EndpointSpec for LaunchApplicationByIdRequest {
-    type Response = ();
+impl schematic_runtime::EndpointSpec for LaunchApplicationByIdRequest {
+    type Api = SamsungSmartTvApi;
+    type Success = ();
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Empty;
     const ENDPOINT_ID: &'static str = "LaunchApplicationById";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
+        );
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
+    }
 }
 /// Request for `LaunchApplicationByName` endpoint.
 ///
@@ -196,26 +233,6 @@ impl LaunchApplicationByNameRequest {
     pub fn new(app_name: impl Into<String>) -> Self {
         Self { app_name: app_name.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/ws/apps/{}", urlencoding::encode(& self.app_name.to_string())
-        );
-        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
-    }
 }
 impl From<&str> for LaunchApplicationByNameRequest {
     fn from(param: &str) -> Self {
@@ -229,9 +246,29 @@ impl From<String> for LaunchApplicationByNameRequest {
         Self { app_name: param }
     }
 }
-impl crate::shared::EndpointSpec for LaunchApplicationByNameRequest {
-    type Response = ();
+impl schematic_runtime::EndpointSpec for LaunchApplicationByNameRequest {
+    type Api = SamsungSmartTvApi;
+    type Success = ();
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Empty;
     const ENDPOINT_ID: &'static str = "LaunchApplicationByName";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = format!(
+            "/ws/apps/{}", urlencoding::encode(& self.app_name.to_string())
+        );
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
+    }
 }
 /// Request for `GetAppStatus` endpoint.
 ///
@@ -253,26 +290,6 @@ impl GetAppStatusRequest {
     pub fn new(app_id: impl Into<String>) -> Self {
         Self { app_id: app_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
-        );
-        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
-    }
 }
 impl From<&str> for GetAppStatusRequest {
     fn from(param: &str) -> Self {
@@ -284,9 +301,29 @@ impl From<String> for GetAppStatusRequest {
         Self { app_id: param }
     }
 }
-impl crate::shared::EndpointSpec for GetAppStatusRequest {
-    type Response = SamsungAppStatusResponse;
+impl schematic_runtime::EndpointSpec for GetAppStatusRequest {
+    type Api = SamsungSmartTvApi;
+    type Success = SamsungAppStatusResponse;
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Json<SamsungAppStatusResponse>;
     const ENDPOINT_ID: &'static str = "GetAppStatus";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
+        );
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
+    }
 }
 /// Request for `CloseApp` endpoint.
 ///
@@ -308,26 +345,6 @@ impl CloseAppRequest {
     pub fn new(app_id: impl Into<String>) -> Self {
         Self { app_id: app_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
-        );
-        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
-    }
 }
 impl From<&str> for CloseAppRequest {
     fn from(param: &str) -> Self {
@@ -339,9 +356,29 @@ impl From<String> for CloseAppRequest {
         Self { app_id: param }
     }
 }
-impl crate::shared::EndpointSpec for CloseAppRequest {
-    type Response = ();
+impl schematic_runtime::EndpointSpec for CloseAppRequest {
+    type Api = SamsungSmartTvApi;
+    type Success = ();
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Empty;
     const ENDPOINT_ID: &'static str = "CloseApp";
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
+        );
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
+    }
 }
 /// Request for `InstallApp` endpoint.
 ///
@@ -363,26 +400,6 @@ impl InstallAppRequest {
     pub fn new(app_id: impl Into<String>) -> Self {
         Self { app_id: app_id.into() }
     }
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// ## Returns
-    ///
-    /// A tuple of:
-    /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string with query parameters
-    /// - The request body as a `RequestBody`
-    /// - Endpoint-specific headers as key-value pairs
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if a JSON request body
-    /// fails to serialize.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
-        );
-        Ok(("PUT", path, crate::shared::RequestBody::Empty, vec![]))
-    }
 }
 impl From<&str> for InstallAppRequest {
     fn from(param: &str) -> Self {
@@ -394,1096 +411,478 @@ impl From<String> for InstallAppRequest {
         Self { app_id: param }
     }
 }
-impl crate::shared::EndpointSpec for InstallAppRequest {
-    type Response = ();
+impl schematic_runtime::EndpointSpec for InstallAppRequest {
+    type Api = SamsungSmartTvApi;
+    type Success = ();
+    type Failure = schematic_runtime::NoDeclaredError;
+    type Decoder = schematic_runtime::Empty;
     const ENDPOINT_ID: &'static str = "InstallApp";
-}
-/// Request enum for SamsungSmartTv API.
-///
-/// Each variant wraps a strongly-typed request struct.
-pub enum SamsungSmartTvRequest {
-    /// Canonical Smart View info endpoint for modern Samsung TVs. Returns device identity, model, firmware, and network details. Payload fields vary by model and firmware revision; unknown fields are preserved via flattened extras. For high-frequency polling, prefer conditional requests or payload diffing to reduce repeated owned-string allocations when firmware does not support ETag-style cache validation.
-    GetDeviceInfo(GetDeviceInfoRequest),
-    /// Debug/developer-facing log endpoint. May require developer mode enabled on the TV and can return non-success status when disabled.
-    GetServerLogs(GetServerLogsRequest),
-    /// Launch a Samsung application by its package ID. Firmware-dependent support; use when the Samsung app ID is known. Recommended runtime strategy: attempt this endpoint first, fall back to LaunchApplicationByName.
-    LaunchApplicationById(LaunchApplicationByIdRequest),
-    /// Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}.
-    LaunchApplicationByName(LaunchApplicationByNameRequest),
-    /// Get the running status and metadata of a specific application. Returns visibility, running state, version, and name.
-    GetAppStatus(GetAppStatusRequest),
-    /// Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.
-    CloseApp(CloseAppRequest),
-    /// Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.
-    InstallApp(InstallAppRequest),
-}
-impl SamsungSmartTvRequest {
-    /// Converts the request into (method, path, body, headers) parts.
-    ///
-    /// Delegates to the inner request struct's `into_parts()` method.
-    ///
-    /// ## Errors
-    ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
-    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        match self {
-            Self::GetDeviceInfo(req) => req.into_parts(),
-            Self::GetServerLogs(req) => req.into_parts(),
-            Self::LaunchApplicationById(req) => req.into_parts(),
-            Self::LaunchApplicationByName(req) => req.into_parts(),
-            Self::GetAppStatus(req) => req.into_parts(),
-            Self::CloseApp(req) => req.into_parts(),
-            Self::InstallApp(req) => req.into_parts(),
-        }
-    }
-    /// Returns the endpoint identifier for this request.
-    ///
-    /// This is used internally for response hook lookup.
-    #[must_use]
-    pub fn endpoint_id(&self) -> &'static str {
-        match self {
-            Self::GetDeviceInfo(_) => {
-                <GetDeviceInfoRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::GetServerLogs(_) => {
-                <GetServerLogsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::LaunchApplicationById(_) => {
-                <LaunchApplicationByIdRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::LaunchApplicationByName(_) => {
-                <LaunchApplicationByNameRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::GetAppStatus(_) => {
-                <GetAppStatusRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::CloseApp(_) => {
-                <CloseAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::InstallApp(_) => {
-                <InstallAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-        }
-    }
-    /// Returns how this endpoint's response body is decoded.
-    ///
-    /// The generic `request::<T>()` decodes JSON; it consults this to
-    /// reject text, binary, and empty endpoints up front.
-    #[must_use]
-    pub fn response_kind(&self) -> crate::shared::ResponseKind {
-        match self {
-            Self::GetDeviceInfo(_) => crate::shared::ResponseKind::Json,
-            Self::GetServerLogs(_) => crate::shared::ResponseKind::Text,
-            Self::LaunchApplicationById(_) => crate::shared::ResponseKind::Empty,
-            Self::LaunchApplicationByName(_) => crate::shared::ResponseKind::Empty,
-            Self::GetAppStatus(_) => crate::shared::ResponseKind::Json,
-            Self::CloseApp(_) => crate::shared::ResponseKind::Empty,
-            Self::InstallApp(_) => crate::shared::ResponseKind::Empty,
-        }
-    }
-}
-impl From<GetDeviceInfoRequest> for SamsungSmartTvRequest {
-    fn from(req: GetDeviceInfoRequest) -> Self {
-        Self::GetDeviceInfo(req)
-    }
-}
-impl From<GetServerLogsRequest> for SamsungSmartTvRequest {
-    fn from(req: GetServerLogsRequest) -> Self {
-        Self::GetServerLogs(req)
-    }
-}
-impl From<LaunchApplicationByIdRequest> for SamsungSmartTvRequest {
-    fn from(req: LaunchApplicationByIdRequest) -> Self {
-        Self::LaunchApplicationById(req)
-    }
-}
-impl From<LaunchApplicationByNameRequest> for SamsungSmartTvRequest {
-    fn from(req: LaunchApplicationByNameRequest) -> Self {
-        Self::LaunchApplicationByName(req)
-    }
-}
-impl From<GetAppStatusRequest> for SamsungSmartTvRequest {
-    fn from(req: GetAppStatusRequest) -> Self {
-        Self::GetAppStatus(req)
-    }
-}
-impl From<CloseAppRequest> for SamsungSmartTvRequest {
-    fn from(req: CloseAppRequest) -> Self {
-        Self::CloseApp(req)
-    }
-}
-impl From<InstallAppRequest> for SamsungSmartTvRequest {
-    fn from(req: InstallAppRequest) -> Self {
-        Self::InstallApp(req)
-    }
-}
-/// Samsung Smart TV LAN API (S95C-focused modern Tizen subset) client.
-pub struct SamsungSmartTv {
-    client: reqwest::Client,
-    base_url: String,
-    /// Environment variable names for authentication credentials.
-    env_auth: Vec<String>,
-    /// Authentication strategy for this API client.
-    auth_strategy: schematic_define::AuthStrategy,
-    /// Effective authentication policy for this API client.
-    auth_policy: schematic_define::AuthPolicy,
-    /// Environment variable for Basic auth username.
-    env_username: Option<String>,
-    /// Headers builder with environment variable support for credentials.
-    headers: schematic_define::Headers,
-    /// Variant-specific hooks for response customization.
-    variant_hooks: crate::shared::VariantHooks,
-}
-impl SamsungSmartTv {
-    /// Base URL for the API.
-    pub const BASE_URL: &'static str = "http://192.168.1.1:8001";
-    /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some(
-        "https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html",
-    );
-    /// Creates a new API client with the default base URL.
-    pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
-            base_url: Self::BASE_URL.to_string(),
-            env_auth: vec![],
-            auth_strategy: schematic_define::AuthStrategy::None,
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![],
-                env_fallback: None,
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Creates a new API client with a custom base URL.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// let client = Api::with_base_url("http://localhost:8080/v1");
-    /// ```
-    pub fn with_base_url(base_url: impl Into<String>) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
-            base_url: base_url.into(),
-            env_auth: vec![],
-            auth_strategy: schematic_define::AuthStrategy::None,
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![],
-                env_fallback: None,
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Creates a new API client with a pre-configured reqwest client.
-    ///
-    /// Use this when you need custom timeouts, connection pools, or middleware.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// let custom_client = reqwest::Client::builder()
-    ///     .timeout(std::time::Duration::from_secs(60))
-    ///     .build()
-    ///     .unwrap();
-    /// let api = Api::with_client(custom_client);
-    /// ```
-    pub fn with_client(client: reqwest::Client) -> Self {
-        Self {
-            client,
-            base_url: Self::BASE_URL.to_string(),
-            env_auth: vec![],
-            auth_strategy: schematic_define::AuthStrategy::None,
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![],
-                env_fallback: None,
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Creates a new API client with a pre-configured reqwest client and custom base URL.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// let custom_client = reqwest::Client::builder()
-    ///     .timeout(std::time::Duration::from_secs(60))
-    ///     .build()
-    ///     .unwrap();
-    /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
-    /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
-        Self {
-            client,
-            base_url: base_url.into(),
-            env_auth: vec![],
-            auth_strategy: schematic_define::AuthStrategy::None,
-            auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![],
-                env_fallback: None,
-            },
-            env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: None,
-                    basic_user: None,
-                    basic_pass: None,
-                    api_key: None,
-                    oauth_client_id: None,
-                    oauth_client_secret: None,
-                    oauth_redirect_uri: None,
-                }),
-            variant_hooks: crate::shared::VariantHooks::default(),
-        }
-    }
-    /// Returns a reference to the underlying HTTP client.
-    ///
-    /// Use this for custom requests that aren't covered by the generated methods,
-    /// such as paginated endpoints that require query parameters.
-    pub fn http_client(&self) -> &reqwest::Client {
-        &self.client
-    }
-    /// Returns the base URL for this API client.
-    pub fn api_base_url(&self) -> &str {
-        &self.base_url
-    }
-    /// Returns the effective authentication policy for this client.
-    pub fn auth_policy(&self) -> &schematic_define::AuthPolicy {
-        &self.auth_policy
-    }
-    /// Returns OAuth2 provider metadata, if this client accepts OAuth tokens.
-    pub fn oauth_config(&self) -> Option<&schematic_define::OAuth2Config> {
-        self.auth_policy.oauth2()
-    }
-    /// Returns the API key header name and value for authentication.
-    ///
-    /// Returns `None` if the authentication strategy is not `ApiKey`
-    /// or if the API key environment variable is not set.
-    pub fn api_key_header(&self) -> Option<(String, String)> {
-        let (header, value_prefix) = self
-            .auth_policy
-            .explicit
-            .iter()
-            .find_map(|method| match method {
-                schematic_define::AuthMethod::ApiKey { header, value_prefix } => {
-                    Some((header.clone(), value_prefix.clone()))
-                }
-                _ => None,
-            })
-            .or_else(|| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| (api_key.header.clone(), None))
-            })?;
-        self.headers
-            .env_mapping()
-            .api_key
-            .as_ref()
-            .and_then(|api_key| {
-                api_key
-                    .names
-                    .names()
-                    .iter()
-                    .find_map(|env_name| std::env::var(env_name).ok())
-            })
-            .map(|value| {
-                let value = format!(
-                    "{}{}", value_prefix.clone().unwrap_or_default(), value
-                );
-                (header, value)
-            })
-    }
-    /// Creates a variant builder for customizing this API client.
-    ///
-    /// The builder pattern allows fluent configuration of:
-    /// - Base URL (for proxies, mock servers, or different environments)
-    /// - Authentication credentials (different env var names)
-    /// - Authentication strategy
-    /// - Response hooks for JSON transformation and mutation
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// use schematic_define::UpdateStrategy;
-    ///
-    /// let api = Api::new();
-    ///
-    /// // Create a variant pointing to a staging server with a response hook
-    /// let staging = api.variant()
-    ///     .base_url("https://staging.api.com/v1")
-    ///     .env_auth(vec!["STAGING_API_KEY".to_string()])
-    ///     .mutate_response::<ListModelsRequest>(|ctx, response| {
-    ///         response.data.retain(|m| !m.id.contains("deprecated"));
-    ///         Ok(())
-    ///     })
-    ///     .build();
-    /// ```
-    #[must_use]
-    pub fn variant(&self) -> SamsungSmartTvVariantBuilder<'_> {
-        SamsungSmartTvVariantBuilder::new(self)
-    }
-    /// Creates a variant of this API client with different configuration.
-    ///
-    /// This is a convenience method equivalent to:
-    /// ```text
-    /// api.variant()
-    ///     .base_url(base_url)
-    ///     .env_auth(env_auth)
-    ///     .auth_update(strategy)
-    ///     .build()
-    /// ```
-    ///
-    /// ## Arguments
-    ///
-    /// * `base_url` - New base URL for this variant
-    /// * `env_auth` - New environment variable names for credentials
-    /// * `strategy` - How to update the auth strategy:
-    ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
-    ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
-    pub fn variant_with(
-        &self,
-        base_url: impl Into<String>,
-        env_auth: Vec<String>,
-        strategy: schematic_define::UpdateStrategy,
-    ) -> Self {
-        self.variant()
-            .base_url(base_url)
-            .env_auth(env_auth)
-            .auth_update(strategy)
-            .build()
-    }
-    /// Creates a variant of this API client with custom headers configuration.
-    ///
-    /// This is a convenience method for creating variants with fully customized
-    /// headers, including environment variable mapping for credentials.
-    ///
-    /// ## Arguments
-    ///
-    /// * `headers` - Headers builder with environment mapping configured
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// use schematic_define::{Headers, EnvMapping, EnvList};
-    ///
-    /// let custom_headers = Headers::default()
-    ///     .with_env_mapping(EnvMapping {
-    ///         bearer_token: Some(EnvList::single("STAGING_TOKEN")),
-    ///         basic_user: None,
-    ///         basic_pass: None,
-    ///         api_key: None,
-    ///     })
-    ///     .header("X-Environment", "staging");
-    ///
-    /// let staging_client = api.variant_with_headers(custom_headers);
-    /// ```
-    pub fn variant_with_headers(&self, headers: schematic_define::Headers) -> Self {
-        self.variant().headers_builder(headers).build()
-    }
-}
-impl Default for SamsungSmartTv {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-/// Builder for creating customized variants of the API client.
-///
-/// Use [`#struct_name::variant()`] to create a builder, then chain
-/// configuration methods and call [`build()`](Self::build) to create
-/// the variant client.
-pub struct SamsungSmartTvVariantBuilder<'a> {
-    base: &'a SamsungSmartTv,
-    base_url: Option<String>,
-    env_auth: Option<Vec<String>>,
-    auth_update: schematic_define::UpdateStrategy,
-    headers: Option<schematic_define::Headers>,
-    pre_response_json: Option<std::sync::Arc<crate::shared::PreResponseJsonHook>>,
-    response_mutators: std::collections::HashMap<
-        &'static str,
-        std::sync::Arc<dyn crate::shared::AnyResponseMutator>,
-    >,
-}
-impl<'a> SamsungSmartTvVariantBuilder<'a> {
-    /// Creates a new variant builder from the base API client.
-    fn new(base: &'a SamsungSmartTv) -> Self {
-        Self {
-            base,
-            base_url: None,
-            env_auth: None,
-            auth_update: schematic_define::UpdateStrategy::NoChange,
-            headers: None,
-            pre_response_json: None,
-            response_mutators: std::collections::HashMap::new(),
-        }
-    }
-    /// Sets the base URL for the variant.
-    ///
-    /// If not set, the original client's base URL is used.
-    #[must_use]
-    pub fn base_url(mut self, url: impl Into<String>) -> Self {
-        self.base_url = Some(url.into());
-        self
-    }
-    /// Sets the environment variable names for authentication.
-    ///
-    /// If not set, the original client's env_auth is used.
-    #[must_use]
-    pub fn env_auth(mut self, env_auth: Vec<String>) -> Self {
-        self.env_auth = Some(env_auth);
-        self
-    }
-    /// Sets how the authentication strategy should be updated.
-    ///
-    /// - `UpdateStrategy::NoChange` - Keep current auth strategy (default)
-    /// - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
-    #[must_use]
-    pub fn auth_update(mut self, strategy: schematic_define::UpdateStrategy) -> Self {
-        self.auth_update = strategy;
-        self
-    }
-    /// Sets custom headers for the variant using a Headers builder.
-    ///
-    /// This replaces the entire headers configuration, including environment
-    /// variable mapping. If not set, the original client's headers are used.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// use schematic_define::{Headers, EnvMapping, EnvList};
-    ///
-    /// let custom = Headers::default()
-    ///     .with_env_mapping(EnvMapping {
-    ///         bearer_token: Some(EnvList::single("STAGING_KEY")),
-    ///         basic_user: None,
-    ///         basic_pass: None,
-    ///         api_key: None,
-    ///     })
-    ///     .header("X-Custom", "value");
-    ///
-    /// let variant = api.variant().headers_builder(custom).build();
-    /// ```
-    #[must_use]
-    pub fn headers_builder(mut self, headers: schematic_define::Headers) -> Self {
-        self.headers = Some(headers);
-        self
-    }
-    /// Sets a pre-response JSON transformation hook.
-    ///
-    /// This hook runs after receiving an HTTP response but before
-    /// deserializing to the response type. Use it to reshape JSON
-    /// payloads to match expected structures.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// // Unwrap a { data: ... } envelope
-    /// variant.pre_response_json(|ctx, json| {
-    ///     Ok(json.get("data").cloned().unwrap_or(json))
-    /// })
-    /// ```
-    #[must_use]
-    pub fn pre_response_json<F>(mut self, hook: F) -> Self
-    where
-        F: Fn(
-                &crate::shared::ResponseContext,
-                serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
-            + 'static,
-    {
-        self.pre_response_json = Some(std::sync::Arc::new(hook));
-        self
-    }
-    /// Registers a response mutation hook for a specific endpoint.
-    ///
-    /// This hook runs after deserializing the response and can mutate
-    /// the response object in place. The endpoint is identified by its
-    /// request type.
-    ///
-    /// ## Examples
-    ///
-    /// ```text
-    /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
-    ///     response.data.retain(|m| !m.id.contains("deprecated"));
-    ///     Ok(())
-    /// })
-    /// ```
-    #[must_use]
-    pub fn mutate_response<R, F>(mut self, hook: F) -> Self
-    where
-        R: crate::shared::EndpointSpec,
-        R::Response: Send + Sync + 'static,
-        F: Fn(
-                &crate::shared::ResponseContext,
-                &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
-    {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
-        self
-    }
-    /// Builds the variant API client with the configured options.
-    ///
-    /// Options not explicitly set will inherit from the base client.
-    #[must_use]
-    pub fn build(self) -> SamsungSmartTv {
-        let auth_update = self.auth_update.clone();
-        let auth_policy = match auth_update.clone() {
-            schematic_define::UpdateStrategy::NoChange => self.base.auth_policy.clone(),
-            schematic_define::UpdateStrategy::ChangeTo(ref auth) => {
-                schematic_define::AuthPolicy::from_auth_strategy(auth)
-            }
-            _ => self.base.auth_policy.clone(),
-        };
-        let auth_strategy = match auth_update.clone() {
-            schematic_define::UpdateStrategy::NoChange => self.base.auth_strategy.clone(),
-            schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
-            _ => self.base.auth_strategy.clone(),
-        };
-        let has_env_auth_override = self.env_auth.is_some();
-        let env_auth = self.env_auth.unwrap_or_else(|| self.base.env_auth.clone());
-        let headers = match self.headers {
-            Some(headers) => headers,
-            None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
-                self.base
-                    .headers
-                    .clone()
-                    .with_env_mapping(
-                        schematic_define::RestApi::legacy_env_mapping_for(
-                            &auth_strategy,
-                            &env_auth,
-                            self.base.env_username.as_deref(),
-                        ),
-                    )
-            }
-            None => self.base.headers.clone(),
-        };
-        SamsungSmartTv {
-            client: self.base.client.clone(),
-            base_url: self.base_url.unwrap_or_else(|| self.base.base_url.clone()),
-            env_auth,
-            auth_strategy,
-            auth_policy,
-            env_username: self.base.env_username.clone(),
-            headers,
-            variant_hooks: crate::shared::VariantHooks {
-                pre_response_json: self.pre_response_json,
-                response_mutators: self.response_mutators,
-            },
-        }
-    }
-}
-impl SamsungSmartTv {
-    fn auth_is_required(&self) -> bool {
-        !self.auth_policy.explicit.is_empty() || self.auth_policy.env_fallback.is_some()
-    }
-    fn accepted_explicit_auth_methods(&self) -> Vec<String> {
-        self.auth_policy
-            .explicit
-            .iter()
-            .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => {
-                    match header.as_deref() {
-                        Some(header) => format!("an explicit bearer token in `{header}`"),
-                        None => "an explicit bearer token".to_string(),
-                    }
-                }
-                schematic_define::AuthMethod::ApiKey { header, .. } => {
-                    format!("an explicit API key in `{header}`")
-                }
-                schematic_define::AuthMethod::Basic => {
-                    "explicit basic auth credentials".to_string()
-                }
-                schematic_define::AuthMethod::OAuth2(_) => {
-                    "an explicit OAuth access token".to_string()
-                }
-                _ => "explicit authentication".to_string(),
-            })
-            .collect()
-    }
-    fn env_fallback_var_names(&self) -> Vec<String> {
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .bearer_token
-                    .as_ref()
-                    .map(|list| list.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| api_key.names.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let mut vars = Vec::new();
-                if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
-                    vars.extend(user.names().iter().cloned());
-                }
-                if let Some(pass) = self.headers.env_mapping().basic_pass.as_ref() {
-                    vars.extend(pass.names().iter().cloned());
-                }
-                vars
-            }
-            None => Vec::new(),
-            _ => Vec::new(),
-        }
-    }
-    fn authentication_required_error(&self) -> SchematicError {
-        let explicit_methods = self.accepted_explicit_auth_methods();
-        let env_fallback_vars = self.env_fallback_var_names();
-        let mut options = Vec::new();
-        if !explicit_methods.is_empty() {
-            options.push(explicit_methods.join(", "));
-        }
-        if !env_fallback_vars.is_empty() {
-            options
-                .push(
-                    format!(
-                        "set one of the fallback env vars `{}`", env_fallback_vars
-                        .join("`, `")
-                    ),
-                );
-        }
-        let mut message = if options.is_empty() {
-            "Authentication required.".to_string()
-        } else {
-            format!("Authentication required: {}.", options.join(" or "))
-        };
-        if self.auth_policy.oauth2().is_some() {
-            message
-                .push_str(
-                    " Obtain the OAuth token with schematic-oauth, then inject it with `.oauth_token(...)`.",
-                );
-        }
-        SchematicError::AuthenticationRequired {
-            message,
-            explicit_methods,
-            env_fallback_vars,
-        }
-    }
-    fn apply_env_fallback(
-        &self,
-        headers: schematic_define::Headers,
-    ) -> schematic_define::Headers {
-        let env_mapping = self.headers.env_mapping().clone();
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping
-                    .bearer_token
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                match (token, header.as_deref()) {
-                    (Some(token), Some(header)) => {
-                        headers.use_bearer_token_with_header(token, header)
-                    }
-                    (Some(token), None) => headers.use_bearer_token(token),
-                    _ => headers,
-                }
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header, value_prefix }) => {
-                let key = env_mapping
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|name| std::env::var(name).ok())
-                    });
-                match key {
-                    Some(key) => {
-                        let value = format!(
-                            "{}{}", value_prefix.clone().unwrap_or_default(), key
-                        );
-                        headers.header(header.clone(), value)
-                    }
-                    None => headers,
-                }
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping
-                    .basic_user
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                let password = env_mapping
-                    .basic_pass
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                match (username, password) {
-                    (Some(username), Some(password)) => {
-                        headers.use_basic_auth(username, password)
-                    }
-                    _ => headers,
-                }
-            }
-            None => headers,
-            _ => headers,
-        }
-    }
-    fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
-        match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header
-                    .as_deref()
-                    .map_or_else(
-                        || headers.has_authorization(),
-                        |header| headers.has_header(header),
-                    )
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header, .. }) => {
-                headers.has_header(header)
-            }
-            Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),
-            None => false,
-            _ => false,
-        }
-    }
-    fn resolve_request_headers(&self) -> Result<Vec<(String, String)>, SchematicError> {
-        let mut headers = self.headers.clone();
-        if !headers.has_explicit_auth() {
-            headers = self.apply_env_fallback(headers);
-        }
-        if self.auth_is_required() && !headers.has_explicit_auth()
-            && !self.headers_satisfy_fallback(&headers)
-        {
-            return Err(self.authentication_required_error());
-        }
-        headers.build().map_err(SchematicError::from)
-    }
-    /// Builds and sends an HTTP request, returning the raw response plus context.
-    ///
-    /// This is an internal helper method used by the public request methods.
-    /// Returns both the response and the context needed for hook processing.
-    async fn build_and_send_request(
-        &self,
-        request: impl Into<SamsungSmartTvRequest>,
-    ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
-        let request = request.into();
-        let endpoint_id = request.endpoint_id();
-        let (method, path, body, endpoint_headers) = request.into_parts()?;
-        let url = format!("{}{}", self.base_url, path);
-        let mut req_builder = match method {
-            "GET" => self.client.get(&url),
-            "POST" => self.client.post(&url),
-            "PUT" => self.client.put(&url),
-            "PATCH" => self.client.patch(&url),
-            "DELETE" => self.client.delete(&url),
-            "HEAD" => self.client.head(&url),
-            "OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url),
-            _ => return Err(SchematicError::UnsupportedMethod(method.to_string())),
-        };
-        let api_headers = self.resolve_request_headers()?;
-        let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
-        for (key, value) in merged_headers {
-            req_builder = req_builder.header(key.as_str(), value.as_str());
-        }
-        req_builder = match body {
-            crate::shared::RequestBody::Empty => req_builder,
-            crate::shared::RequestBody::Json(json) => {
-                req_builder.header("Content-Type", "application/json").body(json)
-            }
-            crate::shared::RequestBody::Multipart(parts) => {
-                let mut form = reqwest::multipart::Form::new();
-                for part in parts {
-                    form = match part {
-                        crate::shared::FormPart::Text { name, value } => {
-                            form.text(name, value)
-                        }
-                        crate::shared::FormPart::Json { name, value } => {
-                            let field = reqwest::multipart::Part::text(value)
-                                .mime_str("application/json")
-                                .map_err(|e| {
-                                    SchematicError::SerializationError(e.to_string())
-                                })?;
-                            form.part(name, field)
-                        }
-                        crate::shared::FormPart::File { name, file } => {
-                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
-                                .file_name(file.file_name);
-                            if let Some(mime) = file.mime {
-                                field = field
-                                    .mime_str(&mime)
-                                    .map_err(|e| {
-                                        SchematicError::SerializationError(e.to_string())
-                                    })?;
-                            }
-                            form.part(name, field)
-                        }
-                    };
-                }
-                req_builder.multipart(form)
-            }
-            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
-            crate::shared::RequestBody::Raw { content_type, bytes } => {
-                req_builder.header("Content-Type", content_type).body(bytes)
-            }
-        };
-        let response = req_builder.send().await?;
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body_text = response.text().await.unwrap_or_default();
-            return Err(SchematicError::ApiError {
-                status,
-                body: body_text,
-            });
-        }
-        let status = response.status().as_u16();
-        let headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-        let ctx = crate::shared::ResponseContext::new(
-            endpoint_id,
-            method,
-            path.clone(),
-            url,
-            status,
-            headers,
+    const METHOD: schematic_runtime::Method = schematic_runtime::Method::PUT;
+    fn into_parts(
+        self,
+    ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        Ok((response, ctx))
+        let query: Vec<(String, String)> = Vec::new();
+        let headers: Vec<(String, String)> = vec![];
+        Ok(schematic_runtime::RequestParts {
+            method: <Self as schematic_runtime::EndpointSpec>::METHOD,
+            path,
+            query,
+            headers,
+            body: schematic_runtime::RequestBody::Empty,
+        })
     }
-    /// Merges API-level and endpoint-level headers.
-    ///
-    /// Endpoint headers override API headers for matching keys (case-insensitive).
-    /// Returns a new Vec with the merged headers.
-    fn merge_headers(
-        api_headers: &[(String, String)],
-        endpoint_headers: &[(String, String)],
-    ) -> Vec<(String, String)> {
-        let mut result: Vec<(String, String)> = Vec::new();
-        for (api_key, api_value) in api_headers {
-            let has_override = endpoint_headers
-                .iter()
-                .any(|(k, _)| k.eq_ignore_ascii_case(api_key));
-            if !has_override {
-                result.push((api_key.clone(), api_value.clone()));
-            }
-        }
-        for (key, value) in endpoint_headers {
-            result.push((key.clone(), value.clone()));
-        }
-        result
+}
+/// A call to the `GetDeviceInfo` endpoint, returned by [`SamsungSmartTv::get_device_info`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetDeviceInfoCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, GetDeviceInfoRequest>,
+);
+impl<'a> GetDeviceInfoCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
     }
-    /// Executes an API request expecting a JSON response.
-    ///
-    /// Takes any request type that can be converted into the request enum
-    /// and returns the deserialized response. If response hooks are configured
-    /// via the variant builder, they will be applied.
-    ///
-    /// ## Hooks
-    ///
-    /// If configured via `variant()`:
-    /// - `pre_response_json` - Transforms JSON before deserialization
-    /// - `mutate_response` - Mutates the response after deserialization
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, GetDeviceInfoRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
     ///
     /// ## Errors
     ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    /// - The response body cannot be deserialized as JSON
-    /// - A hook returns an error
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
-        &self,
-        request: impl Into<SamsungSmartTvRequest>,
-    ) -> Result<T, SchematicError> {
-        let request = request.into();
-        match request.response_kind() {
-            crate::shared::ResponseKind::Json => {}
-            crate::shared::ResponseKind::Text => {
-                return Err(SchematicError::WrongResponseDecoder {
-                    endpoint_id: request.endpoint_id(),
-                    kind: "text",
-                    expected_method: "request_text",
-                });
-            }
-            crate::shared::ResponseKind::Binary => {
-                return Err(SchematicError::WrongResponseDecoder {
-                    endpoint_id: request.endpoint_id(),
-                    kind: "binary",
-                    expected_method: "request_bytes",
-                });
-            }
-            crate::shared::ResponseKind::Empty => {
-                return Err(SchematicError::WrongResponseDecoder {
-                    endpoint_id: request.endpoint_id(),
-                    kind: "empty",
-                    expected_method: "request_empty",
-                });
-            }
-        }
-        let (response, ctx) = self.build_and_send_request(request).await?;
-        let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
-        let has_mutator = self
-            .variant_hooks
-            .response_mutators
-            .contains_key(ctx.endpoint_id);
-        if has_pre_hook || has_mutator {
-            let bytes = response.bytes().await?;
-            let mut json_value: serde_json::Value = serde_json::from_slice(&bytes)?;
-            if let Some(ref hook) = self.variant_hooks.pre_response_json {
-                json_value = hook(&ctx, json_value)?;
-            }
-            let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self
-                .variant_hooks
-                .response_mutators
-                .get(ctx.endpoint_id)
-            {
-                mutator.mutate(&ctx, &mut result)?;
-            }
-            Ok(result)
-        } else {
-            let result = response.json::<T>().await?;
-            Ok(result)
-        }
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
     }
-    /// Executes an API request expecting a plain text response.
-    ///
-    /// Returns the response body as a String.
+}
+impl<'a> ::core::future::IntoFuture for GetDeviceInfoCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        GetDeviceInfoRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetServerLogs` endpoint, returned by [`SamsungSmartTv::get_server_logs`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetServerLogsCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, GetServerLogsRequest>,
+);
+impl<'a> GetServerLogsCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, GetServerLogsRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
     ///
     /// ## Errors
     ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request_text(
-        &self,
-        request: impl Into<SamsungSmartTvRequest>,
-    ) -> Result<String, SchematicError> {
-        let (response, _ctx) = self.build_and_send_request(request).await?;
-        let text = response.text().await?;
-        Ok(text)
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
     }
-    /// Executes an API request expecting no response body.
-    ///
-    /// Use this for endpoints that return 204 No Content or where
-    /// the response body should be ignored.
+}
+impl<'a> ::core::future::IntoFuture for GetServerLogsCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        GetServerLogsRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `LaunchApplicationById` endpoint, returned by [`SamsungSmartTv::launch_application_by_id`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LaunchApplicationByIdCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, LaunchApplicationByIdRequest>,
+);
+impl<'a> LaunchApplicationByIdCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByIdRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
     ///
     /// ## Errors
     ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request_empty(
-        &self,
-        request: impl Into<SamsungSmartTvRequest>,
-    ) -> Result<(), SchematicError> {
-        let (_response, _ctx) = self.build_and_send_request(request).await?;
-        Ok(())
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
     }
-    /// Convenience method for the `GetServerLogs` endpoint.
+}
+impl<'a> ::core::future::IntoFuture for LaunchApplicationByIdCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByIdRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `LaunchApplicationByName` endpoint, returned by [`SamsungSmartTv::launch_application_by_name`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct LaunchApplicationByNameCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, LaunchApplicationByNameRequest>,
+);
+impl<'a> LaunchApplicationByNameCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByNameRequest,
+    > {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
     ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for LaunchApplicationByNameCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        LaunchApplicationByNameRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `GetAppStatus` endpoint, returned by [`SamsungSmartTv::get_app_status`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct GetAppStatusCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, GetAppStatusRequest>,
+);
+impl<'a> GetAppStatusCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, GetAppStatusRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for GetAppStatusCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        GetAppStatusRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `CloseApp` endpoint, returned by [`SamsungSmartTv::close_app`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct CloseAppCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, CloseAppRequest>,
+);
+impl<'a> CloseAppCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, CloseAppRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for CloseAppCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        CloseAppRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+/// A call to the `InstallApp` endpoint, returned by [`SamsungSmartTv::install_app`].
+///
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+#[derive(Clone, Debug)]
+#[must_use = "a call sends nothing until it is awaited"]
+pub struct InstallAppCall<'a>(
+    schematic_runtime::Call<'a, SamsungSmartTvApi, InstallAppRequest>,
+);
+impl<'a> InstallAppCall<'a> {
+    /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
+    pub fn anonymous(self) -> Self {
+        Self(self.0.anonymous())
+    }
+    /// See [`Call::credential`](schematic_runtime::Call::credential).
+    pub fn credential(self, credential: schematic_runtime::Credential) -> Self {
+        Self(self.0.credential(credential))
+    }
+    /// See [`Call::deadline`](schematic_runtime::Call::deadline).
+    pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self {
+        Self(self.0.deadline(deadline))
+    }
+    /// See [`Call::full`](schematic_runtime::Call::full). Chain it
+    /// last: this call's setters are not available on the result.
+    pub fn full(
+        self,
+    ) -> schematic_runtime::FullCall<'a, SamsungSmartTvApi, InstallAppRequest> {
+        self.0.full()
+    }
+    /// See [`Call::build`](schematic_runtime::Call::build).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
+    pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
+        self.0.build().map(Self)
+    }
+}
+impl<'a> ::core::future::IntoFuture for InstallAppCall<'a> {
+    type Output = <schematic_runtime::Call<
+        'a,
+        SamsungSmartTvApi,
+        InstallAppRequest,
+    > as ::core::future::IntoFuture>::Output;
+    type IntoFuture = schematic_runtime::CallFuture<'a, Self::Output>;
+    #[inline]
+    fn into_future(self) -> Self::IntoFuture {
+        ::core::future::IntoFuture::into_future(self.0)
+    }
+}
+impl SamsungSmartTv {
+    /// Canonical Smart View info endpoint for modern Samsung TVs. Returns device identity, model, firmware, and network details. Payload fields vary by model and firmware revision; unknown fields are preserved via flattened extras. For high-frequency polling, prefer conditional requests or payload diffing to reduce repeated owned-string allocations when firmware does not support ETag-style cache validation.
+    ///
+    /// `GET /api/v2/`
+    ///
+    /// Returns a [`GetDeviceInfoCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_device_info(&self) -> GetDeviceInfoCall<'_> {
+        GetDeviceInfoCall(self.0.send(GetDeviceInfoRequest::default()))
+    }
     /// Debug/developer-facing log endpoint. May require developer mode enabled on the TV and can return non-success status when disabled.
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn get_server_logs(
-        &self,
-        request: GetServerLogsRequest,
-    ) -> Result<String, SchematicError> {
-        self.request_text(request).await
-    }
-    /// Convenience method for the `LaunchApplicationById` endpoint.
     ///
+    /// `GET /logs/`
+    ///
+    /// Returns a [`GetServerLogsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    pub fn get_server_logs(&self) -> GetServerLogsCall<'_> {
+        GetServerLogsCall(self.0.send(GetServerLogsRequest::default()))
+    }
     /// Launch a Samsung application by its package ID. Firmware-dependent support; use when the Samsung app ID is known. Recommended runtime strategy: attempt this endpoint first, fall back to LaunchApplicationByName.
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn launch_application_by_id(
-        &self,
-        request: LaunchApplicationByIdRequest,
-    ) -> Result<(), SchematicError> {
-        self.request_empty(request).await
-    }
-    /// Convenience method for the `LaunchApplicationByName` endpoint.
     ///
+    /// `POST /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`LaunchApplicationByIdCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn launch_application_by_id(
+        &self,
+        app_id: impl Into<String>,
+    ) -> LaunchApplicationByIdCall<'_> {
+        LaunchApplicationByIdCall(self.0.send(LaunchApplicationByIdRequest::new(app_id)))
+    }
     /// Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}.
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn launch_application_by_name(
-        &self,
-        request: LaunchApplicationByNameRequest,
-    ) -> Result<(), SchematicError> {
-        self.request_empty(request).await
-    }
-    /// Convenience method for the `CloseApp` endpoint.
     ///
+    /// `POST /ws/apps/{app_name}`
+    ///
+    /// Returns a [`LaunchApplicationByNameCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_name: impl Into<String>`: the `{app_name}` path parameter
+    pub fn launch_application_by_name(
+        &self,
+        app_name: impl Into<String>,
+    ) -> LaunchApplicationByNameCall<'_> {
+        LaunchApplicationByNameCall(
+            self.0.send(LaunchApplicationByNameRequest::new(app_name)),
+        )
+    }
+    /// Get the running status and metadata of a specific application. Returns visibility, running state, version, and name.
+    ///
+    /// `GET /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`GetAppStatusCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn get_app_status(&self, app_id: impl Into<String>) -> GetAppStatusCall<'_> {
+        GetAppStatusCall(self.0.send(GetAppStatusRequest::new(app_id)))
+    }
     /// Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn close_app(
-        &self,
-        request: CloseAppRequest,
-    ) -> Result<(), SchematicError> {
-        self.request_empty(request).await
-    }
-    /// Convenience method for the `InstallApp` endpoint.
     ///
+    /// `DELETE /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`CloseAppCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn close_app(&self, app_id: impl Into<String>) -> CloseAppCall<'_> {
+        CloseAppCall(self.0.send(CloseAppRequest::new(app_id)))
+    }
     /// Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.
-    #[must_use = "this returns a Future that must be awaited"]
-    pub async fn install_app(
-        &self,
-        request: InstallAppRequest,
-    ) -> Result<(), SchematicError> {
-        self.request_empty(request).await
+    ///
+    /// `PUT /api/v2/applications/{app_id}`
+    ///
+    /// Returns a [`InstallAppCall`]: chain optional values and per-call settings on it, then `.await` it to send.
+    ///
+    /// ## Arguments
+    ///
+    /// - `app_id: impl Into<String>`: the `{app_id}` path parameter
+    pub fn install_app(&self, app_id: impl Into<String>) -> InstallAppCall<'_> {
+        InstallAppCall(self.0.send(InstallAppRequest::new(app_id)))
     }
 }

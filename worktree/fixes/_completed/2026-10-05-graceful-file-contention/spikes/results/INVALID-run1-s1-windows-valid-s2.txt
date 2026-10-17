@@ -1,0 +1,194 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Length LastWriteTime        
+------ -------------        
+587776 10/11/2026 8:54:23 PM
+                            
+                            
+S1 os=windows base=B:\coding\gfc-run\gfc-s1
+S1 absent-dest result=Ok identity_before=[legacy(ok=1 vsn=66c9d8b2 idx=600000000018fd0d) id128(ok=1 vsn=3c66ca1e66c9d8b2 id=00000000000000000dfd180000000000)] identity_after=[legacy(ok=1 vsn=66c9d8b2 idx=600000000018fd0d) id128(ok=1 vsn=3c66ca1e66c9d8b2 id=00000000000000000dfd180000000000)] same=true child_kept=true
+S1 dest-empty-dir noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) stage=set-info src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) stage=set-info src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-file noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) stage=set-info src_kept=true dest_identity_unchanged=true
+S1 dest-file MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) stage=set-info src_kept=true dest_identity_unchanged=true
+S1 dest-file std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-nonempty-dir noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) stage=set-info src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) stage=set-info src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir std::fs::rename=Err(kind=DirectoryNotEmpty, os=Some(145), msg=The directory is not empty. (os error 145)) stage=set-info src_still_there=true dest_replaced=false
+S1 dest-dangling-link noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) stage=set-info link_kept=true nowhere_created=false
+S1 missing-src noreplace=Err(kind=NotFound, os=Some(2), msg=The system cannot find the file specified. (os error 2)) stage=open
+S1 cross-device to=C:\Users\ken\AppData\Local\Temp\gfc-run\gfc-s1-xdev-dst noreplace=Err(kind=CrossesDevices, os=Some(17), msg=The system cannot move the file to a different disk drive. (os error 17)) stage=set-info src_kept=true dest_exists=false
+S1 in-use child-cwd-in-subdir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S1 in-use open-file-no-share-delete noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S1 in-use open-file-std-default-share noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S1 in-use own-notify-watcher noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S1 in-use own-notify-watcher-on-parent-recursive noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info moved=false
+S1 in-use handle-on-subdir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S1 in-use handle-on-root-dir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S1 permission-deny-DE-on-src icacls_ok=true noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S1 permission-deny-AD-on-parent icacls_ok=true noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) stage=set-info src_kept=true
+S2 os=windows root=B:\coding\gfc-run\gfc-s2 watcher-kind=ReadDirectoryChangesWatcher
+S2 ===== strategy A-child-watch
+S2 watch parent=None checkout=None admin=None
+S2 threads before=4 with-watcher=5
+S2 [01 baseline-no-action] events=1
+    +   0ms Modify(Any) [parent\checkout]
+S2 [02 create checkout/sub/new.txt] events=2
+    +   0ms Create(Any) [parent\checkout\sub\new.txt]
+    +   0ms Modify(Any) [parent\checkout\sub\new.txt]
+S2 [03 append checkout/a.txt] events=1
+    +   0ms Modify(Any) [parent\checkout\a.txt]
+S2 [04 metadata-only (readonly on/off) checkout/a.txt] events=2
+    +   0ms Modify(Any) [parent\checkout\a.txt]
+    +   0ms Modify(Any) [parent\checkout\a.txt]
+S2 [05 delete checkout/b.txt] events=1
+    +   0ms Remove(Any) [parent\checkout\b.txt]
+S2 [06 admin: index.lock -> index (rename-replace), sharedindex.* create] events=7
+    +   0ms Create(Any) [admin\index.lock]
+    +   0ms Modify(Any) [admin\index.lock]
+    +   0ms Remove(Any) [admin\index.lock]
+    +   0ms Modify(Any) [admin\index]
+    +   0ms Modify(Any) [admin\index]
+    +   0ms Create(Any) [admin\sharedindex.0123abcd]
+    +   0ms Modify(Any) [admin\sharedindex.0123abcd]
+S2 [07 sibling activity in parent (outside both trees)] events=3
+    +   0ms Create(Any) [parent\sibling.txt]
+    +   0ms Modify(Any) [parent\sibling.txt]
+    +   0ms Create(Any) [parent\othersib]
+S2 noreplace rename checkout->quarantine while watched: Ok
+S2 [08 rename checkout -> .checkout.wt-removal-q1] events=3
+    +   0ms Modify(Name(From)) [parent\checkout]
+    +   0ms Modify(Name(To)) [parent\.checkout.wt-removal-q1]
+    +   0ms Modify(Any) [parent\.checkout.wt-removal-q1]
+S2 [09 write inside quarantine (no new watch)] events=3
+    +   0ms Create(Any) [parent\checkout\sub\after-move.txt]
+    +   0ms Modify(Any) [parent\checkout\sub\after-move.txt]
+    +   0ms Modify(Any) [parent\checkout\a.txt]
+S2 [10 recreate original checkout/ + recreated.txt] events=1
+    +   0ms Create(Any) [parent\checkout]
+S2 unwatch(original checkout path) after rename = None
+S2 watch(quarantine) = None
+S2 [11 write inside quarantine (fresh watch)] events=2
+    +   0ms Create(Any) [parent\.checkout.wt-removal-q1\sub\after-rewatch.txt]
+    +   0ms Modify(Any) [parent\.checkout.wt-removal-q1\sub\after-rewatch.txt]
+S2 [11b write inside recreated original (old watch removed)] events=0
+S2 [12 delete quarantine children (operation-owned)] events=5
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\sub\new.txt]
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\sub\after-move.txt]
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\sub\after-rewatch.txt]
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\a.txt]
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\sub]
+S2 remove_dir(quarantine root, watched) = Ok
+S2 [13 delete quarantine root itself] events=0
+S2 [14 parent still observed after quarantine root removed] events=2
+    +   0ms Create(Any) [parent\after-root-removed.txt]
+    +   0ms Modify(Any) [parent\after-root-removed.txt]
+S2 handler-dropped (bounded queue full) = 0
+S2 threads after-drop=4 after-drop+300ms=4
+S2 ===== strategy B-parent-recursive
+S2 watch parent(recursive)=None admin=None
+S2 threads before=4 with-watcher=5
+S2 [01 baseline-no-action] events=0
+S2 [02 create checkout/sub/new.txt] events=2
+    +   0ms Create(Any) [parent\checkout\sub\new.txt]
+    +   0ms Modify(Any) [parent\checkout\sub\new.txt]
+S2 [03 append checkout/a.txt] events=1
+    +   0ms Modify(Any) [parent\checkout\a.txt]
+S2 [04 metadata-only (readonly on/off) checkout/a.txt] events=2
+    +   0ms Modify(Any) [parent\checkout\a.txt]
+    +   0ms Modify(Any) [parent\checkout\a.txt]
+S2 [05 delete checkout/b.txt] events=1
+    +   0ms Remove(Any) [parent\checkout\b.txt]
+S2 [06 admin: index.lock -> index (rename-replace), sharedindex.* create] events=7
+    +   0ms Create(Any) [admin\index.lock]
+    +   0ms Modify(Any) [admin\index.lock]
+    +   0ms Remove(Any) [admin\index.lock]
+    +   0ms Modify(Any) [admin\index]
+    +   0ms Modify(Any) [admin\index]
+    +   0ms Create(Any) [admin\sharedindex.0123abcd]
+    +   0ms Modify(Any) [admin\sharedindex.0123abcd]
+S2 [07 sibling activity in parent (outside both trees)] events=5
+    +   0ms Create(Any) [parent\sibling.txt]
+    +   0ms Modify(Any) [parent\sibling.txt]
+    +   0ms Create(Any) [parent\othersib]
+    +   0ms Create(Any) [parent\othersib\x]
+    +   0ms Modify(Any) [parent\othersib\x]
+S2 noreplace rename checkout->quarantine while watched: Ok
+S2 [08 rename checkout -> .checkout.wt-removal-q1] events=3
+    +   0ms Modify(Name(From)) [parent\checkout]
+    +   0ms Modify(Name(To)) [parent\.checkout.wt-removal-q1]
+    +   0ms Modify(Any) [parent\.checkout.wt-removal-q1]
+S2 [09 write inside quarantine (no new watch)] events=3
+    +   0ms Create(Any) [parent\.checkout.wt-removal-q1\sub\after-move.txt]
+    +   0ms Modify(Any) [parent\.checkout.wt-removal-q1\sub\after-move.txt]
+    +   0ms Modify(Any) [parent\.checkout.wt-removal-q1\a.txt]
+S2 [10 recreate original checkout/ + recreated.txt] events=3
+    +   0ms Create(Any) [parent\checkout]
+    +   0ms Create(Any) [parent\checkout\recreated.txt]
+    +   0ms Modify(Any) [parent\checkout\recreated.txt]
+S2 [12 delete quarantine children (operation-owned)] events=4
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\sub\new.txt]
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\sub\after-move.txt]
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\a.txt]
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1\sub]
+S2 remove_dir(quarantine root, watched) = Ok
+S2 [13 delete quarantine root itself] events=1
+    +   0ms Remove(Any) [parent\.checkout.wt-removal-q1]
+S2 [14 parent still observed after quarantine root removed] events=2
+    +   0ms Create(Any) [parent\after-root-removed.txt]
+    +   0ms Modify(Any) [parent\after-root-removed.txt]
+S2 handler-dropped (bounded queue full) = 0
+S2 threads after-drop=4 after-drop+300ms=4
+S2 [O1 bounded(64) queue, 3000 creates, consumer idle] events=64
+    +   0ms Create(Any) [flood1\f0]
+    +   0ms Modify(Any) [flood1\f0]
+    +   0ms Create(Any) [flood1\f1]
+    +   0ms Modify(Any) [flood1\f1]
+    +   0ms Create(Any) [flood1\f2]
+    +   0ms Modify(Any) [flood1\f2]
+    +   0ms Create(Any) [flood1\f3]
+    +   0ms Modify(Any) [flood1\f3]
+    +   0ms Create(Any) [flood1\f4]
+    +   0ms Modify(Any) [flood1\f4]
+    +   0ms Create(Any) [flood1\f5]
+    +   0ms Modify(Any) [flood1\f5]
+    +   0ms Create(Any) [flood1\f6]
+    +   0ms Modify(Any) [flood1\f6]
+    +   0ms Create(Any) [flood1\f7]
+    +   0ms Modify(Any) [flood1\f7]
+    +   0ms Create(Any) [flood1\f8]
+    +   0ms Modify(Any) [flood1\f8]
+    +   0ms Create(Any) [flood1\f9]
+    +   0ms Modify(Any) [flood1\f9]
+    ... 24 more ...
+    +   1ms Create(Any) [flood1\f22]
+    +   1ms Modify(Any) [flood1\f22]
+    +   1ms Create(Any) [flood1\f23]
+    +   1ms Modify(Any) [flood1\f23]
+    +   1ms Create(Any) [flood1\f24]
+    +   1ms Modify(Any) [flood1\f24]
+    +   1ms Create(Any) [flood1\f25]
+    +   1ms Modify(Any) [flood1\f25]
+    +   1ms Create(Any) [flood1\f26]
+    +   1ms Modify(Any) [flood1\f26]
+    +   1ms Create(Any) [flood1\f27]
+    +   1ms Modify(Any) [flood1\f27]
+    +   1ms Create(Any) [flood1\f28]
+    +   1ms Modify(Any) [flood1\f28]
+    +   1ms Create(Any) [flood1\f29]
+    +   1ms Modify(Any) [flood1\f29]
+    +   1ms Create(Any) [flood1\f30]
+    +   1ms Modify(Any) [flood1\f30]
+    +   1ms Create(Any) [flood1\f31]
+    +   1ms Modify(Any) [flood1\f31]
+S2 O1 received=64 dropped-by-our-handler=5936
+S2 O2 wrote 40000 files in 4890ms with the backend blocked
+S2 O2 created=40000 create-events=2 other-events=1 rescan-events=0 errors=0 rescan_info=[]
+S2 O2 watcher drop took 0ms
+S2 L1 watcher instances created=300 in 93ms outcome=no limit hit threads=301
+S2 L1 threads after dropping all=1
+
+

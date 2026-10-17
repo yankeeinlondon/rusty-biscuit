@@ -227,7 +227,7 @@ fn assert_not_contains(haystack: &str, needle: &str, label: &str) {
 }
 
 /// `schematic-gen validate --api openai` should emit bold-green
-/// `[PASS]` and `[OK]` markers when run inside a real terminal.
+/// `[PASS]` markers, one per output, when run inside a real terminal.
 ///
 /// Skips locally when tmux is unavailable; CI requires the backend.
 #[test]
@@ -253,18 +253,10 @@ fn level2_validate_emits_ansi_styled_ok_on_success() {
         ],
         "validate PASS marker",
     );
-    assert_contains_any(
-        &buffer,
-        &["\x1b[1m\x1b[32m[OK]\x1b[0m", "\x1b[1;32m[OK]\x1b[0m"],
-        "validate OK marker",
-    );
-    // The summary line should mention the API being validated.
-    assert_contains(&buffer, "OpenAI", "validate summary mentions API name");
-    assert_contains(
-        &buffer,
-        "All validation checks passed",
-        "validate summary text",
-    );
+    // One pass line per output.
+    for output in ["rust", "openapi", "postman"] {
+        assert_contains(&buffer, &format!("[PASS]\x1b[0m {output}"), "validate output line");
+    }
 }
 
 /// `schematic-gen generate --api all --dry-run` should announce

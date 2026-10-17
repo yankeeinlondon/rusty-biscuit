@@ -1,22 +1,58 @@
-//! Integration tests for HTTP client code generation.
+//! Integration tests for the generated client module of a REST API.
 //!
-//! These tests verify that the generated HTTP client code:
-//! - Correctly matches HTTP methods to reqwest methods
-//! - Properly sets up authentication headers based on AuthStrategy
-//! - Handles request bodies correctly
-//! - Implements proper error handling
+//! A generated module no longer carries an HTTP client: sending, status
+//! checks, credential application, and query encoding live in
+//! `schematic-runtime` and are tested there. These tests verify that the
+//! module:
+//! - declares the API's one client struct over the runtime client, its tag
+//!   type, and the struct's constants and infallible constructor
+//! - scopes every request to the API by naming the tag in its
+//!   `EndpointSpec` implementation, with the endpoint's HTTP method
+//! - carries the definition's authentication translation in `definition()`
+//! - has no send path, request enum, or credential store of its own; its
+//!   only sends are the endpoint methods' calls through the runtime client
 
 use proc_macro2::TokenStream;
 use schematic_define::{
-    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy,
+    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin, Endpoint, EnvAuthStrategy,
     OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
 };
+use schematic_gen::output::assemble::assemble_shared_module;
 use schematic_gen::output::assemble_api_code;
 
 /// Formats generated tokens into readable code for assertions.
 fn format_tokens(tokens: &TokenStream) -> String {
     let file = syn::parse2::<syn::File>(tokens.clone()).expect("Generated code should be valid");
     prettyplease::unparse(&file)
+}
+
+/// `code` with all whitespace, and any trailing comma before `)`, `]`, or
+/// `}`, removed, so assertions survive line wrapping.
+fn squash(code: &str) -> String {
+    let flat: String = code.split_whitespace().collect();
+    flat.replace(",)", ")").replace(",]", "]").replace(",}", "}")
+}
+
+/// `code` without its doc comments, whose usage examples legitimately
+/// mention `send` and `async fn`.
+fn without_docs(code: &str) -> String {
+    code.lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The generated `definition()`, squashed, up to the doc comment of the
+/// `new()` that follows it.
+fn definition_body(code: &str) -> String {
+    let flat = squash(code);
+    let start = flat
+        .find("pubfndefinition()")
+        .unwrap_or_else(|| panic!("definition() is missing:\n{code}"));
+    let end = flat[start..]
+        .find("///")
+        .unwrap_or_else(|| panic!("new() is missing:\n{code}"));
+    flat[start..start + end].to_string()
 }
 
 /// Creates a test API with the given auth strategy.
@@ -59,6 +95,11 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -90,6 +131,11 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -145,567 +191,280 @@ fn make_dual_auth_api() -> RestApi {
         module_path: None,
         request_suffix: None,
         version: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
 // =============================================================================
-// HTTP method matching tests
+// API client struct and constructor
 // =============================================================================
 
 #[test]
-fn client_matches_get_method() {
+fn module_declares_one_client_struct_and_a_tag_with_the_api_impl() {
     let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = format_tokens(&assemble_api_code(&api));
 
-    assert!(
-        code.contains(r#""GET" => self.client.get(&url)"#),
-        "Should match GET method\nGenerated code:\n{}",
-        code
-    );
+    for expected in [
+        "pub struct TestApi(schematic_runtime::Client<TestApiApi>);",
+        "pub enum TestApiApi {}",
+        "impl schematic_runtime::Api for TestApiApi {",
+        r#"const NAME: &'static str = "TestApi";"#,
+        "schematic_runtime::api_client!(TestApi, TestApiApi);",
+    ] {
+        assert!(code.contains(expected), "missing `{expected}`\nGenerated code:\n{code}");
+    }
+    assert!(!code.contains("TestApiClient"), "no client alias\nGenerated code:\n{code}");
 }
 
 #[test]
-fn client_matches_post_method() {
+fn client_struct_holds_base_url_and_an_infallible_new() {
     let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = format_tokens(&assemble_api_code(&api));
+    let flat = squash(&code);
 
     assert!(
-        code.contains(r#""POST" => self.client.post(&url)"#),
-        "Should match POST method\nGenerated code:\n{}",
-        code
+        code.contains(r#"pub const BASE_URL: &'static str = "https://api.example.com/v1";"#),
+        "The client struct should hold the base URL\nGenerated code:\n{code}"
     );
-}
-
-#[test]
-fn client_matches_put_method() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
     assert!(
-        code.contains(r#""PUT" => self.client.put(&url)"#),
-        "Should match PUT method\nGenerated code:\n{}",
-        code
+        code.contains("pub const DOCS_URL: Option<&'static str> = None;"),
+        "The client struct should hold the docs URL\nGenerated code:\n{code}"
     );
-}
-
-#[test]
-fn client_matches_patch_method() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
     assert!(
-        code.contains(r#""PATCH" => self.client.patch(&url)"#),
-        "Should match PATCH method\nGenerated code:\n{}",
-        code
+        flat.contains(&squash(
+            "pub fn new() -> Self { Self(schematic_runtime::Client::new(Self::definition())) }"
+        )),
+        "new() should wrap a runtime client seeded from definition()\nGenerated code:\n{code}"
     );
-}
-
-#[test]
-fn client_matches_delete_method() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains(r#""DELETE" => self.client.delete(&url)"#),
-        "Should match DELETE method\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn client_matches_head_method() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains(r#""HEAD" => self.client.head(&url)"#),
-        "Should match HEAD method\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn client_matches_options_method() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains(r#""OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url)"#),
-        "Should match OPTIONS method\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn client_handles_unsupported_method() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("SchematicError::UnsupportedMethod"),
-        "Should handle unsupported methods\nGenerated code:\n{}",
-        code
-    );
+    assert!(!flat.contains("fnbuilder()"), "no per-API builder\nGenerated code:\n{code}");
 }
 
 // =============================================================================
-// Authentication header tests
+// Request scoping
 // =============================================================================
 
 #[test]
-fn no_auth_generates_no_auth_code() {
+fn requests_name_the_api_marker() {
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
+    let code = format_tokens(&assemble_api_code(&api));
+
+    for request in ["GetItemsRequest", "GetItemRequest"] {
+        assert!(
+            code.contains(&format!("impl schematic_runtime::EndpointSpec for {request} {{")),
+            "{request} should implement EndpointSpec\nGenerated code:\n{code}"
+        );
+    }
+    // One `type Api` per endpoint, each naming this API's marker, so its
+    // client accepts these requests and no other API's client does.
+    assert_eq!(
+        code.matches("type Api = TestApiApi;").count(),
+        api.endpoints.len(),
+        "Generated code:\n{code}"
+    );
+    assert!(!code.contains("type Api = Api;"), "Generated code:\n{code}");
+}
+
+#[test]
+fn each_http_method_becomes_the_request_method_constant() {
+    let methods = [
+        (RestMethod::Get, "GET"),
+        (RestMethod::Post, "POST"),
+        (RestMethod::Put, "PUT"),
+        (RestMethod::Patch, "PATCH"),
+        (RestMethod::Delete, "DELETE"),
+        (RestMethod::Head, "HEAD"),
+        (RestMethod::Options, "OPTIONS"),
+    ];
+    let mut api = make_api("TestApi", AuthStrategy::None, vec![]);
+    api.endpoints = methods
+        .iter()
+        .map(|(method, name)| Endpoint {
+            id: format!("Do{name}"),
+            method: *method,
+            path: "/items".to_string(),
+            description: format!("{name} items"),
+            request: None,
+            response: ApiResponse::json_type("ItemsResponse"),
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        })
+        .collect();
+    let flat = squash(&format_tokens(&assemble_api_code(&api)));
+
+    for (_, name) in methods {
+        assert!(
+            flat.contains(&squash(&format!(
+                r#"const ENDPOINT_ID: &'static str = "Do{name}"; const METHOD: schematic_runtime::Method = schematic_runtime::Method::{name};"#
+            ))),
+            "Do{name} should declare Method::{name}"
+        );
+    }
+}
+
+// =============================================================================
+// Authentication translation
+// =============================================================================
+
+#[test]
+fn no_auth_definition_has_no_auth_config() {
     let api = make_api("NoAuthApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = format_tokens(&assemble_api_code(&api));
 
-    // Should NOT contain any env::var calls for auth
-    // Check that there's no bearer/api key setup code
-    assert!(
-        !code.contains(r#"header("Authorization""#) || code.contains("// Apply authentication"),
-        "No auth API should not set Authorization header (except in match arm)\nGenerated code:\n{}",
-        code
+    assert_eq!(
+        definition_body(&code),
+        squash(
+            "pub fn definition() -> schematic_runtime::ApiDefinition { schematic_runtime::ApiDefinition::new(Self::BASE_URL) }"
+        ),
+        "An API without credentials keeps the runtime default\nGenerated code:\n{code}"
     );
 }
 
 #[test]
-fn bearer_token_uses_runtime_auth_matching() {
+fn definition_carries_the_auth_translation() {
+    let cases = [
+        (
+            make_api(
+                "BearerApi",
+                AuthStrategy::BearerToken { header: None },
+                vec!["BEARER_TOKEN".to_string()],
+            ),
+            r#"schematic_runtime::EnvFallback::new(schematic_runtime::CredentialPlacement::Bearer { header: None }, ["BEARER_TOKEN"])"#,
+        ),
+        (
+            make_api(
+                "CustomBearerApi",
+                AuthStrategy::BearerToken {
+                    header: Some("X-Custom-Auth".to_string()),
+                },
+                vec!["MY_TOKEN".to_string()],
+            ),
+            r#"schematic_runtime::CredentialPlacement::Bearer { header: Some("X-Custom-Auth".to_string()) }, ["MY_TOKEN"]"#,
+        ),
+        (
+            make_api(
+                "ApiKeyApi",
+                AuthStrategy::ApiKey {
+                    header: "X-API-Key".to_string(),
+                    value_prefix: None,
+                },
+                vec!["API_SECRET".to_string()],
+            ),
+            r#"schematic_runtime::CredentialPlacement::ApiKeyHeader { header: "X-API-Key".to_string(), prefix: None }, ["API_SECRET"]"#,
+        ),
+        (
+            make_basic_auth_api("BasicAuthApi", "API_USER", "API_PASS"),
+            r#"schematic_runtime::EnvFallback::new(schematic_runtime::CredentialPlacement::Basic, ["API_PASS"]).username_vars(["API_USER"])"#,
+        ),
+    ];
+
+    for (api, expected) in cases {
+        let code = format_tokens(&assemble_api_code(&api));
+        let definition = definition_body(&code);
+        assert!(
+            definition.contains(".auth(schematic_runtime::AuthConfig::none()"),
+            "{} should configure auth\nGenerated code:\n{code}",
+            api.name
+        );
+        assert!(
+            definition.contains(&squash(expected)),
+            "{} should translate to `{expected}`\nGenerated code:\n{code}",
+            api.name
+        );
+    }
+}
+
+#[test]
+fn dual_auth_definition_accepts_api_key_and_oauth_bearer_tokens() {
+    let api = make_dual_auth_api();
+    let code = format_tokens(&assemble_api_code(&api));
+    let definition = definition_body(&code);
+
+    // Each explicit method is accepted; the OAuth2 token travels as a bearer.
+    assert!(
+        definition.contains(&squash(
+            r#".accept(schematic_runtime::CredentialPlacement::ApiKeyHeader { header: "X-API-Key".to_string(), prefix: None })"#
+        )),
+        "Should accept the API key\nGenerated code:\n{code}"
+    );
+    assert!(
+        definition.contains(&squash(
+            ".accept(schematic_runtime::CredentialPlacement::Bearer { header: None })"
+        )),
+        "Should accept the OAuth token as a bearer token\nGenerated code:\n{code}"
+    );
+    assert!(
+        definition.contains(r#"["DUAL_AUTH_API_KEY"]"#),
+        "Should read the API key variable as the fallback\nGenerated code:\n{code}"
+    );
+    // Credentials are supplied to the runtime client, not set on the module.
+    assert!(!code.contains("pub fn api_key("), "Generated code:\n{code}");
+    assert!(!code.contains("pub fn oauth_token("), "Generated code:\n{code}");
+}
+
+// =============================================================================
+// What the module no longer contains
+// =============================================================================
+
+#[test]
+fn module_has_no_send_path_of_its_own() {
     let api = make_api(
-        "BearerApi",
+        "TestApi",
         AuthStrategy::BearerToken { header: None },
         vec!["BEARER_TOKEN".to_string()],
     );
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
+    let code = without_docs(&format_tokens(&assemble_api_code(&api)));
 
-    // Should store env var in struct init
-    assert!(
-        code.contains("BEARER_TOKEN"),
-        "Should reference BEARER_TOKEN env var in struct init\nGenerated code:\n{}",
-        code
-    );
-
-    // Should use runtime match for auth
-    assert!(
-        code.contains("match &self.auth_policy.env_fallback"),
-        "Should use auth policy fallback matching\nGenerated code:\n{}",
-        code
-    );
-
-    assert!(
-        code.contains("schematic_define::EnvAuthStrategy::BearerToken"),
-        "Should handle BearerToken env fallback\nGenerated code:\n{}",
-        code
-    );
-
-    assert!(
-        code.contains("headers.use_bearer_token(token)"),
-        "Should apply bearer token via Headers helper\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn bearer_token_with_custom_header() {
-    let api = make_api(
-        "CustomBearerApi",
-        AuthStrategy::BearerToken {
-            header: Some("X-Custom-Auth".to_string()),
-        },
-        vec!["MY_TOKEN".to_string()],
-    );
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    // Should store custom header in auth_strategy init
-    assert!(
-        code.contains("X-Custom-Auth"),
-        "Should include custom header in auth_strategy init\nGenerated code:\n{}",
-        code
-    );
-
-    assert!(
-        code.contains("headers.use_bearer_token_with_header(token, header)"),
-        "Should use the custom-header bearer helper\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn api_key_uses_runtime_auth_matching() {
-    let api = make_api(
-        "ApiKeyApi",
-        AuthStrategy::ApiKey {
-            header: "X-API-Key".to_string(),
-            value_prefix: None,
-        },
-        vec!["API_SECRET".to_string()],
-    );
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    // Should store env var in struct init
-    assert!(
-        code.contains("API_SECRET"),
-        "Should reference API_SECRET env var in struct init\nGenerated code:\n{}",
-        code
-    );
-
-    // Should store header name in auth_strategy init
-    assert!(
-        code.contains("X-API-Key"),
-        "Should include header name in auth_strategy\nGenerated code:\n{}",
-        code
-    );
-
-    assert!(
-        code.contains("schematic_define::EnvAuthStrategy::ApiKey"),
-        "Should handle ApiKey env fallback\nGenerated code:\n{}",
-        code
-    );
-
-    assert!(
-        code.contains("headers.header(header.clone(), value)"),
-        "Should write the API key header through Headers\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn basic_auth_uses_reqwest_basic_auth() {
-    let api = make_basic_auth_api("BasicAuthApi", "API_USER", "API_PASS");
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    // Should contain env var names
-    assert!(
-        code.contains("API_USER"),
-        "Should reference API_USER env var\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("API_PASS"),
-        "Should reference API_PASS env var\nGenerated code:\n{}",
-        code
-    );
-
-    assert!(
-        code.contains("headers.use_basic_auth(username, password)"),
-        "Should use the Headers basic auth helper\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn dual_auth_generates_explicit_api_key_and_oauth_helpers() {
-    let api = make_dual_auth_api();
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("pub fn api_key(&self, key: impl Into<String>) -> Self"),
-        "Should generate explicit API key helper\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("pub fn oauth_token(&self, token: impl Into<String>) -> Self"),
-        "Should generate explicit OAuth token helper\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn dual_auth_generates_descriptive_authentication_required_error() {
-    let api = make_dual_auth_api();
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("SchematicError::AuthenticationRequired"),
-        "Should use AuthenticationRequired for dual-auth clients\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("Obtain the OAuth token with schematic-oauth"),
-        "Should point OAuth users to schematic-oauth\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("if !headers.has_explicit_auth()"),
-        "Should only apply env fallback when explicit auth is absent\nGenerated code:\n{}",
-        code
-    );
-}
-
-// =============================================================================
-// Request body handling tests
-// =============================================================================
-
-#[test]
-fn client_adds_content_type_for_body() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains(r#"header("Content-Type", "application/json")"#),
-        "Should set Content-Type for body\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn client_adds_body_when_present() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("crate::shared::RequestBody::Json(json)"),
-        "Should attach a JSON body\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains(".body(json)"),
-        "Should add the serialized JSON to the request\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("req_builder.multipart(form)"),
-        "Should attach a multipart body\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("req_builder.form(&pairs)"),
-        "Should attach a URL-encoded body\nGenerated code:\n{}",
-        code
-    );
-}
-
-// =============================================================================
-// Response handling tests
-// =============================================================================
-
-#[test]
-fn client_checks_response_status() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("response.status().is_success()"),
-        "Should check response status\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn client_deserializes_json_response() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("response.json::<T>().await"),
-        "Should deserialize JSON response\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn client_handles_api_error() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    // Check for ApiError pattern (may be formatted across lines)
-    assert!(
-        code.contains("SchematicError::ApiError"),
-        "Should return ApiError for non-success status\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("status") && code.contains("body"),
-        "ApiError should have status and body fields\nGenerated code:\n{}",
-        code
-    );
-}
-
-// =============================================================================
-// URL construction tests
-// =============================================================================
-
-#[test]
-fn client_constructs_url_from_base_and_path() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains(r#"format!("{}{}", self.base_url, path)"#),
-        "Should construct URL from base_url and path\nGenerated code:\n{}",
-        code
-    );
-}
-
-// =============================================================================
-// API struct tests
-// =============================================================================
-
-#[test]
-fn api_struct_has_client_field() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("client: reqwest::Client"),
-        "API struct should have reqwest Client field\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn api_struct_has_base_url_field() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("base_url: String"),
-        "API struct should have base_url field\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn api_struct_has_new_constructor() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("pub fn new()"),
-        "API struct should have new() constructor\nGenerated code:\n{}",
-        code
-    );
-}
-
-// =============================================================================
-// Request enum tests
-// =============================================================================
-
-#[test]
-fn request_enum_has_variants_for_all_endpoints() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    assert!(
-        code.contains("pub enum TestApiRequest"),
-        "Should have request enum\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("GetItems(GetItemsRequest)"),
-        "Should have GetItems variant\nGenerated code:\n{}",
-        code
-    );
-    assert!(
-        code.contains("GetItem(GetItemRequest)"),
-        "Should have GetItem variant\nGenerated code:\n{}",
-        code
-    );
-}
-
-#[test]
-fn request_enum_has_into_parts_method() {
-    let api = make_api("TestApi", AuthStrategy::None, vec![]);
-    let tokens = assemble_api_code(&api);
-    let code = format_tokens(&tokens);
-
-    // The enum should delegate into_parts to the inner request struct
-    assert!(
-        code.contains("impl TestApiRequest") && code.contains("fn into_parts"),
-        "Request enum should have into_parts method\nGenerated code:\n{}",
-        code
-    );
-}
-
-/// Builds an API with a JSON endpoint (so the generic `request<T>` is emitted)
-/// and a plain-text endpoint (which must be rejected through that path).
-fn make_text_response_api() -> RestApi {
-    RestApi {
-        name: "TextApi".to_string(),
-        description: "Text API".to_string(),
-        base_url: "https://api.example.com/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![
-            Endpoint {
-                id: "GetJson".to_string(),
-                method: RestMethod::Get,
-                path: "/json".to_string(),
-                description: "Get JSON".to_string(),
-                request: None,
-                response: ApiResponse::json_type("JsonResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetPlainText".to_string(),
-                method: RestMethod::Get,
-                path: "/text".to_string(),
-                description: "Get plain text".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-        ],
-        module_path: None,
-        request_suffix: None,
-        version: None,
+    for removed in [
+        "reqwest",
+        "async fn",
+        "pub enum TestApiRequest",
+        "SchematicError",
+        "ResponseKind",
+        "RequestParts =",
+        "fn request",
+        "build_and_send_request",
+        "merge_headers",
+        "append_query_pairs",
+        "fn with_client",
+        "fn with_base_url",
+        "fn http_client",
+        "fn api_base_url",
+        "fn auth_policy",
+        "fn bearer_token",
+        "fn variant",
+        "VariantHooks",
+        "resolve_request_auth",
+        "schematic_define::",
+    ] {
+        assert!(!code.contains(removed), "`{removed}` is still emitted:\n{code}");
     }
+
+    // The only sends are the endpoint methods', through the runtime client,
+    // one per endpoint, each returning that endpoint's call type.
+    let flat = squash(&code);
+    assert_eq!(flat.matches(".send(").count(), 2, "{code}");
+    assert_eq!(flat.matches("self.0.send(").count(), 2, "{code}");
+    assert!(
+        flat.contains("pubfnget_items(&self)->GetItemsCall<'_>{GetItemsCall(self.0.send(GetItemsRequest::default()))}"),
+        "{code}"
+    );
+    assert!(
+        flat.contains("pubfnget_item(&self,item_id:implInto<String>)->GetItemCall<'_>{GetItemCall(self.0.send(GetItemRequest::new(item_id)))}"),
+        "{code}"
+    );
 }
 
 #[test]
-fn text_endpoint_is_rejected_through_generic_request() {
-    let api = make_text_response_api();
-    let code = format_tokens(&assemble_api_code(&api));
+fn shared_module_holds_no_transport_or_auth_resolution() {
+    let shared = format_tokens(&assemble_shared_module());
 
-    // The request enum reports the endpoint's response kind...
-    assert!(
-        code.contains("fn response_kind(&self)"),
-        "request enum should expose response_kind()\nGenerated code:\n{code}"
-    );
-    assert!(
-        code.contains("ResponseKind::Text"),
-        "text endpoint should map to ResponseKind::Text\nGenerated code:\n{code}"
-    );
-
-    // ...and the generic JSON request() guards against non-JSON endpoints,
-    // steering callers to `request_text` instead of a spurious JSON error.
-    assert!(
-        code.contains("WrongResponseDecoder"),
-        "generic request() should reject non-JSON endpoints\nGenerated code:\n{code}"
-    );
-    assert!(
-        code.contains(r#""request_text""#),
-        "the guard should name the request_text convenience method\nGenerated code:\n{code}"
-    );
+    assert!(shared.contains("pub fn combine_cookie_headers"), "{shared}");
+    for removed in ["resolve_request_auth", "SchematicError", "reqwest::", "schematic_define::"] {
+        assert!(!shared.contains(removed), "`{removed}` is still emitted:\n{shared}");
+    }
 }

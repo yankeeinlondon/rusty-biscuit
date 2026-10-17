@@ -21,7 +21,9 @@ cleanly off its platform.
 - **The window must be focused**: `SpawnVisibility::Foreground` plus
   `focus_spawned_pane()`. Poll until it is genuinely frontmost; a raise returns
   before the window becomes key.
-- **macOS focus is global**: gate on `RUN_LEVEL3=1` and run one test at a time.
+- **macOS focus is global**: gate with `require_level!(Level::L3, …)` (skips
+  unless `RUN_LEVEL3=1`, which `just test-l3` sets) and run one test at a time
+  (`just test-l3` uses nextest `-j 1`).
 - **Send a modified chord as one event.** AppleScript `keystroke … using <mod>
   down` carries the modifier on the key event; `cliclick`'s separate key-down,
   key, and key-up events race. Bare-modifier presses are unreliable through

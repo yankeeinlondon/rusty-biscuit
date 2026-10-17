@@ -1,0 +1,150 @@
+error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     let _ = client.send(GiteaListRepos).await;
+  |                    ---- ^^^^^^^^^^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+  |                    |
+  |                    required by a bound introduced by this call
+  |
+note: expected this to be `GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     type Api = GiteaApi;
+  |                ^^^^^^^^
+note: required by a bound in `GitHub::send`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  | schematic_runtime::api_client!(GitHub, GitHubApi);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | required by a bound in this associated function
+  | required by this bound in `GitHub::send`
+  = note: this error originates in the macro `schematic_runtime::api_client` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Call<'_, GitHubApi, GiteaListRepos>` is not a future
+  --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+   |
+   |     let _ = client.send(GiteaListRepos).await;
+   |                                         ^^^^^ `Call<'_, GitHubApi, GiteaListRepos>` is not a future
+   |
+   = help: the trait `IntoFuture` is not implemented for `Call<'_, GitHubApi, GiteaListRepos>`
+   = note: Call<'_, GitHubApi, GiteaListRepos> must be a future or must implement `IntoFuture` to be awaited
+help: the trait `IntoFuture` is conditionally implemented for `Call<'_, A, R>`
+  --> src/call.rs
+   |
+   | impl<'a, A: Api, R: EndpointSpec<Api = A>> IntoFuture for Call<'a, A, R> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                                  |
+   |                                  unsatisfied requirement introduced here: `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+help: remove the `.await`
+   |
+42 -     let _ = client.send(GiteaListRepos).await;
+42 +     let _ = client.send(GiteaListRepos);
+   |
+
+error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     let _ = client.send_raw(GiteaListRepos, &CallOptions::new()).await;
+  |                    -------- ^^^^^^^^^^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+  |                    |
+  |                    required by a bound introduced by this call
+  |
+note: expected this to be `GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     type Api = GiteaApi;
+  |                ^^^^^^^^
+note: required by a bound in `GitHub::send_raw`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  | schematic_runtime::api_client!(GitHub, GitHubApi);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | required by a bound in this associated function
+  | required by this bound in `GitHub::send_raw`
+  = note: this error originates in the macro `schematic_runtime::api_client` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     let _ = client.send_raw(GiteaListRepos, &CallOptions::new()).await;
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+  |
+note: expected this to be `GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     type Api = GiteaApi;
+  |                ^^^^^^^^
+note: required by a bound in `GitHub::send_raw`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  | schematic_runtime::api_client!(GitHub, GitHubApi);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | required by a bound in this associated function
+  | required by this bound in `GitHub::send_raw`
+  = note: this error originates in the macro `schematic_runtime::api_client` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     let _ = client.send_raw(GiteaListRepos, &CallOptions::new()).await;
+  |                                                                  ^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+  |
+note: expected this to be `GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     type Api = GiteaApi;
+  |                ^^^^^^^^
+note: required by a bound in `GitHub::send_raw`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  | schematic_runtime::api_client!(GitHub, GitHubApi);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | required by a bound in this associated function
+  | required by this bound in `GitHub::send_raw`
+  = note: this error originates in the macro `schematic_runtime::api_client` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     let _ = client.check_link::<GiteaListRepos>(&link);
+  |                                 ^^^^^^^^^^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+  |
+note: expected this to be `GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     type Api = GiteaApi;
+  |                ^^^^^^^^
+note: required by a bound in `GitHub::check_link`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  | schematic_runtime::api_client!(GitHub, GitHubApi);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | required by a bound in this associated function
+  | required by this bound in `GitHub::check_link`
+  = note: this error originates in the macro `schematic_runtime::api_client` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0271]: type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     let _ = GitHub::new().mutate_response::<GiteaListRepos, _>(|_, _repos| Ok(()));
+  |                                             ^^^^^^^^^^^^^^ type mismatch resolving `<GiteaListRepos as EndpointSpec>::Api == GitHubApi`
+  |
+note: expected this to be `GitHubApi`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  |     type Api = GiteaApi;
+  |                ^^^^^^^^
+note: required by a bound in `GitHub::mutate_response`
+ --> tests/fixtures/compile_fail/request_of_another_api_through_the_api_struct.rs
+  |
+  | schematic_runtime::api_client!(GitHub, GitHubApi);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | required by a bound in this associated function
+  | required by this bound in `GitHub::mutate_response`
+  = note: this error originates in the macro `schematic_runtime::api_client` (in Nightly builds, run with -Z macro-backtrace for more info)

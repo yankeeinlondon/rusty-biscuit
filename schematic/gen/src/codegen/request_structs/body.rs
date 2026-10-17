@@ -1,7 +1,8 @@
 //! Body-specific request struct generation.
 //!
 //! Handles typed body fields and `From<BodyType>` implementations for
-//! request structs that carry a JSON payload.
+//! request structs that carry a body: a JSON type, a generated form struct,
+//! or a raw text (`String`) or binary (`Vec<u8>`) payload.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -19,10 +20,11 @@ pub fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
         Some(ApiRequest::FormData { .. }) | Some(ApiRequest::UrlEncoded { .. }) => {
             match super::form::form_body_type_name(endpoint) {
                 Some(name) => type_name_to_tokens(&name),
-                None => return quote! {},
+                _ => return quote! {},
             }
         }
-        // Text and Binary bodies are not yet carried by the request struct.
+        Some(ApiRequest::Text { .. }) => quote! { String },
+        Some(ApiRequest::Binary { .. }) => quote! { Vec<u8> },
         _ => return quote! {},
     };
 

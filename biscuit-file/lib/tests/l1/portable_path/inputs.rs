@@ -32,7 +32,7 @@ fn the_md_clean_table_keeps_intent_and_rewrites_position() {
 
     for (authored, expected, strategy) in [
         ("^/foo.md", "^/foo.md".to_string(), P::AuthoredIntent(IntentForms::ALL)),
-        ("../../../foo.md", "&foo.md".to_string(), P::RepoRoot(None)),
+        ("../../../foo.md", "foo.md".to_string(), P::TreeRootRelative),
         ("{{CONFIG_DIR}}/x.json", "{{CONFIG_DIR}}/x.json".to_string(), P::AuthoredIntent(IntentForms::ALL)),
         ("{{TMPDIR}}/x.json", absolute_text(&scratch), P::AbsolutePath),
     ] {
@@ -164,7 +164,7 @@ fn intent_after_same_dir_lets_a_plain_link_win() {
 }
 
 #[test]
-fn minimal_churn_keeps_a_relative_link_already_in_the_chosen_form() {
+fn position_links_use_the_root_spelling_and_keep_an_authored_root_spelling() {
     let fx = Fixture::new();
     let cwd = fx.dir("repo/docs/sub");
     fx.file("repo/docs/sub/foo.md");
@@ -173,17 +173,15 @@ fn minimal_churn_keeps_a_relative_link_already_in_the_chosen_form() {
     fx.file("repo/docs/README.md");
     let ctx = fx.ctx(&cwd, &[]);
     for (authored, expected) in [
-        ("foo.md", "foo.md"),
-        ("./foo.md", "./foo.md"),
-        ("a/b.md", "a/b.md"),
-        ("../README.md", "../README.md"),
-        ("../other/x.md", "../other/x.md"),
+        ("foo.md", "docs/sub/foo.md"),
+        ("./foo.md", "docs/sub/foo.md"),
+        ("a/b.md", "docs/sub/a/b.md"),
+        ("../README.md", "docs/README.md"),
+        ("../other/x.md", "docs/other/x.md"),
         // Not already the chosen form: respelled.
-        ("./a/../foo.md", "./foo.md"),
-        ("./../sub/foo.md", "./foo.md"),
-        // A bare link reached through the repository-root fallback is not a
-        // same-directory link.
-        ("docs/other/x.md", "../other/x.md"),
+        ("./a/../foo.md", "docs/sub/foo.md"),
+        ("./../sub/foo.md", "docs/sub/foo.md"),
+        ("docs/other/x.md", "docs/other/x.md"),
     ] {
         let found = evaluate(PortablePath::from_reference(reference(authored)).with_ctx(&ctx));
         assert_eq!(found.reference().raw(), expected, "{authored}");

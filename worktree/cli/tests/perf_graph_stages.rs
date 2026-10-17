@@ -162,7 +162,7 @@ fn observed_sparse_lanes_graph_fixture_has_the_observed_topology() {
     let fixture = GraphFixture::observed_sparse_lanes();
     let repo = fixture.main();
     let git = |args: &[&str]| {
-        let output = Command::new("git").current_dir(repo).args(args).output().expect("git should be installed");
+        let output = worktree::git::command().current_dir(repo).args(args).output().expect("git should be installed");
         assert!(output.status.success(), "git {args:?} failed");
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     };

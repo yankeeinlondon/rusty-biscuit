@@ -15,6 +15,7 @@ tokio = { version = "1.49.0", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3.15"
+wiremock = "0.6"
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]

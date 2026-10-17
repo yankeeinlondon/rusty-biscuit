@@ -172,6 +172,8 @@ struct IconPayload {
     svg: String,
     #[serde(default)]
     nerd_font_preferred: bool,
+    #[serde(default)]
+    nerd_font_auto: bool,
 }
 
 /// Writes SVG markup to a temporary file and renders it via the terminal image
@@ -1884,7 +1886,9 @@ impl Writer<'_> {
             Err(_) => return Ok(payload.clone()),
         };
 
-        if icon.nerd_font_preferred && let Some(ref nerd) = icon.nerd_font {
+        if (icon.nerd_font_preferred || (icon.nerd_font_auto && term.is_nerd_font == Some(true)))
+            && let Some(ref nerd) = icon.nerd_font
+        {
             return Ok(nerd.clone());
         }
         if let Some(ref unicode) = icon.unicode {
@@ -3101,6 +3105,30 @@ mod render_tree_tests {
         term.color_depth = color_depth;
         term.is_nerd_font = nerd_font;
         TerminalRenderOptions::new(&term, RenderStrictness::Warn)
+    }
+
+    #[test]
+    fn icon_font_selection_preserves_explicit_preferences() {
+        for (preferred, auto, detected, expected) in [
+            (false, false, Some(true), "fallback"),
+            (true, false, Some(false), "nerd"),
+            (false, true, Some(true), "nerd"),
+            (false, true, Some(false), "fallback"),
+            (false, true, None, "fallback"),
+        ] {
+            let node = RenderNode::extended("icon", vec![RenderNode::text("fallback")], Some(
+                serde_json::json!({
+                    "nerd_font": "nerd",
+                    "unicode": "fallback",
+                    "text": "fallback",
+                    "nerd_font_preferred": preferred,
+                    "nerd_font_auto": auto,
+                }).to_string(),
+            ));
+            let output = render_terminal_node(&node, &opts_with(ColorDepth::TrueColor, detected))
+                .unwrap().output;
+            assert_eq!(output, expected);
+        }
     }
 
     // ── RT-COMPOSE-001: sequence join ──────────────────────────────────────

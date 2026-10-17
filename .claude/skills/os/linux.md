@@ -76,7 +76,26 @@ glyph. WSL2 follows these Linux code paths; its archive-mode traps are in
   is the host killing the linker for memory under parallel links, not a code
   error.
 - Retry with fewer parallel builds:
-  `just cross-check <package> --os linux --build-jobs 2`.
+  `just cross-check <package> --os linux --build-jobs 2`. The flag must
+  follow the package name; before it the script exits 2 with
+  `unknown flag --build-jobs`.
+
+## inotify: watches follow inodes, new directories are not watched
+
+Measured 2026-10-11 on `BUILD_LINUX` (ZFS) and the WSL guest (ext4); the
+adapter that relies on this is `worktree/lib/src/remove/observation/inotify.rs`:
+
+- A watch descriptor follows its inode, so a renamed directory keeps
+  reporting through the same watch. A wrapper that tracks watches by path
+  can lose this; read the kernel events directly.
+- A directory created after its parent's watch was added is not watched
+  until something adds a watch for it; files created in it before then are
+  missed.
+- `renameat2(RENAME_NOREPLACE)` works on ZFS, ext4, and tmpfs. Limits on
+  `BUILD_LINUX`: `max_user_watches` 4194304, `max_user_instances` 65536,
+  `max_queued_events` 8388608, so a blocked reader did not overflow at
+  40,000 events there. The WSL guest's much lower limits are in
+  [wsl.md](wsl.md).
 
 ## Reading `/proc` for another process's descriptors
 

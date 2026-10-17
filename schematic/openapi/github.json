@@ -61,15 +61,14 @@
     },
     "/repos/{owner}/{repo}/git/trees/{tree_sha}": {
       "get": {
-        "summary": "Get a Git tree recursively (may truncate at 100k entries or 7MB)",
-        "description": "Get a Git tree recursively (may truncate at 100k entries or 7MB)",
-        "operationId": "GetGitTreeRecursive",
+        "summary": "Get a Git tree; set `recursive` to include every nested entry (may truncate at 100k entries or 7MB)",
+        "description": "Get a Git tree; set `recursive` to include every nested entry (may truncate at 100k entries or 7MB)",
+        "operationId": "GetGitTree",
         "parameters": [
           {
             "in": "query",
             "name": "recursive",
-            "description": "Fetch tree recursively (always true for this endpoint)",
-            "required": true,
+            "description": "Fetch the tree recursively instead of a single level",
             "schema": {
               "type": "boolean"
             },

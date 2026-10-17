@@ -223,6 +223,40 @@ mod tests {
         assert_eq!(err.to_string(), "Configuration parse error: invalid json");
     }
 
+    #[tokio::test]
+    async fn device_rest_errors_map_to_bad_gateway_with_their_codes() {
+        use axum::response::IntoResponse;
+        use homelab::rest::RestError;
+
+        let device_reply = || RestError::Status {
+            status: 503,
+            body: "device busy".to_string(),
+        };
+        let cases = [
+            (
+                ServerError::from(EversoloError::from(device_reply())),
+                "EVERSOLO_ERROR",
+                "Eversolo error: Eversolo API error: status 503: device busy",
+            ),
+            (
+                ServerError::from(SamsungTvError::from(device_reply())),
+                "SAMSUNG_TV_ERROR",
+                "Samsung TV error: Samsung TV API error: status 503: device busy",
+            ),
+        ];
+
+        for (error, code, message) in cases {
+            let response = error.into_response();
+            assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            let body: serde_json::Value = serde_json::from_slice(&body).expect("json");
+            assert_eq!(body["code"], code);
+            assert_eq!(body["error"], message);
+        }
+    }
+
     // Test HTTP status code mappings
     #[test]
     fn test_status_codes() {

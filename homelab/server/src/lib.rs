@@ -258,16 +258,19 @@ async fn probe_eversolo(state: &AppState) -> Option<DeviceStatusJson> {
         (service.host.clone(), service.port)
     };
 
-    let eversolo = Eversolo::new(host, port);
-
     let result = match timeout(state.request_timeout, async {
+        let eversolo = Eversolo::new(host, port)?;
         let (playback_state, screen_brightness) =
             tokio::join!(eversolo.get_state(), eversolo.get_screen_brightness());
-        Ok::<_, homelab::eversolo::EversoloError>((playback_state?, screen_brightness.ok()))
+        Ok::<_, homelab::eversolo::EversoloError>((
+            eversolo,
+            playback_state?,
+            screen_brightness.ok(),
+        ))
     })
     .await
     {
-        Ok(Ok((resp, screen_brightness))) => {
+        Ok(Ok((eversolo, resp, screen_brightness))) => {
             let effective_power_state = infer_effective_power_state(
                 resp.state,
                 screen_brightness
@@ -375,13 +378,19 @@ async fn probe_samsung_tv(state: &AppState) -> Option<DeviceStatusJson> {
         (name.clone(), service.mac_address.is_none())
     };
 
-    let tv = {
+    let (host, rest_port, ws_port) = {
         let tvs = state.samsung_tvs.read().await;
         let service = tvs.get(&tv_name)?;
-        SamsungTv::new(service.host.clone(), service.rest_port, service.ws_port)
+        (service.host.clone(), service.rest_port, service.ws_port)
     };
 
-    let result = match timeout(state.request_timeout, tv.get_device_info()).await {
+    let result = match timeout(state.request_timeout, async {
+        SamsungTv::new(host, rest_port, ws_port)?
+            .get_device_info()
+            .await
+    })
+    .await
+    {
         Ok(Ok(info)) => {
             let mut detail = serde_json::Map::new();
             if let Some(name) = &info.name {

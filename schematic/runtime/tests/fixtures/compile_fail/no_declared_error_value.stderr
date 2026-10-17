@@ -1,0 +1,5 @@
+error[E0599]: no variant, associated function, or constant named `Body` found for enum `NoDeclaredError` in the current scope
+ --> tests/fixtures/compile_fail/no_declared_error_value.rs
+  |
+  |     let _declared: ErrorKind<NoDeclaredError> = ErrorKind::Declared(NoDeclaredError::Body);
+  |                                                                                      ^^^^ variant, associated function, or constant not found in `NoDeclaredError`

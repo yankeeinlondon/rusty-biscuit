@@ -1,0 +1,11 @@
+error[E0599]: no method named `open` found for mutable reference `&mut SessionScope<'_, Example, ListItems>` in the current scope
+ --> tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.rs
+  |
+  |             scope.open().await;
+  |                   ^^^^ method not found in `&mut SessionScope<'_, Example, ListItems>`
+
+error[E0599]: no method named `close` found for mutable reference `&mut SessionScope<'_, Example, ListItems>` in the current scope
+ --> tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.rs
+  |
+  |             scope.close().await;
+  |                   ^^^^^ method not found in `&mut SessionScope<'_, Example, ListItems>`

@@ -61,8 +61,25 @@ repository defects.
   than SUN_LEN" (`kache daemon run` does). Root the fixture under `/tmp`, as
   `real_kache_worktree_restore` (`tools/test-toolkit`) does.
 - **`getcwd` after the cwd is deleted** fails with `ENOENT`, but only after
-  about 2 s. A test of an unreadable-cwd branch (for example sniff-cli's
-  `relative_base_with_unreadable_cwd_fails`) should make only one lookup.
+  searching the parent's entries: about 2 s in general, and about 9 s when the
+  deleted directory sat directly in the shared `$TMPDIR`
+  (`/var/folders/…/T/`; 2 ms under `/private/tmp`, 70 µs inside an empty
+  private parent). A test of an unreadable-cwd branch (for example sniff-cli's
+  `relative_base_with_unreadable_cwd_fails`) should make only one lookup, and
+  should create the directory to delete inside its own `TempDir`, removing
+  only the child.
+
+## File flushes cost ~25 ms each
+
+On Apple platforms std's `File::sync_all` **and** `File::sync_data` call
+`fcntl(F_FULLFSYNC)`, which also empties the drive's write cache: about 25 ms
+per call here. The `worktree` recovery-store tests took 0.3–4 s each with
+std's flushes and about 30 ms with plain `libc::fsync`. Plain `fsync` survives
+a process or kernel crash, not a power loss; when the code claims only
+process-crash durability, call `libc::fsync` under
+`#[cfg(target_vendor = "apple")]` (`flush` in
+`worktree/lib/src/remove/recovery/storage.rs`). Never call std's flush in a
+per-batch loop on macOS without measuring it.
 
 ## Process groups
 
@@ -133,6 +150,39 @@ inside the directory shows that the directory is in use, not that it is
 watched. See the [FSEvents guide](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
 and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
 
+### Receiving FSEvents reliably
+
+Measured with `fsevent-sys` 4.1 at latency 0:
+
+- **Bursts drop events even when the handler never blocks.** 2,000-file
+  bursts produced `MustScanSubDirs` "user dropped" events; 64–1,000 did not.
+- **Delivery is not ordered against a marker.** `FSEventStreamFlushSync`
+  alone is not a drain: it delivers only what fseventsd has already processed
+  (1 of 50 write-then-flush rounds missed its write). One confirmed marker is
+  not a drain either: under a 2,000-file burst fseventsd gave a few creations
+  IDs after a later marker (about 1 drain in 15). `wt remove` repeats marker
+  rounds (create a marker, flush until it arrives) until a round delivers no
+  watched-path event, and treats anything later as arriving in a later drain
+  (`worktree/lib/src/remove/observation/fsevents.rs`). A round costs ~11 ms
+  idle, up to ~650 ms under suite load.
+- **`FSEventStreamStart` returns before events are routed.** Confirm with one
+  marker before relying on the stream.
+- **Removing or renaming a directory replaces its pending child events** in
+  the same batch, even at latency 0. Drain between changing a directory's
+  children and renaming or removing it.
+- **fseventsd serializes stream registration:** ~20 ms alone, up to 5 s each
+  with ~15 test processes starting together. Run FSEvents tests in a nextest
+  group with `max-threads = 1` (`fsevents-l1`). Events also lag 100–600 ms
+  under load, past any fixed wait.
+- **History flags are cumulative.** A created-then-deleted (or renamed) path
+  can report `Create` with `Remove` or the rename flag. Match "the
+  history includes the expected flag" plus the path's current state, never
+  "every flag is expected".
+- **Watches are path-based.** After a rename, the new name is unobserved until
+  watched, so watch both names before the move. Avoid a recursive watch on a
+  shared parent: every sibling's activity reaches the stream, and a busy
+  sibling (a build) is enough to make FSEvents drop events.
+
 ### Reading other processes' descriptors and cwd
 
 `sniff/lib/src/filesystem/query/macos.rs` implements this. Traps it handles:
@@ -171,7 +221,9 @@ and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
   Confirm with `grep link-search target/debug/build/libgit2-sys-*/output`.
   `cargo clean -p libgit2-sys` did not help. Prefix the command with
   `LIBGIT2_NO_PKG_CONFIG=1` to build the vendored libgit2, which takes a
-  one-time C build.
+  one-time C build. For a scoped local run, a process-local
+  `LIBRARY_PATH=/opt/homebrew/opt/libgit2/lib` also links, once you confirm the
+  library exists there.
 - **`CDPATH` sends a relative `cd` into the main checkout.** Agent shells here
   inherit an exported `CDPATH` that lists the main checkout and does not start
   with `.`. From a linked worktree, `cd sniff` lands in the main checkout's
@@ -254,6 +306,12 @@ and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
   skill's `installation.md` has the details. A fake wrapper in a fixture that
   models this stripping must `unset DYLD_FALLBACK_LIBRARY_PATH` explicitly,
   because a plain Bash passthrough can keep the variable on hosted macOS.
+- **CoreAudio client setup is serialized across processes.** The first
+  `AudioObjectGetPropertyData*` call initializes the HAL, about 0.75 s of
+  serial time each here (seven third-party HAL plug-ins): 1 process 1.1 s,
+  6 together 4.6 s each, with under 0.2 s of CPU apiece. Tests that enumerate
+  audio devices slow down by their count, not core count; keep them few
+  (sniff's `testing.md`).
 - **L1 timeouts when heavy jobs run at the same time.** Sniff's CoreAudio and
   network-interface probes, and tree-hugger's corpus tests, can exceed the
   30 s L1 budget when they run beside Clippy, other compiles, or other suites

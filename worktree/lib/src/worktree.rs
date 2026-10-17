@@ -293,7 +293,7 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
 /// entry containing `repo` is the current one; the process's current
 /// directory is never read.
 pub fn parse_worktree_state_in(repo: &Path) -> Result<WorktreeList, WorktreeError> {
-    let porcelain = git_command_in(repo, &["worktree", "list", "--porcelain"])?;
+    let porcelain = crate::git::worktree_list_in(repo)?;
     let entries = parse_worktree_list_from(&porcelain, repo);
     let default_branch = default_branch_in(repo)?;
     let refs = RefSnapshot::read_in(repo);
@@ -628,8 +628,11 @@ fn porcelain_path(line: &str) -> Option<&str> {
 /// Create a new worktree under `base`.
 ///
 /// The worktree is placed at `{base}/{repo-name}/{dasherized-branch}/`.
-/// Callers are responsible for resolving `base` (e.g. via
-/// [`worktree::config::resolve_base_dir`] or an interactive prompt).
+/// `base` is used as given and is not checked here: callers must resolve and
+/// validate it first, through [`crate::config::resolve_base_dir`] or, for a
+/// value chosen some other way, [`crate::config::validate_base_dir`] plus an
+/// existing-directory check. A relative `base` would place the worktree under
+/// the current directory.
 ///
 /// A new branch forks from the local branch `from`, or from the current
 /// branch when `from` is `None`, and its fork origin is recorded (see
@@ -753,7 +756,7 @@ pub fn create_worktree(
 
 fn prepare_include_source(fork_branch: Option<&str>, destination: &Path)
     -> Result<(Option<WorktreeEntry>, IncludeOutcome), WorktreeError> {
-    let entries = parse_worktree_list(&git_command(&["worktree", "list", "--porcelain"])?);
+    let entries = parse_worktree_list(&crate::git::worktree_list()?);
     let mut outcome = IncludeOutcome::default();
     let source = match copy_source(&entries, fork_branch) {
         CopySource::Worktree(entry) => { outcome.source_label = entry.branch.clone().unwrap_or_default(); Some(entry) },
@@ -818,7 +821,7 @@ fn finish_include_copy(source: &Option<WorktreeEntry>, destination: &Path, outco
 
 /// Find a worktree by name; see [`resolve_worktree`] for the rules.
 pub fn find_worktree(name: &str) -> Result<WorktreeEntry, WorktreeError> {
-    let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
+    let porcelain = crate::git::worktree_list()?;
     resolve_worktree(&parse_worktree_list(&porcelain), name)
 }
 
@@ -874,7 +877,7 @@ pub fn resolve_worktree(
 
 /// List worktree names for shell completions; see [`completion_names`].
 pub fn worktree_names() -> Vec<String> {
-    let Ok(porcelain) = git_command(&["worktree", "list", "--porcelain"]) else {
+    let Ok(porcelain) = crate::git::worktree_list() else {
         return vec!["base".to_string()];
     };
     completion_names(&parse_worktree_list(&porcelain))
@@ -920,7 +923,6 @@ pub fn local_branches() -> Vec<String> {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
 
     use crate::git::recorder;
 
@@ -959,7 +961,7 @@ branch refs/heads/fix/bug-42
     }
 
     fn run_git(repo: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let status = crate::git::command()
             .current_dir(repo)
             .args(args)
             .status()
@@ -1411,13 +1413,16 @@ branch refs/heads/fix/bug-42
         let _guard = DirGuard::enter(repo.path());
 
         recorder::start_recording();
+        crate::questions::start_recording();
         let list = list_worktrees().expect("list should succeed");
+        let asked = crate::questions::finish_recording();
         let calls = recorder::finish_recording();
 
-        let count = |command: &str| {
-            recorder::count_matching(&calls, |args| args.first().map(String::as_str) == Some(command))
+        let count = |calls: &[Vec<String>], command: &str| {
+            recorder::count_matching(calls, |args| args.first().map(String::as_str) == Some(command))
         };
-        assert_eq!(count("for-each-ref"), 1, "got {calls:?}");
+        assert_eq!(count(&asked, "for-each-ref"), 1, "one ref read, got {asked:?}");
+        assert_eq!(count(&calls, "for-each-ref"), 0, "read in-process, got {calls:?}");
         // `default_branch()` probes `rev-parse --verify main` without a remote;
         // no tip is resolved with a bare `rev-parse <branch>` any more.
         let tip_lookups = recorder::count_matching(&calls, |args| {
@@ -1712,7 +1717,7 @@ branch refs/heads/fix/bug-42
     }
 
     fn rev_parse(repo: &Path, rev: &str) -> String {
-        let out = Command::new("git")
+        let out = crate::git::command()
             .current_dir(repo)
             .args(["rev-parse", rev])
             .output()

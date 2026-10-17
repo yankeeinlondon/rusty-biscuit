@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no authored total
+ --> tests/fixtures/compile_fail/pager_total_without_a_total.rs
+  |
+  |     let _ = pages.total();
+  |                   ^^^^^ `total()` needs a total in the definition
+  |
+help: the trait `HasTotal` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_total_without_a_total.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` authors no total
+note: required by a bound in `schematic_runtime::pager::Pages::<'a, A, R>::total`
+ --> src/pager/pages.rs
+  |
+  |     pub fn total(&self) -> Option<u64>
+  |            ----- required by a bound in this associated function
+  |     where
+  |         R: HasTotal,
+  |            ^^^^^^^^ required by this bound in `Pages::<'a, A, R>::total`

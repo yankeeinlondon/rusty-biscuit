@@ -69,7 +69,6 @@ Three scanners are provided:
 - `serde`, `serde_json`, `toml` - Serialization
 - `gguf-rs-lib` - GGUF file parsing
 - `schematic-definitions` - Ollama/LM Studio API types
-- `schematic-schema` - HuggingFace API client
 - `sniff` - OS detection for platform-specific paths
 - `dirs` - Platform directory resolution
 

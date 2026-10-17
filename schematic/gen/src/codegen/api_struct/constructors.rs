@@ -62,6 +62,7 @@ pub(super) fn generate_constructors(
                 auth_policy: #auth_policy_init,
                 env_username: #env_username_init,
                 headers: #headers_init,
+                api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),
             }
         }
@@ -82,6 +83,7 @@ pub(super) fn generate_constructors(
                 auth_policy: #auth_policy_init,
                 env_username: #env_username_init,
                 headers: #headers_init,
+                api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),
             }
         }
@@ -108,6 +110,7 @@ pub(super) fn generate_constructors(
                 auth_policy: #auth_policy_init,
                 env_username: #env_username_init,
                 headers: #headers_init,
+                api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),
             }
         }
@@ -132,6 +135,7 @@ pub(super) fn generate_constructors(
                 auth_policy: #auth_policy_init,
                 env_username: #env_username_init,
                 headers: #headers_init,
+                api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),
             }
         }

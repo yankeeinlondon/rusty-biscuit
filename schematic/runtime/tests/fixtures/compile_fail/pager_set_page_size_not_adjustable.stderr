@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no adjustable page size
+ --> tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.rs
+  |
+  |     pages.set_page_size(10);
+  |           ^^^^^^^^^^^^^ `set_page_size(..)` needs an adjustable `PageSize` in the definition
+  |
+help: the trait `AdjustablePageSize` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` does not mark its page size adjustable
+note: required by a bound in `schematic_runtime::pager::Pages::<'a, A, R>::set_page_size`
+ --> src/pager/pages.rs
+  |
+  |     pub fn set_page_size(&mut self, size: u32)
+  |            ------------- required by a bound in this associated function
+  |     where
+  |         R: AdjustablePageSize,
+  |            ^^^^^^^^^^^^^^^^^^ required by this bound in `Pages::<'a, A, R>::set_page_size`

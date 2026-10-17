@@ -55,7 +55,7 @@ sniff repo remote rust-lang/cargo
 sniff repo remote owner/repo
 ```
 
-With a shorthand, the provider is not known in advance. Sniff probes configured providers sequentially (GitHub, GitLab, Bitbucket) and uses the first one that returns a successful response. Gitea is excluded from shorthand probing because it is self-hosted with no default base URL.
+With a shorthand, the provider is not known in advance. Sniff probes providers sequentially (GitHub, GitLab, Bitbucket) and uses the first one that returns a successful response. Gitea is excluded from shorthand probing because it is self-hosted with no default base URL.
 
 ## Supported Providers
 
@@ -70,7 +70,7 @@ GitLab supports nested groups in URLs (e.g., `group/subgroup/repo`). The entire 
 
 ## Authentication
 
-Each provider reads credentials from environment variables. Credentials are required for all operations — there is no unauthenticated fallback.
+Each provider reads credentials from environment variables, using the first non-empty one in the order below. With none set, requests are sent anonymously, which is enough for public repositories within the provider's anonymous rate limit. A 401 is reported as a credentials error.
 
 | Provider | Environment variables |
 |---|---|
@@ -81,7 +81,7 @@ Each provider reads credentials from environment variables. Credentials are requ
 
 Bitbucket app passwords can be created at `https://bitbucket.org/account/settings/app-passwords/`.
 
-When using the `owner/repo` shorthand, providers with no credentials configured are silently skipped. If no configured provider finds the repository, sniff exits with a `ShorthandNotFound` error listing which providers were tried.
+When using the `owner/repo` shorthand, sniff asks GitHub, then GitLab, then Bitbucket, with or without credentials. A 404 or any other failure moves on to the next provider; rejected credentials (`InvalidCredentials`) or a rate limit stop the search. If no provider finds the repository, sniff exits with a `ShorthandNotFound` error listing which providers were tried.
 
 ## Default Output
 

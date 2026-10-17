@@ -1,0 +1,20 @@
+error[E0277]: `GetItem` is not paginated
+ --> tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+  |
+  |     let _ = client.send(GetItem).pager();
+  |                                  ^^^^^ no pagination strategy is authored for this endpoint
+  |
+help: the trait `Paginated` is not implemented for `GetItem`
+ --> tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+  |
+  | struct GetItem;
+  | ^^^^^^^^^^^^^^
+  = note: the definition authors no pagination strategy for `GetItem`, so the generated client has no pager for it
+note: required by a bound in `pager::pages::<impl Call<'a, A, R>>::pager`
+ --> src/pager/pages.rs
+  |
+  |     pub fn pager(self) -> Pager<'a, A, R>
+  |            ----- required by a bound in this associated function
+  |     where
+  |         R: Paginated,
+  |            ^^^^^^^^^ required by this bound in `pager::pages::<impl Call<'a, A, R>>::pager`

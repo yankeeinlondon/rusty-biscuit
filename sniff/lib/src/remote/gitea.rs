@@ -9,10 +9,10 @@
 
 use async_trait::async_trait;
 use schematic_schema::gitea::*;
-use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     count_api_request,
+    envelope::{Replies, Unauthorized},
     provider::RemoteRepoProvider,
     snapshot::{
         CONTINUATION_PREFIXES, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, documents_from_tree,
@@ -24,10 +24,16 @@ use super::{
 };
 use crate::error::SniffError;
 
+const REPLIES: Replies = Replies::new("Gitea", Unauthorized::Missing("GITEA_TOKEN"));
+
+/// Codeberg's API root.
+const CODEBERG_API_URL: &str = "https://codeberg.org/api/v1";
+
 /// Gitea remote repository provider.
 ///
 /// Uses the schematic-generated Gitea API client for all HTTP operations.
-/// Authentication is via the `GITEA_TOKEN` environment variable.
+/// Each request sends a non-empty `GITEA_TOKEN`, and is sent anonymously when
+/// it is not set.
 ///
 /// Note: Gitea is self-hosted only, so a base URL is always required.
 /// Use [`GiteaRemote::with_base_url`] for custom instances or
@@ -38,8 +44,8 @@ use crate::error::SniffError;
 /// Gitea uses `Authorization: token <pat>` format. The `GITEA_TOKEN`
 /// environment variable should contain the full token value.
 ///
-/// For Codeberg, you can optionally use `CODEBERG_TOKEN` which takes
-/// precedence over `GITEA_TOKEN`.
+/// For Codeberg, a non-empty `CODEBERG_TOKEN` takes precedence over
+/// `GITEA_TOKEN`.
 ///
 /// ## Examples
 ///
@@ -73,7 +79,8 @@ impl GiteaRemote {
     ///
     /// ## Errors
     ///
-    /// Returns `SniffError::RemoteInit` if the client cannot be initialized.
+    /// Returns `SniffError::RemoteInit` if the client cannot be initialized,
+    /// including when `base_url` is not an HTTP(S) URL with a host.
     ///
     /// ## Examples
     ///
@@ -84,11 +91,7 @@ impl GiteaRemote {
     /// ```
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
         let normalized_url = normalize_base_url(base_url);
-
-        Ok(Self {
-            client: Gitea::with_base_url(&normalized_url),
-            base_url: normalized_url,
-        })
+        Self::build(Gitea::new().base_url(&normalized_url), normalized_url)
     }
 
     /// Create for [Codeberg](https://codeberg.org), a popular public Gitea instance.
@@ -107,22 +110,21 @@ impl GiteaRemote {
     /// let metadata = codeberg.get_repo_metadata("forgejo", "forgejo").await?;
     /// ```
     pub fn codeberg() -> Result<Self, SniffError> {
-        let base_url = "https://codeberg.org/api/v1";
+        Self::codeberg_at(CODEBERG_API_URL)
+    }
 
-        // Use CODEBERG_TOKEN if available, otherwise fall back to GITEA_TOKEN
-        let client = Gitea::new()
-            .variant()
-            .base_url(base_url)
-            .env_auth(vec![
-                "CODEBERG_TOKEN".to_string(),
-                "GITEA_TOKEN".to_string(),
-            ])
-            .build();
+    /// Codeberg's credential order against `api_url`, so a test can point it
+    /// at a local server.
+    fn codeberg_at(api_url: &str) -> Result<Self, SniffError> {
+        let builder = Gitea::new()
+            .base_url(api_url)
+            .env_order(["CODEBERG_TOKEN", "GITEA_TOKEN"]);
+        Self::build(builder, api_url.to_string())
+    }
 
-        Ok(Self {
-            client,
-            base_url: base_url.to_string(),
-        })
+    fn build(builder: Gitea, base_url: String) -> Result<Self, SniffError> {
+        let client = builder.build().map_err(|error| REPLIES.init(&error))?;
+        Ok(Self { client, base_url })
     }
 
     /// Returns the base URL for this Gitea instance.
@@ -140,28 +142,6 @@ impl GiteaRemote {
             .to_string()
     }
 
-    /// Build a Gitea API client variant that performs no authentication.
-    ///
-    /// The client is constructed by overriding both the env-fallback list
-    /// (so no credentials can be picked up from `GITEA_TOKEN`,
-    /// `CODEBERG_TOKEN`, etc.) **and** the auth strategy itself (so the
-    /// schematic runtime does not pre-flight-reject the request for missing
-    /// credentials). The combination produces a truly anonymous client
-    /// whose request passes through to the wire and is judged by the API
-    /// alone.
-    ///
-    /// This supports the "attempt unauthenticated" fallback: when an
-    /// authenticated request fails because no credentials are configured,
-    /// we retry once with this anonymous client before surfacing a
-    /// `MissingCredentials` error to the user.
-    fn unauthenticated_client(&self) -> Gitea {
-        self.client
-            .variant()
-            .env_auth(Vec::new())
-            .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
-            .build()
-    }
-
     /// Fetches the recursive root tree once, continuing if Gitea truncated it.
     ///
     /// See `GitHubRemote::fetch_tree` — Gitea mirrors the GitHub tree API,
@@ -172,25 +152,24 @@ impl GiteaRemote {
         repo: &str,
         default_branch: &str,
     ) -> Result<RemoteTree, SniffError> {
-        let request = GetGitTreeRecursiveRequest::new(owner, repo, default_branch);
         count_api_request("tree");
-        let response: GitTreeResponse = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let response = REPLIES.value(
+            self.client
+                .get_git_tree_recursive(owner, repo, default_branch)
+                .await,
+        )?;
 
         let mut tree = RemoteTree::observed(blobs_of(response.tree), response.truncated);
         if tree.truncated {
             let mut recovered = Vec::new();
             for prefix in CONTINUATION_PREFIXES {
-                let request = GetGitTreeRecursiveRequest::new(
+                let call = self.client.get_git_tree_recursive(
                     owner,
                     repo,
                     format!("{default_branch}:{prefix}"),
                 );
                 count_api_request("tree_continuation");
-                let Ok(response) = self.client.request::<GitTreeResponse>(request).await else {
+                let Ok(response) = call.await else {
                     continue;
                 };
                 recovered.extend(
@@ -238,87 +217,6 @@ fn normalize_base_url(url: &str) -> String {
     }
 }
 
-/// Map a [`SchematicError`] to a [`SniffError`].
-///
-/// Handles special cases:
-/// - `MissingCredential` / `AuthenticationRequired` -> `MissingCredentials`
-/// - 401 -> `MissingCredentials` (anonymous request rejected)
-/// - 403 with rate limit info -> `RateLimited`
-/// - 404 -> `RemoteApi` with "Not found"
-/// - Other HTTP errors -> `RemoteApi`
-///
-/// ## Notes
-///
-/// `MissingCredentials` is only emitted *after* the anonymous retry has
-/// failed (see [`GiteaRemote::unauthenticated_client`]) or when the API
-/// explicitly demands credentials for a private resource (a real 401
-/// response). Call sites that want the "attempt unauthenticated"
-/// behaviour must wrap the initial request in a
-/// `MissingCredential`/`AuthenticationRequired` retry rather than mapping
-/// the first failure directly through this function.
-fn map_schematic_error(err: SchematicError) -> SniffError {
-    match err {
-        SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
-            provider: "Gitea".to_string(),
-            env_var: env_vars.join(" or "),
-        },
-        SchematicError::AuthenticationRequired {
-            env_fallback_vars, ..
-        } => SniffError::MissingCredentials {
-            provider: "Gitea".to_string(),
-            env_var: env_fallback_vars.join(" or "),
-        },
-        SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
-            provider: "Gitea".to_string(),
-            env_var: format!("GITEA_TOKEN (API returned 401: {})", body),
-        },
-        SchematicError::ApiError { status: 403, body } => {
-            // Check if this is a rate limit error
-            if body.to_lowercase().contains("rate limit") {
-                SniffError::RateLimited {
-                    provider: "Gitea".to_string(),
-                    retry_after: None,
-                }
-            } else {
-                SniffError::RemoteApi {
-                    provider: "Gitea".to_string(),
-                    status: 403,
-                    message: body,
-                }
-            }
-        }
-        SchematicError::ApiError { status: 429, .. } => SniffError::RateLimited {
-            provider: "Gitea".to_string(),
-            retry_after: None,
-        },
-        SchematicError::ApiError { status: 404, .. } => SniffError::RemoteApi {
-            provider: "Gitea".to_string(),
-            status: 404,
-            message: "Not found".to_string(),
-        },
-        SchematicError::ApiError { status, body } => SniffError::RemoteApi {
-            provider: "Gitea".to_string(),
-            status,
-            message: body,
-        },
-        SchematicError::Http(e) => SniffError::RemoteApi {
-            provider: "Gitea".to_string(),
-            status: 0,
-            message: e.to_string(),
-        },
-        SchematicError::Json(e) => SniffError::RemoteApi {
-            provider: "Gitea".to_string(),
-            status: 0,
-            message: format!("JSON parse error: {}", e),
-        },
-        other => SniffError::RemoteApi {
-            provider: "Gitea".to_string(),
-            status: 0,
-            message: other.to_string(),
-        },
-    }
-}
-
 #[async_trait]
 impl RemoteRepoProvider for GiteaRemote {
     fn provider(&self) -> GitProvider {
@@ -326,13 +224,8 @@ impl RemoteRepoProvider for GiteaRemote {
     }
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
-        let request = GetRepositoryRequest::new(owner, repo);
         count_api_request("metadata");
-        let info: RepositoryInfo = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let info = REPLIES.value(self.client.get_repository(owner, repo).await)?;
 
         // Gitea types are heavily optional - extract with defaults
         let name = info.name.unwrap_or_else(|| repo.to_string());
@@ -416,12 +309,12 @@ impl RemoteRepoProvider for GiteaRemote {
         repo: &str,
         path: &str,
     ) -> Result<String, SniffError> {
-        let request = GetRepositoryContentRawRequest::new(owner, repo, path);
         count_api_request("contents");
-        self.client
-            .get_repository_content_raw(request)
-            .await
-            .map_err(map_schematic_error)
+        REPLIES.value(
+            self.client
+                .get_repository_content_raw(owner, repo, path)
+                .await,
+        )
     }
 
     async fn list_pull_requests(
@@ -430,38 +323,20 @@ impl RemoteRepoProvider for GiteaRemote {
         repo: &str,
         state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let mut request = ListPullRequestsRequest::new(owner, repo);
-
         // Map PullRequestState to Gitea API state parameter
-        match state {
-            PullRequestState::Open => {
-                request = request.with_state("open".to_string());
-            }
-            PullRequestState::Closed => {
-                request = request.with_state("closed".to_string());
-            }
-            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => {
-                request = request.with_state("all".to_string());
-            }
-        }
-
-        // Attempt the request with the configured client first. If it fails
-        // because no credentials are available, retry once with an explicitly
-        // unauthenticated client. Only after the anonymous retry also fails
-        // (or on a real 401/403) do we surface a credentials error.
-        count_api_request("pulls");
-        let prs: Vec<PullRequestSummary> = match self.client.request(request.clone()).await {
-            Ok(prs) => prs,
-            Err(SchematicError::MissingCredential { .. })
-            | Err(SchematicError::AuthenticationRequired { .. }) => {
-                count_api_request("pulls");
-                self.unauthenticated_client()
-                    .request(request)
-                    .await
-                    .map_err(map_schematic_error)?
-            }
-            Err(err) => return Err(map_schematic_error(err)),
+        let api_state = match state {
+            PullRequestState::Open => "open",
+            PullRequestState::Closed => "closed",
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => "all",
         };
+
+        count_api_request("pulls");
+        let prs = REPLIES.value(
+            self.client
+                .list_pull_requests(owner, repo)
+                .state(api_state.to_string())
+                .await,
+        )?;
 
         let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
@@ -525,13 +400,8 @@ impl RemoteRepoProvider for GiteaRemote {
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
-        let request = ListIssuesRequest::new(owner, repo);
         count_api_request("issues");
-        let issues: Vec<IssueSummary> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let issues = REPLIES.value(self.client.list_issues(owner, repo).await)?;
 
         // Gitea's ListIssues with type=issues already filters out PRs
         Ok(issues
@@ -570,22 +440,12 @@ impl RemoteRepoProvider for GiteaRemote {
         repo: &str,
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
-        let tags_request = ListTagsRequest::new(owner, repo);
         count_api_request("tags");
-        let tags: Vec<RepoTag> = self
-            .client
-            .request(tags_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let tags = REPLIES.value(self.client.list_tags(owner, repo).await)?;
 
         // Fetch releases
-        let releases_request = ListReleasesRequest::new(owner, repo);
         count_api_request("releases");
-        let releases: Vec<Release> = self
-            .client
-            .request(releases_request)
-            .await
-            .map_err(map_schematic_error)?;
+        let releases = REPLIES.value(self.client.list_releases(owner, repo).await)?;
 
         // Convert tags - we can determine if annotated from the message field
         let tag_infos: Vec<TagInfo> = tags
@@ -706,8 +566,8 @@ impl RemoteRepoProvider for GiteaRemote {
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
-        // Gitea ListOrgRepos endpoint is not implemented in schematic-definitions
-        // Return empty for now
+        // The generated client has `list_org_repos`, but this provider does not call
+        // it yet, so organization listings are always empty.
         Ok(Vec::new())
     }
 
@@ -810,51 +670,84 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_map_schematic_error_missing_credentials() {
-        let err = SchematicError::MissingCredential {
-            env_vars: vec!["GITEA_TOKEN".to_string()],
-        };
-        match map_schematic_error(err) {
-            SniffError::MissingCredentials { provider, env_var } => {
-                assert_eq!(provider, "Gitea");
-                assert!(env_var.contains("GITEA_TOKEN"));
-            }
-            _ => panic!("Expected MissingCredentials error"),
-        }
-    }
+    /// Codeberg reads `CODEBERG_TOKEN` before `GITEA_TOKEN`; an empty variable
+    /// counts as unset. Each case asserts the header the server received.
+    mod codeberg_credentials {
+        use serial_test::serial;
+        use test_toolkit::EnvGuard;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[test]
-    fn test_map_schematic_error_rate_limited() {
-        let err = SchematicError::ApiError {
-            status: 403,
-            body: "API rate limit exceeded".to_string(),
-        };
-        match map_schematic_error(err) {
-            SniffError::RateLimited { provider, .. } => {
-                assert_eq!(provider, "Gitea");
-            }
-            _ => panic!("Expected RateLimited error"),
-        }
-    }
+        use super::*;
 
-    #[test]
-    fn test_map_schematic_error_not_found() {
-        let err = SchematicError::ApiError {
-            status: 404,
-            body: "Not Found".to_string(),
-        };
-        match map_schematic_error(err) {
-            SniffError::RemoteApi {
-                provider,
-                status,
-                message,
-            } => {
-                assert_eq!(provider, "Gitea");
-                assert_eq!(status, 404);
-                assert_eq!(message, "Not found");
-            }
-            _ => panic!("Expected RemoteApi error"),
+        async fn sent_authorization(codeberg: Option<&str>, gitea: Option<&str>) -> String {
+            let _guards: Vec<EnvGuard> = [("CODEBERG_TOKEN", codeberg), ("GITEA_TOKEN", gitea)]
+                .into_iter()
+                .map(|(name, value)| match value {
+                    Some(value) => EnvGuard::set_safe(name, value),
+                    None => EnvGuard::remove_safe(name),
+                })
+                .collect();
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/repos/owner/repo"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "name": "repo",
+                    "default_branch": "main"
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let provider = GiteaRemote::codeberg_at(&server.uri()).unwrap();
+
+            provider.get_repo_metadata("owner", "repo").await.unwrap();
+
+            let requests = server.received_requests().await.unwrap();
+            requests[0]
+                .headers
+                .get("authorization")
+                .map(|value| value.to_str().unwrap().to_string())
+                .unwrap_or_default()
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn codeberg_token_wins_over_gitea_token() {
+            let sent = sent_authorization(Some("codeberg-secret"), Some("gitea-secret")).await;
+
+            assert_eq!(sent, "token codeberg-secret");
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn gitea_token_is_used_when_codeberg_token_is_absent() {
+            let sent = sent_authorization(None, Some("gitea-secret")).await;
+
+            assert_eq!(sent, "token gitea-secret");
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn gitea_token_is_used_when_codeberg_token_is_empty() {
+            let sent = sent_authorization(Some(""), Some("gitea-secret")).await;
+
+            assert_eq!(sent, "token gitea-secret");
+        }
+
+        #[tokio::test]
+        #[serial]
+        async fn no_token_sends_no_authorization() {
+            let sent = sent_authorization(None, None).await;
+
+            assert_eq!(sent, "");
+        }
+
+        #[test]
+        fn codeberg_targets_the_codeberg_api() {
+            assert_eq!(
+                GiteaRemote::codeberg().unwrap().base_url(),
+                "https://codeberg.org/api/v1"
+            );
         }
     }
 }

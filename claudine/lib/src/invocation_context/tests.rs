@@ -1722,3 +1722,45 @@ fn an_external_prompt_opened_through_home_takes_home_as_its_tree_root() {
 
     drop(guards);
 }
+
+/// A repository left mid-merge with `tracked.txt` unmerged.
+fn repo_with_merge_conflict() -> TempDir {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    fs::write(fixture.path().join("tracked.txt"), "base\n").unwrap();
+    git(fixture.path(), &["add", "tracked.txt"]);
+    git(fixture.path(), &["commit", "-q", "-m", "base"]);
+    git(fixture.path(), &["checkout", "-q", "-b", "theirs"]);
+    fs::write(fixture.path().join("tracked.txt"), "theirs\n").unwrap();
+    git(fixture.path(), &["commit", "-q", "-am", "theirs"]);
+    git(fixture.path(), &["checkout", "-q", "main"]);
+    fs::write(fixture.path().join("tracked.txt"), "ours\n").unwrap();
+    git(fixture.path(), &["commit", "-q", "-am", "ours"]);
+    let merge = Command::new("git")
+        .args(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com"])
+        .args(["merge", "-q", "theirs"])
+        .current_dir(fixture.path())
+        .output()
+        .expect("run git merge in the fixture");
+    assert!(!merge.status.success(), "the merge must stop on a conflict: {merge:?}");
+    fixture
+}
+
+/// `ctx.merge_conflicts` and `current.merge_conflicts` read the index, not the
+/// launch `GitInfo`, whose summary request carries no per-file changes.
+#[test]
+fn merge_conflicts_are_observed_from_the_index_eagerly_and_lazily() {
+    let fixture = repo_with_merge_conflict();
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.merge_conflicts }}");
+    let invocation = InvocationContext::capture_at(&crate::test_support::snapshot(), fixture.path()).unwrap();
+
+    let context = invocation.begin_document_epoch().capture_launch_context(&requirements);
+    assert_eq!(context.get("merge_conflicts"), Some(&serde_json::json!(["tracked.txt"])));
+    assert!(context.diagnostics().is_empty(), "{:?}", context.diagnostics());
+
+    assert_eq!(
+        observed(invocation.current_provider().refresh("merge_conflicts")),
+        serde_json::json!(["tracked.txt"])
+    );
+}

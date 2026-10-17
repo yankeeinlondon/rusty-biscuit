@@ -1,0 +1,59 @@
+error[E0277]: the trait bound `schematic_runtime::Text: SupportsHooks` is not satisfied
+ --> tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.rs
+  |
+  |         .mutate_response::<Get<Text>, _>(|_, text| {
+  |                            ^^^^^^^^^ the trait `SupportsHooks` is not implemented for `schematic_runtime::Text`
+  |
+help: the trait `SupportsHooks` is implemented for `schematic_runtime::Json<T>`
+ --> src/codec.rs
+  |
+  | impl<T> SupportsHooks for Json<T> where T: serde::de::DeserializeOwned + Send + 'static {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         R::Decoder: SupportsHooks,
+  |                     ^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`
+
+error[E0277]: the trait bound `schematic_runtime::Binary: SupportsHooks` is not satisfied
+ --> tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.rs
+  |
+  |         .mutate_response::<Get<Binary>, _>(|_, _bytes| Ok(()))
+  |                            ^^^^^^^^^^^ the trait `SupportsHooks` is not implemented for `schematic_runtime::Binary`
+  |
+help: the trait `SupportsHooks` is implemented for `schematic_runtime::Json<T>`
+ --> src/codec.rs
+  |
+  | impl<T> SupportsHooks for Json<T> where T: serde::de::DeserializeOwned + Send + 'static {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         R::Decoder: SupportsHooks,
+  |                     ^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`
+
+error[E0277]: the trait bound `schematic_runtime::Empty: SupportsHooks` is not satisfied
+ --> tests/fixtures/compile_fail/mutator_on_a_non_json_endpoint.rs
+  |
+  |         .mutate_response::<Get<Empty>, _>(|_, _unit| Ok(()));
+  |                            ^^^^^^^^^^ the trait `SupportsHooks` is not implemented for `schematic_runtime::Empty`
+  |
+help: the trait `SupportsHooks` is implemented for `schematic_runtime::Json<T>`
+ --> src/codec.rs
+  |
+  | impl<T> SupportsHooks for Json<T> where T: serde::de::DeserializeOwned + Send + 'static {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         R::Decoder: SupportsHooks,
+  |                     ^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`

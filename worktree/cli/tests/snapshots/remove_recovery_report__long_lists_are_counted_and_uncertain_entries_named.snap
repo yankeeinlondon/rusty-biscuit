@@ -1,0 +1,26 @@
+---
+source: worktree/cli/tests/remove_recovery_report.rs
+expression: "stopped(&finished(report), None)"
+---
+Removal stopped: watching for changes stopped working, so what happened next can't be verified.
+
+Original: /work/fix-path-spelling
+Moved to: /work/.wt-remove-fix-path-spelling-a91c
+Deleted before stopping: 1 file and 1 folder (listed in the saved report)
+Possibly deleted: 2 files (no result was recorded for them)
+Remaining: 1 entry in the moved directory
+Observed: /work/.wt-remove-fix-path-spelling-a91c/target/0.o was modified (reported at 14:03:07 UTC)
+Observed: /work/.wt-remove-fix-path-spelling-a91c/target/1.o was modified (reported at 14:03:08 UTC)
+Observed: /work/.wt-remove-fix-path-spelling-a91c/target/2.o was modified (reported at 14:03:09 UTC)
+…and 13 more changes, listed in the saved report
+Git registration: now points to the moved directory
+Error: error 1
+Error: error 2
+Error: error 3
+…and 2 more errors, listed in the saved report
+A write that landed just before its entry was deleted was deleted with it; the saved report lists every deleted entry.
+
+Stop any tasks using either path. Inspect both locations and save new work.
+Retry: wt remove fix/path-spelling
+  Run it from the base checkout at /repo.
+Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json

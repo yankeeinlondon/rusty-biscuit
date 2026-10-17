@@ -112,6 +112,7 @@ impl Scripted {
 
 #[derive(Default)]
 struct Fake {
+    path_reader: Option<super::win32_paths::PathReader>,
     pids: Option<Result<Vec<u32>, String>>,
     processes: BTreeMap<u32, Scripted>,
     opens: HashMap<u32, usize>,
@@ -120,6 +121,10 @@ struct Fake {
     capacities: Vec<usize>,
     /// PIDs whose handle was closed, in order.
     closed: Rc<RefCell<Vec<u32>>>,
+    /// Every module whose path was read one at a time, by PID and index.
+    path_reads: Vec<(u32, usize)>,
+    /// [`Source::loader_paths`] by PID: the indexes the one-pass read covers.
+    walked: HashMap<u32, Option<Vec<usize>>>,
 }
 
 /// Records its own close.
@@ -153,6 +158,8 @@ impl Fake {
 
 impl Source for &mut Fake {
     type Process = FakeHandle;
+
+    fn path_reader(&self) -> Option<super::win32_paths::PathReader> { self.path_reader.clone() }
 
     fn pids(&mut self) -> Result<Vec<u32>, String> {
         match &self.pids {
@@ -209,7 +216,19 @@ impl Source for &mut Fake {
         })
     }
 
+    fn loader_paths(&mut self, process: &FakeHandle) -> Option<HashMap<Module, PathBuf>> {
+        let covered = self.walked.get(&process.pid).cloned().flatten()?;
+        let modules = self.process(process.pid).ok()?.modules.clone().ok()?;
+        Some(
+            covered
+                .into_iter()
+                .filter_map(|index| Some((Module(index), modules.get(index)?.clone().ok()?)))
+                .collect(),
+        )
+    }
+
     fn module_path(&mut self, process: &FakeHandle, module: Module) -> Result<PathBuf, Fault> {
+        self.path_reads.push((process.pid, module.0));
         let modules = self.process(process.pid)?.modules.clone()?;
         modules.get(module.0).cloned().unwrap_or(Err(Fault::Gone))
     }
@@ -247,7 +266,7 @@ fn indexed(path: &Path) -> PathBuf {
 }
 
 fn module_paths(record: &ProcessRecord) -> Vec<PathBuf> {
-    record.evidence.iter().flat_map(paths).collect()
+    record.evidence.iter().filter(|e| e.kind == EvidenceKind::LoadedModule).flat_map(paths).collect()
 }
 
 #[test]
@@ -301,6 +320,39 @@ fn modules_loaded_from_the_tree_are_evidence_and_others_are_not() {
     assert_eq!(counts.get(counters::QUERY_MODULE_INSPECTIONS), 4);
     assert_eq!(counts.get(counters::QUERY_PATH_LOOKUPS), 2);
     assert_eq!(counts.get(counters::QUERY_DESCRIPTOR_INSPECTIONS), 0);
+}
+
+/// The scene's image and helper (inside the tree) and a system module
+/// (outside), with the one-pass loader read covering `walked`.
+fn walked_scene(walked: Option<Vec<usize>>) -> (Scene, Fake) {
+    let scene = scene();
+    let mut fake = Fake::default().with(
+        PID,
+        Scripted::new()
+            .image(&scene.root.join("bin").join("tool.exe"))
+            .module(&scene.root.join("bin").join("helper.dll"))
+            .module(&scene.base.join("system.dll")),
+    );
+    fake.walked.insert(PID, walked);
+    (scene, fake)
+}
+
+#[test]
+fn modules_the_loader_walk_covers_are_not_read_again_and_match_the_same() {
+    let (scene, mut unwalked) = walked_scene(None);
+    let expected = unwalked.query(&scene.root, &PathUsageOptions::default());
+    assert_eq!(unwalked.path_reads, vec![(PID, 0), (PID, 1), (PID, 2)], "without a walk every module is read");
+
+    // The walk misses module 2 (as it misses a 32-bit module of a WOW64
+    // process): only that one is read on its own.
+    let (scene, mut walked) = walked_scene(Some(vec![0, 1]));
+    let report = walked.query(&scene.root, &PathUsageOptions::default());
+
+    assert_eq!(walked.path_reads, vec![(PID, 2)]);
+    let paths = |report: &PathUsageReport| module_paths(&report.processes[0]).iter().map(|p| p.file_name().unwrap().to_owned()).collect::<Vec<_>>();
+    assert_eq!(paths(&report), paths(&expected));
+    assert_eq!(paths(&report), vec![std::ffi::OsString::from("helper.dll"), "tool.exe".into()]);
+    assert_eq!(coverage(&report, Mechanism::LoadedModules).status, CoverageStatus::Complete);
 }
 
 #[test]
@@ -590,26 +642,57 @@ fn target_only_matches_a_module_that_is_the_target_file() {
     assert!(report.processes.is_empty(), "{:#?}", report.processes);
 }
 
+/// Runs the full query, letting the first process inspection make `checks`
+/// budget checks before the budget expires.
+fn query_expiring_during_modules(fake: &mut Fake, root: &Path, checks: i64) -> PathUsageReport {
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    let mut backend =
+        super::tests::ExpiringDuringInspection::new(ModuleBackend::with_source(fake), checks);
+    run(root, &PathUsageOptions::default(), &mut backend, &budget, chrono::Utc::now()).expect("report")
+}
+
 #[test]
 fn a_budget_expiring_between_modules_keeps_what_was_read() {
     let scene = scene();
-    let mut fake = Fake::default().with(
-        PID,
-        Scripted::new()
-            .module(&scene.root.join("bin").join("tool.exe"))
-            .module(&scene.root.join("bin").join("helper.dll")),
-    );
-    // The first per-module check passes; the second finds it expired.
-    let budget = Budget::expiring_after_checks(1);
-    let (_, inspections) = inspect_directly(&scene, &mut fake, &budget);
-    assert_eq!(inspections[0].result, InspectionResult::Partial);
-    assert_eq!(inspections[0].evidence.len(), 1);
-    assert!(
-        inspections[0]
-            .limitations
-            .iter()
-            .any(|l| l.kind == LimitationKind::BudgetExhausted)
-    );
+    let tool = scene.root.join("bin").join("tool.exe");
+    let helper = scene.root.join("bin").join("helper.dll");
+    let mut fake = Fake::default().with(PID, Scripted::new().image(&tool).module(&helper));
+    // The first module's read check and lookup pass; the second module's read
+    // check finds the budget expired.
+    let report = query_expiring_during_modules(&mut fake, &scene.root, 2);
+
+    assert!(report.budget_exhausted);
+    assert_eq!(report.processes.len(), 1, "{:#?}", report.processes);
+    let record = &report.processes[0];
+    assert_eq!(record.pid, PID);
+    assert_eq!(record.creation_token, Some(CREATED));
+    assert_eq!(record.executable.as_ref().map(|e| e.as_path()), Some(tool.as_path()));
+    assert_eq!(record.evidence.len(), 1, "{:#?}", record.evidence);
+    let evidence = &record.evidence[0];
+    assert_eq!(evidence.kind, EvidenceKind::LoadedModule);
+    assert_eq!(evidence.match_basis, MatchBasis::PathLookup);
+    assert_eq!(paths(evidence), vec![indexed(&tool)]);
+    assert!(evidence.identity.is_some());
+
+    let modules = coverage(&report, Mechanism::LoadedModules);
+    assert_eq!(modules.status, CoverageStatus::Partial, "{modules:#?}");
+    assert_eq!(limitation_count(modules, LimitationKind::BudgetExhausted), 1, "{modules:#?}");
+}
+
+#[test]
+fn a_module_whose_lookup_the_budget_refuses_is_a_gap_not_evidence() {
+    let scene = scene();
+    let tool = scene.root.join("bin").join("tool.exe");
+    let mut fake = Fake::default().with(PID, Scripted::new().module(&tool));
+    // The module's read check passes; its lookup finds the budget expired.
+    let (report, counts) = measure(|| query_expiring_during_modules(&mut fake, &scene.root, 1));
+
+    assert!(report.budget_exhausted);
+    assert!(report.processes.is_empty(), "{:#?}", report.processes);
+    assert_eq!(counts.get(counters::QUERY_PATH_LOOKUPS), 0);
+    let modules = coverage(&report, Mechanism::LoadedModules);
+    assert_eq!(modules.status, CoverageStatus::Partial, "{modules:#?}");
+    assert_eq!(limitation_count(modules, LimitationKind::BudgetExhausted), 1, "{modules:#?}");
 }
 
 #[test]
@@ -648,6 +731,136 @@ fn inspect_directly(
 
 
 /// Windows spellings of an in-tree module path, resolved by lookup.
+#[test]
+fn file_side_holders_are_joined_to_process_lifetimes_and_keep_handles_for_enrichment() {
+    let scene = scene();
+    let file = scene.root.join("held.txt");
+    std::fs::write(&file, "held").unwrap();
+    let requested = indexed(&file);
+    let mut source = Fake::default().with(PID, Scripted::new());
+    source.path_reader = Some(std::sync::Arc::new(move |entry, _| {
+        Ok((entry.identity, if entry.path == requested { vec![PID] } else { Vec::new() }))
+    }));
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    let record = report.processes.iter().find(|p| p.pid == PID).unwrap();
+    assert_eq!(record.creation_token, Some(CREATED));
+    assert!(!record.identity_uncertain);
+    assert_eq!(record.user.as_deref(), Some(USER));
+    assert_eq!(record.evidence.len(), 1);
+    assert_eq!(record.evidence[0].kind, EvidenceKind::OpenHandle);
+    assert_eq!(paths(&record.evidence[0]), vec![indexed(&file)]);
+    assert_eq!(coverage(&report, Mechanism::OpenHandles).status, CoverageStatus::Complete);
+}
+
+#[test]
+fn file_side_failures_and_replacements_are_visible_without_invented_evidence() {
+    let scene = scene();
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, _| {
+            if entry.directory { Err("STATUS_DELETE_PENDING".to_string().into()) }
+            else { Ok((FileIdentity::Windows { volume_serial: 0, file_id: 0 }, vec![PID])) }
+        })), ..Fake::default()
+    };
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    assert!(report.processes.is_empty());
+    let handles = coverage(&report, Mechanism::OpenHandles);
+    assert_eq!(handles.status, CoverageStatus::Failed);
+    assert!(handles.limitations.iter().any(|l| l.kind == LimitationKind::InspectionFailed));
+    assert!(handles.limitations.iter().any(|l| l.kind == LimitationKind::DescriptorReplaced));
+}
+
+#[test]
+fn a_file_side_pid_missing_from_enumeration_keeps_uncertain_evidence() {
+    let scene = scene();
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, _| Ok((entry.identity, (OTHER_PID..OTHER_PID + 10).collect())))),
+        ..Fake::default()
+    };
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    assert_eq!(report.processes.len(), 10);
+    assert!(report.processes.iter().all(|p| p.identity_uncertain && p.name.is_none() && !p.evidence.is_empty()));
+    let gaps: Vec<_> = coverage(&report, Mechanism::OpenHandles).limitations.iter()
+        .filter(|l| l.kind == LimitationKind::IdentityUncertain).collect();
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0].count, 10);
+    assert_eq!(gaps[0].examples.len(), super::report::MAX_LIMITATION_EXAMPLES);
+}
+
+#[test]
+fn a_new_holder_is_reconfirmed_without_assigning_its_identity_to_earlier_paths() {
+    let scene = scene();
+    let mut source = Fake {
+        pids: Some(Ok(Vec::new())),
+        path_reader: Some(std::sync::Arc::new(|entry, _| Ok((entry.identity, vec![PID])))),
+        ..Fake::default()
+    }.with(PID, Scripted::new());
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    let known = report.processes.iter().find(|p| !p.identity_uncertain).unwrap();
+    assert_eq!(known.creation_token, Some(CREATED));
+    assert_eq!(known.evidence.len(), 1);
+    assert_eq!(known.user.as_deref(), Some(USER));
+    let uncertain = report.processes.iter().find(|p| p.identity_uncertain).unwrap();
+    assert!(uncertain.name.is_none());
+    assert!(!uncertain.evidence.is_empty());
+    assert_eq!(coverage(&report, Mechanism::OpenHandles).status, CoverageStatus::Partial);
+}
+
+#[test]
+fn retention_limits_span_file_side_and_loaded_module_evidence() {
+    let scene = scene();
+    let module = scene.root.join("module.dll");
+    std::fs::write(&module, "").unwrap();
+    for n in 0..MAX_EVIDENCE_PER_PROCESS {
+        std::fs::write(scene.root.join(format!("file-{n}")), "").unwrap();
+    }
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, _| Ok((entry.identity, vec![PID])))),
+        ..Fake::default()
+    }.with(PID, Scripted::new().module(&module));
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    let process = report.processes.iter().find(|p| p.pid == PID).unwrap();
+    assert_eq!(process.evidence.len() as u64, MAX_EVIDENCE_PER_PROCESS);
+    assert!(process.evidence.iter().all(|e| e.kind == EvidenceKind::OpenHandle));
+    assert!(coverage(&report, Mechanism::OpenHandles).truncation.as_ref().unwrap().omitted > 0);
+    assert_eq!(coverage(&report, Mechanism::LoadedModules).truncation.as_ref().unwrap().omitted, 1);
+}
+
+#[test]
+fn file_side_workers_stop_at_the_budget_and_flush_the_request_counters() {
+    let scene = scene();
+    for n in 0..100 { std::fs::write(scene.root.join(format!("entry-{n}")), "").unwrap(); }
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, budget| {
+            budget.expire();
+            Ok((entry.identity, vec![OTHER_PID]))
+        })), ..Fake::default()
+    };
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    let mut backend = ModuleBackend::with_source(&mut source);
+    let (report, metrics) = measure(|| run(&scene.root, &PathUsageOptions::default(),
+        &mut backend, &budget, chrono::Utc::now()).unwrap());
+    let handles = coverage(&report, Mechanism::OpenHandles);
+    assert_eq!(handles.status, CoverageStatus::Partial);
+    assert!(report.budget_exhausted);
+    assert!(!report.processes.is_empty());
+    assert!(handles.limitations.iter().any(|l| l.kind == LimitationKind::BudgetExhausted));
+    assert_eq!(metrics.get(counters::QUERY_PATH_HOLDER_INSPECTIONS), handles.attempted.unwrap());
+}
+
+#[cfg(windows)]
+#[test]
+fn pipe_namespaces_are_rejected_without_any_metadata_or_process_probe() {
+    for path in [r"\\.\pipe\query-fixture", r"\\?\pipe\query-fixture",
+        r"\\server\pipe\query-fixture", r"\\?\UNC\server\pipe\query-fixture",
+        r"\\?\GLOBALROOT\Device\NamedPipe\query-fixture"]
+    {
+        let (result, counts) = measure(|| query_path_usage(Path::new(path), &PathUsageOptions::default()));
+        assert_eq!(result.unwrap_err().kind(), "unsupported_target_kind", "{path}");
+        assert_eq!(counts.get(counters::FS_METADATA_PROBES), 0, "{path}");
+        assert_eq!(counts.get(counters::QUERY_PROCESS_ENUMERATIONS), 0, "{path}");
+    }
+}
+
 #[cfg(windows)]
 mod spellings {
     use super::*;
@@ -762,6 +975,46 @@ mod live {
     #[test]
     #[ignore = "subprocess fixture invoked by the live Win32 tests"]
     fn usage_child() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::Storage::FileSystem::{LockFileEx, LOCKFILE_EXCLUSIVE_LOCK,
+            ReadDirectoryChangesW, FILE_NOTIFY_CHANGE_FILE_NAME};
+        use windows::Win32::System::IO::OVERLAPPED;
+        let mut held = Vec::new();
+        if let Some(tree) = std::env::var_os("SNIFF_USAGE_TREE") {
+            let root = PathBuf::from(tree);
+            let file = std::fs::OpenOptions::new().read(true).write(true).open(root.join("held.txt")).unwrap();
+            let directory = std::fs::OpenOptions::new().read(true).custom_flags(0x02000000).open(&root).unwrap();
+            let mode = std::env::var("SNIFF_USAGE_MODE").unwrap_or_default();
+            if mode == "lock" {
+                let mut overlapped = OVERLAPPED::default();
+                unsafe { LockFileEx(HANDLE(file.as_raw_handle()), LOCKFILE_EXCLUSIVE_LOCK,
+                    None, 1, 0, &mut overlapped) }.unwrap();
+                let waiter = std::fs::OpenOptions::new().read(true).write(true).open(root.join("held.txt")).unwrap();
+                let (send, receive) = std::sync::mpsc::sync_channel(0);
+                std::thread::spawn(move || {
+                    let mut overlapped = OVERLAPPED::default();
+                    send.send(()).unwrap();
+                    let _ = unsafe { LockFileEx(HANDLE(waiter.as_raw_handle()), LOCKFILE_EXCLUSIVE_LOCK,
+                        None, 1, 0, &mut overlapped) };
+                });
+                receive.recv().unwrap();
+            } else if mode == "watch" {
+                let watcher = std::fs::OpenOptions::new().read(true).custom_flags(0x02000000).open(&root).unwrap();
+                let (send, receive) = std::sync::mpsc::sync_channel(0);
+                std::thread::spawn(move || {
+                    let mut buffer = [0u32; 1024];
+                    let mut returned = 0;
+                    send.send(()).unwrap();
+                    let _ = unsafe { ReadDirectoryChangesW(HANDLE(watcher.as_raw_handle()),
+                        buffer.as_mut_ptr().cast(), size_of_val(&buffer) as u32, false,
+                        FILE_NOTIFY_CHANGE_FILE_NAME, Some(&mut returned), None, None) };
+                });
+                receive.recv().unwrap();
+            }
+            held.extend([file, directory]);
+        }
         println!("ready");
         std::io::stdout().flush().unwrap();
         let mut sink = Vec::new();
@@ -780,7 +1033,9 @@ mod live {
 
     /// Runs a copy of this test executable from `image`, so the child's own
     /// executable is a module loaded from inside the tree.
-    fn spawn_child(image: &Path) -> ChildGuard {
+    fn spawn_child(image: &Path) -> ChildGuard { spawn_holder(image, None) }
+
+    fn spawn_holder(image: &Path, mode: Option<(&Path, &str)>) -> ChildGuard {
         let current = std::env::current_exe().expect("test executable");
         if std::fs::hard_link(&current, image).is_err() {
             std::fs::copy(&current, image).expect("copy the test executable");
@@ -796,14 +1051,28 @@ mod live {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        command.env_remove("SNIFF_USAGE_TREE").env_remove("SNIFF_USAGE_MODE");
+        if let Some((tree, mode)) = mode {
+            command.env("SNIFF_USAGE_TREE", tree).env("SNIFF_USAGE_MODE", mode).current_dir(tree);
+        }
         let mut child = ChildGuard(command.spawn().expect("spawn the usage child"));
         let stdout = child.0.stdout.take().unwrap();
-        for line in BufReader::new(stdout).lines() {
-            if line.expect("child stdout") == "ready" {
-                return child;
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                if line.expect("child stdout") == "ready" {
+                    let _ = send.send(());
+                    return;
+                }
             }
+        });
+        if receive.recv_timeout(Duration::from_secs(2)).is_err() {
+            drop(child);
+            reader.join().expect("read child readiness");
+            panic!("the usage child did not become ready");
         }
-        panic!("the usage child exited before it was ready");
+        reader.join().expect("read child readiness");
+        child
     }
 
     fn live_query(path: &Path) -> PathUsageReport {
@@ -829,11 +1098,82 @@ mod live {
         assert!(!record.identity_uncertain);
         assert_eq!(record.name.as_ref().map(|n| n.as_os_str().to_owned()), Some("usage-child.exe".into()));
         assert_eq!(module_paths(record), vec![indexed(&image)]);
-        let evidence = &record.evidence[0];
+        let evidence = record.evidence.iter().find(|e| e.kind == EvidenceKind::LoadedModule).unwrap();
         assert_eq!(evidence.kind, EvidenceKind::LoadedModule);
         assert_eq!(evidence.match_basis, MatchBasis::PathLookup);
         assert_eq!(evidence.identity, Some(super::super::identity::of_path(&image, true).unwrap()));
         drop(child);
+    }
+
+    fn assert_file_and_directory_holders(mode: &str) {
+        let scene = scene();
+        let file = scene.root.join("held.txt");
+        std::fs::write(&file, "held").unwrap();
+        let image = scene.root.join("usage-holder.exe");
+        let child = spawn_holder(&image, Some((&scene.root, mode)));
+        let report = live_query(&scene.root);
+        let process = report.processes.iter().find(|p| p.pid == child.0.id()).expect("holder found");
+        let handles: Vec<_> = process.evidence.iter().filter(|e| e.kind == EvidenceKind::OpenHandle).collect();
+        assert!(handles.iter().any(|e| paths(e).contains(&indexed(&file))), "{mode}: {report:#?}");
+        assert!(handles.iter().any(|e| paths(e).contains(&indexed(&scene.root))), "{mode}: {report:#?}");
+        assert!(process.creation_token.is_some());
+        assert!(!process.identity_uncertain);
+    }
+
+    #[test]
+    fn a_controlled_child_is_found_by_its_open_file_and_directory() {
+        assert_file_and_directory_holders("open");
+    }
+
+    #[test]
+    fn handle_owners_are_found_while_a_child_waits_in_lock_file_ex() {
+        assert_file_and_directory_holders("lock");
+    }
+
+    #[test]
+    fn handle_owners_are_found_while_a_child_waits_in_read_directory_changes() {
+        assert_file_and_directory_holders("watch");
+    }
+
+    #[test]
+    fn a_child_running_through_a_junction_is_found_by_the_spelling_it_was_asked_for() {
+        // The query asks for `link`, the loader recorded `link\bin\…`,
+        // and the tree is indexed under `app`.
+        let scene = scene();
+        let link = scene.base.join("link");
+        let status = Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link)
+            .arg(&scene.root)
+            .stdout(Stdio::null())
+            .status()
+            .expect("cmd runs");
+        assert!(status.success(), "mklink /J needs no privilege");
+        let image = link.join("bin").join("usage-child.exe");
+        let child = spawn_child(&image);
+
+        let report = live_query(&link);
+
+        let record = report.processes.iter().find(|p| p.pid == child.0.id()).unwrap_or_else(|| panic!("{report:#?}"));
+        assert_eq!(module_paths(record), vec![indexed(&scene.root.join("bin").join("usage-child.exe"))]);
+        drop(child);
+    }
+
+    #[test]
+    fn the_loader_walk_reads_exactly_what_get_module_file_name_ex_reads() {
+        // This test process is 64-bit, so the walk covers every module.
+        let mut source = super::super::win32::ffi::Win32;
+        let opened = source.open(std::process::id()).expect("open this process");
+        let (modules, count) = source.modules(&opened.process, 4096).expect("list modules");
+        assert_eq!(modules.len(), count);
+        let walked = source.loader_paths(&opened.process).expect("walk the loader list");
+        assert!(modules.len() > 5, "{modules:?}");
+        for module in modules {
+            let one = source.module_path(&opened.process, module).expect("module path");
+            assert_eq!(walked.get(&module), Some(&one), "module at {:#x}", module.0);
+        }
     }
 
     #[test]
@@ -850,7 +1190,6 @@ mod live {
         assert_eq!(modules.status, CoverageStatus::Partial, "{modules:#?}");
         assert!(!modules.limitations.is_empty());
         for mechanism in [
-            Mechanism::OpenHandles,
             Mechanism::WorkingDirectories,
             Mechanism::DirectoryChangeSubscriptions,
             Mechanism::Polling,

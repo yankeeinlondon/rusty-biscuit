@@ -26,13 +26,14 @@ pub struct DefaultTarget {
 /// Returns `None` when neither `refs/heads/<default>` nor
 /// `refs/remotes/origin/<default>` exists.
 pub fn select_default_target(base: &Path, default_branch: &str) -> Option<DefaultTarget> {
+    // In-process; Git answers only what that read can't.
     let resolve = |full_ref: &str| {
-        git_from(base, base, &["rev-parse", "--verify", "--quiet", full_ref])
-            .ok()
+        crate::git_metadata::commit_of(base, full_ref)
+            .unwrap_or_else(|| git_from(base, base, &["rev-parse", "--verify", "--quiet", &format!("{full_ref}^{{commit}}")]).ok())
             .filter(|sha| !sha.is_empty())
     };
-    let local = resolve(&format!("refs/heads/{default_branch}^{{commit}}"));
-    let remote = resolve(&format!("refs/remotes/origin/{default_branch}^{{commit}}"));
+    let local = resolve(&format!("refs/heads/{default_branch}"));
+    let remote = resolve(&format!("refs/remotes/origin/{default_branch}"));
     choose_default_target(default_branch, local, remote, |ancestor, descendant| {
         is_ancestor(base, ancestor, descendant)
     })

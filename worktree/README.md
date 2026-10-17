@@ -47,28 +47,16 @@ Outside a repository, `wt` explains where to run it and exits with code 1.
 
     Allows you to create a new worktree by just providing the branch name you want to use.
 
-    - Directory Resolution
-        - Establishing the base directory we `wt` will use for all worktrees it creates:
-            - if the ENV variable `WT` is set and points to a valid directory (which is NOT a git repo) we will use that
-            - if WT is not set we will look for a `~/.worktree.json` file:
-
-                The `~/.worktree.json` file is structured like:
-
-                ```ts
-                type worktree {
-                    base_dir: string; 
-                }
-                ```
-
-                - if the file exists and the file's structure is valid, the directory it points to is a valid directory, and that directory is NOT part of a git repo, we will use that directory as the base
-                - if the file doesn't exist we will ask the user to choose a "base directory" from a set of choices:
-                    - the following directories will be "considered": `~/worktrees`, `~/wt`, `~/.claudine/worktrees`
-                    - each of the "considered" directories will be evaluated to make sure that they are NOT part of a git repo (as this would cause conflicts); any which are a part of a repo will be eliminated for consideration. 
-                    - if these directories do NOT exist that is fine, they're considered "available"
-                    - if we have at least one available option then we will use the `inquire` crate to create a select input for the user to choose between the found options, plus a "other" option
-                    - if the "other" option is chosen then we will provide a text input for them to specify the directory manually
-                - if the file _exists_ but has the wrong structure then we will provide an error which describes the problem and describes what the correct format is. Provide the user with the path to the config file (e.g., `~/.worktree.config`) as an OSC8 link (Prose struct in biscuit-terminal supports this with an easy syntax) and tell the user to edit the file or alternatively to delete the file and run `wt create` again for an interactive process.
-                - if the file _exists_ but points to a directory which is in a git repo, we will provide an error which describes the problem and then provides the filepath to the config file (as an OSC8 link) and suggests the user to update this file. In this case, we should also just suggest some common choices are ... and list the same "considered" directories which passed from above.
+    - Directory Resolution (full rules in [`docs/base-directory.md`](./docs/base-directory.md))
+        - the base directory comes from the `WT` environment variable, or, when `WT` is unset or exactly empty, from `base_dir` in `~/.worktree.json` (`{"base_dir": "/home/me/wt"}`)
+        - any other `WT` value is used or rejected; an invalid `WT` never falls back to the config file
+        - the value must be an absolute path on this host (`/home/me/wt` on Linux and WSL, `C:\Users\me\wt` on Windows) naming an existing directory that does not have `.git` directly inside it; directories deeper inside a repository are allowed
+        - nothing is expanded or made relative to the current directory: `wt`, `./wt`, and `~/wt` are rejected, and a path written for another operating system (`b:\wt` on Linux, macOS, or WSL; `/home/me/wt` on Windows) is rejected as foreign syntax. Under WSL, a drive path also gets a `/mnt/b/wt` suggestion
+        - every rejection exits 1 before anything is created, naming the value, its source (`WT` or the config file, linked), and the fix; a missing directory is never recreated, since it may be an unmounted drive
+        - a malformed `~/.worktree.json` (not UTF-8 JSON with one string `base_dir`, a repeated key, trailing text) exits 1 with the expected format
+        - when neither source is set:
+            - in an interactive terminal (stdin and stderr are terminals and `CI` is unset or empty), `wt` offers `~/worktrees`, `~/wt`, `~/.claudine/worktrees` (minus repository roots) and "Other" for a typed path. An unusable choice shows why and asks again; nothing is created or saved until the path passes the rules above. A missing directory is created, checked, then saved to `~/.worktree.json`. A creation failure exits 1; cancelling exits 0
+            - otherwise `wt create` exits 1 with instructions to set `WT` or write `~/.worktree.json`, and never prompts
         - Repo Info:
             - we will detect if the current working directory is inside a git repo and if it's not return with a descriptive error
             - if we are in a git repo, we will detect:
@@ -117,8 +105,10 @@ Outside a repository, `wt` explains where to run it and exits with code 1.
     - `--force-branch` on a worktree with files but without `--force-worktree` is a conflict (exit 3 when non-interactive)
     - **standing in the worktree**: with the [shell integration](#shell-integration) the first run asks everything, then moves your shell to the fork parent's worktree (or the base repo) and the wrapper finishes the removal from there, keeping your subdirectory when it exists there. If protected files, include rules, the copy record, or other approved work changes between the two steps (including files inside a nested repository, which git lists as one directory), or the handoff is over a minute old, nothing is removed; a file it cannot read stops it too (exit 4). Without the wrapper `wt remove` refuses (exit 4)
         - the second step asks the network only for what the approved actions still need: keeping the branch or deleting it by explicit choice needs no PR lookup or live check, and a branch deleted because it was safe needs none when a local default branch, another local branch, or a tag still holds its commits. A branch proved safe only by a PR or an `origin/*` copy is checked live again, and nothing is removed if that proof is gone or cannot be checked. With `--force-remote`, the branch on origin is checked again before anything is removed, and a change, deletion, or unreachable origin stops the removal. Every dirty file is still read in full
-    - **a folder other programs are using**: while any other program's current directory is inside the worktree (an editor's language server, an agent, a terminal tab; your own shell is exempt), `wt remove` names those programs (command line, age, and whether the program is orphaned, plus a command to end them) and refuses with exit 4 before the report, and checks again right before deleting. No flag overrides it: a program that writes into the folder while git deletes it leaves a half-deleted folder. Close the programs or move them out, then run it again. On Windows an open file inside the folder is also detected; on macOS and Linux only current directories are visible
-        - if git still fails partway (it stops at the first entry it cannot delete, after unregistering the worktree), `wt` retries deleting the rest; if that fails too it exits 1 with the `rm -rf` (Windows: `Remove-Item -Recurse -Force`) that finishes the job, and leaves the branch and origin untouched
+    - **a folder other programs are using**: after the report and the questions, `wt remove` checks whether another process is using the worktree (standing in it, holding a file open, watching it, or running a program from it; your own shell is exempt) and pauses with exit 3, naming each process, before anything moves. No flag overrides it; the one exception is on Windows, where a check that finds only Windows Search's own processes is repeated once after 500 ms, and that second check decides. Otherwise the worktree is moved to a hidden sibling and deleted there while both paths are watched; a write that appears stops the removal with exit 1, keeps what is left and the branches, and prints both locations and the saved report. Run the same `wt remove <name>` again to continue it with fresh questions ([details](docs/cli/remove.md#background-programs-writing-into-the-worktree))
+        - a retry runs from outside the moved checkout (for example the base checkout), finds the stopped removal by the same name even after Git stopped listing it, and refuses with exit 3 while something new is at the original path. Each removal's record and full report are kept in `<git-common-dir>/wt-removal/<operation-id>/` ([details](docs/cli/remove.md#recovery-records-and-retry))
+        - Ctrl-C (or `SIGTERM`) while it checks, moves, or deletes does not kill `wt`: it stops at the next safe point with exit 1, moving nothing if the move had not happened yet, and otherwise printing the same stop report so the same `wt remove <name>` continues it ([details](docs/cli/remove.md#interrupting-a-removal))
+        - some checkouts are refused before anything moves: submodules, a locked worktree, a FIFO, device, nested mount, or unsupported reparse point inside (exit 3), and a filesystem that cannot move a directory without risking replacement, such as a WSL checkout under `/mnt/<drive>` (exit 4)
     - the main checkout cannot be removed (use plain `git` for that), whether it is named `base` or by its branch
     - **a worktree Git can't read** (`✕` in `wt list`) is prepared before the report, never by deleting anything:
         - *directory gone*: the index Git kept for it is compared with its last commit; staged changes need the usual consent (`--force-worktree` in a script), an index that can't be read, or that changed after it was checked (including the `sharedindex.*` file a split index depends on), refuses (exit 3), and only that worktree's record is removed (`git worktree remove <path>`, never `prune`), then its branch is handled as usual
@@ -182,10 +172,10 @@ cmd.exe has no wrapper.
 | Code | Meaning |
 |---|---|
 | 0 | Done, including a prompt the caller cancelled |
-| 1 | Something failed |
+| 1 | Something failed, including a `wt remove` that stopped after moving the checkout (what is left is kept, and the report names both locations) |
 | 2 | Invalid arguments (clap) |
-| 3 | Refused to avoid losing work; nothing was removed, though `wt remove` may have repaired a worktree's `.git` link first (the message says so) |
-| 4 | Blocked by the environment (for example, no shell wrapper, or another program using the worktree folder); nothing was removed |
+| 3 | Refused to avoid losing work (for example, another process is using the worktree); nothing was removed, though `wt remove` may have repaired a worktree's `.git` link first (the message says so) |
+| 4 | Blocked by the environment (for example, no shell wrapper, change watching that cannot start, or on Windows a file held open that blocks the move); nothing was removed |
 
 > Important: always try to use `biscuit-terminal` renderable components to produce a nice looking output. `Prose` is the most commonly used component but `UnorderedList`, `BlockQuote`, or `Table` can also be very helpful.
 

@@ -136,6 +136,18 @@ pub(crate) fn build_filesystem_system_view(
     root: &Path,
     options: SharedWalkOptions,
 ) -> FilesystemSystemView {
+    build_filesystem_system_view_with_cap(root, options, MAX_FILES)
+}
+
+/// [`build_filesystem_system_view`] with the inventory cap as a parameter.
+///
+/// Production always passes [`MAX_FILES`]; tests pass a small cap so that
+/// saturation needs tens of files rather than ten thousand.
+fn build_filesystem_system_view_with_cap(
+    root: &Path,
+    options: SharedWalkOptions,
+    inventory_cap: usize,
+) -> FilesystemSystemView {
     let started = Instant::now();
     let shared = Arc::new(Mutex::new(SharedWalkAccumulator::default()));
     let scanned_files = Arc::new(AtomicUsize::new(0));
@@ -180,6 +192,7 @@ pub(crate) fn build_filesystem_system_view(
                     entry.path(),
                     &scan_root,
                     &options,
+                    inventory_cap,
                     &mut worker,
                     &scanned_files,
                 )
@@ -204,8 +217,8 @@ pub(crate) fn build_filesystem_system_view(
     performance::record_logged_stage("filesystem.shared_walk", started.elapsed(), Level::DEBUG);
 
     // See `scan_inventory_parallel`: exceeding the cap is what proves a file
-    // went unrepresented; a tree of exactly `MAX_FILES` files is complete.
-    let truncated = scanned_files.load(Ordering::Relaxed) > MAX_FILES;
+    // went unrepresented; a tree of exactly `inventory_cap` files is complete.
+    let truncated = scanned_files.load(Ordering::Relaxed) > inventory_cap;
 
     let inventory = options.collect_inventory.then(|| FileInventory {
         scope: FileScanScope {
@@ -215,7 +228,7 @@ pub(crate) fn build_filesystem_system_view(
         total_files_scanned: accumulated.classifications.len(),
         classifications: Arc::new(std::mem::take(&mut accumulated.classifications)),
         truncated,
-        limit: truncated.then_some(MAX_FILES),
+        limit: truncated.then_some(inventory_cap),
     });
 
     let docs = options.collect_docs.then(|| {
@@ -260,12 +273,13 @@ fn process_file_entry(
     path: &Path,
     root: &Path,
     options: &SharedWalkOptions,
+    inventory_cap: usize,
     worker: &mut WorkerBuffers,
     scanned_files: &Arc<AtomicUsize>,
 ) -> WalkState {
     if options.collect_inventory {
         let index = scanned_files.fetch_add(1, Ordering::Relaxed);
-        if index < MAX_FILES {
+        if index < inventory_cap {
             let entry_timer =
                 performance::StageTimer::start("filesystem.file_inventory.walk.entry");
             performance::increment_counter(counters::FS_INVENTORY_ACCEPTED, 1);
@@ -374,7 +388,12 @@ mod tests {
     /// Manifests written by [`saturating_fixture`], one per directory.
     const SATURATING_MANIFESTS: usize = 6;
 
-    /// A tree with more files than the inventory cap, plus a manifest in every
+    /// The inventory cap the saturation tests inject in place of
+    /// [`MAX_FILES`], so that saturating it takes tens of files, not ten
+    /// thousand (which took 6–10 s per test on native Windows).
+    const TEST_CAP: usize = 48;
+
+    /// A tree with more files than [`TEST_CAP`], plus a manifest in every
     /// directory.
     ///
     /// The manifests are what make the combined-walk assertion meaningful:
@@ -382,7 +401,7 @@ mod tests {
     /// evidence a walk that quit at the cap would lose.
     fn saturating_fixture() -> TempDir {
         let dir = TempDir::new().expect("tempdir");
-        let per_dir = (MAX_FILES / SATURATING_MANIFESTS) + 200;
+        let per_dir = (TEST_CAP / SATURATING_MANIFESTS) + 4;
         for d in 0..SATURATING_MANIFESTS {
             let sub = dir.path().join(format!("pkg{d:02}"));
             fs::create_dir_all(&sub).expect("create dir");
@@ -401,23 +420,24 @@ mod tests {
     #[test]
     fn inventory_only_walk_stops_at_the_cap_and_reports_truncation() {
         let dir = saturating_fixture();
-        let (view, counts) =
-            testing::measure(|| build_filesystem_system_view(dir.path(), inventory_options()));
+        let (view, counts) = testing::measure(|| {
+            build_filesystem_system_view_with_cap(dir.path(), inventory_options(), TEST_CAP)
+        });
         let inventory = view.inventory.expect("inventory requested");
 
         assert!(
             inventory.truncated,
             "a tree above the cap must report truncation"
         );
-        assert_eq!(inventory.limit, Some(MAX_FILES));
+        assert_eq!(inventory.limit, Some(TEST_CAP));
         assert_eq!(
-            inventory.total_files_scanned, MAX_FILES,
+            inventory.total_files_scanned, TEST_CAP,
             "the represented count is the cap, not the tree's file count"
         );
-        assert_eq!(inventory.classifications.len(), MAX_FILES);
+        assert_eq!(inventory.classifications.len(), TEST_CAP);
         assert_eq!(
             counts.get(counters::FS_INVENTORY_ACCEPTED),
-            MAX_FILES as u64,
+            TEST_CAP as u64,
             "classification must stop at the cap"
         );
         assert!(
@@ -455,7 +475,9 @@ mod tests {
             collect_inventory: true,
             ..Default::default()
         };
-        let (view, counts) = testing::measure(|| build_filesystem_system_view(dir.path(), options));
+        let (view, counts) = testing::measure(|| {
+            build_filesystem_system_view_with_cap(dir.path(), options, TEST_CAP)
+        });
 
         assert!(
             view.inventory.expect("inventory requested").truncated,
@@ -463,7 +485,7 @@ mod tests {
         );
         assert_eq!(
             counts.get(counters::FS_INVENTORY_ACCEPTED),
-            MAX_FILES as u64,
+            TEST_CAP as u64,
             "classification still stops at the cap"
         );
 
@@ -476,6 +498,24 @@ mod tests {
             SATURATING_MANIFESTS,
             "every manifest must be found even though the inventory saturated"
         );
+    }
+
+    /// The saturation tests above inject [`TEST_CAP`]; this pins what the
+    /// production entry point passes instead. The saturating tree exceeds
+    /// `TEST_CAP` but not `MAX_FILES`, so production must classify all of it.
+    #[test]
+    fn production_walk_is_bounded_by_the_shared_inventory_cap() {
+        let dir = saturating_fixture();
+        let file_count = SATURATING_MANIFESTS * (TEST_CAP / SATURATING_MANIFESTS + 5);
+        assert!(file_count > TEST_CAP && file_count <= MAX_FILES);
+
+        let (view, counts) =
+            testing::measure(|| build_filesystem_system_view(dir.path(), inventory_options()));
+        let inventory = view.inventory.expect("inventory requested");
+
+        assert!(!inventory.truncated, "production must not use the test cap");
+        assert_eq!(inventory.total_files_scanned, file_count);
+        assert_eq!(counts.get(counters::FS_INVENTORY_SATURATED), 0);
     }
 
     #[test]

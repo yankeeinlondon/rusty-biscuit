@@ -5,7 +5,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -142,7 +141,7 @@ fn scripted_launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHand
 }
 
 fn git_out(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git").current_dir(repo).args(args).output().expect("git should be installed");
+    let output = crate::git::command().current_dir(repo).args(args).output().expect("git should be installed");
     assert!(output.status.success(), "git {args:?} failed in {repo:?}");
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
@@ -259,10 +258,12 @@ impl Drop for Repo {
     }
 }
 
-/// One listing's accepted results and its git calls.
+/// One listing's accepted results, its git calls, and the reads it
+/// answered in-process or with Git ([`crate::questions`]).
 struct Run {
     listing: Listing,
     calls: Vec<Vec<String>>,
+    asked: Vec<Vec<String>>,
 }
 
 impl Run {
@@ -270,13 +271,20 @@ impl Run {
         recorder::count_matching(&self.calls, matches)
     }
 
+    fn asked(&self, matches: impl Fn(&[String]) -> bool) -> usize {
+        recorder::count_matching(&self.asked, matches)
+    }
+
     /// `git status` walks: dirtiness measurements.
     fn status_walks(&self) -> usize {
         self.count(|args| args.iter().any(|arg| arg == "status"))
     }
 
+    /// Ref snapshots, each read in-process: no `for-each-ref` process runs.
     fn ref_reads(&self) -> usize {
-        self.count(|args| args.first().map(String::as_str) == Some("for-each-ref"))
+        let is_read = |args: &[String]| args.first().map(String::as_str) == Some("for-each-ref");
+        assert_eq!(self.count(is_read), 0, "{:?}", self.calls);
+        self.asked(is_read)
     }
 
     fn merge_trees(&self) -> usize {
@@ -306,9 +314,11 @@ fn run(at: &Path, script: Script, options: ListOptions) -> Run {
     *SCRIPT.lock().unwrap_or_else(|e| e.into_inner()) = Some(script);
     *OBSERVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
     recorder::start_recording();
+    crate::questions::start_recording();
     let listing = gather(at, &options, &mut |_| {});
+    let asked = crate::questions::finish_recording();
     let calls = recorder::finish_recording();
-    Run { listing: listing.expect("gather"), calls }
+    Run { listing: listing.expect("gather"), calls, asked }
 }
 
 type Details = Option<(Option<(String, String)>, Vec<(String, String)>)>;
@@ -340,6 +350,22 @@ fn assert_describes_the_final_state(run: &Run, at: &Path, options: ListOptions, 
 
 fn caption_state(run: &Run) -> Option<CaptionState> {
     run.listing.list.caption.as_ref().map(|caption| caption.state())
+}
+
+/// One `#[test]` per case of a case table, listed by label, plus the table's
+/// label list for its guard test: each case builds its own repository and
+/// lists it three times, so the cases spread over the runner's cores.
+macro_rules! case_tests {
+    ($labels:ident, $run:ident { $($test:ident => $label:literal),* $(,)? }) => {
+        $(
+            #[test]
+            #[serial_test::serial]
+            fn $test() {
+                $run($label);
+            }
+        )*
+        const $labels: &[&str] = &[$($label),*];
+    };
 }
 
 #[test]
@@ -398,33 +424,42 @@ fn unchanged_tips_accept_the_first_gather_and_measure_everything_once() {
     assert_eq!(run.merge_trees(), single_merge_trees, "{:?}", run.calls);
 }
 
-#[test]
-#[serial_test::serial]
-fn without_an_origin_or_a_graph_the_single_gather_is_accepted() {
-    // (label, removes origin, graph, ref reads)
-    for (label, removes_origin, graph, ref_reads) in [("no origin", true, true, 1), ("no graph", false, false, 2)] {
-        let repo = Repo::new();
-        if removes_origin {
-            run_git(&repo.main, &["remote", "remove", "origin"]);
-        }
-
-        let run = run(&repo.main, Script::finishing(), options(graph, false, BUDGET));
-
-        let launched = OBSERVED.lock().unwrap_or_else(|e| e.into_inner()).is_some();
-        assert_eq!(launched, !removes_origin, "{label}: a worker is launched only with an origin");
-        assert_eq!(run.listing.remote.waited.is_some(), !removes_origin, "{label}");
-        assert!(!run.regathered(), "{label}");
-        assert_eq!(run.ref_reads(), ref_reads, "{label}: no second read without a wait: {:?}", run.calls);
-        assert_eq!(run.status_walks(), 2, "{label}: {:?}", run.calls);
-        assert_eq!(run.listing.graph.is_some(), graph, "{label}");
-        let history = run.count(|args| matches!(args.first().map(String::as_str), Some("merge-base") | Some("log")));
-        assert_eq!(history > 0, graph, "{label}: history is read only for the graph: {:?}", run.calls);
-        // Removing `origin` removes its tracking refs, and with them the caption.
-        let caption = (!removes_origin).then_some(CaptionState::InSync);
-        assert_eq!(caption_state(&run), caption, "{label}");
-        assert_describes_the_final_state(&run, &repo.main, options(graph, false, BUDGET), label);
-    }
+/// (label, removes origin, graph, ref reads)
+fn single_gather_cases() -> [(&'static str, bool, bool, usize); 2] {
+    [("no origin", true, true, 1), ("no graph", false, false, 2)]
 }
+
+/// Without an origin or a graph, the single gather is accepted.
+fn assert_the_single_gather_is_accepted(label: &str) {
+    let (_, removes_origin, graph, ref_reads) = single_gather_cases().into_iter().find(|case| case.0 == label).expect("a listed case");
+    let repo = Repo::new();
+    if removes_origin {
+        run_git(&repo.main, &["remote", "remove", "origin"]);
+    }
+
+    let run = run(&repo.main, Script::finishing(), options(graph, false, BUDGET));
+
+    let launched = OBSERVED.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+    assert_eq!(launched, !removes_origin, "{label}: a worker is launched only with an origin");
+    assert_eq!(run.listing.remote.waited.is_some(), !removes_origin, "{label}");
+    assert!(!run.regathered(), "{label}");
+    assert_eq!(run.ref_reads(), ref_reads, "{label}: no second read without a wait: {:?}", run.asked);
+    assert_eq!(run.status_walks(), 2, "{label}: {:?}", run.calls);
+    assert_eq!(run.listing.graph.is_some(), graph, "{label}");
+    let history = run.asked(|args| matches!(args.first().map(String::as_str), Some("merge-base") | Some("log")));
+    assert_eq!(history > 0, graph, "{label}: history is read only for the graph: {:?}", run.asked);
+    let processes = run.count(|args| matches!(args.first().map(String::as_str), Some("merge-base") | Some("log")));
+    assert_eq!(processes, 0, "{label}: and answered in-process: {:?}", run.calls);
+    // Removing `origin` removes its tracking refs, and with them the caption.
+    let caption = (!removes_origin).then_some(CaptionState::InSync);
+    assert_eq!(caption_state(&run), caption, "{label}");
+    assert_describes_the_final_state(&run, &repo.main, options(graph, false, BUDGET), label);
+}
+
+case_tests!(SINGLE_GATHER_TESTS, assert_the_single_gather_is_accepted {
+    without_an_origin_the_single_gather_is_accepted => "no origin",
+    without_a_graph_the_single_gather_is_accepted => "no graph",
+});
 
 #[test]
 #[serial_test::serial]
@@ -453,12 +488,13 @@ fn a_failed_preference_write_starts_no_local_gather_and_launches_nothing() {
     );
 }
 
-#[test]
-#[serial_test::serial]
-fn a_ref_change_during_the_wait_is_regathered_from_the_final_tips() {
-    type Moves = fn(&Repo) -> Vec<Vec<String>>;
-    type Check = fn(&Run, &Repo);
-    let cases: [(&str, Moves, Check); 4] = [
+type RefMoves = fn(&Repo) -> Vec<Vec<String>>;
+type RefCheck = fn(&Run, &Repo);
+
+/// Each ref change a fetch can make during the wait, and what the listing
+/// then shows.
+fn ref_changes() -> [(&'static str, RefMoves, RefCheck); 4] {
+    [
         (
             "advance",
             |repo| vec![args(&["update-ref", "refs/remotes/origin/main", &repo.upstream_commit("main")])],
@@ -486,35 +522,54 @@ fn a_ref_change_during_the_wait_is_regathered_from_the_final_tips() {
                 assert_eq!((target.reference.as_str(), target.sha.as_str()), ("main", repo.c2.as_str()));
             },
         ),
-    ];
-    for (label, moves, check) in cases {
-        let repo = Repo::new();
-        let _seam = overlap::Installed::with_mode(Mode::Observe);
-        let moves = moves(&repo);
-        let mut script = Script::held(Hold::BothFinished);
-        script.moves = moves;
+    ]
+}
 
-        let run = run(&repo.feature, script, options(true, true, BUDGET));
+/// A ref change during the wait is regathered from the final tips.
+fn assert_a_ref_change_is_regathered(label: &str) {
+    let (_, moves, check) = ref_changes().into_iter().find(|(case, _, _)| *case == label).expect("a listed ref change");
+    let repo = Repo::new();
+    let _seam = overlap::Installed::with_mode(Mode::Observe);
+    let mut script = Script::held(Hold::BothFinished);
+    script.moves = moves(&repo);
 
-        assert!(observed().released_by_event, "{label}: the first gather finished before refs moved");
-        assert!(run.regathered(), "{label}");
-        assert_eq!(run.status_walks(), 2, "{label}: a fetch never measures dirtiness again: {:?}", run.calls);
-        assert_describes_the_final_state(&run, &repo.feature, options(true, true, BUDGET), label);
-        check(&run, &repo);
-    }
+    let run = run(&repo.feature, script, options(true, true, BUDGET));
+
+    assert!(observed().released_by_event, "{label}: the first gather finished before refs moved");
+    assert!(run.regathered(), "{label}");
+    assert_eq!(run.status_walks(), 2, "{label}: a fetch never measures dirtiness again: {:?}", run.calls);
+    assert_describes_the_final_state(&run, &repo.feature, options(true, true, BUDGET), label);
+    check(&run, &repo);
+}
+
+case_tests!(REF_CHANGE_TESTS, assert_a_ref_change_is_regathered {
+    an_advanced_tracking_ref_during_the_wait_is_regathered_from_the_final_tips => "advance",
+    a_rewound_tracking_ref_during_the_wait_is_regathered_from_the_final_tips => "rewind",
+    an_added_tracking_ref_during_the_wait_is_regathered_from_the_final_tips => "addition",
+    a_deleted_tracking_ref_during_the_wait_is_regathered_from_the_final_tips => "deletion",
+});
+
+/// Every listed case table has exactly one test per case.
+#[test]
+fn every_pipeline_case_has_its_own_test() {
+    let labels = |cases: &[&'static str]| cases.to_vec();
+    assert_eq!(labels(REF_CHANGE_TESTS), ref_changes().map(|(label, _, _)| label));
+    assert_eq!(labels(FAST_FORWARD_TESTS), fast_forward_cases().map(|(label, _, _, _)| label));
+    assert_eq!(labels(SINGLE_GATHER_TESTS), single_gather_cases().map(|(label, _, _, _)| label));
+    assert_eq!(labels(FAILED_REF_READ_TESTS), failed_ref_read_cases().map(|(_, label)| label));
+    assert_eq!(labels(TIMED_OUT_WAIT_TESTS), timed_out_wait_cases().map(|(_, label)| label));
 }
 
 fn args(args: &[&str]) -> Vec<String> {
     args.iter().map(|arg| arg.to_string()).collect()
 }
 
-#[test]
-#[serial_test::serial]
-fn fast_forward_measures_again_only_the_checkout_it_moved() {
-    let fast_forward = ListOptions { fast_forward: true, ..options(true, false, BUDGET) };
-    type Setup = fn(&Repo);
-    type Expected = fn(&FfResult) -> bool;
-    let cases: [(&str, Setup, Expected, usize); 4] = [
+type FastForwardSetup = fn(&Repo);
+type FastForwardExpected = fn(&FfResult) -> bool;
+
+/// Each `--ff` outcome, its setup, and how many `status` walks it costs.
+fn fast_forward_cases() -> [(&'static str, FastForwardSetup, FastForwardExpected, usize); 4] {
+    [
         (
             "moved with a holder",
             |repo| run_git(&repo.main, &["update-ref", "refs/remotes/origin/main", &repo.upstream_commit("main")]),
@@ -537,49 +592,69 @@ fn fast_forward_measures_again_only_the_checkout_it_moved() {
             |ff| matches!(ff, FfResult::Refused(FfRefusal::Diverged)),
             2,
         ),
-    ];
-    for (label, setup, expected, walks) in cases {
-        let repo = Repo::new();
-        setup(&repo);
+    ]
+}
 
-        let run = run(&repo.main, Script::finishing(), fast_forward);
+/// A fast-forward measures again only the checkout it moved.
+fn assert_fast_forward_measures_only_what_it_moved(label: &str) {
+    let fast_forward = ListOptions { fast_forward: true, ..options(true, false, BUDGET) };
+    let (_, setup, expected, walks) = fast_forward_cases().into_iter().find(|case| case.0 == label).expect("a listed case");
+    let repo = Repo::new();
+    setup(&repo);
 
-        let ff = run.listing.ff.as_ref().expect("--ff ran");
-        assert!(expected(ff), "{label}: {ff:?}");
-        assert_eq!(run.status_walks(), walks, "{label}: {:?}", run.calls);
-        assert_eq!(run.regathered(), matches!(ff, FfResult::Moved { .. }), "{label}");
-        assert_describes_the_final_state(&run, &repo.main, fast_forward, label);
+    let run = run(&repo.main, Script::finishing(), fast_forward);
+
+    let ff = run.listing.ff.as_ref().expect("--ff ran");
+    assert!(expected(ff), "{label}: {ff:?}");
+    assert_eq!(run.status_walks(), walks, "{label}: {:?}", run.calls);
+    assert_eq!(run.regathered(), matches!(ff, FfResult::Moved { .. }), "{label}");
+    assert_describes_the_final_state(&run, &repo.main, fast_forward, label);
+}
+
+case_tests!(FAST_FORWARD_TESTS, assert_fast_forward_measures_only_what_it_moved {
+    a_fast_forward_of_a_checked_out_default_measures_again_only_that_checkout => "moved with a holder",
+    a_fast_forward_of_an_unchecked_out_default_measures_nothing_again => "moved without a holder",
+    an_up_to_date_fast_forward_measures_nothing_again => "up to date",
+    a_refused_fast_forward_measures_nothing_again => "refused",
+});
+
+/// (which ref read fails, label)
+fn failed_ref_read_cases() -> [(usize, &'static str); 2] {
+    [(1, "initial"), (2, "final")]
+}
+
+/// A failed ref read never counts as unchanged, and a failed final read
+/// never prunes.
+fn assert_a_failed_ref_read_establishes_nothing(label: &str) {
+    let (failing_read, _) = failed_ref_read_cases().into_iter().find(|case| case.1 == label).expect("a listed case");
+    let repo = Repo::new();
+    repo.record_gone_branch();
+    let reads = AtomicUsize::new(0);
+    let _failure = recorder::fail_matching(move |args| {
+        args.first() == Some(&"for-each-ref") && reads.fetch_add(1, Ordering::SeqCst) + 1 == failing_read
+    });
+
+    let run = run(&repo.main, Script::finishing(), options(true, false, BUDGET));
+    drop(_failure);
+
+    assert!(run.regathered(), "{label}: a failed read establishes nothing");
+    let pruned = ForkOriginStore::load_from(&fork_origin_path(&repo.main).unwrap()).get("gone").is_none();
+    if failing_read == 1 {
+        assert!(run.listing.list.ref_snapshot().succeeded(), "{label}");
+        assert_eq!(caption_state(&run), Some(CaptionState::InSync), "{label}: the final read's facts");
+        assert!(pruned, "{label}: the final read succeeded");
+        assert_describes_the_final_state(&run, &repo.main, options(true, false, BUDGET), label);
+    } else {
+        assert!(!run.listing.list.ref_snapshot().succeeded(), "{label}");
+        assert_eq!(caption_state(&run), None, "{label}: the degraded listing, as before");
+        assert!(!pruned, "{label}: an empty failed read would make every record look deleted");
     }
 }
 
-#[test]
-#[serial_test::serial]
-fn a_failed_ref_read_never_counts_as_unchanged_and_a_failed_final_read_never_prunes() {
-    for (failing_read, label) in [(1, "initial"), (2, "final")] {
-        let repo = Repo::new();
-        repo.record_gone_branch();
-        let reads = AtomicUsize::new(0);
-        let _failure = recorder::fail_matching(move |args| {
-            args.first() == Some(&"for-each-ref") && reads.fetch_add(1, Ordering::SeqCst) + 1 == failing_read
-        });
-
-        let run = run(&repo.main, Script::finishing(), options(true, false, BUDGET));
-        drop(_failure);
-
-        assert!(run.regathered(), "{label}: a failed read establishes nothing");
-        let pruned = ForkOriginStore::load_from(&fork_origin_path(&repo.main).unwrap()).get("gone").is_none();
-        if failing_read == 1 {
-            assert!(run.listing.list.ref_snapshot().succeeded(), "{label}");
-            assert_eq!(caption_state(&run), Some(CaptionState::InSync), "{label}: the final read's facts");
-            assert!(pruned, "{label}: the final read succeeded");
-            assert_describes_the_final_state(&run, &repo.main, options(true, false, BUDGET), label);
-        } else {
-            assert!(!run.listing.list.ref_snapshot().succeeded(), "{label}");
-            assert_eq!(caption_state(&run), None, "{label}: the degraded listing, as before");
-            assert!(!pruned, "{label}: an empty failed read would make every record look deleted");
-        }
-    }
-}
+case_tests!(FAILED_REF_READ_TESTS, assert_a_failed_ref_read_establishes_nothing {
+    a_failed_initial_ref_read_never_counts_as_unchanged => "initial",
+    a_failed_final_ref_read_never_prunes => "final",
+});
 
 #[test]
 #[serial_test::serial]
@@ -610,34 +685,43 @@ fn nothing_persists_before_the_accepted_gather_is_committed_once() {
     assert!(repo.cached(&upstream, &feature), "and the final gather's");
 }
 
-#[test]
-#[serial_test::serial]
-fn a_timed_out_wait_keeps_pending_status_and_lets_a_longer_local_gather_finish() {
-    for (moves, label) in [(false, "tips unchanged"), (true, "a fetch landed before the final read")] {
-        let repo = Repo::new();
-        let seam = overlap::Installed::with_mode(Mode::HoldListUntilRemote);
-        let mut script = Script { finishes: false, ..Script::finishing() };
-        if moves {
-            script = script.moving(&[&["update-ref", "refs/remotes/origin/main", &repo.upstream_commit("main")]]);
-        }
-
-        let run = run(&repo.main, script, options(false, false, Duration::from_millis(100)));
-
-        let waited = run.listing.remote.waited.as_ref().expect("launched");
-        assert!(waited.timed_out, "{label}");
-        assert_eq!(waited.head, HeadEnd::Running { last: None }, "{label}: the detached worker is not joined");
-        assert!(seam.list_started_after_the_wait(), "{label}: the local gather outlasted the wait");
-        assert_eq!(run.status_walks(), 2, "{label}: {:?}", run.calls);
-        assert_eq!(run.regathered(), moves, "{label}");
-        let expected = if moves { CaptionState::Behind(1) } else { CaptionState::InSync };
-        assert_eq!(caption_state(&run), Some(expected), "{label}");
-        assert_eq!(
-            run.listing.list.statuses.iter().map(|status| status.dirty).collect::<Vec<_>>(),
-            [DirtyStatus::Clean, DirtyStatus::Clean],
-            "{label}"
-        );
-    }
+/// (whether a fetch lands before the final read, label)
+fn timed_out_wait_cases() -> [(bool, &'static str); 2] {
+    [(false, "tips unchanged"), (true, "a fetch landed before the final read")]
 }
+
+/// A timed-out wait keeps pending status and lets a longer local gather
+/// finish.
+fn assert_a_timed_out_wait_lets_the_local_gather_finish(label: &str) {
+    let (moves, _) = timed_out_wait_cases().into_iter().find(|case| case.1 == label).expect("a listed case");
+    let repo = Repo::new();
+    let seam = overlap::Installed::with_mode(Mode::HoldListUntilRemote);
+    let mut script = Script { finishes: false, ..Script::finishing() };
+    if moves {
+        script = script.moving(&[&["update-ref", "refs/remotes/origin/main", &repo.upstream_commit("main")]]);
+    }
+
+    let run = run(&repo.main, script, options(false, false, Duration::from_millis(100)));
+
+    let waited = run.listing.remote.waited.as_ref().expect("launched");
+    assert!(waited.timed_out, "{label}");
+    assert_eq!(waited.head, HeadEnd::Running { last: None }, "{label}: the detached worker is not joined");
+    assert!(seam.list_started_after_the_wait(), "{label}: the local gather outlasted the wait");
+    assert_eq!(run.status_walks(), 2, "{label}: {:?}", run.calls);
+    assert_eq!(run.regathered(), moves, "{label}");
+    let expected = if moves { CaptionState::Behind(1) } else { CaptionState::InSync };
+    assert_eq!(caption_state(&run), Some(expected), "{label}");
+    assert_eq!(
+        run.listing.list.statuses.iter().map(|status| status.dirty).collect::<Vec<_>>(),
+        [DirtyStatus::Clean, DirtyStatus::Clean],
+        "{label}"
+    );
+}
+
+case_tests!(TIMED_OUT_WAIT_TESTS, assert_a_timed_out_wait_lets_the_local_gather_finish {
+    a_timed_out_wait_with_unchanged_tips_keeps_pending_status => "tips unchanged",
+    a_timed_out_wait_with_a_later_fetch_regathers_after_the_local_gather => "a fetch landed before the final read",
+});
 
 /// Without a worker the stored answers are read as they are: nothing is
 /// launched or waited for, and refs are read once.
@@ -651,7 +735,9 @@ fn without_a_worker_nothing_is_launched_and_refs_are_read_once() {
     let mut progress = Vec::new();
 
     recorder::start_recording();
+    crate::questions::start_recording();
     let listing = gather(&repo.main, &options, &mut |event| progress.push(event)).expect("gather");
+    let asked = crate::questions::finish_recording();
     let calls = recorder::finish_recording();
 
     assert!(OBSERVED.lock().unwrap_or_else(|e| e.into_inner()).is_none(), "no worker was launched");
@@ -659,9 +745,9 @@ fn without_a_worker_nothing_is_launched_and_refs_are_read_once() {
     assert_eq!(listing.remote.origin.as_deref(), Some(ORIGIN));
     assert!(listing.remote.waited.is_none());
     assert!(!listing.regathered);
-    let ref_reads = recorder::count_matching(&calls, |args| args.first().map(String::as_str) == Some("for-each-ref"));
-    assert_eq!(ref_reads, 1, "{calls:?}");
-    assert_eq!(caption_state(&Run { listing, calls }), Some(CaptionState::InSync));
+    let ref_reads = recorder::count_matching(&asked, |args| args.first().map(String::as_str) == Some("for-each-ref"));
+    assert_eq!(ref_reads, 1, "{asked:?}");
+    assert_eq!(caption_state(&Run { listing, calls, asked }), Some(CaptionState::InSync));
 }
 
 /// A launched worker's wait is bracketed for the caller's progress display.

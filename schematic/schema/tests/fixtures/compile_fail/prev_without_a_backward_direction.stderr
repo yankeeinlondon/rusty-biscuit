@@ -1,0 +1,80 @@
+error[E0277]: `schematic_schema::github::ListReleasesRequest` has no backward direction
+ --> tests/fixtures/compile_fail/prev_without_a_backward_direction.rs
+  |
+  |     let _ = pages.prev().await;
+  |                   ^^^^ `prev()` needs a backward cursor leg or a previous link in the definition
+  |
+  = help: the trait `HasPrev` is not implemented for `schematic_schema::github::ListReleasesRequest`
+  = note: the definition for `schematic_schema::github::ListReleasesRequest` authors no backward direction
+  = help: the following other types implement trait `HasPrev`:
+            ListAuditLogsRequest
+            ListDownloadsRequest
+            ListFilesInVectorStoreBatchRequest
+            ListIssueChangesRequest
+            ListOrganizationSpendAlertsRequest
+            ListProjectRateLimitsRequest
+            ListProjectSpendAlertsRequest
+            ListPullRequestCommentsRequest
+          and $N others
+note: required by a bound in `schematic_schema::schematic_runtime::pager::Pages::<'a, A, R>::prev`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub async fn prev(&mut self) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>>
+  |                  ---- required by a bound in this associated function
+  |     where
+  |         R: HasPrev,
+  |            ^^^^^^^ required by this bound in `Pages::<'a, A, R>::prev`
+
+error[E0277]: `schematic_schema::github::ListReleasesRequest` has no backward direction
+ --> tests/fixtures/compile_fail/prev_without_a_backward_direction.rs
+  |
+  |     let _ = pages.prev().await;
+  |             ^^^^^^^^^^^^ `prev()` needs a backward cursor leg or a previous link in the definition
+  |
+  = help: the trait `HasPrev` is not implemented for `schematic_schema::github::ListReleasesRequest`
+  = note: the definition for `schematic_schema::github::ListReleasesRequest` authors no backward direction
+  = help: the following other types implement trait `HasPrev`:
+            ListAuditLogsRequest
+            ListDownloadsRequest
+            ListFilesInVectorStoreBatchRequest
+            ListIssueChangesRequest
+            ListOrganizationSpendAlertsRequest
+            ListProjectRateLimitsRequest
+            ListProjectSpendAlertsRequest
+            ListPullRequestCommentsRequest
+          and $N others
+note: required by a bound in `schematic_schema::schematic_runtime::pager::Pages::<'a, A, R>::prev`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub async fn prev(&mut self) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>>
+  |                  ---- required by a bound in this associated function
+  |     where
+  |         R: HasPrev,
+  |            ^^^^^^^ required by this bound in `Pages::<'a, A, R>::prev`
+
+error[E0277]: `schematic_schema::github::ListReleasesRequest` has no backward direction
+ --> tests/fixtures/compile_fail/prev_without_a_backward_direction.rs
+  |
+  |     let _ = pages.prev().await;
+  |                          ^^^^^ `prev()` needs a backward cursor leg or a previous link in the definition
+  |
+  = help: the trait `HasPrev` is not implemented for `schematic_schema::github::ListReleasesRequest`
+  = note: the definition for `schematic_schema::github::ListReleasesRequest` authors no backward direction
+  = help: the following other types implement trait `HasPrev`:
+            ListAuditLogsRequest
+            ListDownloadsRequest
+            ListFilesInVectorStoreBatchRequest
+            ListIssueChangesRequest
+            ListOrganizationSpendAlertsRequest
+            ListProjectRateLimitsRequest
+            ListProjectSpendAlertsRequest
+            ListPullRequestCommentsRequest
+          and $N others
+note: required by a bound in `schematic_schema::schematic_runtime::pager::Pages::<'a, A, R>::prev`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub async fn prev(&mut self) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>>
+  |                  ---- required by a bound in this associated function
+  |     where
+  |         R: HasPrev,
+  |            ^^^^^^^ required by this bound in `Pages::<'a, A, R>::prev`

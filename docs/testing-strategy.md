@@ -123,12 +123,12 @@ package ever needs it.
 
 ## Test levels
 
-Rusty Biscuit is unusually heavy on command-line and terminal-rendering code.
-Much of what matters cannot be verified from inside a plain Rust test: whether
-a terminal emulator renders a glyph at the right width, whether a browser
-computes the expected style, whether the operating system delivers a key press
-the way the program expects. The suite is therefore split into levels by what
-each test needs from the environment.
+Much of what matters in this repository cannot be verified from inside a plain
+Rust test: whether a terminal emulator renders a glyph at the right width,
+whether a browser computes the expected style, whether the operating system
+delivers a key press the way the program expects, whether a provider really
+answers the way a generated client assumes. The suite is therefore split into
+levels by what each test needs from the environment.
 
 | Level | Name prefix | What it covers | Default behavior |
 | --- | --- | --- | --- |
@@ -139,20 +139,58 @@ each test needs from the environment.
 | Real | `real_` | Tests against real devices, networks, or provider APIs. | Skipped unless the relevant per-package environment variables opt in. |
 | Slow | `slow_` | Otherwise ordinary tests that exceed the time budget for fast runs. | Left out of `sanity` and of local `just test`; CI includes them for packages that ask. |
 
-Why three numbered levels for terminal code? Level 1 can spawn a program in a
-pseudo-terminal and feed it bytes, but *we* manufacture those bytes, so Level 1
-cannot notice that a real terminal never sent them. Level 2 puts the program
-inside a real terminal and captures the rendered pane, which proves that
-glyphs, widths, styling, and scrolling survive a real emulator. Input is still
-injected as bytes through the terminal's command-line interface, so the
-terminal's own key encoding is not exercised. Only Level 3 presses real keys,
-which is the only way to answer "what does the terminal emit when the user
-holds Ctrl?" Level 3 needs window focus, which is fragile and
-platform-specific, so it is strictly opt-in.
-
 Level 2, Level 3, and browser tests must never steal foreground focus or close
 a window they did not open. A test that grabs focus makes the developer's
 machine unusable during a run and is not portable to CI.
+
+### Levels say what a test needs; fidelity says what it proves
+
+A level answers "what must exist on this machine for the test to run?" It does
+not answer "how much does a pass tell me?" Those are separate questions, and
+reviews ask the second one using three **fidelity rungs**.
+
+Every requirement that matters to a user sits on a **boundary**: a foreign
+thing whose behavior the code assumes. Examples are a terminal's key encoder,
+an API provider's response format, a browser's layout engine, the operating
+system's routing table, or another tool's file format. A test is only as
+convincing as the independence of that foreign thing from our own assumptions,
+so the rung is decided by who authored each side of the boundary:
+
+| Rung | Name | Who authored what | Example: a CLI that reads keys | Example: a generated API client |
+| --- | --- | --- | --- | --- |
+| F1 | Synthetic | We wrote the input and the expected output. | Feed the program bytes we invented through a pseudo-terminal. | Call the client against a stub whose responses we scripted. |
+| F2 | Witnessed | A real consumer observes our output; our stimulus still drives it. | Run in a real terminal and read back the rendered pane. | Compile the generated client and run it against a local server that implements the spec. |
+| F3 | Native | The real counterparty produces the input. | Press real keys at the OS level and let the terminal encode them. | Call the live provider, or replay a dated recording of its real response. |
+
+```mermaid
+flowchart LR
+    A[Our code] -->|F1: input and expectation both ours| B[Our own assumptions]
+    A -->|F2: real consumer checks our output| C[Real renderer / server / compiler]
+    D[Real counterparty] -->|F3: real counterparty supplies the input| A
+```
+
+The WezTerm bug that motivated this scheme is the F1 blind spot. Pseudo-terminal
+tests feed bytes that *we* decided a terminal sends, so they cannot notice that
+a real terminal never sends them. A real terminal capturing our output (F2)
+proves our glyphs survive rendering, but input is still injected as bytes
+through the terminal's command-line interface. Only real key events (F3) answer
+"what does the terminal emit when the user holds Ctrl?" That level needs window
+focus, which is fragile and platform-specific, so it is strictly opt-in.
+
+Levels and rungs correlate without being the same thing:
+
+- `level2_` and `browser_` tests usually reach F2. `level3_` and `real_` tests
+  usually reach F3. Ordinary L1 tests are usually F1.
+- An L1 test that compiles generated code and runs it against a loopback server
+  is F2. A `real_` test that only reads a local fixture is F1.
+- A recorded response counts as F3 for the format it captured, but it is
+  stale-able: note when and from where it was recorded.
+
+When writing a test, name the boundary the requirement depends on and pick the
+level that reaches the rung that boundary needs. The boundary catalog, which
+lists the recurring boundaries in this repository and the rung each needs, is in
+`prompts/_test-rigor.md`; the `rust-testing` skill's `verification-fidelity.md`
+page covers choosing a rung while writing tests.
 
 ### Naming is the mechanism
 

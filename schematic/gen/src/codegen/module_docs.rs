@@ -128,13 +128,21 @@ impl<'a> ModuleDocBuilder<'a> {
             _ => "Uses custom authentication.".to_string(),
         };
 
-        let env_info = if !self.api.env_auth.is_empty() {
-            format!(
-                " Set via environment variable: `{}`.",
-                self.api.env_auth.join("` or `")
-            )
-        } else {
-            String::new()
+        // The variables the generated client actually reads, which can be
+        // fewer than `env_auth` names: a definition's environment mapping
+        // decides.
+        let env_info = match crate::codegen::api_struct::env_fallback_vars(self.api) {
+            Some((vars, username_vars)) if !username_vars.is_empty() => format!(
+                " Without a supplied credential, the client reads the username from `{}` and \
+                 the password from `{}`.",
+                username_vars.join("` or `"),
+                vars.join("` or `")
+            ),
+            Some((vars, _)) => format!(
+                " Without a supplied credential, the client reads `{}`.",
+                vars.join("` or `")
+            ),
+            None => String::new(),
         };
 
         format!("## Authentication\n\n{}{}", auth_desc, env_info)
@@ -195,7 +203,7 @@ impl<'a> ModuleDocBuilder<'a> {
         };
 
         let api_name = &self.api.name;
-        let method_name = to_snake_case(&endpoint.id);
+        let call = crate::codegen::endpoint_methods::example_invocation(self.api, endpoint, "client");
         let custom_base_url = if self.api.base_url == "http://192.168.1.1:9529" {
             "http://192.168.1.50:9529"
         } else {
@@ -209,10 +217,13 @@ impl<'a> ModuleDocBuilder<'a> {
 use schematic_schema::prelude::*;
 
 #[tokio::main]
-async fn main() -> Result<(), SchematicError> {{
-    let client = {}::new();
-    let response = client.{}().await?;
-    println!("{{:?}}", response);
+async fn main() -> Result<(), Box<dyn std::error::Error>> {{
+    let client = {api_name}::new();
+    let data = {call}.await?;
+
+    // the whole response: status, headers, and request id as well
+    let response = {call}.full().await?;
+    println!("{{}}", response.meta);
     Ok(())
 }}
 ```
@@ -222,9 +233,8 @@ async fn main() -> Result<(), SchematicError> {{
 ```text
 use schematic_schema::prelude::*;
 
-let client = {}::with_base_url("{}");
-```"#,
-            api_name, method_name, api_name, custom_base_url
+let client = {api_name}::new().base_url("{custom_base_url}");
+```"#
         )
     }
 }
@@ -261,26 +271,10 @@ pub(crate) fn lines_to_doc_comments(doc: &str) -> TokenStream {
     quote! { #(#lines)* }
 }
 
-/// Converts a PascalCase string to snake_case.
-fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() {
-            if i > 0 {
-                result.push('_');
-            }
-            result.push(c.to_lowercase().next().unwrap());
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, Endpoint};
+    use schematic_define::{ApiResponse, CrossOrigin, Endpoint};
 
     fn make_test_api() -> RestApi {
         RestApi {
@@ -308,6 +302,11 @@ mod tests {
             module_path: None,
             request_suffix: None,
             version: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -346,15 +345,6 @@ mod tests {
         let code = tokens.to_string();
         // Should not have a markdown link format
         assert!(!code.contains("]("));
-    }
-
-    #[test]
-    fn to_snake_case_converts_pascal_case() {
-        assert_eq!(to_snake_case("ListItems"), "list_items");
-        assert_eq!(to_snake_case("GetUser"), "get_user");
-        assert_eq!(to_snake_case("CreateAPIKey"), "create_a_p_i_key");
-        assert_eq!(to_snake_case("simple"), "simple");
-        assert_eq!(to_snake_case("A"), "a");
     }
 
     #[test]
@@ -477,8 +467,14 @@ mod tests {
         let example = builder.example_section();
 
         // Should use ListItems (GET) not CreateItem (POST)
-        assert!(example.contains("list_items"));
-        assert!(!example.contains("create_item"));
+        assert!(example.contains("let data = client.list_items().await?;"), "{example}");
+        assert!(
+            example.contains("let response = client.list_items().full().await?;"),
+            "{example}"
+        );
+        assert!(example.contains("let client = TestApi::new();"), "{example}");
+        assert!(!example.contains("create_item"), "{example}");
+        assert!(!example.contains("CallOptions"), "{example}");
     }
 
     #[test]
@@ -499,7 +495,11 @@ mod tests {
         let builder = ModuleDocBuilder::new(&api);
         let example = builder.example_section();
 
-        assert!(example.contains("create_item"));
+        assert!(example.contains("let data = client.create_item().await?;"), "{example}");
+        assert!(
+            example.contains(r#"TestApi::new().base_url("https://staging.example.com/v1");"#),
+            "{example}"
+        );
     }
 
     #[test]

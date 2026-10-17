@@ -1,6 +1,7 @@
-//! A local bare `origin`, a `pusher` clone standing in for everyone else,
-//! and the listed clone with one linked worktree, all with the user's and the
-//! system's git configuration shut out; plus [`UploadPackGate`], which holds
+//! A local bare `origin` that others' pushes land in directly
+//! ([`Fixture::commit_and_push`]), and the listed clone with one linked
+//! worktree, all with the user's and the system's git configuration shut
+//! out; plus [`UploadPackGate`], which holds
 //! `origin`'s `upload-pack` to keep the worker working. Shared by the
 //! real-Git listing tests (`list_remote_head.rs`, `list_flags.rs`,
 //! `perf_pr_request.rs`). Declare a gate after its fixture: the gate releases
@@ -9,16 +10,17 @@
 #![allow(dead_code)]
 
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use assert_cmd::cargo::cargo_bin;
 use worktree::pull_requests::pr_store_path;
 use worktree::remote_head::remote_head_store_path;
 use worktree_cli::env::TEST_WAIT_BUDGET_VAR;
 
-use crate::perf_support::{WorkerPaths, append_git_config, isolated_cache_file, reap_workers};
+use crate::perf_support::{WorkerPaths, isolated_cache_file, reap_workers};
 
 /// How long a test waits for a detached worker before failing.
 pub const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -27,7 +29,6 @@ pub struct Fixture {
     pub root: tempfile::TempDir,
     pub main: PathBuf,
     pub linked: PathBuf,
-    pub pusher: PathBuf,
     pub bare: PathBuf,
 }
 
@@ -39,21 +40,16 @@ impl Fixture {
         for dir in ["home", "cache"] {
             fs::create_dir(root.path().join(dir)).expect("create dir");
         }
-        fs::write(root.path().join("empty.gitconfig"), "").expect("write empty git config");
+        // No automatic maintenance: `git maintenance run --auto --detach`
+        // after a commit or fetch is a process per call that outlives it.
+        fs::write(root.path().join("empty.gitconfig"), "[maintenance]\n\tauto = false\n").expect("write the global git config");
         let bare = root.path().join("origin.git");
         let main = root.path().join("main");
-        let pusher = root.path().join("pusher");
         let linked = root.path().join("main-feature");
-        let fixture = Self { main, linked, pusher, bare, root };
+        let fixture = Self { main, linked, bare, root };
 
         fixture.git(fixture.root.path(), &["init", "--bare", "-b", "main", "origin.git"]);
-        fixture.git(fixture.root.path(), &["init", "-b", "main", "pusher"]);
-        // What `git remote add origin <bare>` writes.
-        append_git_config(
-            &fixture.pusher.join(".git").join("config"),
-            &[("remote.origin.url", fixture.bare.to_str().unwrap()), ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")],
-        );
-        fixture.push_commit("first");
+        fixture.push_commit("first", false);
         fixture.git(fixture.root.path(), &["clone", fixture.bare.to_str().unwrap(), "main"]);
         fixture.git(&fixture.main, &["worktree", "add", "-b", "feature", fixture.linked.to_str().unwrap()]);
         fixture
@@ -61,7 +57,7 @@ impl Fixture {
 
     /// Git with no user or system configuration and a fixed identity.
     pub fn git(&self, dir: &Path, args: &[&str]) -> String {
-        let output = self.isolated(Command::new("git")).current_dir(dir).args(args).output().expect("git runs");
+        let output = self.isolated(worktree::git::command()).current_dir(dir).args(args).output().expect("git runs");
         assert!(output.status.success(), "git {args:?} in {dir:?}: {output:?}");
         String::from_utf8(output.stdout).expect("utf-8").trim().to_string()
     }
@@ -81,18 +77,40 @@ impl Fixture {
         command
     }
 
-    /// Another clone advances `origin`'s `main` by one commit; returns it.
+    /// Advances `origin`'s `main` by one commit that sets `file.txt` to
+    /// `message`, as someone else's push would; returns it.
     pub fn commit_and_push(&self, message: &str) -> String {
-        self.push_commit(message);
-        self.git(&self.pusher, &["rev-parse", "HEAD"])
+        self.push_commit(message, true)
     }
 
-    /// [`Fixture::commit_and_push`] without reading back the new commit.
-    fn push_commit(&self, message: &str) {
-        fs::write(self.pusher.join("file.txt"), format!("{message}\n")).expect("write");
-        self.git(&self.pusher, &["add", "."]);
-        self.git(&self.pusher, &["commit", "-m", message]);
-        self.git(&self.pusher, &["push", "origin", "main"]);
+    /// Writes the commit straight into `origin` with one `git fast-import`;
+    /// a clone that commits and pushes starts about ten git processes.
+    fn push_commit(&self, message: &str, onto_main: bool) -> String {
+        let time = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock after 1970").as_secs();
+        let contents = format!("{message}\n");
+        let parent = if onto_main { "from refs/heads/main^0\n" } else { "" };
+        // `^0`: fast-import does not let a branch start from itself.
+        let stream = format!(
+            "commit refs/heads/main\nmark :1\ncommitter Test User <test@example.com> {time} +0000\ndata {}\n{message}\n{parent}\
+             M 100644 inline file.txt\ndata {}\n{contents}\nget-mark :1\ndone\n",
+            message.len(),
+            contents.len()
+        );
+        let mut child = self
+            .isolated(worktree::git::command())
+            .current_dir(&self.bare)
+            .args(["fast-import", "--quiet", "--done"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("git runs");
+        child.stdin.take().expect("piped stdin").write_all(stream.as_bytes()).expect("write to git fast-import");
+        let output = child.wait_with_output().expect("git fast-import");
+        assert!(output.status.success(), "git fast-import: {output:?}");
+        let sha = String::from_utf8(output.stdout).expect("utf-8").trim().to_string();
+        assert_eq!(sha.len(), 40, "git fast-import gave {sha:?}");
+        sha
     }
 
     pub fn wt(&self, dir: &Path) -> Command {
