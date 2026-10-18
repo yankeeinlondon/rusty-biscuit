@@ -167,7 +167,7 @@ pub use self::file_reference::{
     LaunchMagicScope, MagicPathRegistration, MagicPathTier, MagicSearchRoot, PackageAreaFallback,
     PartialCompletion, PathIdentity, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
     RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure,
-    RelativeRoute, RootProvenance, capture_env, find_git_root, home_dir, user_cache_dir,
+    RelativeRoute, RootProvenance, capture_env, find_git_root, home_dir, user_cache_dir, user_cache_dir_from,
 };
 
 #[cfg(feature = "file-reference")]

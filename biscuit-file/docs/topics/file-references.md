@@ -282,6 +282,15 @@ XDG_CACHE_HOME=/var/cache/me    (macOS)    → <home>/Library/Caches
 LOCALAPPDATA unset              (Windows)  → None
 ```
 
+`biscuit_file::user_cache_dir_from(env, home)` applies the same rules to an
+environment lookup and home the caller already holds, such as a request
+snapshot's, so a library never reads the process:
+
+```rust,ignore
+let env = snapshot.env();
+let cache = biscuit_file::user_cache_dir_from(|name| env.get(name).map(Into::into), snapshot.home());
+```
+
 ### Magic (`@`)
 
 Magic references search a prioritized list of root directories — the most

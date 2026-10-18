@@ -1502,7 +1502,19 @@ pub fn home_dir() -> Option<PathBuf> {
 /// The environment is an input, not proof of a trusted filesystem boundary:
 /// whoever launches the process chooses it.
 pub fn user_cache_dir() -> Option<PathBuf> {
-    cache_dir_for(CacheOs::current(), |name| std::env::var_os(name), home_dir().as_deref())
+    user_cache_dir_from(|name| std::env::var_os(name), home_dir().as_deref())
+}
+
+/// [`user_cache_dir`] for an environment and home the caller already holds,
+/// such as a request snapshot's, so a library never reads the process.
+///
+/// `env` looks up one variable by name; `home` follows [`home_dir`]'s rule
+/// (a relative home is no home).
+pub fn user_cache_dir_from(
+    env: impl Fn(&str) -> Option<std::ffi::OsString>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    cache_dir_for(CacheOs::current(), env, home.filter(|home| home.is_absolute()))
 }
 
 /// The platform convention [`user_cache_dir`] follows, separate from the
@@ -1681,6 +1693,31 @@ mod tests {
             assert!(got.is_absolute(), "{got:?}");
             #[cfg(target_os = "macos")]
             assert!(got.ends_with("Library/Caches"), "{got:?}");
+        }
+
+        /// The injected form follows the host's convention over the given
+        /// environment and home, never the process's.
+        #[test]
+        fn user_cache_dir_from_reads_only_the_given_environment_and_home() {
+            let env = env_of(&[
+                ("XDG_CACHE_HOME", abs("xdg").into_os_string()),
+                ("LOCALAPPDATA", abs("local").into_os_string()),
+            ]);
+            let expected = if cfg!(target_os = "macos") {
+                abs("home").join("Library").join("Caches")
+            } else if cfg!(windows) {
+                abs("local")
+            } else {
+                abs("xdg")
+            };
+            assert_eq!(user_cache_dir_from(env, Some(&abs("home"))), Some(expected));
+        }
+
+        #[test]
+        fn user_cache_dir_from_treats_a_relative_home_as_no_home() {
+            let expected = if cfg!(windows) { Some(abs("local")) } else { None };
+            let env = env_of(&[("LOCALAPPDATA", abs("local").into_os_string())]);
+            assert_eq!(user_cache_dir_from(env, Some(Path::new("relative/home"))), expected);
         }
     }
 
