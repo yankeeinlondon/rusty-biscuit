@@ -35,7 +35,17 @@ impl Markdown {
     /// Runs the pipeline as a root over a request a root already holds: the
     /// caller's request, or one derived from it for an inline pass
     /// (pre-flight discovery, reference-graph content preparation).
-    pub(crate) fn run_root_pipeline(&mut self, mut options: crate::markdown::compose::ComposeRequest) -> MarkdownResult<ComposeReport> {
+    pub(crate) fn run_root_pipeline(&mut self, options: crate::markdown::compose::ComposeRequest) -> MarkdownResult<ComposeReport> {
+        self.run_root_pipeline_hooked(options, None)
+    }
+
+    /// [`run_root_pipeline`](Self::run_root_pipeline), calling `hook` once for
+    /// the root document between its frontmatter and its body.
+    pub(crate) fn run_root_pipeline_hooked(
+        &mut self,
+        mut options: crate::markdown::compose::ComposeRequest,
+        hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
+    ) -> MarkdownResult<ComposeReport> {
         // A constructor has no document, so `ComposeOptions::new` captures no
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
@@ -108,7 +118,8 @@ impl Markdown {
         // `current.*` read raised anywhere under this root.
         let current = options.current_authority();
         let glob_warnings = options.glob_warnings.clone();
-        let mut report = self.run_compose_pipeline_internal(options, &mut runtime)?;
+        let node = Self::pipeline_node(&options);
+        let mut report = self.run_compose_pipeline_node(options, &mut runtime, node, hook)?;
         report.cache_stats = Some(runtime.cache.stats());
         let remote_fetch_stats = runtime.remote_fetch.stats();
         report.warnings.extend(remote_fetch_stats.cache_compose_warnings());
@@ -142,7 +153,13 @@ impl Markdown {
         options: crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
     ) -> MarkdownResult<ComposeReport> {
-        let node = match &options.source {
+        let node = Self::pipeline_node(&options);
+        self.run_compose_pipeline_node(options, runtime, node, None)
+    }
+
+    /// The ancestry node `options`' source enters the transclusion stack as.
+    fn pipeline_node(options: &crate::markdown::compose::ComposeRequest) -> Option<(String, std::path::PathBuf)> {
+        match &options.source {
             ComposeSource::Unknown => None,
             ComposeSource::File(path) => Some((
                 biscuit_file::canonicalize_simplified(path)
@@ -154,8 +171,7 @@ impl Markdown {
             ComposeSource::Url(url) => {
                 Some((url.to_string(), std::path::PathBuf::from(url.to_string())))
             }
-        };
-        self.run_compose_pipeline_node(options, runtime, node)
+        }
     }
 
     /// Runs every stage for one document under an explicit ancestry node.
@@ -169,6 +185,7 @@ impl Markdown {
         mut options: crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         node: Option<(String, std::path::PathBuf)>,
+        mut hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
     ) -> MarkdownResult<ComposeReport> {
         let entered = node.is_some();
         if let Some((id, path)) = node {
@@ -463,6 +480,20 @@ impl Markdown {
                         &prepared_schemas,
                         &fse_report.typed_keys,
                     )?;
+                }
+            }
+
+            // The host's hook sees the frontmatter every frontmatter command
+            // has resolved, and may change the environment the body then
+            // renders with (a launch identity chosen from that frontmatter).
+            if let Some(hook) = hook.as_mut() {
+                let mut env = options.context().env().clone();
+                hook(self.frontmatter(), &mut env)?;
+                if &env != options.context().env() {
+                    *options.context_mut().env_mut() = env;
+                    if let Some(nested) = &nested {
+                        nested.align_environment(options.context().env());
+                    }
                 }
             }
 

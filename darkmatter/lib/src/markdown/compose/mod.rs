@@ -212,6 +212,15 @@ use tracing::instrument;
 #[cfg(test)]
 pub use super::normalize::HeadingLevel;
 
+/// The host callback of [`Markdown::compose_with_frontmatter_hook`]: the
+/// root document's resolved frontmatter and the environment its body will
+/// render with, which the callback may change.
+pub type ResolvedFrontmatterHook<'h> = dyn FnMut(
+        &crate::markdown::Frontmatter,
+        &mut std::collections::HashMap<String, String>,
+    ) -> MarkdownResult<()>
+    + 'h;
+
 impl Markdown {
     /// Composes the document for `request`.
     ///
@@ -239,6 +248,33 @@ impl Markdown {
     ) -> MarkdownResult<(Markdown, ComposeReport)> {
         let mut result = self.clone();
         let report = result.run_compose_pipeline(request)?;
+        Ok((result, report))
+    }
+
+    /// [`compose_with`](Self::compose_with), letting the host choose the
+    /// environment the body renders with from the resolved frontmatter.
+    ///
+    /// `hook` is called once, for the request's root document only, after its
+    /// frontmatter is fully resolved (both interpolation passes and every
+    /// frontmatter `$( … )` command) and before any body stage runs. It
+    /// receives that frontmatter and the request context's environment (the
+    /// `env` root, and the `AGENT`/`MODEL` behind `ctx.agent`/`ctx.model`);
+    /// whatever it leaves there is what the body, its transclusions, and its
+    /// `as_markdown()` content read. Frontmatter values already resolved keep
+    /// the environment they resolved with. Nothing runs twice: the hook adds
+    /// no compose pass.
+    ///
+    /// ## Errors
+    ///
+    /// As [`compose_with`](Self::compose_with), plus any error `hook` returns,
+    /// which ends the compose before the body renders.
+    pub fn compose_with_frontmatter_hook(
+        &self,
+        request: &ComposeRequest,
+        hook: &mut ResolvedFrontmatterHook<'_>,
+    ) -> MarkdownResult<(Markdown, ComposeReport)> {
+        let mut result = self.clone();
+        let report = result.run_root_pipeline_hooked(request.clone(), Some(hook))?;
         Ok((result, report))
     }
 

@@ -99,6 +99,60 @@ mod frontmatter_shell_expansion_integration {
         assert!(composed.content().contains("from-body"));
     }
 
+    /// The hook sees the frontmatter its `$( … )` produced, and the body reads
+    /// the environment the hook chose; each command runs once.
+    #[test]
+    fn frontmatter_hook_sets_the_environment_the_body_renders_with() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "---\nagent: \"$(echo goose)\"\n---\nBODY_AGENT={{ env.AGENT }}\n\n::shell echo from-body\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+                ComposeOperation::Interpolation,
+                ComposeOperation::ShellExpansion,
+            ])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApproval)),
+                ..Default::default()
+            });
+        let mut calls = Vec::new();
+
+        let (composed, report) = md
+            .compose_with_frontmatter_hook(
+                &crate::markdown::compose::test_request(options),
+                &mut |frontmatter, env| {
+                    let agent = frontmatter.as_map().get("agent").and_then(|value| value.as_str()).unwrap_or_default().to_string();
+                    calls.push(agent.clone());
+                    env.insert("AGENT".to_string(), agent);
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        assert_eq!(calls, ["goose"], "called once, with the command's output");
+        assert!(composed.content().contains("BODY_AGENT=goose"), "{}", composed.content());
+        assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+        assert_eq!(report.shell_expansions_applied, 1);
+    }
+
+    /// A hook error ends the compose before the body renders.
+    #[test]
+    fn frontmatter_hook_error_ends_the_compose() {
+        let md: Markdown = "---\nagent: claude\n---\nBody\n".into();
+
+        let error = md
+            .compose_with_frontmatter_hook(
+                &crate::markdown::compose::test_request(ComposeOptions::new()),
+                &mut |_, _| Err(MarkdownError::Transform("no provider".to_string())),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, MarkdownError::Transform(ref message) if message == "no provider"), "{error:?}");
+    }
+
     #[test]
     fn frontmatter_shell_with_no_candidates_is_noop() {
         let content = "---\ntitle: Hello\n---\nBody text\n";
