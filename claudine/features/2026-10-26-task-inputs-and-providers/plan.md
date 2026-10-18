@@ -4,11 +4,11 @@ created: 2026-10-12
 phase: 1
 agent: claude/sonnet
 yolo: true
-packages:
-    - claudine
-    - claudine-cli
-    - darkmatter
-    - darkmatter-dmls
+packages: []
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Task Inputs and Providers Implementation Plan
@@ -159,7 +159,7 @@ plan states a default so work is not blocked, and Wave 1 records the outcome.
 
 ### Spike (runs once, before Wave 4)
 
-- [ ] **Bounded-expansion schema spike** — one host, in-memory/temp-dir.
+- [x] **Bounded-expansion schema spike** — one host, in-memory/temp-dir.
   Write a throwaway three-level `task → group → sequence` expansion with
   `steps` unions (`step[]`, list-form unions) and `loop@./lifecycle.yaml`
   imports, and load it through the current schema engine and the DMLS overlay.
@@ -203,19 +203,19 @@ Smell grep before declaring done: `#[serde(default)]` or `Option<T>`/`unwrap_or_
 
 ### Wave 1 — Inventory and Dependency Check
 
-- [ ] **Dependency check** — Read the status/implementation logs of
+- [x] **Dependency check** — Read the status/implementation logs of
   `2026-10-20-lifecycle-grammar`, `2026-10-21-claudine-schemas`,
   `2026-10-24-sequence-containers`, `2026-10-25-loops-and-flow-control`,
   `2026-10-23-shell-template-approval`. Record which landed and the resulting
   error-family names (Rule 2). Ask the author on Rules 1, 2, 14 if unresolved.
-- [ ] **Contract inventory** — Map acceptance criteria 1–10 to existing tests
+- [x] **Contract inventory** — Map acceptance criteria 1–10 to existing tests
   and needed additions. Record in `implementation-log.md` (beside this plan):
   every `params` reader/writer in the task parser, reserved-key lists
   (`reserved.rs` has `params` in two lists), runner, and preflight; every
   `with` evaluator for proxy/retry/prep and how each resolves file values
   today; the planned-target consumers (gate, review, status line,
   `step_env_overrides`, `apply_target_env_overrides`).
-- [ ] **Migration inventory** — *Parallel with Contract inventory.* Search
+- [x] **Migration inventory** — *Parallel with Contract inventory.* Search
   `prompts/` (incl. `review-loop.md`), `claudine/prompts/`, fixtures, tests,
   `docs/`, `.claude/skills/` for task-input `params:`, `proxy|retry|prep`
   `with:` relying on target-relative paths, and the old doc rule. Classify each
@@ -223,10 +223,10 @@ Smell grep before declaring done: `#[serde(default)]` or `Option<T>`/`unwrap_or_
   evidence), or rewrite-relative. Exclude `claudine/docs/research/**`, protocol
   fixtures (`stream/**`), and `features/`/`fixes/_completed` snapshots by
   inspection.
-- [ ] **Test baseline** — Run `just test` and `just lint` in `claudine/` and the
+- [x] **Test baseline** — Run `just test` and `just lint` in `claudine/` and the
   darkmatter schema/DMLS suites; record failures separately from intended
   changes. Note unrelated working-tree changes without touching them.
-- [ ] **Skill load** — Read `claudine`, `darkmatter`, `rust-testing`, `just`,
+- [x] **Skill load** — Read `claudine`, `darkmatter`, `rust-testing`, `just`,
   `os`, `biscuit-file` skills before delegating.
 
 Checkpoint: log lists dependency state, rulings answered, exact files per
@@ -234,7 +234,7 @@ phase, and baseline failures.
 
 ### Wave 2 — Spike
 
-- [ ] **Run the bounded-expansion spike** (above). Prerequisite: Wave 1 and
+- [x] **Run the bounded-expansion spike** (above). Prerequisite: Wave 1 and
   dependency-gate answer for Rule 1. If dependencies have not landed, run it
   against the current engine with stand-in lifecycle types and note that.
 
