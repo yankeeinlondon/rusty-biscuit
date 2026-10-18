@@ -28,6 +28,47 @@ skills_files_updated_during_phase_1:
     - .claude/skills/biscuit-file/SKILL.md
     - .claude/skills/biscuit-file/references/api.md
     - .claude/skills/darkmatter/testing.md
+source_files_during_phase_2:
+    - darkmatter/dmls/src/wiki/universe.rs
+    - darkmatter/dmls/src/wiki/mod.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/graph/node.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/providers/rename.rs
+    - darkmatter/dmls/src/providers/wiki.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/level1_wiki.rs
+    - darkmatter/dmls/tests/l1/wiki_universe_equivalence.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_3:
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/index_store/mod.rs
+    - darkmatter/dmls/src/index_store/facts.rs
+    - darkmatter/dmls/src/index_store/failure.rs
+    - darkmatter/dmls/src/index_store/keys.rs
+    - darkmatter/dmls/src/index_store/location.rs
+    - darkmatter/dmls/src/index_store/lock.rs
+    - darkmatter/dmls/src/index_store/source.rs
+    - darkmatter/dmls/src/index_store/source_tests.rs
+    - darkmatter/dmls/src/index_store/store.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_concurrency.rs
+    - darkmatter/dmls/tests/l1/index_store_facts.rs
+    - darkmatter/dmls/tests/l1/index_store_keys.rs
+    - darkmatter/dmls/tests/l1/index_store_open.rs
+    - darkmatter/dmls/tests/l1/index_store_sweep.rs
+    - darkmatter/dmls/tests/fixtures/index_store_golden.txt
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/os/windows.md
 ---
 
 # Plan: DMLS Index Store
@@ -307,10 +348,10 @@ providers vs. a new `index_store` module) and may run concurrently.
 
 ### Wave 3 (sequential: one design, one agent)
 
-- [ ] **`WikiUniverse` type.** Build the universe from a list of paths plus wiki
+- [x] **`WikiUniverse` type.** Build the universe from a list of paths plus wiki
   roots (`wiki_doc_for`), separate from graph documents.
   - Prerequisite: Phase 1.
-- [ ] **`build_with_roots` change.** Add the universe parameter; `assemble`
+- [x] **`build_with_roots` change.** Add the universe parameter; `assemble`
   (`graph/arena.rs`, the `wiki_docs` build near line 334) uses it instead of
   deriving docs from parsed documents. The graph records each document's
   universe slot.
@@ -320,10 +361,10 @@ providers vs. a new `index_store` module) and may run concurrently.
     documents plus, once the file list exists, the file list. Decide and record
     which one in the log; the choice must not change diagnostics for open
     documents.
-- [ ] **Resolver wiring.** `resolve_file` and the ambiguity check
+- [x] **Resolver wiring.** `resolve_file` and the ambiguity check
   (`arena.rs` near 937-981) index the universe by slot, not by
   `DocumentId`.
-- [ ] **Rename wiring.** `apply_file_rename` and `safe_new_spelling`
+- [x] **Rename wiring.** `apply_file_rename` and `safe_new_spelling`
   (`providers/rename.rs`, near 261-330) and `providers/wiki.rs` (near 290,
   333) read the universe from the graph instead of `graph.wiki_docs()`.
   - The post-rename universe replaces the old path's slot with the new path
@@ -332,19 +373,19 @@ providers vs. a new `index_store` module) and may run concurrently.
 
 ### Wave 4 (after Wave 3)
 
-- [ ] **Equivalence tests.** On the Phase 1 corpus, a graph over a **small**
+- [x] **Equivalence tests.** On the Phase 1 corpus, a graph over a **small**
   document subset with the full universe gives the same ambiguity diagnostics
   and rename spellings as the full-graph oracle.
   - Include the spec's case: an ambiguous `[[name]]` whose rival is not a
     candidate stays ambiguous.
-- [ ] **No-regression run.** Existing wiki, rename, and graph L1 tests
+- [x] **No-regression run.** Existing wiki, rename, and graph L1 tests
   (`level1_wiki.rs`, `level1_graph_index.rs`, rename tests) pass unchanged in
   behavior.
 
 ### Validation checkpoint 2
 
-- [ ] `just test` and `just lint` pass in `darkmatter/`.
-- [ ] No caller passes an empty or document-derived universe except the
+- [x] `just test` and `just lint` pass in `darkmatter/`.
+- [x] No caller passes an empty or document-derived universe except the
   oracle helper and `WorkspaceIndex`, as recorded in Wave 3.
 
 ## Phase 3: Store Core (R1, R2, R7-R12)
@@ -353,7 +394,7 @@ A new `darkmatter/dmls/src/index_store/` module. No wiring into the server yet.
 
 ### Wave 5 (parallel; three agents, disjoint files)
 
-- [ ] **Facts model (R1, R9).** `FileFacts` (path, hash, headings, links, wiki
+- [x] **Facts model (R1, R9).** `FileFacts` (path, hash, headings, links, wiki
   links, transclusions, candidate keys), `STORE_FORMAT`, `FACTS_VERSION`.
   - `FileFacts::from_index(&DocumentIndex, hash, candidate_keys)` and
     `FileFacts::into_index(...)` per ruling 9.
@@ -361,7 +402,7 @@ A new `darkmatter/dmls/src/index_store/` module. No wiring into the server yet.
     No `FileResolutionContext`, configuration, or resolved path is stored.
   - The hash is raw-bytes xxHash via `biscuit-hash` (load the `biscuit-hash`
     skill), the same value as `DocumentIndex::content_hash`.
-- [ ] **Candidate keys (R2, ruling 2).** Pure function from a link / wiki /
+- [x] **Candidate keys (R2, ruling 2).** Pure function from a link / wiki /
   transclusion plus the source directory to a set of keys.
   - Decode first: percent-encoding, `<...>`, `file://`, absolute, directory,
     magic-root forms; a form with no probable path falls back to the file-name
@@ -369,7 +410,7 @@ A new `darkmatter/dmls/src/index_store/` module. No wiring into the server yet.
   - File-name key: case-folded, NFC, Markdown extension stripped.
   - Property test over the corpus: keys of every oracle referrer include a key
     of the target (no misses). Add the 18 S1 root-relative cases explicitly.
-- [ ] **Location, sweep, permissions (R7, R8, R10).**
+- [x] **Location, sweep, permissions (R7, R8, R10).**
   - `store_path(root)`: `<user_cache_dir>/darkmatter/dmls/<hex16>-f<FACTS_VERSION>.sqlite`
     with the root key `xxhash(canonicalize_simplified(root))` as 16 hex digits.
   - `DMLS_CACHE_DIR` per ruling 11; directory `0700`, files `0600` on Unix.
@@ -381,7 +422,7 @@ A new `darkmatter/dmls/src/index_store/` module. No wiring into the server yet.
 
 ### Wave 6 (after Wave 5)
 
-- [ ] **`IndexStore` (R1, R11).** `open`, `upsert_batch`, `remove_missing`,
+- [x] **`IndexStore` (R1, R11).** `open`, `upsert_batch`, `remove_missing`,
   `candidates_for(target)`, `scan_headings`, `touch`.
   - `STRICT` tables from ruling 17; `meta` table (format, `FACTS_VERSION`,
     root, `last_opened`); indexes on each key column and on `file_id`
@@ -392,7 +433,7 @@ A new `darkmatter/dmls/src/index_store/` module. No wiring into the server yet.
     when the stored hash matches; delete only paths missing on disk.
   - Open checks: root mismatch = delete and refill; stamp mismatch = corruption.
   - Every row decode failure is `StoreFailure::Corrupt`, never an empty result.
-- [ ] **`FactsSource` (R12).** Trait with `StoreFacts` and
+- [x] **`FactsSource` (R12).** Trait with `StoreFacts` and
   `MemoryFacts(HashMap<PathBuf, FileFacts>)`, and `StoreFailure`.
   - Failure ladder from the R12 table: corruption = recreate once, a second
     failure or a failed delete = memory; read-only, full, busy beyond timeout,
@@ -403,30 +444,30 @@ A new `darkmatter/dmls/src/index_store/` module. No wiring into the server yet.
 
 ### Wave 7 (after Wave 6; parallel tests)
 
-- [ ] **Round trip and golden (R1, R9).** Extract, write, read back equal;
+- [x] **Round trip and golden (R1, R9).** Extract, write, read back equal;
   write/read/write stability; golden snapshot of the corpus facts that fails
   on change without a `FACTS_VERSION` bump.
-- [ ] **Open and fallback matrix.** Every Input Robustness Matrix row for
+- [x] **Open and fallback matrix.** Every Input Robustness Matrix row for
   `open`, the env vars, and row decode; R12 ladder with fault injection.
   - Unix `0700`/`0600` under `#[cfg(unix)]`; key stability and pinned macOS
     case behavior of `canonicalize_simplified`.
   - Root mismatch refills.
-- [ ] **Sweep tests (R10).** Stale deleted, fresh kept, missing root kept, a
+- [x] **Sweep tests (R10).** Stale deleted, fresh kept, missing root kept, a
   store touched by a recent batch kept, Unix and Windows variants.
   - The Windows sharing-violation test runs on the native Windows leg; it
     cannot be proven on macOS. Load the `os` skill for how to reach a Windows
     host. Nothing here gates a merge (repo CI policy); failures found after
     merge are fixed forward.
-- [ ] **Concurrency (R11).** Two connections writing interleaved batches
+- [x] **Concurrency (R11).** Two connections writing interleaved batches
   converge; a foreign row with a mismatching hash is re-parsed. Two processes
   cold-filling one store both reach identical rows (acceptance 9). S1 did not
   check row equality.
 
 ### Validation checkpoint 3
 
-- [ ] `just test` and `just lint` pass in `darkmatter/`.
-- [ ] Smell grep over `index_store/` recorded in the log.
-- [ ] Candidate no-miss property holds on the whole corpus.
+- [x] `just test` and `just lint` pass in `darkmatter/`.
+- [x] Smell grep over `index_store/` recorded in the log.
+- [x] Candidate no-miss property holds on the whole corpus.
 
 ## Phase 4: Fill, Ready, and Freshness (R4-R6)
 
