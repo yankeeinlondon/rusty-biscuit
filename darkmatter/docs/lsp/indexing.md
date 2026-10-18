@@ -725,6 +725,15 @@ graph knows `docs/c.md` means `docs/a.md`, so only `notes/b.md` is answered.
   documents. `[[topic]]` with `alpha/topic.md` and `beta/topic.md` listed is
   still ambiguous when neither file is a candidate, and a file rename picks
   the same wiki spelling a graph over every file would.
+- **Only rows that match this process's reads are used.** Each request
+  reads its candidates, rows, or headings from one consistent state of each
+  store, together with the hash of every row, and compares each listed
+  file's row hash with the hash of the bytes this process last read for
+  it. A listed file whose row differs, or has none, is read, hashed, and
+  parsed again for the request, its row is rewritten, and that fresh parse
+  takes the row's place, including in deciding whether the file is a
+  candidate. See [Several DMLS processes](#several-dmls-processes) for how
+  such a row appears.
 - **Open buffers win.** An open buffer's text replaces its row in the graph,
   saved or not.
 - **Files outside the file list are not candidates.** A row another DMLS
@@ -739,6 +748,15 @@ graph knows `docs/c.md` means `docs/a.md`, so only `notes/b.md` is answered.
   headings (an open buffer's headings in place of its row) and emit each
   document's title (its first level-1 heading, else its first heading, else
   its file name) and every heading that matches the query.
+- **Answered on the dispatch thread**, like every other request. The
+  candidate query and the graph build run inside the request handler, so an
+  edit or cancellation sent meanwhile waits for the answer. On a
+  5,700-file repository a references request takes about 45 ms and a
+  workspace-symbols request about 50 ms; workspace symbols grows with the
+  number of listed files. The handler never waits on a build: while one is
+  running or the store is not ready, these requests wait in the queue (see
+  [The index build](#the-index-build)), so the build's lock on the store is
+  never contended.
 
 The graph is dropped after the request. When the stores are off or
 unusable, the same requests answer from facts kept in memory.
@@ -848,6 +866,19 @@ or one per client). They share the store safely:
 - A process uses another process's row only when the row's hash equals its
   own read of the file. A shared row saves a parse; it never decides an
   answer.
+- That check is made on every request, not only when the store is filled.
+  Another process can commit a row computed from older bytes after this
+  process read the file: for example, one window starts a fill, the file is
+  saved, a second window reads the new bytes, and then the first window
+  commits the batch it parsed before the save. SQLite makes each write
+  atomic but cannot tell which bytes are newer. Each request therefore reads
+  every row hash and the rows it needs inside one read transaction, so no
+  commit lands between them, and re-reads any listed file whose row does not
+  match (see
+  [Answering a request from the store](#answering-a-request-from-the-store)).
+  If `notes/wiki.md` holds `[[b#Some Heading]]` on disk but a late batch
+  stored an earlier version without it, a rename of that heading still edits
+  `notes/wiki.md`. The check reads one hash per stored file.
 - Rows are deleted only for files missing on disk, never because a file is
   absent from one process's file list (two builds can list different files).
 - Switching a new store to write-ahead-log mode can report "busy" at once
@@ -863,14 +894,16 @@ A cache problem never fails a request. Each root climbs one ladder:
 | the store is corrupt, not a database, or has another format stamp | takes the exclusive lock, deletes the store, and creates it again, once (`index store recreated`) |
 | the same, but another process holds the lock, or Windows refuses the delete | uses memory for that root |
 | read-only directory, disk full, cannot open, busy beyond 5 s, write-ahead-log switch still busy | uses memory for that root |
-| a write fails during a fill | switches to memory, keeping every row the store can still read plus the facts being written |
+| a write fails, or a row no longer decodes, after the store opened | switches to memory, keeping the store's rows when every one of them can still be read, plus the facts being written |
 | `DMLS_CACHE_DIR=off`, or no cache directory | uses memory for every root |
 
 A root in memory stays there until the process exits; restart DMLS after
 fixing the cause. Memory holds facts, not parsed documents: about 16 MiB
 for a repository of 5,700 files. A request during which a store fails
-still answers, from the facts memory salvaged; the next request that needs
-the store reads and hashes every listed file again first.
+still answers in full: memory holds the rows that could be salvaged, and the
+request reads afresh every listed file it checks whose row is missing or
+does not match this process's read. The next request that needs the store
+reads and hashes every listed file again first.
 
 Because every process with a store open holds its shared lock, no process
 ever deletes or recreates a store another one is using: the sweep skips it,
