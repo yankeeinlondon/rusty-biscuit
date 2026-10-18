@@ -69,6 +69,50 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/index_store/mod.rs
+    - darkmatter/dmls/src/index_store/source.rs
+    - darkmatter/dmls/src/index_store/source_tests.rs
+    - darkmatter/dmls/src/index_store/store.rs
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/index_store/workspace_tests.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_live.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/lsp/indexing.md
+    - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/api.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/src/providers/symbols.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/rename.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_requests.rs
+    - darkmatter/dmls/tests/l1/index_store_sessions.rs
+    - darkmatter/dmls/tests/l1/index_store_stdio.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Plan: DMLS Index Store
@@ -476,7 +520,7 @@ Needs Phase 3; Phase 2 is not required yet.
 
 ### Wave 8 (parallel)
 
-- [ ] **Revalidation pass (R4).** On first need: open every root's store, sweep,
+- [x] **Revalidation pass (R4).** On first need: open every root's store, sweep,
   read and hash every Markdown file in the file list in parallel (ruling 18),
   re-parse only files whose hash differs or has no row, upsert in batches,
   delete rows for missing paths.
@@ -485,17 +529,17 @@ Needs Phase 3; Phase 2 is not required yet.
   - Cancellation between batches and between parses; reconcile changes that
     arrive during the pass (the dependency's R7 behaviors carry over).
   - Work-done progress and the shared single build carry over.
-- [ ] **Parse counter seam.** Use the dependency's `work_counters.rs`; the
+- [x] **Parse counter seam.** Use the dependency's `work_counters.rs`; the
   tests for acceptance 1 and 2 count parses, not time.
-- [ ] **Open-buffer override (R5).** A function returning the facts overlay for
+- [x] **Open-buffer override (R5).** A function returning the facts overlay for
   every open buffer (saved or not); a buffer never writes a row.
 
 ### Wave 9 (after Wave 8)
 
-- [ ] **Ready state.** "Ready" = every Markdown file in the list has a row whose
+- [x] **Ready state.** "Ready" = every Markdown file in the list has a row whose
   hash matches bytes read in this process, and no row exists for a path missing
   on disk. Duplicate paths and symlinks follow the dependency's R5 policy.
-- [ ] **Live updates (R6).**
+- [x] **Live updates (R6).**
   - Before ready: events touch only the file list.
   - After ready, client watching: re-read, re-hash, upsert or delete per event.
   - After ready, fallback watch mode: a save re-hashes only the saved file
@@ -503,18 +547,18 @@ Needs Phase 3; Phase 2 is not required yet.
   - Before each heading or file rename in fallback mode: a full re-hash pass.
   - Every rename re-reads and re-hashes each referrer it will edit; a mismatch
     re-parses that file first.
-- [ ] **Failure to memory mid-process.** A store failure after ready switches
+- [x] **Failure to memory mid-process.** A store failure after ready switches
   `FactsSource` to `MemoryFacts` without losing computed facts and without
   failing the request in flight.
 
 ### Wave 10 (after Wave 9; parallel tests)
 
-- [ ] **R4 tests.** Restart with unchanged files parses zero (acceptance 1);
+- [x] **R4 tests.** Restart with unchanged files parses zero (acceptance 1);
   one change parses one (2); deleted file's row removed; unreadable file fails;
   empty and zero-byte files are valid rows.
-- [ ] **R5 tests.** Unsaved and saved-but-differing buffers override rows; no
+- [x] **R5 tests.** Unsaved and saved-but-differing buffers override rows; no
   buffer writes a row.
-- [ ] **R6 tests.** A watched event updates one row; before ready only the
+- [x] **R6 tests.** A watched event updates one row; before ready only the
   list changes; a fallback save re-hashes only the saved file plus events;
   an unwatched disk change that adds a link then rename edits the new
   referrer (acceptance 7); rename edits the new bytes of a referrer changed
@@ -522,8 +566,8 @@ Needs Phase 3; Phase 2 is not required yet.
 
 ### Validation checkpoint 4
 
-- [ ] `just test` and `just lint` pass in `darkmatter/`.
-- [ ] Acceptance 1, 2, 7, and 9 have passing tests.
+- [x] `just test` and `just lint` pass in `darkmatter/`.
+- [x] Acceptance 1, 2, 7, and 9 have passing tests.
 
 ## Phase 5: Requests Over the Store (R3, R8)
 
@@ -531,7 +575,7 @@ Needs Phases 2 and 4.
 
 ### Wave 11 (sequential: one shared helper)
 
-- [ ] **Temporary-graph builder.** Given a target, collect `candidates_for` over
+- [x] **Temporary-graph builder.** Given a target, collect `candidates_for` over
   every root, union and de-duplicate by canonical path (ruling 15), load facts
   from the `FactsSource`, add every open buffer, add the target, and build a
   `WorkspaceGraph` with the wiki universe from the file list and wiki roots.
@@ -546,27 +590,27 @@ Needs Phases 2 and 4.
 
 ### Wave 12 (after Wave 11; parallel, one agent per provider, disjoint files)
 
-- [ ] **References and DSL transcluded-by.** `providers/references.rs`,
+- [x] **References and DSL transcluded-by.** `providers/references.rs`,
   `providers/dsl.rs`.
-- [ ] **Wiki references.** `providers/wiki.rs`.
-- [ ] **Heading rename and file rename.** `providers/rename.rs`; file rename
+- [x] **Wiki references.** `providers/wiki.rs`.
+- [x] **Heading rename and file rename.** `providers/rename.rs`; file rename
   uses the post-rename universe; a directory rename still makes no edits.
-- [ ] **Workspace symbols.** `providers/symbols.rs`: scan stored headings of
+- [x] **Workspace symbols.** `providers/symbols.rs`: scan stored headings of
   every root, document title rule unchanged (first level-1 heading, else first
   heading, else file name), fuzzy match, de-duplicate nested roots. No graph.
 
 ### Wave 13 (after Wave 12; parallel tests)
 
-- [ ] **Oracle equivalence (acceptance 4).** For each of the six request kinds
+- [x] **Oracle equivalence (acceptance 4).** For each of the six request kinds
   on the corpus, store-backed result equals the oracle's, including wiki
   ambiguity diagnostics and file-rename spellings.
-- [ ] **No-miss (acceptance 5).** For every target in the corpus, candidates
+- [x] **No-miss (acceptance 5).** For every target in the corpus, candidates
   contain every oracle referrer.
-- [ ] **After restart (acceptance 3).** Heading and file rename edit a referrer
+- [x] **After restart (acceptance 3).** Heading and file rename edit a referrer
   that was never open and never referenced by an open document.
-- [ ] **Two roots (acceptance 6).** A file rename in one root edits a referrer
+- [x] **Two roots (acceptance 6).** A file rename in one root edits a referrer
   in the other, after a restart; a nested root yields no duplicates.
-- [ ] **Fallback to memory (acceptance 8).** With the directory read-only,
+- [x] **Fallback to memory (acceptance 8).** With the directory read-only,
   corrupt, locked, or `off`, all four requests answer correctly from memory
   with one `warn`; `off` creates no store file. One stdio wiring test spawns
   `dmls` once with `off` and once with a corrupt store.
@@ -574,9 +618,9 @@ Needs Phases 2 and 4.
 
 ### Validation checkpoint 5
 
-- [ ] `just test` and `just lint` pass in `darkmatter/`.
-- [ ] Acceptance 3-8 have passing tests.
-- [ ] Peak memory and latency sample taken on this repository (full numbers in
+- [x] `just test` and `just lint` pass in `darkmatter/`.
+- [x] Acceptance 3-8 have passing tests.
+- [x] Peak memory and latency sample taken on this repository (full numbers in
   Phase 7).
 
 ## Phase 6: Removal, Logs, and Bench (R13, R14, acceptance 12)

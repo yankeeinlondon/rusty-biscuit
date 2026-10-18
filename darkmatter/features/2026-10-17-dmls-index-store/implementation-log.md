@@ -69,16 +69,57 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/index_store/mod.rs
+    - darkmatter/dmls/src/index_store/source.rs
+    - darkmatter/dmls/src/index_store/source_tests.rs
+    - darkmatter/dmls/src/index_store/store.rs
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/index_store/workspace_tests.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_live.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/lsp/indexing.md
+    - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/api.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/src/providers/symbols.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/rename.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_requests.rs
+    - darkmatter/dmls/tests/l1/index_store_sessions.rs
+    - darkmatter/dmls/tests/l1/index_store_stdio.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
 message_to_agent: |-
-  Phase 3 is done: `dmls::index_store` exists (facts, keys, location/sweep, lock, store, fallback ladder) but nothing calls it yet. For Phase 4:
-  - Use `RootFacts` (one per effective root) as the only entry point; it never fails. Open with `RootFacts::open(root, &StoreLocation, clock)`. `StoreLocation::prepare(dmls_cache_dir_value, user_cache_dir)` takes both inputs as parameters, so no production code reads the environment yet. Supply `DMLS_CACHE_DIR` from the request snapshot's environment and call `biscuit_file::user_cache_dir()`, then run the context-construction / ambient-read guard tests (`tests/l1/context_construction_guard.rs`); a new env read needs a guard entry.
-  - After any `RootFacts` call, check `take_switched()`: true means the store failed mid-process and memory holds only salvaged rows, so revalidate (R4 steps 2-4) before trusting `candidates_for`. Recreate-once happens only at open.
-  - `RootFacts::hashes()` gives every row's hash, for the R4 hash comparison; `upsert` takes `FileFacts::from_index(&index_document(..))` (keys and hash are derived from the index). `remove_missing()` deletes only paths whose `symlink_metadata` is `NotFound`.
-  - Rows are keyed by `path.components().collect::<PathBuf>()`, so any spelling `PathBuf` treats as equal finds the same row.
-  - The sweep is `sweep_stale_stores(dir, STALE_STORE_AGE, SystemTime::now())`; R10 says run it on the first store open in a process. The two `warn` lines (fallback once per process, recreated) are emitted; the R13 `info` lines and the `workspace` field are Phase 6.
-  - Still owed from the Input Robustness Matrix: the single stdio wiring test (`DMLS_CACHE_DIR=off` and a corrupt store answering references over stdio). It needs the server wiring, so it belongs to Phase 4 or 5.
-  - Carried from Phase 2 (for Phase 5): `build_with_roots(indices, generation, universe, contexts)` takes an `Arc<WikiUniverse>` built once per file-list generation; a unique wiki match outside the graph is `WikiResolution::OutsideGraph`; `Oracle::scoped(.., UniverseScope::FileList)` is the expected shape of a request-scoped graph.
-  - Ruling 16 is done: the exact `storage-strategy` line is in the Phase 3 log for the author to apply outside the repository.
+  Phase 5 is done: references (including wiki references and DSL transcluded-by), heading rename, file rename, and workspace symbols now *answer* from the index store, but the full index still gates them. For Phase 6:
+  - Answer path: `ServerState::request_graph(targets)` (router/facts.rs) -> `WorkspaceFacts::request_graph` (candidates over every root, listed only, + listed targets + overlay of open buffers and unlisted targets' `disk_parse`, universe = live snapshot's `shared_wiki_universe()`, shared `RepositoryContexts`). Workspace symbols: `ServerState::symbol_documents()` -> `WorkspaceFacts::symbol_documents` -> `registry.workspace_symbols(query, &[SymbolDocument])` (no graph). References targets come from `providers::reference_target_at` over the live snapshot; that keeps working without the full index because every listed file is a (root-only) snapshot document and the open document is parsed.
+  - What is still the full index, and goes in Phase 6: `Router::needs_full_index` requires `index_is_full()` as well as `facts_ready()`; each build round parses for `WorkspaceIndex::begin_full_build`/`finish_full_build` and then runs the store pass with those parses as `known` (so with the full build removed, `revalidate` parses changed files itself); `bridge_to_index`; the `full index built` line. The store pass, `FactsEvents`, the fallback pre-rename build (`Router::revalidated`), and `refresh_rename_referrers` (which now refreshes closed *candidates*, not snapshot referrers) must survive the removal.
+  - Measured on this repository (loaded host): the first references request is about 9 s and the process peaks at about 1.1 GB, all of it the full build; each later references request is 10 ms and workspace symbols 54 ms. Once the build is gone, add the server-level "warm restart parses zero" test Phase 4 deferred, and re-measure for acceptance 11 in Phase 7.
+  - Tests that prove the request path: `tests/l1/index_store_requests.rs` (oracle equivalence at every corpus probe, no-miss, memory modes; the oracle gained `*_over(graph, ...)` methods), `index_store_sessions.rs` (restart, two roots, nested roots), `index_store_stdio.rs` (spawned binary, `off` and corrupt). Mutation check: a `request_graph` without candidates fails 18 of them, so they will catch a removal that falls back to the snapshot.
+  - Pre-existing: a `../` link out of a workspace folder that is in no repository does not resolve (store or not); a two-root fixture needs a `.git` above both folders.
 ---
 
 # Implementation Log for 2026-10-17-dmls-index-store (7 phases)
@@ -360,3 +401,197 @@ The first `just cross-check dmls --os windows` failed one test: `two_processes_c
 - no skipped or pre-existing failures
 
 Phase 3 implementation complete, ready for review.
+
+## Phase 4
+
+Implemented directly by the orchestrator, without subagents. As in Phase 3, the revalidation pass, ready state, live updates, and router wiring share one design (the build round's thread, the dispatch thread's event handling, and the rename path all meet at `WorkspaceFacts`), so splitting them across agents would have risked divergence for little wall-clock gain.
+
+### What changed
+
+- **`biscuit_file::user_cache_dir_from(env, home)`** (biscuit-file, additive): `user_cache_dir()`'s rules over an injected environment lookup and home (a relative home counts as none). `user_cache_dir()` now wraps it. **Why:** the plan said to "call `biscuit_file::user_cache_dir()`", but that reads the process environment from library code, against the darkmatter rule that only binaries read process state (`RequestSnapshot::from_process`). DMLS now derives the store location from its request snapshot (`DMLS_CACHE_DIR` from `snapshot.env()`, the cache dir from `snapshot.env()` + `snapshot.home()`), so no new ambient read and no guard entry was needed (`context_construction_guard` passes unchanged). Side effect, intended: test sessions built from `LspFixture::fixture_snapshot` (fixture home inside the workspace, empty env) keep their stores inside the workspace temp dir (macOS `<ws>/home/Library/Caches/darkmatter/dmls`, Linux `<ws>/home/.cache/...`; Windows has no `LOCALAPPDATA` in the empty env, so memory)
+- **`IndexStore::remove_paths` / `FactsSource::remove_paths` / `RootFacts::remove_paths`**: per-path form of `remove_missing` (deletes only paths missing on disk), so a deletion event does not stat every row
+- **`index_store/workspace.rs`: `WorkspaceFacts`** (new). One `RootFacts` per effective root plus `verified` (hash of each file read in this process)
+    - `open(roots, location, clock)`: opens every root, then sweeps the store directory once per process (static `SWEPT`), after this workspace's stores are open (so they are locked and fresh)
+    - `revalidate(files, known, progress, cancel)` (R4 steps 2-4): every root's `hashes()`, then a worker pool (same shape and size rule as `parallel_index`) reads and hashes each file through `work_counters`, re-parses only where some owning root's row differs, writes per root in batches of `BATCH_SIZE` checking `cancel` between batches, deletes rows of missing paths (`remove_paths`) and then `remove_missing` on every root. No size/mtime path
+    - `refresh(paths, known)` (R6): the same for a few paths, comparing against those rows only (`load`), not every row's hash
+    - `known`: a supplied parse is used only when its `content_hash` equals the bytes read (a parse is a function of path and bytes). The router passes the build round's parses plus open-buffer parses, so **the store pass adds no parses to what the full index already does**; all 32 dependency `full_index` tests' parse counts hold unchanged
+    - ready (`is_ready(listed, roots)`): `mark_ready` by the caller (only it knows whether changes arrived during the pass), same roots, every listed path verified. A switch to memory (`take_switched` after every operation) withdraws it
+    - `request_documents(paths, buffers)` (R5): stored facts into `DocumentIndex`, each open buffer in place of its row (or added); writes nothing
+    - a file under nested roots gets a row in each store (R8)
+- **Router wiring** (`router.rs`, new `router/facts.rs`):
+    - `ServerState::facts: Arc<Mutex<Option<WorkspaceFacts>>>`, opened on the first build round's thread (never at startup), reopened when the effective roots change. `StoreInputs` captures `DMLS_CACHE_DIR` and the user cache dir from the snapshot at startup; `StoreLocation::prepare` runs on the round thread
+    - each build round runs a store pass after its full-index parse (`FactsPlan::Full` on a build's first round and after a switch; `Paths(touched)` afterwards). `FactsEvents::touched` records Markdown paths changed while a round reads; the round finish starts another round when the full index needs one, when anything was touched, or when a root switched. Ready = both the full index and the store. A listed file the store pass cannot read fails the build like the full index's own reads (filtered by touched)
+    - `proceed` now waits when a build runs, the index is not full, **or the store is not ready**, and (fallback watch mode) for every rename that has not had its own build (`Router::revalidated`), which is the R6 pre-rename full re-hash pass
+    - events: before ready only the file list changes; during a build they are recorded; after ready, client watching → `refresh` at once (after the index applied the event, so its parse of the new bytes serves the row: one parse per event, asserted); fallback mode → held in `pending` until the next save, which refreshes the saved file plus held paths (`install_listing`'s joined/left paths are fed in, so a save's relist reaches it). Watched events of open documents reach the store (rows hold disk state)
+    - `bridge_to_index`: any read whose hash differs from `WorkspaceIndex`'s disk parse calls `disk_changed` (and a missing one `disk_deleted`), so the transitional full index never answers from bytes the store already saw replaced. This is what makes acceptance 7 hold through the server today. **Phase 6 deletes it with the full index**
+    - rename freshness: before computing a heading rename or file rename, the router refreshes the closed targets and every closed document with a `References`/`Transcludes` edge into a target (`referrers_of`), then reloads the snapshot. **Finding:** the plan's natural order (compute, then re-read edited files) does not work: `rewrite_heading_reference` drops an edit when the old slug is not found at the stale span, so the changed referrer is missing from the edit and never re-read. It must be refreshed *before* computing
+- **`WorkspaceIndex::open_buffers`, `disk_parse`** (accessors used above). `FactsPlan` and a `facts` field on `Build` (`full_index.rs`)
+- **`LspFixture::start_with_full_index_gate_and_snapshot`** (test harness)
+- docs: `darkmatter/docs/lsp/indexing.md` gains "The index store" (location table, fill, live-update table per watch mode, rename re-read rule, example) and two state-diagram edges; it states plainly that the store does not answer requests yet. `biscuit-file/docs/topics/file-references.md` documents `user_cache_dir_from`. Phase 7 still owns the full rewrite
+
+### Departures and decisions
+
+- **Acceptance 1 and 2 are tested at the `WorkspaceFacts` level** (`index_store::workspace::tests::{a_restart_with_unchanged_files_parses_nothing, one_file_changed_between_restarts_is_the_only_parse}`), not through the server. While the full index exists, a server restart parses every closed file for it, and the store pass reuses those parses, so a server-level parse count cannot tell a warm store from a cold one. Once Phase 6 deletes the full build, a server-level "restart parses zero" test becomes meaningful and should be added there
+- **"A fallback save re-hashes only the saved file plus files with pending events"**: the pending set is the paths the save's relist reported as joined or left. Paths the full index's own `recheck_parsed` found changed on that save are *not* fed to the store (that would re-hash everything parsed, which is what the amendment removed). The full index is ahead of the store for those until the next rename's full pass; the store answers nothing yet, and in Phase 5 that is the spec's accepted fallback-mode behavior
+- the plan's "Unreadable listed file = state failed": a store-pass failure (exists but unreadable, or changed bytes not UTF-8) or a listed file missing on disk fails the build with the same `RequestFailed` message, unless the path changed during the round. A missing path's row is still deleted
+- **pre-existing, not changed**: `workspace/willRenameFiles` does not edit a Markdown link that carries a heading fragment (`[x](target.md#target)`); only path links and wiki links are rewritten. Observed while writing acceptance 7's file-rename half; the test uses a path link. Whether this is a defect is outside this feature (the oracle records current behavior)
+
+### Smell grep
+
+`rg 'unwrap_or_default\(\)|\.ok\(\)|filter_map|serde\(default'` over `index_store/workspace.rs`, `router/facts.rs`, `index_store/store.rs`, `index_store/source.rs`:
+
+- `source.rs:156` `MemoryFacts::get_all` (Phase 3, recorded there: a map lookup)
+- `router/facts.rs` `finish_round`: `touched.take().unwrap_or_default()` on an `Option<BTreeSet>`: no build recording means nothing was touched; not a parse
+- `router/facts.rs` `known_parses`: `filter_map` over `disk_parse(path)`: "no parse held" simply means the pass parses itself; not a decode
+- the new `remove_paths` skips a non-UTF-8 path with `let Ok(..) else continue` (such a path can never have been written), not `filter_map(.. .ok())`
+
+No row decode path was added; every store read still goes through Phase 3's decoders.
+
+### Input Robustness Matrix (this phase)
+
+No new loader. `DMLS_CACHE_DIR` reaches `StoreLocation::prepare` (whose shapes Phase 3 tested in-process) through the snapshot; two wiring cells are now covered through the server in-process: `off` (`index_store_live::the_kill_switch_answers_from_memory_and_writes_no_store`: answers, no file in the directory) and a corrupt store file (`…::a_corrupt_store_is_recreated_and_the_request_answers`: answers, three rows after recreate). The one spawned-binary stdio wiring test stays in Phase 5 Wave 13, as the plan schedules it. `user_cache_dir_from`: the injected-environment control per host OS and a relative home (`biscuit-file` `file_reference::context::tests::user_cache_dir::{user_cache_dir_from_reads_only_the_given_environment_and_home, user_cache_dir_from_treats_a_relative_home_as_no_home}`); every other shape is `cache_dir_for`'s, tested in Phase 1
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+| --- | --- |
+| R4 / acceptance 1: restart with unchanged files reads and hashes each file once, parses none | `dmls` lib `index_store::workspace::tests::a_restart_with_unchanged_files_parses_nothing` |
+| R4 / acceptance 2: one file changed between restarts is the only parse; its row holds the new facts | `…::one_file_changed_between_restarts_is_the_only_parse` |
+| R4: a deleted file's row is removed even when the new list omits it; a listed missing file is reported | `…::a_deleted_file_loses_its_row` |
+| R4: unreadable (non-UTF-8) file fails with no row and withholds ready; zero-byte file and empty heading title are valid rows, reused on restart | `…::an_unreadable_file_fails_and_empty_files_are_valid_rows` |
+| a supplied parse is reused only when its hash matches | `…::a_known_parse_is_reused_only_when_its_hash_matches` |
+| cancellation before reading reads and writes nothing | `…::a_cancelled_revalidation_reads_nothing_and_writes_nothing` |
+| ready: needs the mark, the same roots, every listed file read; a joined file withholds it until refreshed | `…::ready_needs_a_mark_the_same_roots_and_every_listed_file_read` |
+| R6 refresh: re-reads only given paths, re-parses the changed one, deletes the missing one, keeps ready | `…::a_refresh_updates_one_row_and_deletes_a_missing_one` |
+| R5: unsaved and saved-but-differing buffers replace rows; no buffer writes a row (row hashes unchanged) | `…::open_buffers_replace_rows_and_never_write_one` |
+| R8: a file under nested roots has a row in each store; restart reuses both | `…::a_file_under_nested_roots_has_a_row_in_each_store` |
+| failure to memory after ready: the refresh in flight completes, written facts kept, ready withdrawn, next revalidation refills | `…::a_store_failure_after_ready_switches_to_memory_without_losing_written_facts` |
+| `off`: memory, nothing written | `…::disabled_stores_keep_facts_in_memory` |
+| wiring: no store before the first need; first references fills one row per listed file with its disk hash | `dmls` `l1` `index_store_live::the_first_references_request_fills_the_store_from_disk` |
+| wiring: `DMLS_CACHE_DIR=off` answers, creates no store file | `index_store_live::the_kill_switch_answers_from_memory_and_writes_no_store` |
+| wiring: corrupt store file recreated, request answers | `index_store_live::a_corrupt_store_is_recreated_and_the_request_answers` |
+| R6 before ready: a watched change opens no store; the first need reads the new bytes | `index_store_live::before_ready_a_watched_change_touches_only_the_file_list` |
+| R6 after ready, client watching: one event updates one row with one parse (shared with the index); a deletion removes the row | `index_store_live::after_ready_a_watched_event_updates_one_row` |
+| R7 reconciliation: a change during a held build round is re-read before ready | `index_store_live::a_change_during_a_build_round_is_reread_before_ready` |
+| R6 fallback save re-reads only the saved file (an unannounced change keeps its old row) | `index_store_live::a_fallback_save_rereads_only_the_saved_file` |
+| R6 / acceptance 7: fallback mode, a referrer added on disk without an event is edited by heading rename and by file rename | `index_store_live::a_fallback_rename_edits_a_referrer_added_on_disk_without_an_event` |
+| R6: a rename edits the new bytes of a referrer changed after ready (link moved from line 2 to 4, no event) | `index_store_live::a_rename_edits_the_new_bytes_of_a_referrer_changed_after_ready` |
+| acceptance 9 | Phase 3: `index_store_concurrency::two_processes_cold_filling_one_new_store_reach_identical_rows` |
+| `user_cache_dir_from` | biscuit-file `user_cache_dir::user_cache_dir_from_*` (2 tests) |
+
+Mutation check: disabling the fallback pre-rename build and the referrer refresh makes exactly `a_fallback_rename_edits_…` and `a_rename_edits_the_new_bytes_…` fail; both pass with the code restored.
+
+### Gates and downstream tests
+
+- the gate-skip calculator was not consulted for skipping: the phase changed source files, so every gate ran
+- scoped during the work: `cargo nextest run -p dmls -E 'test(index_store::) | test(full_index) | test(workspace_file_list) | test(startup_log) | test(router::)'` (112 passed) and `-E 'test(index_store_live)'` (9 passed, each under 0.05 s)
+- `just test` in `darkmatter/`: **10441 passed, 10 skipped, 0 failed** (Phase 3: 10420; +21 new)
+- `just lint` in `darkmatter/`: exit 0 (one `clippy::cloned_ref_to_slice_refs` in a new test fixed first)
+- `just test` in `biscuit-file/`: 1142 passed, 0 failed; `just lint` in `biscuit-file/`: exit 0
+- `just check-tier-coverage darkmatter` and `biscuit-file`: 0 stranded. No new test name carries a tier marker; `index_store_live` is declared in `tests/l1/main.rs`, `workspace_tests.rs` is a `#[path]` unit module
+- `just test-l2` not run: no L2 test was touched
+- downstream: no crate depends on `dmls`. The biscuit-file change is one additive function and re-export; the darkmatter area (its consumer here) passed in full
+- scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` = `biscuit-file`, `dmls`, `test-toolkit`, `darkmatter`, `darkmatter-cli`; `change_class` = `package`. The darkmatter packages ran in the area gate; `cargo nextest run -p test-toolkit`: 475 passed, **2 failed, both pre-existing and unrelated**: `ci_workflow_contracts::just_commit_is_deterministic_under_ci` (the root `justfile`'s `commit` recipe has no `CI` branch) and `ci_workflow_contracts::the_ci_documentation_states_the_implemented_behavior` (`.claude/skills/os/ci-evidence.md` does not state `BISCUIT_CI_CONSTRAINTS_DIR`). This phase touched neither file
+- no other skipped or pre-existing failures
+- cross-OS: `just cross-check dmls --os windows` **pass** (1187 tests, 9 skipped, including all 21 new ones) and `just cross-check biscuit-file --os windows` **pass**, both on the first attempt. Linux/WSL not run separately: the new code has no `cfg` branch; its OS risk was path spelling between URI-derived roots and test paths, which Windows exercises
+
+Phase 4 implementation complete, ready for review.
+
+## Phase 5
+
+Implemented directly by the orchestrator, without subagents. Wave 11's builder decides what Wave 12's providers see, and the providers turned out to need almost no change (each already takes the graph it answers from), so one agent kept the design in one place.
+
+### What changed
+
+- **`WorkspaceFacts` request side** (`index_store/workspace.rs`):
+    - `candidates_for(targets, listed)`: the union over every root's `RootFacts::candidates_for`, filtered to the listed files (a row another process wrote for a file this one does not list is never a candidate, R11), de-duplicated by path (ruling 15; file-list paths are already canonical-simplified, ruling 10)
+    - `request_graph(targets, listed, overlay, universe, contexts)`: candidates ∪ listed targets → `request_documents` (stored facts, overlay in place) → `WorkspaceGraph::build_with_roots`. Dropped after the request; nothing is cached across requests except what was already there (the dependency's lazy target cache in `WorkspaceIndex`)
+    - `symbol_documents(listed, overlay)`: `scan_headings` of every root, listed paths only, once per path, overlay buffers in place; no graph
+    - every read runs `take_switched`, so a store failure mid-request withdraws ready and the request still answers from what memory salvaged
+- **Router** (`router.rs`, `router/facts.rs`):
+    - `ServerState::request_graph(targets)`: overlay = every open buffer plus the `disk_parse` of each target outside the file list (a referenced dependency); universe = the live snapshot's `shared_wiki_universe()` (new accessor on `WorkspaceGraph`, an `Arc` clone), which is the file list plus open buffers under the wiki roots, exactly what the full graph resolves against; contexts = the shared `RepositoryContexts` (reused across requests, as S1 recommended)
+    - references: targets = the document and `providers::reference_target_at` under the cursor (now `pub`), answered through the new `with_document_over(uri, graph, f)`. This covers heading backlinks, link targets, wiki references, and DSL transcluded-by with no provider change
+    - heading rename: targets = the document; file rename: targets = the renamed paths. Both build the request graph after `refresh_rename_referrers`
+    - `refresh_rename_referrers` now re-reads the closed targets plus the closed **candidates** (`candidates_for`), replacing Phase 4's `referrers_of` over the live snapshot (deleted)
+    - workspace symbols: `ServerState::symbol_documents()` → `registry.workspace_symbols(query, &documents)`
+- **Providers**: `Provider::workspace_symbols` and `ProviderRegistry::workspace_symbols` take `&[SymbolDocument]` (`(PathBuf, Vec<HeadingFact>)`) instead of a graph. `symbols::workspace_symbols` keeps the title rule (first level-1 heading, else first heading, else file name), the subsequence match, title at line 1, headings at their line with the file name as container. `symbols::graph_symbol_documents(graph)` adapts a graph (non-dependency documents, as before) for the oracle. `document_title` shares the new `title_of`. `rename.rs` changed only in comments (`RenameEnv::graph` is now the request graph)
+- **Oracle** (`tests/common/oracle.rs`): `references_over`, `rename_over`, `will_rename_files_over`, `wiki_diagnostics_over`, `workspace_symbols_over`, `contexts`, `file_list_universe`, `position_at`, `offset_at`; the existing methods delegate with the full graph
+- **Docs**: `darkmatter/docs/lsp/indexing.md` no longer says the store answers nothing; new "Answering a request from the store" section (rule list, example, sequence diagram); the rename re-read paragraph names candidates; the prerequisites table names the store. Skill: `.claude/skills/darkmatter/dmls.md`
+
+### Departures and decisions
+
+- **Off the request thread.** The plan says to run store and parse work off the request thread "per the existing router pattern". Parsing and revalidation stay on the build round's thread (Phase 4). The per-request work (one SQL candidate query per root and target, loading about a hundred rows, building a small graph) runs on the dispatch thread inside the handler, as the rename providers' own file reads already do. Measured on this repository (below): 10 ms per references request, 54 ms per workspace-symbols request. Moving it to a worker would need asynchronous answering for these four methods; not worth it at these figures. `2026-10-11-dmls-request-timeouts` is still a draft spec with no timeout defined, so there is no interaction to honor; nothing was changed for it
+- **The full index still gates these requests** (Phase 6 removes it). The requests now *answer* from the store; `proceed` still waits for the full build plus a ready store. Mutation check: making `request_graph` ignore candidates fails 18 tests, including every `index_store_sessions` and `index_store_stdio` test and the Phase 4 `index_store_live` tests, so the server really answers from the request graph, not the snapshot
+- **Acceptance 3 and 6 are tested through the server across a restart**, but while the full index exists a restart still parses everything for it. The store answers are what is asserted; a "warm restart parses zero" server test belongs to Phase 6 (as Phase 4 recorded)
+- **Pre-existing, not changed: a `../` link out of a workspace folder that is in no repository does not resolve**, with or without the store (verified by answering the same session from the live snapshot: the same empty result). The two-root test therefore makes the folders two directories of one repository, which is the realistic multi-root shape. The corpus's `other` root is a separate repository and reaches `ws` only by wiki link
+- **Corpus breadth**: only one corpus heading is referenced from another file (`docs/b.md`'s "Some Heading", by path link, bare root-relative link, and wiki heading link). The corpus is pinned by the golden-facts snapshot and the oracle self-check, so it was not extended; the server sessions add heading-rename referrers (Markdown fragment and wiki heading spelling classes)
+- the request graph's `generation` is `0`: nothing reads a request graph's generation (it stamps the live snapshot for supersession checks)
+
+### Smell grep
+
+`rg 'unwrap_or_default\(\)|\.ok\(\)|filter_map|serde\(default'` over `index_store/workspace.rs`, `router/facts.rs`, `providers/symbols.rs`:
+
+- `symbols.rs` `filter_map(|(_, node)| node.as_heading())` (twice, plus the pre-existing one in `document_symbols`): heading nodes are exactly the nodes with a heading payload; not a decode
+- `router/facts.rs` `request_graph`: `filter_map(|target| index.disk_parse(target))`: an unlisted target the index has not read is simply not in the overlay; not a decode
+- `router/facts.rs` `finish_round` and `known_parses`: Phase 4, recorded there
+
+No loader or decode path was added.
+
+### Input Robustness Matrix (this phase)
+
+No new loader or configuration field. `DMLS_CACHE_DIR` is now proven through the spawned binary (the stdio wiring test the plan owed): the process environment's `off` reaches the server (memory, one `warn` in the log file, no `.sqlite` under the process root) and an absolute directory holding a corrupt store is honored (one `index store recreated`, no fallback `warn`, two rows after). Every other value shape is `StoreLocation::prepare`'s, tested in Phase 3.
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+| --- | --- |
+| acceptance 4 / R3: references (heading backlinks, link targets, wiki backlinks, DSL transcluded-by), with and without the declaration, equal the oracle at every heading, link, wiki link, and transclusion of every corpus file; every probe kind found a cross-file referrer | `dmls` `l1` `index_store_requests::references_equal_the_oracle_at_every_probe` |
+| acceptance 4: heading rename equals the oracle (edits or refusal) at every heading | `…::heading_renames_equal_the_oracle_at_every_heading` |
+| acceptance 4: file rename equals the oracle for every file renamed in place, into a new directory, and onto another listed file (refusal); wiki spellings included; a directory rename makes no edit | `…::file_renames_equal_the_oracle_including_wiki_spellings` |
+| acceptance 4: workspace symbols equal the oracle for seven queries; R8: a nested-root file listed once | `…::workspace_symbols_equal_the_oracle_and_list_a_nested_file_once` |
+| R3: wiki diagnostics in a request graph equal the oracle's for every file; `[[topic]]` stays ambiguous though neither rival is in the graph | `…::wiki_ambiguity_is_judged_against_the_whole_file_list` |
+| acceptance 5 / R2: for every target, candidates ⊇ every oracle referrer (≥ 10 pairs), including the bare root-relative `docs/a.md` | `…::candidates_never_miss_an_oracle_referrer` |
+| R11: a row outside the file list is not a candidate | `…::a_row_outside_the_file_list_is_not_a_candidate` |
+| acceptance 8: `off` → all four requests equal the oracle from memory, one `warn`, no store directory | `…::with_the_stores_off_every_request_answers_from_memory` |
+| acceptance 8: read-only store directory (`cfg(unix)`) → same, one `warn`, nothing written | `…::with_a_read_only_store_directory_every_request_answers_from_memory` |
+| acceptance 8: corrupt and locked (another holder's shared lock) → same, one `warn`, files untouched | `…::with_corrupt_stores_held_by_another_process_every_request_answers_from_memory` |
+| corrupt, nobody holds it → recreated (three `index store recreated`, no fallback), answers equal | `…::with_corrupt_stores_nobody_holds_the_stores_are_recreated_and_answer` |
+| acceptance 3: after a restart, references, heading rename (Markdown slug and wiki heading text), and file rename (path link, wiki re-spelling) edit referrers never open and not referenced by an open document | `index_store_sessions::after_a_restart_renames_edit_a_referrer_never_open` |
+| acceptance 6: two roots, after a restart, a file rename in one edits a path link and a wiki link in the other | `index_store_sessions::after_a_restart_a_file_rename_edits_a_referrer_in_the_other_root` |
+| acceptance 6: nested roots, references and workspace symbols list each result once | `index_store_sessions::with_nested_roots_no_result_appears_twice` |
+| acceptance 8 wiring: spawned `dmls`, `DMLS_CACHE_DIR=off` from the process environment: four requests answer, one `warn`, no store file | `index_store_stdio::the_binary_answers_from_memory_when_the_stores_are_off` |
+| acceptance 8 wiring: spawned `dmls`, corrupt store recreated once, four requests answer, rows filled | `index_store_stdio::the_binary_recreates_a_corrupt_store_and_answers` |
+| acceptance 7 (fallback rename freshness), now through candidates | Phase 4 `index_store_live::a_fallback_rename_edits_a_referrer_added_on_disk_without_an_event`, `…::a_rename_edits_the_new_bytes_of_a_referrer_changed_after_ready` (still green after `referrers_of` was replaced) |
+
+Mutation checks: (1) `request_graph` without candidates fails 18 tests (above); (2) a request graph whose wiki universe is only its own documents fails 7 `index_store_requests` tests, including the wiki-ambiguity, file-rename-spelling, references, and every memory-mode test. Both restored and re-run green.
+
+None of the new tests spawns more than two processes (`index_store_stdio`, one `dmls` each) or opens a window; none carries a tier marker; all are declared in `tests/l1/main.rs`. Each `index_store_requests` test keeps its corpus path literal inside the `#[test]`.
+
+### Measurement sample (Validation checkpoint 5; full numbers are Phase 7's)
+
+Release `dmls` over stdio on this worktree (5,709 Markdown files, 75,650 headings), `DMLS_CACHE_DIR` in `/tmp`, references on `## The index store` in `darkmatter/docs/lsp/indexing.md`. **Host loaded: load average 25-31** (other sessions' builds).
+
+| | Cold store | Warm restart |
+| --- | --- | --- |
+| first references (full-index build plus store pass) | 9,084 ms | 8,773 ms |
+| `full index built … elapsed_ms` | 8,803 | 8,504 |
+| second and third references (request graph only) | 10 ms, 10 ms | 10 ms, 10 ms |
+| workspace symbols, query `index store` (57 results) | 54 ms | 54 ms |
+| process peak RSS | 1,122 MB | 1,099 MB |
+
+The first request and the peak RSS are still the full build's; they say nothing about acceptance 11 until Phase 6 removes it. The store-backed answers themselves are well inside ruling 6's 500 ms.
+
+### Gates and downstream tests
+
+- the gate-skip calculator was not consulted for skipping: the phase changed source files, so every gate ran
+- scoped during the work: `cargo nextest run -p dmls` (1189 passed after Waves 11-12), `-E 'test(index_store_)'` (65 passed)
+- `just test` in `darkmatter/`: **10457 passed, 10 skipped, 0 failed** (Phase 4: 10441; +16 new)
+- `just lint` in `darkmatter/`: exit 0
+- `just check-tier-coverage darkmatter`: 0 stranded
+- `just test-l2` not run: no L2 test was touched
+- downstream: no crate depends on `dmls` (the changed public items, `Provider::workspace_symbols`, `ProviderRegistry::workspace_symbols`, `providers::reference_target_at`, `WorkspaceGraph::shared_wiki_universe`, the `WorkspaceFacts` methods, are used only inside the `dmls` package and its tests). biscuit-file was not touched this phase
+- scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` = `biscuit-file`, `dmls`, `test-toolkit`, `darkmatter`, `darkmatter-cli`; `change_class` = `package`. The working tree still holds Phase 4's uncommitted changes, which is why `biscuit-file` appears; this phase did not touch it (Phase 4 ran its gates). The darkmatter packages ran in the area gate. `cargo nextest run -p test-toolkit`: 475 passed, **2 failed, the same two pre-existing failures Phase 4 recorded**: `ci_workflow_contracts::just_commit_is_deterministic_under_ci` (the root `justfile`'s `commit` recipe has no `CI` branch) and `ci_workflow_contracts::the_ci_documentation_states_the_implemented_behavior` (`.claude/skills/os/ci-evidence.md` does not state `BISCUIT_CI_CONSTRAINTS_DIR`). This phase touched neither file
+- cross-OS: `just cross-check dmls --os windows` **pass** on the first attempt (1202 passed, 9 skipped; every new test except the `cfg(unix)` read-only one ran there, including the spawned-binary and lock-contention tests). Linux and WSL were not run separately: no new `cfg` branch beyond the Unix-only test, and the OS risk (URI-derived roots against test paths, spawned binary, Windows lock semantics) is what Windows exercises
+- no other skipped or pre-existing failures
+
+Phase 5 implementation complete, ready for review.
