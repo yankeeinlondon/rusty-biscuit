@@ -24,7 +24,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-17
-review_iterations: 0
+review_iterations: 3
+completed: true
 created: 2026-10-17
 owner: Ken Snyder <ken@ken.net>
 packages:
