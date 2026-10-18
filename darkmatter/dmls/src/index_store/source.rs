@@ -6,6 +6,11 @@
 //! backend and never fails: a store failure switches it to memory for the
 //! rest of the process, with one `warn` per process.
 //!
+//! A request reads through [`FactsSource::view`]: its candidates, facts, or
+//! headings together with every row hash, all from one state of the facts. A
+//! store takes them inside one read transaction, so a commit by another
+//! process cannot land between the hashes and the rows they describe.
+//!
 //! Every log line here carries the `workspace` field of the server that
 //! opened the root.
 //!
@@ -13,10 +18,10 @@
 //! | --- | --- |
 //! | corrupt, not a database, format mismatch, root mismatch (at open) | take the exclusive lock, delete, and recreate once; if the lock is held or the delete fails, memory |
 //! | read-only, full, cannot open, busy beyond the timeout, WAL switch still busy | memory |
-//! | any failure after open (a write mid-fill, a row that does not decode) | memory, keeping every fact the store can still be read for plus the facts being written |
+//! | any failure after open (a write mid-fill, a row that does not decode) | memory, keeping the store's rows when all of them can still be read, plus the facts being written |
 //! | `DMLS_CACHE_DIR=off`, no cache directory | memory |
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,6 +53,69 @@ pub trait FactsSource: Send + std::fmt::Debug {
     fn candidates_for(&mut self, target: &Path) -> Result<Vec<PathBuf>, StoreFailure>;
     /// Every file with its headings, sorted by path.
     fn scan_headings(&mut self) -> Result<Vec<(PathBuf, Vec<HeadingFact>)>, StoreFailure>;
+    /// One request's reads, all from one state of the facts: no write lands
+    /// between the row hashes and the reads they vouch for.
+    fn view(&mut self, read: &ViewRead<'_>) -> Result<View, StoreFailure> {
+        read_view(self, read)
+    }
+}
+
+/// What one request reads through [`FactsSource::view`].
+#[derive(Debug, Clone, Copy)]
+pub enum ViewRead<'a> {
+    /// The files in `listed` holding a candidate key of one of `targets`.
+    Candidates { targets: &'a [PathBuf], listed: &'a BTreeSet<PathBuf> },
+    /// Those candidates, and the facts of each of them and of `also`.
+    Documents { targets: &'a [PathBuf], listed: &'a BTreeSet<PathBuf>, also: &'a [PathBuf] },
+    /// Every file's headings.
+    Headings,
+}
+
+impl ViewRead<'_> {
+    /// The targets whose candidates are read; none for headings.
+    pub fn targets(&self) -> &[PathBuf] {
+        match self {
+            Self::Candidates { targets, .. } | Self::Documents { targets, .. } => targets,
+            Self::Headings => &[],
+        }
+    }
+}
+
+/// The result of a [`ViewRead`], with every row's hash from the same state,
+/// so a caller can tell which of the rows it read it may trust.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct View {
+    /// Every file with a row, and its row hash.
+    pub hashes: HashMap<PathBuf, u64>,
+    /// Sorted, once per path; empty for [`ViewRead::Headings`].
+    pub candidates: Vec<PathBuf>,
+    /// Set for [`ViewRead::Documents`] only.
+    pub facts: Vec<FileFacts>,
+    /// Sorted by path; set for [`ViewRead::Headings`] only.
+    pub headings: Vec<(PathBuf, Vec<HeadingFact>)>,
+}
+
+/// Performs `read` through `source`'s individual reads. It is consistent
+/// only when `source` cannot change between them (memory, or a store inside
+/// a read transaction).
+fn read_view<S: FactsSource + ?Sized>(source: &mut S, read: &ViewRead<'_>) -> Result<View, StoreFailure> {
+    let mut view = View { hashes: source.hashes()?, ..View::default() };
+    match *read {
+        ViewRead::Headings => view.headings = source.scan_headings()?,
+        ViewRead::Candidates { targets, listed } | ViewRead::Documents { targets, listed, .. } => {
+            let mut candidates = BTreeSet::new();
+            for target in targets {
+                candidates.extend(source.candidates_for(target)?.into_iter().filter(|path| listed.contains(path)));
+            }
+            if let ViewRead::Documents { also, .. } = *read {
+                let mut paths = candidates.clone();
+                paths.extend(also.iter().cloned());
+                view.facts = source.load(&paths.into_iter().collect::<Vec<_>>())?;
+            }
+            view.candidates = candidates.into_iter().collect();
+        }
+    }
+    Ok(view)
 }
 
 /// One root's SQLite store as a [`FactsSource`].
@@ -129,6 +197,14 @@ impl FactsSource for StoreFacts {
     }
     fn scan_headings(&mut self) -> Result<Vec<(PathBuf, Vec<HeadingFact>)>, StoreFailure> {
         self.store.scan_headings()
+    }
+    fn view(&mut self, read: &ViewRead<'_>) -> Result<View, StoreFailure> {
+        self.store.begin_read()?;
+        let view = read_view(self, read);
+        let ended = self.store.end_read();
+        let view = view?;
+        ended?;
+        Ok(view)
     }
 }
 
@@ -396,8 +472,22 @@ impl RootFacts {
         self.memory.headings()
     }
 
-    /// Switches to memory for the rest of the process, salvaging every row
-    /// the failed store can still be read for.
+    /// One request's reads from one state of the facts; see
+    /// [`FactsSource::view`].
+    pub fn view(&mut self, read: &ViewRead<'_>) -> View {
+        if let Some(primary) = self.primary.as_mut() {
+            match primary.view(read) {
+                Ok(view) => return view,
+                Err(failure) => self.fall_back(failure),
+            }
+        }
+        // Memory never fails.
+        read_view(&mut self.memory, read).unwrap_or_default()
+    }
+
+    /// Switches to memory for the rest of the process, salvaging the failed
+    /// store's rows when all of them can still be read; one row that does
+    /// not decode leaves memory without any.
     fn fall_back(&mut self, failure: StoreFailure) {
         let Some(mut primary) = self.primary.take() else { return };
         warn_fallback(failure.reason(), &failure.to_string(), self.store_path.as_deref(), &self.workspace);

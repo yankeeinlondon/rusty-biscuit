@@ -97,6 +97,33 @@ fn a_row_another_writer_left_for_different_bytes_is_replaced() {
     assert_eq!(foreign.candidates_for(&root.join("b.md")).unwrap(), vec![file]);
 }
 
+/// A read transaction sees one state of the store: another connection's
+/// commit inside it is invisible to every read until it ends, so the row
+/// hashes a request checks describe the rows it reads.
+#[test]
+fn a_commit_during_a_read_transaction_is_invisible_until_it_ends() {
+    let (_dir, base) = base();
+    let root = base.join("ws");
+    let file = root.join("a.md");
+    let path = store_path(&base, &root);
+    let current = FileFacts::from_index(&index_document(&file, "# Current\n\n[b](b.md)\n"));
+    let older = FileFacts::from_index(&index_document(&file, "# Older\n"));
+    let (mut own, _) = IndexStore::open(&path, &root, Arc::new(SystemClock)).unwrap();
+    let (mut foreign, _) = IndexStore::open(&path, &root, Arc::new(SystemClock)).unwrap();
+    own.upsert_batch(std::slice::from_ref(&current)).unwrap();
+
+    own.begin_read().unwrap();
+    assert_eq!(own.hashes().unwrap()[&file], current.hash);
+    foreign.upsert_batch(std::slice::from_ref(&older)).unwrap();
+    assert_eq!(own.hashes().unwrap()[&file], current.hash);
+    assert_eq!(own.candidates_for(&root.join("b.md")).unwrap(), vec![file.clone()]);
+    assert_eq!(own.load(std::slice::from_ref(&file)).unwrap(), vec![current]);
+    own.end_read().unwrap();
+
+    assert_eq!(own.hashes().unwrap()[&file], older.hash);
+    assert!(own.candidates_for(&root.join("b.md")).unwrap().is_empty());
+}
+
 /// The worker half of the two-process cold fill; a no-op unless spawned by
 /// [`two_processes_cold_filling_one_new_store_reach_identical_rows`].
 #[test]

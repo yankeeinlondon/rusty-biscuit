@@ -21,9 +21,20 @@
 //! stored headings, no graph). Both de-duplicate a file under nested roots.
 //!
 //! **Ready** ([`WorkspaceFacts::is_ready`]) means a revalidation completed and
-//! since then every listed file has a row whose hash matches bytes read in
-//! this process. A store failure that switches a root to memory withdraws it,
-//! because memory then holds only the rows that could be salvaged.
+//! since then every listed file has been read in this process. A store
+//! failure that switches a root to memory withdraws it, because memory then
+//! holds only the rows that could be salvaged. The request whose read made
+//! the switch is still answered in full: a checked file memory lacks has no
+//! row matching this process's read, so it is re-read like any other.
+//!
+//! Another process sharing a store can commit an older row after this
+//! process read a file, so ready alone never makes a row trusted. Every
+//! request reader takes its reads in one state of each root's facts, with
+//! every row hash, and uses a row only when its hash equals this process's
+//! last read of the file's bytes. Any other listed file is re-read and
+//! re-parsed for that request, and the fresh parse decides in its place,
+//! including whether the file is a candidate. Shared rows save parsing; they
+//! never decide an answer.
 //!
 //! A file under two nested roots has a row in each root's store.
 
@@ -39,11 +50,12 @@ use crate::clock::Clock;
 use crate::graph::{DocumentContexts, DocumentIndex, HeadingFact, WorkspaceGraph, index_document};
 use crate::providers::symbols::SymbolDocument;
 use crate::wiki::WikiUniverse;
-use crate::workspace::startup::ProgressReporter;
+use crate::workspace::startup::{ProgressReporter, SilentProgress};
 
 use super::facts::FileFacts;
+use super::keys::target_keys;
 use super::location::{STALE_STORE_AGE, StoreLocation, sweep_stale_stores};
-use super::source::RootFacts;
+use super::source::{RootFacts, ViewRead};
 use super::store::BATCH_SIZE;
 
 /// Set once this process has swept its store directory.
@@ -170,7 +182,7 @@ impl WorkspaceFacts {
         cancel: &AtomicBool,
     ) -> PassReport {
         let stored: Vec<HashMap<PathBuf, u64>> = self.roots.iter_mut().map(|(_, facts)| facts.hashes()).collect();
-        let mut report = self.pass(files, stored, known, progress, cancel);
+        let mut report = self.pass(files, stored, known, progress, cancel, None);
         if !report.cancelled {
             for (_, facts) in &mut self.roots {
                 report.removed += facts.remove_missing();
@@ -197,14 +209,16 @@ impl WorkspaceFacts {
                 facts.load(&owned).into_iter().map(|file| (file.path, file.hash)).collect()
             })
             .collect();
-        let mut report = self.pass(paths, stored, known, &crate::workspace::startup::SilentProgress, &AtomicBool::new(false));
+        let mut report = self.pass(paths, stored, known, &SilentProgress, &AtomicBool::new(false), None);
         report.switched |= self.take_switched();
         report
     }
 
     /// The documents a request graph is built over: the stored facts of each
     /// of `paths`, with every buffer in `buffers` in place of its row (or
-    /// added, when it has none). Nothing is written.
+    /// added, when it has none). A row that does not match this process's
+    /// read of its file is replaced by a fresh read (see
+    /// [`verified_view`](Self::verified_view)).
     ///
     /// A root that fails while reading switches to memory and withdraws
     /// ready; the request still gets every fact memory holds.
@@ -213,21 +227,10 @@ impl WorkspaceFacts {
         paths: &[PathBuf],
         buffers: impl IntoIterator<Item = &'a DocumentIndex>,
     ) -> BTreeMap<PathBuf, DocumentIndex> {
-        let mut documents = BTreeMap::new();
-        let mut wanted: Vec<PathBuf> = paths.to_vec();
-        for (root, facts) in &mut self.roots {
-            let owned: Vec<PathBuf> = wanted.iter().filter(|path| path.starts_with(&*root)).cloned().collect();
-            if owned.is_empty() {
-                continue;
-            }
-            for file in facts.load(&owned) {
-                documents.insert(file.path.clone(), file.into_index());
-            }
-            wanted.retain(|path| !documents.contains_key(path));
-        }
-        if self.take_switched() {
-            self.ready = false;
-        }
+        let checked: BTreeSet<PathBuf> = paths.iter().cloned().collect();
+        let view = self.verified_view(ViewRead::Documents { targets: &[], listed: &checked, also: paths }, &checked);
+        let mut documents: BTreeMap<PathBuf, DocumentIndex> =
+            view.facts.into_iter().map(|(path, file)| (path, file.into_index())).collect();
         for buffer in buffers {
             documents.insert(buffer.path.clone(), buffer.clone());
         }
@@ -240,16 +243,11 @@ impl WorkspaceFacts {
     /// of them really reference a target.
     ///
     /// A row of a file outside `listed` (written by another process with a
-    /// different file list) is never a candidate.
+    /// different file list) is never a candidate, and a listed file whose
+    /// row does not match this process's read of it is judged by a fresh
+    /// read instead.
     pub fn candidates_for(&mut self, targets: &[PathBuf], listed: &BTreeSet<PathBuf>) -> Vec<PathBuf> {
-        let mut candidates = BTreeSet::new();
-        for (_, facts) in &mut self.roots {
-            for target in targets {
-                candidates.extend(facts.candidates_for(target).into_iter().filter(|path| listed.contains(path)));
-            }
-        }
-        self.take_switched();
-        candidates.into_iter().collect()
+        self.verified_view(ViewRead::Candidates { targets, listed }, listed).candidates.into_iter().collect()
     }
 
     /// The graph a references, rename, or file-rename request about
@@ -270,10 +268,13 @@ impl WorkspaceFacts {
         universe: Arc<WikiUniverse>,
         contexts: &dyn DocumentContexts,
     ) -> WorkspaceGraph {
-        let mut paths: BTreeSet<PathBuf> = self.candidates_for(targets, listed).into_iter().collect();
-        paths.extend(targets.iter().filter(|target| listed.contains(*target)).cloned());
-        let paths: Vec<PathBuf> = paths.into_iter().collect();
-        let documents = self.request_documents(&paths, overlay);
+        let also: Vec<PathBuf> = targets.iter().filter(|target| listed.contains(*target)).cloned().collect();
+        let view = self.verified_view(ViewRead::Documents { targets, listed, also: &also }, listed);
+        let mut documents: BTreeMap<PathBuf, DocumentIndex> =
+            view.facts.into_iter().map(|(path, file)| (path, file.into_index())).collect();
+        for document in overlay {
+            documents.insert(document.path.clone(), document.clone());
+        }
         WorkspaceGraph::build_with_roots(&documents, 0, universe, contexts)
     }
 
@@ -285,19 +286,98 @@ impl WorkspaceFacts {
         listed: &BTreeSet<PathBuf>,
         overlay: impl IntoIterator<Item = &'a DocumentIndex>,
     ) -> Vec<SymbolDocument> {
-        let mut documents: BTreeMap<PathBuf, Vec<HeadingFact>> = BTreeMap::new();
-        for (_, facts) in &mut self.roots {
-            for (path, headings) in facts.scan_headings() {
-                if listed.contains(&path) {
-                    documents.entry(path).or_insert(headings);
-                }
-            }
-        }
-        self.take_switched();
+        let mut documents = self.verified_view(ViewRead::Headings, listed).headings;
         for buffer in overlay {
             documents.insert(buffer.path.clone(), buffer.headings.clone());
         }
         documents.into_iter().collect()
+    }
+
+    /// Performs `read` in every root, each root's reads from one state of
+    /// its facts, and enforces the byte rule on the result: a path in
+    /// `checked` whose row (in any owning root) is missing or has a hash
+    /// other than this process's last read of its bytes is **unverified**.
+    /// Another process may have committed an older row after this process
+    /// read the file. An unverified row decides nothing, not even by lacking
+    /// a candidate key: each unverified file is re-read, re-hashed, and
+    /// re-parsed (rewriting its row), and that fresh parse takes its place in
+    /// the candidates, facts, and headings. A file that is gone or unreadable
+    /// is left out.
+    ///
+    /// Candidates, facts, and headings of paths outside `checked` are
+    /// dropped.
+    fn verified_view(&mut self, read: ViewRead<'_>, checked: &BTreeSet<PathBuf>) -> VerifiedView {
+        let mut out = VerifiedView::default();
+        let mut unverified: BTreeSet<PathBuf> = BTreeSet::new();
+        for (root, facts) in &mut self.roots {
+            let view = facts.view(&read);
+            let verified = &self.verified;
+            unverified.extend(
+                checked
+                    .iter()
+                    .filter(|path| path.starts_with(&*root))
+                    .filter(|path| verified.get(*path).is_none_or(|hash| view.hashes.get(*path) != Some(hash)))
+                    .cloned(),
+            );
+            out.candidates.extend(view.candidates.into_iter().filter(|path| checked.contains(path)));
+            for file in view.facts {
+                if checked.contains(&file.path) {
+                    out.facts.entry(file.path.clone()).or_insert(file);
+                }
+            }
+            for (path, headings) in view.headings {
+                if checked.contains(&path) {
+                    out.headings.entry(path).or_insert(headings);
+                }
+            }
+        }
+        self.take_switched();
+        if unverified.is_empty() {
+            return out;
+        }
+
+        tracing::debug!(unverified = unverified.len(), "index store rows do not match this process's reads; re-reading");
+        let fresh = self.reread(&unverified);
+        let keys: Vec<String> = read.targets().iter().flat_map(|target| target_keys(target)).collect();
+        let also: &[PathBuf] = match read {
+            ViewRead::Documents { also, .. } => also,
+            _ => &[],
+        };
+        for path in &unverified {
+            out.candidates.remove(path);
+            out.facts.remove(path);
+            out.headings.remove(path);
+            let Some(file) = fresh.get(path) else { continue };
+            let candidate = keys.iter().any(|key| file.candidate_keys.contains(key));
+            if candidate {
+                out.candidates.insert(path.clone());
+            }
+            match read {
+                ViewRead::Candidates { .. } => {}
+                ViewRead::Documents { .. } => {
+                    if candidate || also.contains(path) {
+                        out.facts.insert(path.clone(), file.clone());
+                    }
+                }
+                ViewRead::Headings => {
+                    out.headings.insert(path.clone(), file.headings.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// Re-reads, re-hashes, and re-parses `paths` whatever their rows hold,
+    /// writing each row that differs and deleting the rows of files gone
+    /// from disk. Returns the fresh facts of every file that could be read.
+    fn reread(&mut self, paths: &BTreeSet<PathBuf>) -> BTreeMap<PathBuf, FileFacts> {
+        let paths: Vec<PathBuf> = paths.iter().cloned().collect();
+        // No stored hashes, so every file read is parsed.
+        let stored = vec![HashMap::new(); self.roots.len()];
+        let mut fresh = BTreeMap::new();
+        self.pass(&paths, stored, &BTreeMap::new(), &SilentProgress, &AtomicBool::new(false), Some(&mut fresh));
+        self.take_switched();
+        fresh
     }
 
     /// Whether any root switched to memory since the last check; withdraws
@@ -319,7 +399,8 @@ impl WorkspaceFacts {
     }
 
     /// Reads `files` and writes the rows that differ from `stored`, each
-    /// root's row hashes for (at least) those files.
+    /// root's row hashes for (at least) those files. When `fresh` is given,
+    /// every recomputed file's facts are also put there.
     fn pass(
         &mut self,
         files: &[PathBuf],
@@ -327,6 +408,7 @@ impl WorkspaceFacts {
         known: &BTreeMap<PathBuf, DocumentIndex>,
         progress: &dyn ProgressReporter,
         cancel: &AtomicBool,
+        mut fresh: Option<&mut BTreeMap<PathBuf, FileFacts>>,
     ) -> PassReport {
         let jobs: Vec<Job> = files.iter().map(|path| Job { path: path.clone(), owners: self.owners(path) }).collect();
         let (outcomes, cancelled) = read_all(&jobs, &stored, known, progress, cancel);
@@ -362,6 +444,9 @@ impl WorkspaceFacts {
                             writes[owner].push(facts.clone());
                         }
                     }
+                    if let Some(fresh) = fresh.as_mut() {
+                        fresh.insert(job.path.clone(), facts);
+                    }
                 }
             }
         }
@@ -380,6 +465,14 @@ impl WorkspaceFacts {
         }
         report
     }
+}
+
+/// A request's reads over every root; see [`WorkspaceFacts::verified_view`].
+#[derive(Debug, Default)]
+struct VerifiedView {
+    candidates: BTreeSet<PathBuf>,
+    facts: BTreeMap<PathBuf, FileFacts>,
+    headings: BTreeMap<PathBuf, Vec<HeadingFact>>,
 }
 
 /// One file a pass reads, and the roots whose stores hold its row.

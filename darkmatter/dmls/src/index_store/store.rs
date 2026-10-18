@@ -249,6 +249,24 @@ impl IndexStore {
         Ok(removed)
     }
 
+    /// Starts a read transaction: every read until
+    /// [`end_read`](Self::end_read) sees one committed state of the store,
+    /// whatever another process commits meanwhile (a WAL snapshot). The
+    /// liveness touch runs first, so no read inside the transaction writes.
+    pub fn begin_read(&self) -> Result<(), StoreFailure> {
+        self.touch_if_due()?;
+        self.conn.execute_batch("BEGIN DEFERRED")?;
+        Ok(())
+    }
+
+    /// Ends the read transaction [`begin_read`](Self::begin_read) started.
+    pub fn end_read(&self) -> Result<(), StoreFailure> {
+        if !self.conn.is_autocommit() {
+            self.conn.execute_batch("COMMIT")?;
+        }
+        Ok(())
+    }
+
     /// Every stored file and its row hash.
     pub fn hashes(&self) -> Result<HashMap<PathBuf, u64>, StoreFailure> {
         self.touch_if_due()?;

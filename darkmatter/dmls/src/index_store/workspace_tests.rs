@@ -182,7 +182,7 @@ fn a_cancelled_revalidation_reads_nothing_and_writes_nothing() {
     let report = facts.revalidate(&files, &BTreeMap::new(), &SilentProgress, &AtomicBool::new(true));
     assert!(report.cancelled);
     assert_eq!((report.read, work_counts().since(before).reads), (0, 0));
-    assert!(facts.request_documents(&files, []).is_empty());
+    assert!(facts.roots[0].1.hashes().is_empty(), "no row was written");
 }
 
 /// Ready needs the caller's mark, the same roots, and every listed file read
@@ -278,16 +278,18 @@ fn a_file_under_nested_roots_has_a_row_in_each_store() {
 }
 
 /// A backend that fails every call once `broken` is set, as a store whose
-/// disk failed after ready would.
+/// disk failed after ready would; with `once`, only the next call fails.
 #[derive(Debug)]
 struct Breakable {
     inner: StoreFacts,
     broken: Arc<AtomicBool>,
+    once: bool,
 }
 
 impl Breakable {
     fn gate(&self) -> Result<(), StoreFailure> {
-        if self.broken.load(Ordering::SeqCst) { Err(StoreFailure::Unavailable("disk failed".into())) } else { Ok(()) }
+        let broken = if self.once { self.broken.swap(false, Ordering::SeqCst) } else { self.broken.load(Ordering::SeqCst) };
+        if broken { Err(StoreFailure::Unavailable("disk failed".into())) } else { Ok(()) }
     }
 }
 
@@ -332,7 +334,7 @@ fn a_store_failure_after_ready_switches_to_memory_without_losing_written_facts()
     let path = store_path(fixture.store_dir(), &fixture.root);
     let (store, _) = StoreFacts::open(&path, &fixture.root, Arc::new(SystemClock)).unwrap();
     let broken = Arc::new(AtomicBool::new(false));
-    let backend = Breakable { inner: store, broken: Arc::clone(&broken) };
+    let backend = Breakable { inner: store, broken: Arc::clone(&broken), once: false };
     let root = RootFacts::with_source(Box::new(backend), Some(path), "test");
     let mut facts = WorkspaceFacts::from_roots(vec![(fixture.root.clone(), root)]);
     let roots = std::slice::from_ref(&fixture.root);
@@ -347,8 +349,12 @@ fn a_store_failure_after_ready_switches_to_memory_without_losing_written_facts()
     assert!(!facts.is_ready(&listed(&files), roots), "memory holds only what was salvaged");
     // Nothing could be salvaged from the broken store, but the facts being
     // written survive.
+    let salvaged: Vec<PathBuf> = facts.roots[0].1.hashes().into_keys().collect();
+    assert_eq!(salvaged, vec![files[3].clone()]);
+    // A request still answers in full: a file without a row matching this
+    // process's read is read afresh.
     let documents = facts.request_documents(&files, []);
-    assert_eq!(documents.keys().cloned().collect::<Vec<_>>(), vec![files[3].clone()]);
+    assert_eq!(documents.len(), 5);
     assert_eq!(headings(&documents, &files[3]), vec!["Edited".to_string()]);
 
     let (refill, _) = revalidate(&mut facts, &files);
@@ -357,6 +363,37 @@ fn a_store_failure_after_ready_switches_to_memory_without_losing_written_facts()
     assert!(facts.is_ready(&listed(&files), roots));
     assert_eq!(facts.request_documents(&files, []).len(), 5);
     assert!(facts.roots.iter().all(|(_, root)| root.in_memory()));
+}
+
+/// Memory can hold another process's older row, salvaged when the store
+/// failed: it decides no answer either. The salvaged row of `f2.md` lacks
+/// its link to `f3.md`, yet `f2.md` stays a candidate of `f3.md`, and its
+/// documents and headings are its current bytes'.
+#[test]
+fn a_salvaged_older_row_in_memory_decides_no_answer() {
+    let fixture = Fixture::new();
+    let files = chain(&fixture, 5);
+    let path = store_path(fixture.store_dir(), &fixture.root);
+    let (store, _) = StoreFacts::open(&path, &fixture.root, Arc::new(SystemClock)).unwrap();
+    let broken = Arc::new(AtomicBool::new(false));
+    let backend = Breakable { inner: store, broken: Arc::clone(&broken), once: true };
+    let root = RootFacts::with_source(Box::new(backend), Some(path.clone()), "test");
+    let mut facts = WorkspaceFacts::from_roots(vec![(fixture.root.clone(), root)]);
+    revalidate(&mut facts, &files);
+    let listed = listed(&files);
+
+    let (mut foreign, _) = crate::index_store::IndexStore::open(&path, &fixture.root, Arc::new(SystemClock)).unwrap();
+    let older = FileFacts::from_index(&index_document(&files[2], "# Older\n"));
+    foreign.upsert_batch(std::slice::from_ref(&older)).unwrap();
+    broken.store(true, Ordering::SeqCst);
+
+    assert_eq!(facts.candidates_for(&files[3..4], &listed), vec![files[2].clone()]);
+    assert!(facts.roots[0].1.in_memory(), "the failure switched the root to memory");
+    let documents = facts.request_documents(&files[2..3], []);
+    assert_eq!(headings(&documents, &files[2]), vec!["F2".to_string()]);
+    let symbols = facts.symbol_documents(&listed, []);
+    let f2: Vec<&str> = symbols.iter().filter(|(path, _)| *path == files[2]).flat_map(|(_, headings)| headings.iter().map(|heading| heading.title.as_str())).collect();
+    assert_eq!(f2, ["F2"]);
 }
 
 /// `DMLS_CACHE_DIR=off`: every root is memory, nothing is written to disk,

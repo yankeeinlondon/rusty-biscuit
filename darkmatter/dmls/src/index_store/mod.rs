@@ -31,7 +31,7 @@ pub use facts::FileFacts;
 pub use failure::StoreFailure;
 pub use location::{STALE_STORE_AGE, StoreLocation, SweepReport, lock_path, root_key, store_path, sweep_stale_stores, touch_mtime};
 pub use lock::StoreLock;
-pub use source::{FactsSource, MemoryFacts, RootFacts, RootOpened, StoreFacts, StoreOpened};
+pub use source::{FactsSource, MemoryFacts, RootFacts, RootOpened, StoreFacts, StoreOpened, View, ViewRead};
 pub use store::{IndexStore, OpenReport, UpsertReport};
 pub use workspace::{PassReport, WorkspaceFacts};
 

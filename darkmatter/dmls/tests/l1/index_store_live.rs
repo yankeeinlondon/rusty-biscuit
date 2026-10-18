@@ -1,7 +1,8 @@
 //! Level-1 sessions for the index store behind the server: the first
 //! references request opens and fills the store, rows follow disk changes
 //! per watch mode, and a rename re-reads what it edits. Rows are read back
-//! with a second connection to the store the session holds open.
+//! (or damaged) with a second connection to the store the session holds
+//! open.
 //!
 //! Every session sets `DMLS_CACHE_DIR` to a directory inside its workspace,
 //! so no test writes to the developer's cache.
@@ -424,5 +425,228 @@ fn one_file_changed_between_restarts_is_the_only_parse() {
     assert_eq!(references(&mut fixture, &target), vec!["other.md".to_string(), "referrer.md".to_string()]);
     let work = dmls::work_counters::work_counts().since(before);
     assert_eq!(work.parses, 1, "{work:?}");
+    fixture.shutdown();
+}
+
+/// A workspace for the after-ready damage sessions: `target.md`, its
+/// referrers by heading link, wiki link, and `::file` transclusion, and an
+/// unrelated file. `target.md`, `wiki.md`, and `composer.md` are opened (the
+/// requests start there); `referrer.md` and `composer-two.md` stay closed, so
+/// only the facts name them.
+fn damage_workspace() -> (LspWorkspace, Vec<(PathBuf, &'static str, bool)>) {
+    let workspace = LspWorkspace::new();
+    let files: Vec<(PathBuf, &'static str, bool)> = [
+        ("target.md", TARGET, true),
+        ("referrer.md", "# Referrer\n\nSee [the target](target.md#target).\n\nAnd [[target#Target]] and [[target]].\n", false),
+        ("wiki.md", "# Wiki\n\nAbout [[target]].\n", true),
+        ("composer.md", "# Composer\n\n::file ./target.md\n", true),
+        ("composer-two.md", "# Composer Two\n\n::file ./target.md\n", false),
+        ("other.md", UNRELATED, false),
+    ]
+    .into_iter()
+    .map(|(name, text, opened)| (write(&workspace, name, text), text, opened))
+    .collect();
+    (workspace, files)
+}
+
+/// The requests the store answers, each started from an open document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ask {
+    /// References at `target.md`'s heading.
+    HeadingReferences,
+    /// References at `wiki.md`'s `[[target]]`.
+    WikiReferences,
+    /// References at `composer.md`'s `::file ./target.md` (transcluded by).
+    TranscludedBy,
+    /// Heading rename of `target.md`'s heading.
+    HeadingRename,
+    /// `target.md` renamed to `goal.md`.
+    FileRename,
+    /// Workspace symbols for the empty query.
+    WorkspaceSymbols,
+}
+
+const ASKS: [Ask; 6] =
+    [Ask::HeadingReferences, Ask::WikiReferences, Ask::TranscludedBy, Ask::HeadingRename, Ask::FileRename, Ask::WorkspaceSymbols];
+
+/// `(file name, line, character)` of each location in a references answer,
+/// sorted.
+fn located(fixture: &mut LspFixture<'_>, path: &Path, line: u32, character: u32) -> Value {
+    let response = fixture.request(
+        "textDocument/references",
+        json!({
+            "textDocument": { "uri": uri(path) },
+            "position": { "line": line, "character": character },
+            "context": { "includeDeclaration": false }
+        }),
+    );
+    assert!(response.error.is_none(), "{:?}", response.error);
+    let mut out: Vec<(String, u64, u64)> = response.result.unwrap().as_array().unwrap()
+        .iter()
+        .map(|location| {
+            let name = location["uri"].as_str().unwrap().rsplit('/').next().unwrap().to_string();
+            let start = &location["range"]["start"];
+            (name, start["line"].as_u64().unwrap(), start["character"].as_u64().unwrap())
+        })
+        .collect();
+    out.sort();
+    json!(out)
+}
+
+/// The answer to `ask`, in a form that compares across sessions.
+fn ask(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace, ask: Ask) -> Value {
+    let path = |name: &str| workspace.path().join(name);
+    match ask {
+        Ask::HeadingReferences => located(fixture, &path("target.md"), 0, 3),
+        Ask::WikiReferences => located(fixture, &path("wiki.md"), 2, 9),
+        Ask::TranscludedBy => located(fixture, &path("composer.md"), 2, 10),
+        Ask::HeadingRename => json!(rename_heading(fixture, &path("target.md"), "Goal")),
+        Ask::FileRename => json!(rename_file(fixture, &path("target.md"), &path("goal.md"))),
+        Ask::WorkspaceSymbols => {
+            let response = fixture.request("workspace/symbol", json!({ "query": "" }));
+            assert!(response.error.is_none(), "{:?}", response.error);
+            let mut out: Vec<(String, String, u64)> = response.result.unwrap().as_array().unwrap()
+                .iter()
+                .map(|symbol| {
+                    let location = &symbol["location"];
+                    let name = location["uri"].as_str().unwrap().rsplit('/').next().unwrap().to_string();
+                    (name, symbol["name"].as_str().unwrap().to_string(), location["range"]["start"]["line"].as_u64().unwrap_or(0))
+                })
+                .collect();
+            out.sort();
+            json!(out)
+        }
+    }
+}
+
+/// A session with the damage workspace's documents open.
+fn start_damage_session<'w>(workspace: &'w LspWorkspace, files: &[(PathBuf, &str, bool)], cache: &str) -> LspFixture<'w> {
+    let mut fixture = start(workspace, cache, true);
+    for (path, text, opened) in files {
+        if *opened {
+            open(&mut fixture, workspace, path, text);
+        }
+    }
+    fixture
+}
+
+/// The oracle: every answer from a session whose facts live in memory
+/// (`DMLS_CACHE_DIR=off`), checked not to be vacuous: each one names a
+/// closed file.
+fn memory_answers(workspace: &LspWorkspace, files: &[(PathBuf, &str, bool)]) -> Vec<(Ask, Value)> {
+    let mut fixture = start_damage_session(workspace, files, "off");
+    let answers: Vec<(Ask, Value)> = ASKS.iter().map(|&kind| (kind, ask(&mut fixture, workspace, kind))).collect();
+    fixture.shutdown();
+    for (kind, answer) in &answers {
+        let text = answer.to_string();
+        let closed = if *kind == Ask::TranscludedBy { "composer-two.md" } else { "referrer.md" };
+        assert!(text.contains(closed), "{kind:?} does not name the closed {closed}: {text}");
+    }
+    answers
+}
+
+/// Rows of the workspace store selected as candidates of `target.md`
+/// (key `target`) get a path that is not UTF-8.
+const UNDECODABLE_CANDIDATE_PATHS: &str =
+    "UPDATE files SET path = CAST(X'FF' AS TEXT) || id WHERE id IN (SELECT file_id FROM cand WHERE key = 'target')";
+
+/// Every stored heading gets level 9.
+const UNDECODABLE_HEADING_LEVELS: &str = "UPDATE headings SET level = 9";
+
+/// Damages the store the session holds open, through another connection.
+/// The files on disk stay valid; no salvage of the whole store can succeed.
+fn damage(workspace: &LspWorkspace, sql: &str) {
+    let conn = rusqlite::Connection::open(store_path(&cache_dir(workspace), workspace.path())).unwrap();
+    conn.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(conn.execute(sql, []).unwrap() > 0, "the damage changed no row: {sql}");
+}
+
+/// R12 through the server: after ready, each damage in turn makes the
+/// store undecodable while `first` is the next request. That first answer
+/// already equals the memory oracle; the switch withdrew ready, so the next
+/// request waits for a build that re-reads every listed file, after which
+/// nothing is re-read; and every later answer equals the oracle too.
+fn first_request_after_damage_equals_memory(first: Ask) {
+    for sql in [UNDECODABLE_CANDIDATE_PATHS, UNDECODABLE_HEADING_LEVELS] {
+        let (workspace, files) = damage_workspace();
+        let expected = memory_answers(&workspace, &files);
+        let mut fixture = start_damage_session(&workspace, &files, cache_dir(&workspace).to_str().unwrap());
+        for (kind, answer) in &expected {
+            assert_eq!(&ask(&mut fixture, &workspace, *kind), answer, "control {kind:?}");
+        }
+        damage(&workspace, sql);
+
+        let answer = &expected.iter().find(|(kind, _)| *kind == first).unwrap().1;
+        assert_eq!(&ask(&mut fixture, &workspace, first), answer, "first {first:?} after `{sql}`");
+
+        let before = dmls::work_counters::work_counts();
+        ask(&mut fixture, &workspace, Ask::HeadingReferences);
+        let rebuild = dmls::work_counters::work_counts().since(before);
+        assert_eq!(rebuild.reads, files.len(), "ready was withdrawn, so a build re-read every file: {rebuild:?}");
+        let before = dmls::work_counters::work_counts();
+        ask(&mut fixture, &workspace, Ask::HeadingReferences);
+        let ready = dmls::work_counters::work_counts().since(before);
+        assert_eq!(ready.reads, 0, "ready again: {ready:?}");
+
+        for (kind, answer) in &expected {
+            assert_eq!(&ask(&mut fixture, &workspace, *kind), answer, "{kind:?} after the rebuild, `{sql}`");
+        }
+        fixture.shutdown();
+    }
+}
+
+#[test]
+fn after_ready_damage_the_first_heading_references_equal_memory() {
+    first_request_after_damage_equals_memory(Ask::HeadingReferences);
+}
+
+#[test]
+fn after_ready_damage_the_first_wiki_references_equal_memory() {
+    first_request_after_damage_equals_memory(Ask::WikiReferences);
+}
+
+#[test]
+fn after_ready_damage_the_first_transcluded_by_references_equal_memory() {
+    first_request_after_damage_equals_memory(Ask::TranscludedBy);
+}
+
+#[test]
+fn after_ready_damage_the_first_heading_rename_equals_memory() {
+    first_request_after_damage_equals_memory(Ask::HeadingRename);
+}
+
+#[test]
+fn after_ready_damage_the_first_file_rename_equals_memory() {
+    first_request_after_damage_equals_memory(Ask::FileRename);
+}
+
+#[test]
+fn after_ready_damage_the_first_workspace_symbols_equal_memory() {
+    first_request_after_damage_equals_memory(Ask::WorkspaceSymbols);
+}
+
+/// A store that stops decoding between sessions fails during the build's
+/// first round instead: that round switches to memory, so the build runs a
+/// second full round before releasing the request, whose answers equal the
+/// memory oracle.
+#[test]
+fn a_store_failing_during_the_build_gets_a_full_round_before_any_answer() {
+    let (workspace, files) = damage_workspace();
+    let expected = memory_answers(&workspace, &files);
+    let cache = cache_dir(&workspace);
+    let mut fixture = start_damage_session(&workspace, &files, cache.to_str().unwrap());
+    ask(&mut fixture, &workspace, Ask::HeadingReferences);
+    fixture.shutdown();
+    damage(&workspace, UNDECODABLE_CANDIDATE_PATHS);
+
+    let mut fixture = start_damage_session(&workspace, &files, cache.to_str().unwrap());
+    let before = dmls::work_counters::work_counts();
+    let answer = ask(&mut fixture, &workspace, Ask::HeadingReferences);
+    let work = dmls::work_counters::work_counts().since(before);
+    assert_eq!(work.reads, 2 * files.len(), "the switched round, then a full round: {work:?}");
+    assert_eq!(answer, expected[0].1);
+    for (kind, answer) in &expected {
+        assert_eq!(&ask(&mut fixture, &workspace, *kind), answer, "{kind:?}");
+    }
     fixture.shutdown();
 }
