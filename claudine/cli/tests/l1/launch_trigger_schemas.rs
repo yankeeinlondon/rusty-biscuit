@@ -1,7 +1,8 @@
 //! CLI-boundary coverage for Claudine's trigger schemas in the launch verdict.
 //!
 //! A document with no `$schema` is judged by Claudine's embedded
-//! `claudine.yaml` payload (and `inline-compose.yaml` for an inline prompt):
+//! `claudine.yaml` payload (`inline-compose.yaml` for an inline prompt, and
+//! `sequence.yaml` for a sequence document):
 //! an invalid value of a Claudine control blocks `compose` and
 //! `inline-compose` before any provider launches and is never dropped, while an
 //! unrelated authored optional value keeps the drop-and-warn cleanup. The same
@@ -423,6 +424,32 @@ fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() 
     let argv = launch_recorder::launches(&launches);
     assert_eq!(argv.len(), 1, "only the valid step launches:\n{}", result.stderr);
     assert!(goose_prompt(&argv[0]).contains("GOOD-STEP"), "{argv:?}");
+}
+
+/// A sequence document whose only control is `sequence` is judged by the
+/// embedded `sequence.yaml` payload, imports included, with no schema on
+/// disk: a malformed task field fails the run before any step launches. The
+/// unedited sequence launches its one step.
+#[test]
+fn a_sequence_document_is_judged_by_the_embedded_sequence_trigger_before_any_step() {
+    let fixture = CliProcessFixture::named("launch-trigger-schemas-sequence-root");
+    let launches = launch_recorder::install(&fixture, "goose", "exit 0");
+    write_doc(&fixture, "step.md", "---\ntitle: Step\n---\nSTEP-BODY\n");
+    let valid = write_doc(&fixture, "valid.md", "---\nsequence:\n    - name: one\n      prompt: step.md\n---\nBody.\n");
+    let malformed = write_doc(
+        &fixture,
+        "malformed.md",
+        "---\nsequence:\n    - name: one\n      prompt: step.md\n      operation: [review]\n---\nBody.\n",
+    );
+
+    let control = run(&fixture, "sequence", &valid, &[]);
+    assert_eq!(control.code, Some(0), "{}", control.stderr);
+    assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", control.stderr);
+
+    let result = run(&fixture, "sequence", &malformed, &[]);
+    assert_eq!(result.code, Some(1), "{}", result.stderr);
+    assert!(result.stderr.contains("/sequence/0/operation"), "{}", result.stderr);
+    assert_eq!(launch_recorder::launches(&launches).len(), 1, "the malformed sequence launches nothing:\n{}", result.stderr);
 }
 
 /// The first attempt edits the document to carry an invalid control and fails;

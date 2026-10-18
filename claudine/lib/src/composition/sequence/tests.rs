@@ -2391,8 +2391,9 @@ mod container_grammar {
         }
     }
 
-    /// The shipped schema types two container levels; the parser judges the
-    /// `cancelled` stack of a container at the third level and below.
+    /// The shipped schema types `cancelled` on the first two container
+    /// levels; the parser judges the `cancelled` stack of a container at the
+    /// third level and below.
     macro_rules! deep_cancelled_is_checked {
         ($($name:ident: [$($container:ident),+];)+) => {$(
             #[test]

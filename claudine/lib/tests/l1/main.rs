@@ -27,6 +27,7 @@ mod parser_snapshot;
 mod path_lookup_guard;
 mod protocol_fixture_replay;
 mod semantic_fidelity;
+mod sequence_schema;
 mod single_loop_engine;
 mod test_layout;
 mod tts_phase1_contract;

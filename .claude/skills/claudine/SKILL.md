@@ -344,11 +344,25 @@ through data overrides so canonical rereads do not fire container events again. 
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
 Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
-SimplifiedSchema inlines named types (no recursion), so `lifecycle.yaml`
-types two container levels (`task`/`group`, then `step-2`/`task-2`/`group-2`),
-each with `cancelled: cancelled-stack`; other container events stay
-shape-only, because every inlined full `stack` slows each validation
-(see [Schemas](topics/schemas.md#sequence-containers)). The
+The sequence trigger is `schemas/sequence.yaml` (matches any non-null
+`sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
+`fail_fast` is reported by name), and it is the only declaration of
+`sequence`: `claudine.yaml` no longer declares it, and a sequence document's
+events and `loop` are typed by `claudine.yaml`, which they select. The
+container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
+SimplifiedSchema inlines named types (no recursion), so they are unrolled to
+three typed levels (`task`/`group`, `-2`, `-3`; below that any list). Each
+level inlines the next twice (task `sequence:` and group `tasks:`), so a
+container field costs 4x per level: `cancelled: cancelled-stack` on levels
+1–2 only, the shared `loop` type on level 1 only (object below), other events
+shape-only. Fully typed container events and loops measured +3 s per
+document (release `md`) and doubling `sequence` in both triggers +0.34 s per
+process (debug); every trigger payload is loaded whenever any trigger loads,
+so this cost hits every Claudine launch (see
+[Schemas](topics/schemas.md#sequence-containers)). A group is closed but a
+union with a file reference, so `execution`/`max_paralel` are reported at
+`/…/group` with the value in the message; a top-level `sequence: 42` is
+coerced to the string arm (schema valid; the parser rejects it). The
 `cancelled-*` family is unrolled to the parser's `MAX_CONDITIONAL_DEPTH` (5)
 with no conditional at level 6; its conditionals use one
 `<pattern::^(?:then|else)$>` key, since literal `then`+`else` inline each body
@@ -515,7 +529,7 @@ of a topic doc.
 
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
-- [Schemas](topics/schemas.md) — the five `claudine/schemas/` files, event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
+- [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
 - [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards

@@ -507,7 +507,7 @@ struct WrapperPromptRunner<'a> {
     /// Every attempt every prompt run of this step spawned, group legs and
     /// handoff targets included, for the step status line.
     launches: claudine::composition::LaunchLog,
-    /// The most recent prompt run's perf record and provider.
+    /// The most recent prompt run's perf record.
     ///
     /// Interior mutability because [`PromptTaskRunner::run`] takes `&self` — the
     /// trait is deliberately immutable so the library can hold the runner behind

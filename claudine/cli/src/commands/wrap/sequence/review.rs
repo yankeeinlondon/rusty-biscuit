@@ -3,9 +3,9 @@
 //!
 //! Every provider-launching task gets a row, keyed by its graph identity
 //! (never by name, which may repeat across nested containers, or by row
-//! number). Only a task with no provider of its own is editable; a task that
-//! names one is a read-only row showing it, so the screen never offers a
-//! choice the launch would discard.
+//! number). Only a task whose provider nothing resolved is editable; every
+//! other task is a read-only row showing its provider (or that its launch
+//! decides it), so the screen never offers a choice the launch would discard.
 
 use std::io;
 

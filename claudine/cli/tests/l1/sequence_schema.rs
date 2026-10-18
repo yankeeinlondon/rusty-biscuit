@@ -298,7 +298,9 @@ exit 0
 "#,
     );
 
-    let run_start = std::time::Instant::now();
+    // The 10s command timeout keeps the run well short of the 30s document
+    // fallback; which budget fired is proven from the diagnostic below, not
+    // from wall time, which a loaded runner stretches.
     let assert = fixture
         .command()
         .env("CLAUDINE_WATCHDOG_INTERVAL", "0.1s")
@@ -308,17 +310,6 @@ exit 0
         .args(["sequence", "--opencode", md_file.to_str().unwrap()])
         .assert()
         .failure();
-    let elapsed = run_start.elapsed();
-
-    // The step-level 0.5s budget must win well before the 30s document
-    // fallback. The bound is 4s rather than the fallback itself so it also
-    // catches the budget silently reverting to a whole-second value: the
-    // whole run — prep, step 1, step 2's budget + 0.1s tick + termination —
-    // lands near 1.4s locally and 1.0–1.5s on the slowest CI environment.
-    assert!(
-        elapsed < std::time::Duration::from_secs(4),
-        "per-step step_timeout override should fire quickly; run took {elapsed:?}"
-    );
 
     let calls = fs::read_to_string(&count_path).unwrap();
     assert_eq!(
@@ -332,6 +323,13 @@ exit 0
     assert!(
         plain.contains("1 succeeded") && plain.contains("1 failed"),
         "summary should record step 1 success and step 2 failure; stderr: {plain}"
+    );
+    // The silence budget is rendered in whole seconds, so the step's 0.5s
+    // budget reads `0s`; the 30s fallback, or the budget reverting to a
+    // whole-second value, would name `30s` or `1s`.
+    assert!(
+        plain.contains("no stream activity for 0") && plain.contains("terminating due to step_timeout"),
+        "the step-level sub-second step_timeout should fire; stderr: {plain}"
     );
 }
 

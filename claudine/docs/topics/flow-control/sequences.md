@@ -635,9 +635,10 @@ Claudine walks the **entire task graph**:
   provider-launching task. This plan reads the launch environment. When a step or group leg starts, it
   captures its own environment, and the model is selected again from it: a
   later step whose environment sets `MODEL=b` launches with `b`, even if the
-  launch environment named another model. The provider stands as planned,
-  because no environment variable selects it. A model given with `--model`, or
-  confirmed on the review screen, also stands.
+  launch environment named another model. A predicted provider stands,
+  because no environment variable selects it; a task *decided at launch*
+  resolves its provider from its composed document just before it spawns. A
+  model given with `--model`, or confirmed on the review screen, also stands.
 
 A preflight failure aborts the sequence. Preparation
 never degrades to best-effort.

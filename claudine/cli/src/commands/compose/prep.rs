@@ -110,7 +110,7 @@ impl ActiveDocumentOutcome {
 /// What a `sequence` step owns that a handoff inside it must keep.
 ///
 /// A handoff changes the step's document, never the step (R8). The target reads
-/// the step's caller layers (the user's setters, a task's evaluated `params`,
+/// the step's caller layers (the user's setters, a task's evaluated `with`,
 /// the lexical `seq` binding, earlier steps' runtime
 /// values) at the precedence the source read them, sees the step's environment
 /// and `operation`, writes `set` and `outputs` into the step's runtime cell, and
@@ -309,7 +309,8 @@ pub(crate) fn run_composition_inner(
         emit_dropped_optional_warnings(&pre.dropped_optionals);
         // Pre-validation may have supplied a missing value or dropped an
         // invalid optional; the caller records must carry the same values,
-        // still anchored at the launch origin.
+        // each still anchored where it was authored (a `prep` overlay value
+        // at its `prep`'s document, every other value at the launch origin).
         caller_input_records =
             super::caller_input_records(&shared, pre.set_overrides.clone(), provisional_context.clone());
         (pre.source, pre.set_overrides)

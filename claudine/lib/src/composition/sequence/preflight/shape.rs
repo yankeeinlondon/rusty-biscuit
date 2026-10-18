@@ -35,7 +35,6 @@ pub struct PreflightTask {
     pub label: String,
     /// What the task executes.
     pub action: PreflightAction,
-    /// Values passed to a prompt document as user setters, unevaluated —
     /// The prompt task's `with:` inputs, unevaluated: they bind just in time
     /// against the caller's effective state, from the file that authored them
     /// (`origin_path`).

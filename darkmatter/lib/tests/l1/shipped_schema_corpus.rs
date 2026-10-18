@@ -166,6 +166,12 @@ const EXCEPTIONS: &[Exception] = &[
         Class::Trigger,
         "inline-compose's document metadata, applied by trigger",
     ),
+    exception(
+        "claudine/schemas",
+        "sequence.yaml",
+        Class::Trigger,
+        "the sequence document's catalog, applied by trigger",
+    ),
     // claudine/docs/schemas: design drafts, not loaded by any reader.
     exception(
         "claudine/docs/schemas",
@@ -261,9 +267,12 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     // and loose bodies are `unknown`, and `shell` types the shell command.
     ("claudine/schemas/action.yaml", &["null", "shell", "unknown"]),
     ("claudine/schemas/lifecycle.yaml", &["null", "shell", "unknown"]),
-    // The sequence overlay keys, the sequence list, and the hash payload.
+    // The hash payload.
     ("claudine/schemas/claudine.yaml", &["unknown"]),
     ("claudine/schemas/inline-compose.yaml", &["unknown"]),
+    // Removed root `fail_fast`, and the parser-checked task and step fields.
+    ("claudine/schemas/sequence.yaml", &["null"]),
+    ("claudine/schemas/sequence-types.yaml", &["unknown"]),
     // `set_frontmatter.value` has a native null arm; the undefined actions are
     // `unknown` placeholders.
     (

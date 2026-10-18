@@ -58,7 +58,8 @@ Claudine's own schemas, described next, are delivered this way.
 ## Claudine's Schemas
 
 Claudine types its own frontmatter: the lifecycle events, `loop`, `agent`,
-`model`, the timeouts, the linking keys, and the rest of the
+`model`, a sequence document's steps, the timeouts, the linking keys, and the
+rest of the
 [frontmatter catalog](frontmatter-properties.md). The schemas live in
 [`claudine/schemas/`](../../schemas/README.md) and are used in two places:
 
@@ -67,8 +68,8 @@ Claudine types its own frontmatter: the lifecycle events, `loop`, `agent`,
   document. This works under `claudine/` out of the box, and elsewhere once a
   disk copy of the schemas is reachable (see
   [How a Document Reaches the Schemas](#how-a-document-reaches-the-schemas)).
-- **At launch.** `claudine compose` and `claudine inline-compose` judge the
-  same schemas before anything runs. An invalid Claudine control fails the
+- **At launch.** `claudine compose`, `claudine inline-compose`, and
+  `claudine sequence` judge the same schemas before anything runs. An invalid Claudine control fails the
   launch: no `start` stack runs and no provider starts. See
   [Composition → Claudine's trigger schemas](composition.md#claudines-trigger-schemas-in-the-launch-verdict).
 
@@ -85,17 +86,19 @@ authority on what can run. The schemas catch most mistakes early, but a
 document they accept can still be rejected by the parser (see
 [What only the parser checks](#what-only-the-parser-checks)).
 
-### The five files
+### The seven files
 
 | File | Kind | Holds |
 |---|---|---|
 | [`action.yaml`](../../schemas/action.yaml) | library (`kind: schema`) | the four action types and the two dictionary-bundle types |
-| [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`), the `loop:` block type, and the sequence container types (`step`, `task`, `group`) |
+| [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`) and the `loop:` block type |
+| [`sequence-types.yaml`](../../schemas/sequence-types.yaml) | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
 | [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
 | [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: trigger-schema`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: trigger-schema`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
+| [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: trigger-schema`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
-A library reaches a document only through a trigger's imports, so the five
+A library reaches a document only through a trigger's imports, so the seven
 files work as one bundle. Copy all of them together.
 
 ### When the schemas apply
@@ -112,8 +115,24 @@ can reject it:
 | `start: null` or `start:` | — | — | no Claudine trigger |
 | `ticket: 123` alone | — | — | no Claudine trigger |
 | `prompt: "write it"` | applies | applies | judged by both |
-| `prompt: "write it"` with `sequence: [a, b]` | applies | — | a sequence is not an inline document |
-| `prompt: "write it"` with `sequence: { a: 1 }` | applies | — | invalid: `sequence` is a list or a file reference |
+| `prompt: "write it"` with `sequence: [a, b]` | applies | — | a sequence is not an inline document (`sequence.yaml` applies too) |
+| `prompt: "write it"` with `sequence: { a: 1 }` | applies | — | invalid: `sequence` is a list or a file reference (`sequence.yaml`) |
+
+`sequence.yaml` selects every document with a non-null `sequence`, so a
+sequence document with no other control is judged too:
+
+| Frontmatter | `sequence.yaml` | Verdict |
+|---|---|---|
+| `sequence: [build, test]` | applies | valid |
+| `sequence: "@steps.yaml"` | applies | valid: a file reference |
+| `sequence: { tasks: [a] }` | applies | invalid: `sequence` is a list or a file reference |
+| `sequence: 42` | applies | valid to the schema, which coerces a top-level number to text; the sequence parser rejects it before anything runs |
+| `sequence: null`, or no `sequence` | — | no sequence trigger |
+| `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
+
+Only `sequence.yaml` declares `sequence`. A sequence document's lifecycle
+events and `loop` select `claudine.yaml` whenever they are set, and are typed
+there, so no key has two declarations to keep in step.
 
 Darkmatter's match grammar does not accept a property-level union inside a
 condition, so each identifying key is written as five single-type arms under
@@ -131,7 +150,8 @@ match:
 ```
 
 `inline-compose.yaml` wraps the five `prompt` arms in `all:` beside a `none:`
-of the five `sequence` arms.
+of the five `sequence` arms, and `sequence.yaml` matches the five `sequence`
+arms.
 
 The payloads declare **no required property**. Selection only adds types where
 a key appears; it never asks for an execution input. `inline-compose` keeps its
@@ -289,52 +309,72 @@ without `then` there is left to the parser.
 
 ### Sequence containers
 
-A document's `sequence:` list is typed with `step` items: a value, or a
-`task` object. A task's inline `sequence:` list and its `group:` are typed
-too, and so are a group's `tasks:` legs. You can also import the types for
-your own properties, for example
-`$schema: { nested: task@./lifecycle.yaml }`.
-
-Every typed container types its `cancelled` event with the same restricted
-stack as a document, so a forbidden directive is caught in the editor and at
-launch:
+`sequence.yaml` types a document's `sequence:` list with the step types of
+`sequence-types.yaml`. A step is a name (a bare value) or a `task` object; a
+task's inline `sequence:` list, its `group:`, and a group's `tasks:` legs are
+typed too. You can import the types for your own properties, for example
+`$schema: { nested: task@./sequence-types.yaml }`.
 
 ```yaml
-agent: claude
 sequence:
     - name: build
-      cancelled: [{ retry: 2 }]          # invalid: task `cancelled`
+      cancelled: [{ retry: 2 }]          # invalid: task `cancelled` allows no retry
       sequence:
           - name: compile
             shell: "just build"
-            cancelled: [{ proxy: "@p.md" }]  # invalid: a child's `cancelled`
+            with: [release]              # invalid: `with` is a mapping
     - group:
-          cancelled: [stop]              # valid
+          name: checks
+          execution: parallel            # invalid: removed; a group is closed
+          max_paralel: 2                 # invalid: misspelled `max_parallel`
           tasks:
               - name: lint
                 shell: "just lint"
-                cancelled: [{ skip: null }]  # invalid: a leg's `cancelled`
+                owner: docs-team         # valid: step data, read as `seq.owner`
 ```
 
-Two limits keep the compiled schema small. SimplifiedSchema copies a named
-type into every place that uses it, so a type cannot contain itself:
+A **group object is closed**, so a removed key (`execution`) or a misspelled
+one (`max_paralel`) is a schema error. Because a group's value can also be a
+file reference, the problem is reported at the group (`/sequence/1/group`)
+with the group's value, which names the offending key. A **task object is
+open**: a key Claudine does not reserve, such as `params` or `owner`, is
+authored step data, never a schema error. A document-level `fail_fast` is
+removed and reported at `/fail_fast`; set `fail_fast` on a group object
+instead.
 
-- **Two container levels are typed**: a task or group, and its direct
-  children (the items of its inline `sequence:` and the legs of its
-  `tasks:`). A container nested deeper than that is accepted as any list:
-  the schema does not check its `cancelled` actions, and the task parser
-  rejects a forbidden one before anything runs.
-- **A container's other events** (`initialize`, `start`, `blocked`,
-  `success`, `failure`, `finalize`) are checked for shape only: a list or a
-  mapping. The lifecycle parser checks their actions. Typing each of them
-  like a document's events copies a full action catalog into every container
-  and makes each validation several times slower.
+SimplifiedSchema copies a named type into every place that uses it, so a type
+cannot contain itself. The container types are therefore unrolled into
+**three typed levels**, and the third level's lists are any list:
 
-A task's `when:` and a container's `loop:` (on a group object, or on an
-inline nested sequence's task) are typed by shape only: the guard is
-non-empty text and the loop is an object. Typing a container loop with the
-document `loop` type would inline its gate `stack` into every container. The
-task and loop parsers check the contents.
+```mermaid
+flowchart TD
+    D["document sequence:"] --> L1["level 1: task / group"]
+    L1 -->|"inline sequence:, group tasks:"| L2["level 2: task-2 / group-2"]
+    L2 -->|"inline sequence:, group tasks:"| L3["level 3: task-3 / group-3"]
+    L3 -->|"inline sequence:, group tasks:"| U["any list: the task parser checks it"]
+```
+
+A document nested deeper than three container levels is still valid: the
+schema checks less there, and the task parser, which accepts unlimited
+nesting, checks the rest before anything runs.
+
+Each level inlines the next one twice (through a task's `sequence:` and its
+group's `tasks:`), so the size of a container field multiplies with every
+level. A typed container checks only what stays cheap:
+
+| Container field | Level 1 | Level 2 | Level 3 |
+|---|---|---|---|
+| `name`, `when`, `with`, `group`, `tasks`, `max_parallel`, `fail_fast`, … | typed | typed | typed |
+| `cancelled` | restricted stack | restricted stack | list or mapping |
+| `loop` (on a group, or beside an inline `sequence:`) | the `loop` type | object | object |
+| `initialize`, `start`, `blocked`, `success`, `failure`, `finalize` | list or mapping | list or mapping | list or mapping |
+
+Typing a container's events like a document's makes every Claudine launch
+about three seconds slower, because the compiled schema is built for every
+launch. The lifecycle and loop parsers check what the schema leaves loose.
+The document's own events and `loop` are typed fully by `claudine.yaml`.
+
+A task's `when:` is typed by shape only: non-empty text.
 
 A referenced sequence or group file (`sequence: "@tasks.yaml"`) is not
 Markdown, so no schema judges it; the task parser checks it when the
@@ -355,8 +395,9 @@ before anything runs:
 - in `cancelled`, an `else` written without `then`, and a guarded bundle
   (`when` beside verbs, such as `- { when: "fm.x", stop: null }`) placed
   inside a fifth-level `when`, which the parser counts as a sixth level
-- a container's events other than `cancelled`, and any container below the
-  two typed container levels
+- a container's events other than `cancelled`, the `cancelled` of a
+  third-level container, the contents of a `loop` below the first container
+  level, and any container below the three typed container levels
 - a shell expansion hidden in a `set` value in `initialize`
   (`set: { sha: "$(git rev-parse HEAD)" }`)
 - the arguments of the generated verbs (below)
@@ -430,8 +471,8 @@ is `claudine/` therefore reaches `claudine/schemas/` with no setup. `md schema
 triggers <file>` lists the locations, the shadowed files, and which triggers
 matched.
 
-Anywhere else, install a **complete** bundle of regular files (all five, so the
-relative imports resolve) in one of:
+Anywhere else, install a **complete** bundle of regular files (every file in
+`claudine/schemas/`, so the relative imports resolve) in one of:
 
 - the repository root's `schemas/` folder (a real directory, not a symlink)
 - the folder an absolute `SCHEMAS_DIR` names, such as
@@ -440,7 +481,7 @@ relative imports resolve) in one of:
 
 ```sh
 mkdir -p ~/schemas
-cp claudine/schemas/{action,lifecycle,linking,claudine,inline-compose}.yaml ~/schemas/
+cp claudine/schemas/*.yaml ~/schemas/
 ```
 
 These routes do **not** work:
@@ -456,7 +497,7 @@ These routes do **not** work:
 
 ### In the `claudine` CLI
 
-The `claudine` binary embeds the five files (`include_str!` in
+The `claudine` binary embeds the seven files (`include_str!` in
 [`schema/bundle.rs`](../../lib/src/composition/schema/bundle.rs)), so an
 installed binary validates Claudine controls with no checkout and no disk
 bundle. The embedded copy is the **last** location:

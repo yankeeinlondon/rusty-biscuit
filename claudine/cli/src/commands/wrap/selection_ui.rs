@@ -46,9 +46,9 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 /// Present a multi-step review screen for sequence execution.
 ///
 /// Built on [`biscuit_tui::InputTable`] + [`biscuit_tui::run_standalone`].
-/// Each supplied draft becomes one row; the caller passes only the steps
-/// offered for review, so shell and side-effect steps have no row. A row has
-/// three columns:
+/// Each supplied draft becomes one row; the caller passes one draft per
+/// provider-launching task, so shell and side-effect tasks have no row. A row
+/// has three columns:
 ///
 /// 1. **Step label** (`StaticText`) — the draft's original one-based step
 ///    position and name, read-only.
@@ -99,11 +99,12 @@ pub fn review_sequence(
     Ok(targets)
 }
 
-/// Determine whether all drafts share a single unified provider.
+/// Determine whether all editable drafts share a single unified provider.
 ///
-/// Returns `Some(provider)` when every row resolves to the same
-/// provider (either because it is locked or because every draft's
-/// default plan points to the same provider).  This lets the model
+/// Read-only drafts are ignored. Returns `Some(provider)` when every
+/// editable row resolves to the same provider (either because it is locked
+/// or because every such draft's default plan points to the same
+/// provider).  This lets the model
 /// column use a `ChooseOne` backed by that provider's catalog.
 fn determine_unified_provider(drafts: &[SequenceStepDraft]) -> Option<Provider> {
     let editable: Vec<SequenceStepDraft> =

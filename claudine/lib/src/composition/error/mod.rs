@@ -2020,7 +2020,8 @@ pub enum CompositionError {
     #[error(
         "shell command `{command}` in {task} references `{root}`, which is not available to a \
          sequence shell command; shell commands are approved before the sequence starts, so \
-         they may read early-binding values (`state`, `params`, `fm.*`, `ctx.*`, `env.*`) and \
+         they may read early-binding values (step values, a task's `with`, `fm.*`, `ctx.*`, \
+         `env.*`) and \
          the values earlier steps produce (`outputs`, `loop`, and `group` inside a group)"
     )]
     SequenceShellLateBinding {

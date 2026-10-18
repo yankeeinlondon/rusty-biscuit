@@ -432,14 +432,14 @@ pub struct ProviderPickerPlan {
     pub default_index: usize,
 }
 
-/// Per-step draft for sequence review.
+/// One row of the sequence review: a provider-launching task.
 ///
-/// Every step has a draft, but only steps whose outer executable can launch a
-/// provider (a prompt, task, group, or body step) are shown for review.
+/// Shell and side-effect tasks launch no provider and have no draft.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SequenceStepDraft {
-    /// Zero-based index of the step in the whole sequence; reviewed choices
-    /// are mapped back by this index, never by row number or name.
+    /// Zero-based index of the task's root step in the whole sequence, which
+    /// labels the row. Several tasks of one step share it, so reviewed choices
+    /// are mapped back by row order, never by this index or by name.
     pub step_index: usize,
     /// Display name for the step.
     pub step_name: String,

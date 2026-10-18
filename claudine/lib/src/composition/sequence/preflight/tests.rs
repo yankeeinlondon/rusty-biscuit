@@ -1236,6 +1236,11 @@ mod shell {
                 ),
                 "`{root_name}` must be rejected in a shell command; got: {error}",
             );
+            // The guidance names the task input by its current key; `params`
+            // is step data, not an input.
+            let message = error.to_string();
+            assert!(message.contains("a task's `with`"), "{message}");
+            assert!(!message.contains("`params`"), "{message}");
         }
     }
 
