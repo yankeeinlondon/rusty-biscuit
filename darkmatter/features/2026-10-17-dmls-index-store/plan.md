@@ -5,9 +5,29 @@ phase: 1
 agent: claude/sonnet
 yolo: true
 packages:
-    - darkmatter
-    - dmls
     - biscuit-file
+    - dmls
+source_files_during_phase_1:
+    - darkmatter/dmls/Cargo.toml
+    - Cargo.lock
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_oracle.rs
+    - darkmatter/dmls/tests/fixtures/index_store_corpus/
+docs_updated_during_phase_1:
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/README.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/api.md
+    - .claude/skills/darkmatter/testing.md
 ---
 
 # Plan: DMLS Index Store
@@ -66,7 +86,7 @@ tasks checked (Phase 1 only). It supplies the R5 file list, R6 lazy target
 cache, R7 state machine, R8 log style, and the `configuration.md` /
 `indexing.md` pages that this feature extends.
 
-- [ ] **Gate check.** Do not start Wave 2 until `plan.md` of the dependency is
+- [x] **Gate check.** Do not start Wave 2 until `plan.md` of the dependency is
   fully checked and its final validation checkpoint is recorded in its
   implementation log.
   - If the gate is not met, stop and report. Do not stub the dependency's
@@ -226,7 +246,7 @@ form.
 
 ### Wave 1 (parallel)
 
-- [ ] **Oracle harness.** Move the dependency's full-index build into a
+- [x] **Oracle harness.** Move the dependency's full-index build into a
   test-only module and the shared fixture corpus.
   - The oracle builds `WorkspaceGraph` over every file of a corpus and runs
     the four providers; the store path must later equal it (acceptance 4, 5).
@@ -238,7 +258,7 @@ form.
     a referrer with a heading anchor.
   - Prerequisite: the dependency gate.
   - Do this **before** deleting the production path (Phase 6).
-- [ ] **`user_cache_dir`.** In `biscuit-file`, add
+- [x] **`user_cache_dir`.** In `biscuit-file`, add
   `pub fn user_cache_dir() -> Option<PathBuf>` beside `home_dir()`
   (`file_reference/context.rs`).
   - Linux `$XDG_CACHE_HOME` (relative or empty = unset) else `~/.cache`; macOS
@@ -247,11 +267,11 @@ form.
     the process values.
   - Load the `biscuit-file` skill first. No `dirs::cache_dir` in dmls.
   - Prerequisite: none.
-- [ ] **Dependency add.** Add `rusqlite = { version = "0.31", features =
+- [x] **Dependency add.** Add `rusqlite = { version = "0.31", features =
   ["bundled"] }` to `darkmatter/dmls/Cargo.toml`, matching `claudine/lib`.
   - Update `darkmatter/docs/dependencies.md` and `docs/dependencies.md`.
   - Prerequisite: none.
-- [ ] **Removal inventory.** Use GitNexus / `rg` to list every production
+- [x] **Removal inventory.** Use GitNexus / `rg` to list every production
   consumer of the dependency's full-index build (`collect_indices*`,
   `index_workspace`, `WorkspaceIndex::from_indices`, `bench.rs`), and of
   `WorkspaceGraph::wiki_docs()`. Write the list in the implementation log.
@@ -260,23 +280,25 @@ form.
 
 ### Wave 2 (after Wave 1; needs the gate)
 
-- [ ] **`user_cache_dir` tests.** Per OS with injected environment and home; the
+- [x] **`user_cache_dir` tests.** Per OS with injected environment and home; the
   relative and empty `$XDG_CACHE_HOME` rows; `None` when no home.
   - Prerequisite: Wave 1 `user_cache_dir`.
-- [ ] **Oracle self-check.** Assert the oracle's answers on the corpus against
+- [x] **Oracle self-check.** Assert the oracle's answers on the corpus against
   hand-written expectations for a handful of cases, so a bug in the oracle
   cannot make the store tests vacuous.
   - Prerequisite: Wave 1 oracle.
-- [ ] **Skill update (biscuit-file).** Add `user_cache_dir` to
+- [x] **Skill update (biscuit-file).** Add `user_cache_dir` to
   `.claude/skills/biscuit-file/` and `biscuit-file/docs/topics/` beside
   `home_dir()`.
 
 ### Validation checkpoint 1
 
-- [ ] Dependency gate recorded as met in the implementation log.
-- [ ] Rulings 2-18 confirmed or overridden by the author, recorded in the log.
-- [ ] `just test` and `just lint` pass in `biscuit-file/` and `darkmatter/`.
-- [ ] Oracle exists under test only, with its self-check.
+- [x] Dependency gate recorded as met in the implementation log.
+- [x] Rulings 2-18 confirmed or overridden by the author, recorded in the log.
+  (Adopted as written under `yolo: true` in a headless run; the author was not
+  consulted. See the Phase 1 log.)
+- [x] `just test` and `just lint` pass in `biscuit-file/` and `darkmatter/`.
+- [x] Oracle exists under test only, with its self-check.
 
 ## Phase 2: Wiki Universe API (R3)
 
