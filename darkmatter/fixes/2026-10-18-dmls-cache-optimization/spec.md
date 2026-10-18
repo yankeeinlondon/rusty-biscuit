@@ -21,7 +21,10 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-18
+review_iterations: 0
 clarified: false
 implemented: false
 created: 2026-10-18
@@ -48,19 +51,19 @@ trigger-payload memo misses on nearly every lookup.
 This fix makes four changes:
 
 1. The payload memo hits across workspace scopes that resolve a trigger
-   identically (F3, R1).
+   identically.
 2. A configuration notification that changes nothing does not invalidate
-   registries (F1, R2).
+   registries.
 3. A document's registry job runs ahead of queued workspace preparation, and
-   duplicate workspace jobs merge into one (F2, R3).
+   duplicate workspace jobs merge into one.
 4. Startup and the registry worker never prepare the same scopes at the same
-   time (F4, R4).
+   time.
 
 ## The Incident
 
 On 2026-10-18, with the `dmls` built from `2026-10-17-dmls-index-store`,
-opening `darkmatter/features/2026-10-17-dmls-index-store/review-3.md` in the
-editor logged:
+opening the `review-3.md` document for `2026-10-17-dmls-index-store`
+in the editor logged:
 
 ```text
 WARN dmls::request_timing: slow request method="textDocument/semanticTokens/full" … elapsed_ms=1170
@@ -114,7 +117,8 @@ startup's preparation and once from the worker's. The document itself
 
 ### F1. A configuration notification that changes nothing invalidates every registry
 
-`ServerState::update_config` (`dmls/src/router.rs`) clears contexts, calls
+In the `dmls` package, [ServerState::update_config](../../dmls/src/router.rs)
+applies configuration reloads. It clears contexts, calls
 `invalidate_all_trigger_registries()`, and queues a workspace preparation
 **before** comparing the effective configuration, and does so even when the
 comparison then finds no change. After the editor's routine startup
@@ -128,8 +132,8 @@ differs re-prepares by itself, and one that is equal stays fresh.
 
 ### F2. A document's job waits behind the whole workspace preparation
 
-The registry worker (`spawn_registry_worker`, `dmls/src/registry_jobs.rs`)
-takes jobs from one unbounded FIFO channel. A `RegistryJob::Workspace`
+In the `dmls` package, [spawn_registry_worker](../../dmls/src/router.rs)
+runs background registry preparation. It takes jobs from one unbounded FIFO channel. A `RegistryJob::Workspace`
 queued by F1 runs before the `RegistryJob::Document` a request is parked on,
 however cheap the document's own job is. `schedule_workspace` does not merge
 with a workspace job already queued, so several triggers (config, a YAML
@@ -137,8 +141,8 @@ save, a relist) queue several full passes.
 
 ### F3. The trigger-payload memo misses across workspace probes
 
-`file_payload_memo` (`darkmatter/lib/src/markdown/schemas/triggers/assemble.rs`)
-reuses an entry only when `(source, payload, schema_roots, folder_context)`
+In the `darkmatter` library, [file_payload_memo](../../lib/src/markdown/schemas/triggers/assemble.rs)
+caches resolved trigger payloads. It reuses an entry only when `(source, payload, schema_roots, folder_context)`
 are all equal. `folder_context` is the requesting document's context with the
 source path replaced by its folder, so every package folder is a distinct key
 even though:
@@ -150,11 +154,15 @@ even though:
   recomputes the repository, package, and package-area scopes for the new
   `cwd`.
 
-What survives the derivation and can still differ between two requesting
-documents is the request-side state: `request_cwd` and its tree, the launch
-`@` scope, an inherited validation failure, and the home and environment.
-Within one repository and one DMLS process these are expected to agree for
-every workspace probe, but nothing proves it yet.
+Derivation does not erase every document difference. It retains the request
+boundary and tree, launch `@` scope, captured home and environment, repository
+catalog, magic paths, vault roots, explicit tree controls, and inherited
+validation failure. It also chooses whether to keep the current tree. In
+the `dmls` package, [RepositoryContexts](../../dmls/src/context.rs) builds one context per
+repository and derives all its documents from that context, so the launch
+scope and request boundary agree across that repository's workspace probes.
+That supports sharing for this incident, but does not justify sharing across
+arbitrary library callers or across repositories.
 
 The memo also holds `RECENT_PAYLOADS = 16` entries in insertion order. One
 pass over this repository needs 18 distinct keys (6 probes × 3 triggers), so
@@ -164,7 +172,9 @@ cost again.
 
 ### F4. Startup and the worker prepare the same scopes at the same time
 
-`spawn_startup` runs `prepare_workspace_registries` on its own thread. A
+In the `dmls` package, [spawn_startup](../../dmls/src/router.rs)
+coordinates initial discovery and runs workspace registry preparation on its
+own thread. A
 workspace job queued meanwhile (F1) runs the same probes on the registry
 worker in parallel. `TriggerRegistries::begin` starts a second
 `Preparation` for a scope that already has one in flight, so both threads do
@@ -184,20 +194,39 @@ improve.
   reading `FileResolutionContext::derive` and every context use in
   `resolve_yaml_schema_with_roots`. When in doubt, a field stays in the key:
   a miss costs time, a false hit serves a wrong schema.
-- The preferred shape is a key built from a context **normalized onto the
-  trigger's folder** (for example `context.for_cwd(source.parent())` with the
-  source path cleared), so equality is decided by `FileResolutionContext`'s
-  own `PartialEq` and does not drift when the context gains fields.
+- Use full `FileResolutionContext` equality on the contexts actually used by
+  resolution, rather than hand-copying selected fields. The initial candidate
+  key is the context derived with `for_cwd(source.parent())`, plus the ordered
+  contexts derived **directly from the original context** with
+  `for_trusted_external_cwd(root)` for each schema root. The first covers
+  source-relative resolution; the others cover bare-name lookups in roots
+  outside the repository. Keep the original context for execution.
+- Confirm equivalence through imports, delegated schemas, and examples before
+  dropping the original context from the key. In particular, deriving a
+  trusted root from an already-normalized context can inherit a failure or
+  tree choice that direct derivation would not have. If a resolution branch
+  reads additional original state, retain that state or the original context
+  for that branch. Never clear a validation failure or widen a trust boundary
+  merely to obtain a hit. No new public context API is required by this fix.
+- Sharing applies only to resolved payloads. Keep each document's registry,
+  trigger matching context, `$path` pattern base, precedence, advisories, and
+  diagnostic provenance unchanged. A memo hit returns the existing schema
+  `Arc` identity as well as equivalent dependencies and shape.
 - The capacity covers at least one full workspace pass with headroom. It may
-  be sized from the number of distinct trigger files rather than a fixed
-  constant. Eviction remains least-recently-used, and a hit refreshes
-  recency.
+  use a bounded fixed capacity; start with 32 entries, enough for the
+  incident and the 18-distinct-input regression fixture. Count distinct full
+  keys, not just trigger paths: roots and context can differ. Do not grow a
+  process-wide cache without a bound, since expanded payloads can be large.
+  Eviction becomes least-recently-used, and a hit refreshes recency. The current implementation is insertion-ordered, so this is an
+  intentional behavior change.
 - The existing fingerprint check (dependency bytes and searched folder
   listings) is unchanged.
 
 **Target:** on this repository, one cold workspace pass resolves each
-trigger payload **once** (3 misses, not 18 or 32), and a second pass with no
-file changes resolves **none**.
+trigger payload **once per distinct resolution key** (3 misses for the
+measured three-trigger input set, not 18 or 32), and a second forced scan with
+no file changes resolves **none**. A fresh registry lookup bypasses the memo
+entirely and cannot by itself demonstrate memo reuse.
 
 ### R2. A configuration notification that changes nothing invalidates nothing (F1)
 
@@ -207,10 +236,21 @@ file changes resolves **none**.
 - Clearing contexts may stay (it is cheap). A context that rebuilds
   differently re-prepares through `is_fresh`'s context comparison, not
   through a blanket invalidation.
-- When the configuration did change, invalidate only when the change can
-  affect registries (schema roots, workspace roots or globs, anything
-  `SchemaRoots::for_document` reads). Otherwise the existing behavior is
-  kept.
+- For this fix, any effective configuration change retains blanket trigger
+  invalidation and schedules one merged workspace pass **after** applying the
+  new configuration. This conservative choice avoids an incomplete list of
+  relevant settings; narrowing invalidation further is out of scope.
+- Keep existing graph relinking, configuration-error diagnostics, semantic
+  token refresh decisions, and open-document diagnostics updates. An unchanged
+  effective configuration can still rebuild a different repository context
+  after files on disk changed; that document must re-prepare on next demand.
+  The zero-preparation guarantee assumes unchanged context inputs too.
+- Schema roots remain those of the five root kinds (`SchemaRootKind`:
+  package, package area, tree, `SCHEMAS_DIR`, home) derived from the
+  document's captured context; there is no new schema-root configuration setting. Home and
+  environment remain captured at server startup. An unchanged notification
+  does not mean zero work: configuration parsing and required context/graph
+  refreshes may still occur.
 
 ### R3. Document jobs run first; workspace jobs merge (F2)
 
@@ -222,24 +262,72 @@ file changes resolves **none**.
   is not lost.
 - A running workspace pass yields between probes when a document job is
   waiting: it finishes its current probe, runs the document job, and then
-  continues. A request never waits for more than one probe's preparation
-  plus its own.
-- `outstanding` accounting and the startup observer events stay correct
-  under merging. Tests that count jobs are updated to the merged count.
+  continues. Post the document completion immediately so dispatch can resume
+  its waiters; do not defer it until the workspace pass completes. An unrelated
+  workspace pass adds at most its current probe's preparation to the wait.
+  Earlier document jobs and the document's own preparation can still add time.
+- Probe-list construction must also run off the dispatch thread. Check for
+  document jobs before the first probe and between probes. Do not promise
+  interruption inside a payload resolution or a filesystem operation.
+- Track queued, running, and requested-again workspace work distinctly. Clear
+  queued state atomically when a pass starts, not when dispatch later handles
+  its completion. Otherwise a change between worker completion and dispatch
+  handling can disappear. Merge all schedules received during one pass into
+  one follow-up pass using the latest roots, contexts, and repository set.
+- `outstanding` counts actual queued or running jobs, including one suspended
+  workspace pass; it does not count each probe or each merged scheduling call.
+  Startup phases need explicit accounting so observers cannot report startup
+  complete between discovery and final preparation. Send one completion per
+  executed job; update tests that previously counted duplicate schedules.
 
-### R4. One preparation per scope at a time (F4)
+### R4. The registry worker owns all server preparation
 
-- A scope whose preparation is already in flight is not prepared a second
-  time concurrently. The second caller either waits for the in-flight result
-  or skips the scope and relies on the in-flight result being installed.
-  The choice is the implementer's, but it must not hold the overlay lock
-  across preparation I/O (the existing rule in `overlay/registry.rs`).
-- A change recorded while the first preparation ran still leaves the scope
-  stale afterward (the existing `changes`/`epoch` replay), so skipping never
-  installs an out-of-date registry.
-- Alternatively, startup's workspace preparation moves onto the registry
-  worker as its first job, which removes the second thread entirely. This is
-  acceptable if R3's ordering still lets a document job overtake it.
+Move both startup preparation phases onto the same worker used by document
+and refresh jobs. This is the chosen design, rather than introducing a second
+per-scope waiting mechanism. File discovery stays on its background thread;
+neither that thread nor dispatch calls preparation directly. The worker
+finishes a probe before starting another job, so two server jobs cannot run a
+preparation concurrently. This is a DMLS guarantee, not a promise to serialize
+all callers of the process-wide library memo.
+
+Preserve startup's two phases: prepare the initially known workspace scopes,
+list files, record the discovered repositories, and prepare any newly known
+scopes. Coordinate these phases through completion messages; never block
+dispatch waiting for the worker. A document job can overtake either phase.
+The existing one-time `schema registry ready` summary and startup observer
+completion occur after discovery and the final required preparation, with
+preparation elapsed time excluding the file walk and queue waits. Publish the
+file-list result once and preserve its existing ordering after startup's
+registry-ready event. A later invalidation still makes affected scopes stale;
+startup completion does not assert that no future refresh is needed.
+
+```mermaid
+sequenceDiagram
+    participant Dispatch
+    participant Worker as Registry worker
+    participant Discovery as File discovery
+    Dispatch->>Worker: Initial workspace preparation
+    Worker-->>Dispatch: Initial phase complete
+    Dispatch->>Discovery: List files and repositories
+    Discovery-->>Dispatch: Discovery result
+    Dispatch->>Worker: Prepare newly discovered scopes
+    Dispatch->>Worker: Document needed by a request
+    Note over Worker: Finish current probe, then prioritize document
+    Worker-->>Dispatch: Document ready; resume its waiters
+    Worker-->>Dispatch: Final startup phase complete
+    Note over Dispatch: Registry-ready summary, then file-list publication
+```
+
+- Keep preparation I/O outside the overlay lock, and preserve the existing
+  change/epoch replay. A relevant change during preparation leaves the
+  installed scope stale; waiting requests recheck demand and queue again.
+- A pending document job reads current context when it executes, or detects an
+  outdated captured context and reschedules before releasing waiters. A config
+  change while it is queued must not strand requests behind a stale result.
+- Cancellation removes only that request, retaining work needed by other
+  waiters or diagnostics. Shutdown answers all waiters once, stops taking new
+  jobs, and releases startup coordination without waiting for a completion
+  that can no longer be delivered. Preserve dispatch responsiveness.
 
 ### R5. Make the cost visible
 
@@ -247,57 +335,87 @@ file changes resolves **none**.
   `trigger registries prepared probes=… prepared=… fresh=… payload_hits=… payload_misses=… elapsed_ms=… workspace=…`.
 - The `slow request` line already reports `waited_for_trigger_registry`.
   Add `trigger_registry_wait_ms`, the time parked on a registry job, so
-  queueing (F2) and preparation can be told apart from the log alone.
-- Never log payload contents.
+  total waiting can be distinguished from synchronous handler work. This
+  duration includes both queueing and background preparation; it does not
+  separate those two costs. Use the injected server clock. Sum separate parked
+  intervals, stopping each at resume, cancellation, or shutdown; do not count
+  intervening handler work or waits for the index. Emit it on the existing
+  completion event, including canceled requests, without adding a second event.
+- Count hits and misses attributable to that workspace pass, excluding document
+  jobs that interrupt it; process-global counter deltas would mix those jobs.
+  A hit means fingerprint-validated reuse, and a miss means an attempted
+  uncached payload resolution. Fresh scopes perform neither. Include failed
+  probes separately from fresh and successfully prepared probes. Preserve
+  existing info-level startup summaries and failure/recovery transitions.
+- Never log payload contents, captured environment values, or schema text.
 
 ## Acceptance Criteria
 
-1. With a client that sends `didChangeConfiguration` with unchanged settings
-   right after `initialized`, the first schema-dependent request on a
-   Markdown document outside `claudine/` does not wait for any workspace
-   probe's preparation. On this repository it answers in **≤ 250 ms** on a
-   quiet host (measured, recorded in the implementation log; not an L1 gate).
-2. One cold startup on this repository records exactly 3 payload misses; a
-   second workspace pass with no file changes records 0.
-3. An unchanged `didChangeConfiguration` causes zero registry preparations.
-4. While a workspace pass is running or queued, a document job queued after
-   it is prepared before the pass's remaining probes.
-5. No scope is prepared twice concurrently, and a change during a
-   preparation still leaves that scope stale (existing replay tests pass
-   unchanged).
-6. Resolved registries, diagnostics, and trigger summaries are identical to
-   today's on the existing trigger fixtures (`darkmatter/tests/fixtures/schema-triggers/`).
+1. An unchanged startup configuration notification adds no workspace pass or
+   blanket invalidation. A request for a fresh document registry proceeds
+   immediately; a cold document can wait for its own job and the current
+   workspace probe, but overtakes remaining workspace probes.
+2. A cold scan of the measured three-trigger input set records 3 payload
+   misses; a second forced scan with unchanged inputs records 0. Other roots
+   supplied by a user's home or environment can legitimately add keys, so a
+   universal count of 3 for every checkout is not required.
+3. An unchanged configuration notification with unchanged context inputs
+   causes zero additional preparations relative to the same startup without
+   the notification. Already scheduled startup work may still finish.
+4. Multiple queued workspace schedules merge, and schedules during a running
+   pass produce one follow-up pass, including the worker-completion/dispatch
+   boundary. Document completion releases waiters before remaining probes.
+5. No two server preparations run concurrently. A relevant change during a
+   preparation leaves that scope stale, and the next demand recovers. Existing
+   change-replay and failure-transition tests continue to pass.
+6. Resolved registries, diagnostics, and trigger summaries are identical on the
+   existing fixtures under `darkmatter/tests/fixtures/schema-triggers/`,
+   including package-specific payload selection and pattern matching.
+
+Record one quick before/after sample of the reported stdio reproduction on
+one quiet host in the implementation log. Retain **≤ 250 ms** as the original
+incident's non-gating target, not a portable pass/fail threshold. Record any
+remaining wait and its cause. No additional performance spike, host matrix,
+repetition requirement, or statistical gate is needed: the existing profile
+already identifies the expensive work.
 
 ## Tests
 
 Run through `just test` (nextest) in `darkmatter/`. Use the existing work
-counters and injected gates, not timing.
+counters and injected gates, not timing. Hermetic stdio transport tests are
+L1: they require no terminal, browser, or live editor. Use temporary repository
+fixtures and the existing `LspFixture` snapshot/context controls, with no host
+home or environment dependency. Gates must have bounded failure cleanup so a
+regression fails rather than hangs. Use the monorepo Test Toolkit. Run the
+area's `just lint` after implementation; no new CI tier or scope is needed.
 
 | Requirement | Tier | Test |
 | --- | --- | --- |
 | R1 | L1 darkmatter | two documents in different package folders of one repository, same schema roots: the second resolution of a trigger payload is a memo hit (miss counter seam) |
-| R1 | L1 darkmatter | a document in another repository, or with a different home or environment, is a miss (no false hit) |
-| R1 | L1 darkmatter | 18 distinct keys followed by a repeat pass: the repeat pass has zero misses (capacity) |
+| R1 | L1 darkmatter | distinct repository/request boundaries, launch scopes, home/environment, explicit tree controls, or inherited failure never reuse incompatible payloads; cover a trusted external root and inline imports/examples as well as relative payload files |
+| R1 | L1 darkmatter | 18 genuinely distinct full keys followed by a forced repeat scan: zero misses; a hit protects an entry from eviction and the least recently used entry is evicted at the bound |
 | R1 | L1 darkmatter | a changed dependency file or a file added to a schema root still misses (fingerprint unchanged) |
-| R2 | L1 dmls | an unchanged `didChangeConfiguration` leaves every registry fresh and queues no job; a change to a schema-root setting invalidates |
+| R2 | L1 dmls | an unchanged `didChangeConfiguration` leaves every registry fresh and queues no job; an effective config change (for example workspace discovery settings) invalidates; unrelated file/config diagnostics and refresh behavior remain intact |
 | R2 | L1 dmls | a context that rebuilds differently after a reload re-prepares on next need without a blanket invalidation |
 | R3 | L1 dmls | with the worker gated, queue Workspace, Workspace, Document: the document job runs first and one workspace pass runs |
 | R3 | L1 dmls | a document job queued during a gated workspace pass runs after the current probe, before the next |
 | R3 | L1 dmls | a workspace schedule during a running pass yields exactly one follow-up pass |
-| R4 | L1 dmls | startup preparation and a worker workspace job overlapping on a gate: each probe's `Preparation::run` executes once (registry-scan counter) |
+| R4 | L1 dmls | startup and refresh scheduled together: the shared worker never runs preparations concurrently; fresh probes are skipped, and discovered repositories are prepared before startup completion |
 | R4 | L1 dmls | a change recorded during the single in-flight preparation leaves the scope stale |
-| R5 | L1 dmls | captured `tracing` subscriber shows the pass line and the `trigger_registry_wait_ms` field |
-| Acc. 1 | L2 dmls | stdio session: `initialize`, `initialized`, `didChangeConfiguration`, `didOpen`, `semanticTokens/full` on a fixture with a costly trigger in another package; the request reports no registry wait (`waited_for_trigger_registry=false`) |
+| R5 | L1 dmls | captured `tracing` shows pass-local counts excluding interrupting document jobs; an injected clock proves summed registry waits, including resume/requeue, cancellation, and shutdown, on one completion event |
+| Startup request ordering | L1 dmls | hermetic stdio session with the existing `LspFixture`: gate an unrelated workspace probe, send unchanged configuration, open a document and request semantic tokens; release the current probe and observe the response before the next workspace probe completes; allow `waited_for_trigger_registry=true` for a cold document |
+| Worker completion boundary | L1 dmls | schedule a workspace refresh after the worker completes but before dispatch handles its completion; exactly one new pass runs |
+| Lifecycle | L1 dmls | multiple waiters share a document job; cancel one and answer the other once; shutdown during either startup phase releases waiters and coordination; a context change during queued work cannot strand them |
 
 ## Documentation
 
-- `darkmatter/docs/lsp/indexing.md` (or the page that describes startup and
-  trigger registries): job ordering, workspace-job merging, when a config
+- `darkmatter/docs/lsp/indexing.md`: job ordering, workspace-job merging, when a config
   reload invalidates registries, and what the payload memo is keyed on, with
   a Mermaid sequence for "request parked on a document job while a workspace
   pass runs".
-- `darkmatter/docs/lsp/configuration.md`: a reload with unchanged settings
-  is free; which settings re-prepare trigger registries.
+- `darkmatter/docs/lsp/configuration.md`: an unchanged effective reload
+  does not invalidate registries when context inputs are unchanged; every
+  effective change retains conservative invalidation.
 - `.claude/skills/darkmatter/dmls.md`: the worker's priority rule and the
   memo key.
 - The `file_payload_memo` and `update_config` doc comments, which describe
@@ -306,20 +424,26 @@ counters and injected gates, not timing.
 ## Out of Scope
 
 - Making a single payload resolution cheaper (`to_json_schema`'s recursive
-  union conversion, 80–130 ms for Claudine's triggers). With R1 it runs once
-  per trigger per process; optimizing it is a separate fix if it still
+  union conversion, 80–130 ms for Claudine's triggers). With payload sharing it runs once
+  per distinct retained key while inputs are unchanged; optimizing it is a separate fix if it still
   matters.
 - Persisting resolved payloads across restarts.
 - Lazily skipping workspace probes nobody has opened a document in.
 
+## Review Notes
+
+The review chooses one worker for server preparation and conservative
+invalidation on every effective configuration change. These choices avoid
+cross-thread duplicate preparation and an incomplete dependency list without
+changing schema-selection semantics. The previous draft called eviction
+least-recently-used even though the code evicts by insertion order; the new
+recency rule is now explicit. It also required a cold document to report no
+registry wait, which conflicts with per-document preparation; the acceptance
+criteria now prove queue ordering and notification behavior directly.
+
 ## Open Questions
 
-1. **R1 key fields.** Does any field that survives `derive` (request
-   boundary, launch `@` scope) actually vary between workspace probes of one
-   repository? If it does, R1's target of 3 misses is unreachable without a
-   further argument that the varying field cannot change a payload. The
-   implementer reports this before planning closes.
-2. **R2 scope of "affects registries".** Is there a configuration key beyond
-   schema roots and workspace discovery that changes a trigger registry? If
-   that is hard to enumerate, invalidating on any effective change (but not
-   on an unchanged one) is the fallback.
+None blocking. The context-key equivalence checks above are required
+correctness work, not permission to broaden sharing if a check fails. Record
+any necessary additional key inputs, and any departure from this design, in
+the implementation log while leaving this reviewed snapshot intact.
