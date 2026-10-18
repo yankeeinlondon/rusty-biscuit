@@ -474,21 +474,26 @@ fn dedup_locations(locations: Vec<Location>) -> Vec<Location> {
 }
 
 /// The document a heading completion at `offset` reads headings from: the
-/// target of an anchor in an open link destination, or of a wiki heading
-/// fragment.
+/// target of an anchor in an open link destination (a graph document, or a
+/// Markdown file resolution finds outside the graph), or of a wiki heading
+/// fragment (a wiki candidate only).
 pub(crate) fn completion_heading_target(ctx: &DocumentContext, offset: usize) -> Option<std::path::PathBuf> {
-    let document = completion::heading_target(ctx, offset).or_else(|| wiki::heading_target(ctx, offset))?;
-    ctx.graph.document(document).map(|record| record.path.clone())
+    let document = completion::heading_target(ctx, offset).or_else(|| wiki::heading_target(ctx, offset));
+    match document {
+        Some(document) => ctx.graph.document(document).map(|record| record.path.clone()),
+        None => completion::heading_target_file(ctx, offset),
+    }
 }
 
 /// The document the link, wiki link, or transclusion at `offset` in the
-/// document at `path` lands on, read from the graph's resolved edges.
+/// document at `path` lands on, read from the graph's resolved edges: a
+/// graph document, or a Markdown file outside the graph.
 pub(crate) fn reference_target_at(
     graph: &WorkspaceGraph,
     path: &Path,
     offset: usize,
 ) -> Option<std::path::PathBuf> {
-    use crate::graph::EdgeKind;
+    use crate::graph::{EdgeKind, EdgeTarget};
     let document = graph.document_id(path)?;
     let references = graph
         .links(document)
@@ -501,9 +506,13 @@ pub(crate) fn reference_target_at(
         .chain(transclusions)
         .filter(|(_, node, _)| node.span.contains(&offset))
         .find_map(|(id, _, kind)| {
-            graph.outgoing(id, kind).find_map(|edge| {
-                let target = graph.node(edge.target.node()?)?;
-                graph.document(target.document).map(|record| record.path.clone())
+            graph.outgoing(id, kind).find_map(|edge| match &edge.target {
+                EdgeTarget::Node(node) => {
+                    let target = graph.node(*node)?;
+                    graph.document(target.document).map(|record| record.path.clone())
+                }
+                EdgeTarget::File(file) => crate::graph::is_markdown_path(file).then(|| file.clone()),
+                EdgeTarget::Unresolved(_) => None,
             })
         })
 }

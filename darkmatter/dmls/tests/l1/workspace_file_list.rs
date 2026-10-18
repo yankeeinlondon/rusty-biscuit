@@ -72,11 +72,12 @@ fn watched_change(fixture: &LspFixture<'_>, path: &std::path::Path, kind: u32) {
 }
 
 /// The diagnostics last published for `uri` once the server has handled
-/// every earlier message: a request round trip is the barrier, and older
-/// buffered publications for `uri` are discarded.
+/// every earlier message and finished the registry jobs they queued; older
+/// buffered publications for `uri` are discarded. A response alone is no
+/// barrier: a job can hold the refresh after the registry is installed.
+/// The round trip is `documentSymbol`, which parses only `uri`.
 fn latest(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
-    let response = fixture.request("textDocument/documentSymbol", json!({ "textDocument": { "uri": uri } }));
-    assert!(response.error.is_none(), "{:?}", response.error);
+    fixture.flush_server_with("textDocument/documentSymbol", json!({ "textDocument": { "uri": uri } }));
     let latest = fixture.take_buffered_diagnostics(uri).expect("diagnostics were published");
     while fixture.take_buffered_diagnostics(uri).is_some() {}
     latest["diagnostics"].as_array().cloned().unwrap_or_default()

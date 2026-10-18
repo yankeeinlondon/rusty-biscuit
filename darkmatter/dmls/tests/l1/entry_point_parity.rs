@@ -611,11 +611,11 @@ fn markdown_links_resolve_existing_targets_above_a_narrower_workspace_folder() {
     std::fs::write(repo.join("target.md"), "# Target\n").unwrap();
     std::fs::write(home.join("target.md"), "# Target\n").unwrap();
 
-    // The narrower folder indexes only `docs/`, so a fragment on a target is
-    // unknown, never missing. The whole repository is the positive control:
-    // its targets are indexed and their anchors checked.
+    // The narrower folder lists only `docs/`, but a target above it is parsed
+    // on demand, so its anchors are checked exactly as in the whole
+    // repository, the positive control.
     let mut mismatches =
-        above_the_folder_mismatches(&repo.join("docs"), "anywhere", &workspace, &repo, &home, &magic);
+        above_the_folder_mismatches(&repo.join("docs"), "target", &workspace, &repo, &home, &magic);
     mismatches.extend(above_the_folder_mismatches(&repo, "target", &workspace, &repo, &home, &magic));
     assert!(mismatches.is_empty(), "{} mismatches:\n{}", mismatches.len(), mismatches.join("\n"));
 }

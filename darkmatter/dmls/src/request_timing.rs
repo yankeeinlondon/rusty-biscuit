@@ -10,7 +10,9 @@
 //! A request is measured from dequeue to sending its response; a notification
 //! has no response and is measured through its handler's completion. Work the
 //! handler hands to another thread (debounced diagnostics publishing, the
-//! startup file-list walk) is not part of either figure.
+//! startup file-list walk, a trigger-registry preparation it queued) is not
+//! part of a notification's figure; a request that waits for such work
+//! includes the wait, and records it as a [`Wait`].
 //!
 //! ## Stage nesting
 //!
@@ -64,6 +66,8 @@ impl Stage {
 pub enum Wait {
     FileList,
     FullIndex,
+    /// Its document's trigger registry, prepared off the dispatch thread.
+    TriggerRegistry,
 }
 
 /// How a message's handling ended.
@@ -100,6 +104,7 @@ pub struct RequestTimings {
     stages: Mutex<[Option<Duration>; 4]>,
     waited_for_file_list: AtomicBool,
     waited_for_full_index: AtomicBool,
+    waited_for_trigger_registry: AtomicBool,
 }
 
 impl RequestTimings {
@@ -112,6 +117,7 @@ impl RequestTimings {
             stages: Mutex::new([None; 4]),
             waited_for_file_list: AtomicBool::new(false),
             waited_for_full_index: AtomicBool::new(false),
+            waited_for_trigger_registry: AtomicBool::new(false),
         }
     }
 
@@ -136,6 +142,7 @@ impl RequestTimings {
         let flag = match wait {
             Wait::FileList => &self.waited_for_file_list,
             Wait::FullIndex => &self.waited_for_full_index,
+            Wait::TriggerRegistry => &self.waited_for_trigger_registry,
         };
         flag.store(true, Ordering::Relaxed);
     }
@@ -149,6 +156,7 @@ impl RequestTimings {
         match wait {
             Wait::FileList => self.waited_for_file_list.load(Ordering::Relaxed),
             Wait::FullIndex => self.waited_for_full_index.load(Ordering::Relaxed),
+            Wait::TriggerRegistry => self.waited_for_trigger_registry.load(Ordering::Relaxed),
         }
     }
 
@@ -167,6 +175,7 @@ impl std::fmt::Debug for RequestTimings {
         debug
             .field("waited_for_file_list", &self.waited(Wait::FileList))
             .field("waited_for_full_index", &self.waited(Wait::FullIndex))
+            .field("waited_for_trigger_registry", &self.waited(Wait::TriggerRegistry))
             .finish()
     }
 }
@@ -208,6 +217,7 @@ macro_rules! completion_event {
             provider_chain_ms = $timings.stage(Stage::ProviderChain).map(millis),
             waited_for_file_list = $timings.waited(Wait::FileList),
             waited_for_full_index = $timings.waited(Wait::FullIndex),
+            waited_for_trigger_registry = $timings.waited(Wait::TriggerRegistry),
             $message
         )
     };

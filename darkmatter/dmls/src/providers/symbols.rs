@@ -103,7 +103,7 @@ fn build_tree(headings: &[Heading], cursor: &mut usize, parent_level: u8) -> Vec
 /// against `query` (case-insensitive; an empty query matches everything).
 pub fn workspace_symbols(query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
     let mut out = Vec::new();
-    for record in graph.documents() {
+    for record in graph.documents().iter().filter(|record| !record.dependency) {
         let Some(doc_id) = graph.document_id(&record.path) else {
             continue;
         };

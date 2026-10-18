@@ -11,8 +11,9 @@
 //! The walk honors `.gitignore`, `.ignore`, `.git/info/exclude`, and the
 //! global excludes file, also outside a git repository
 //! (`require_git(false)`). Hidden directories are walked, because folders
-//! such as `.claude/` hold real Markdown, but every directory named `.git` is
-//! skipped (`filter_entry`). **Symlinks are not followed**: a symlinked
+//! such as `.claude/` hold real Markdown, but every entry named `.git` is
+//! skipped (`filter_entry`), and the directory holding it is reported as a
+//! repository ([`DiscoveryReport::repositories`]). **Symlinks are not followed**: a symlinked
 //! directory is never descended and a symlinked file is never listed. Two
 //! listed paths that canonicalize to the same file (overlapping or aliased
 //! workspace roots) are reported as duplicates (the caller logs each) rather
@@ -24,6 +25,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
@@ -88,6 +90,12 @@ pub struct DiscoveryReport {
     /// Walk errors (an unreadable directory, a vanished root). Any error
     /// makes the list incomplete.
     pub errors: Vec<String>,
+    /// The walked directories holding a `.git` entry (a directory, or the
+    /// file of a linked worktree or submodule), in walk order: the
+    /// repositories whose schema scopes workspace preparation adds. Found
+    /// by the same walk, which never descends into `.git`; an ignored
+    /// directory is not walked, so a repository inside one is not found.
+    pub repositories: Vec<PathBuf>,
 }
 
 impl DiscoveryReport {
@@ -111,7 +119,13 @@ pub fn effective_roots(roots: &[PathBuf], config: &WorkspaceConfig) -> Vec<PathB
 
 /// The walker every discovery decision uses, so the initial walk and a
 /// single-path check agree on ignore rules.
-fn walker(root: &Path, max_depth: Option<usize>) -> ignore::Walk {
+///
+/// Each skipped `.git` entry's parent is pushed to `repositories` when given.
+fn walker(
+    root: &Path,
+    max_depth: Option<usize>,
+    repositories: Option<Arc<Mutex<Vec<PathBuf>>>>,
+) -> ignore::Walk {
     // `follow_links(false)` is the whole symlink policy: symlinked dirs are
     // never descended and symlinked files are yielded as symlinks (skipped by
     // the caller), so loop detection is unnecessary.
@@ -120,7 +134,15 @@ fn walker(root: &Path, max_depth: Option<usize>) -> ignore::Walk {
         .hidden(false)
         .require_git(false)
         .max_depth(max_depth)
-        .filter_entry(|entry| entry.file_name() != ".git")
+        .filter_entry(move |entry| {
+            if entry.file_name() != ".git" {
+                return true;
+            }
+            if let (Some(repositories), Some(parent)) = (&repositories, entry.path().parent()) {
+                repositories.lock().expect("repository list lock poisoned").push(parent.to_path_buf());
+            }
+            false
+        })
         .build()
 }
 
@@ -131,8 +153,9 @@ pub fn discover_workspace(roots: &[PathBuf], config: &WorkspaceConfig) -> Discov
     // Physical identity of files already accepted, so an alias is a duplicate.
     let mut seen_physical: HashSet<PathBuf> = HashSet::new();
 
+    let repositories = Arc::new(Mutex::new(Vec::new()));
     for effective_root in effective_roots(roots, config) {
-        for entry in walker(&effective_root, None) {
+        for entry in walker(&effective_root, None, Some(Arc::clone(&repositories))) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(error) => {
@@ -159,7 +182,10 @@ pub fn discover_workspace(roots: &[PathBuf], config: &WorkspaceConfig) -> Discov
             }
         }
     }
-
+    let mut repositories = std::mem::take(&mut *repositories.lock().expect("repository list lock poisoned"));
+    let mut seen = HashSet::new();
+    repositories.retain(|repository| seen.insert(repository.clone()));
+    report.repositories = repositories;
     report
 }
 
@@ -190,12 +216,12 @@ pub fn listed_kind(roots: &[PathBuf], config: &WorkspaceConfig, path: &Path) -> 
     let remaining = parent.strip_prefix(&effective_root).ok()?.components();
     for next in remaining {
         let child = directory.join(next);
-        if !walker(&directory, Some(1)).flatten().any(|entry| entry.path() == child) {
+        if !walker(&directory, Some(1), None).flatten().any(|entry| entry.path() == child) {
             return None;
         }
         directory = child;
     }
-    walker(parent, Some(1))
+    walker(parent, Some(1), None)
         .flatten()
         .any(|entry| entry.path() == path && entry.file_type().is_some_and(|kind| kind.is_file()))
         .then_some(kind)
@@ -253,6 +279,22 @@ mod tests {
         assert!(names.contains(&"docs/b.markdown".to_string()));
         assert!(!names.iter().any(|n| n.ends_with("notes.txt")));
         assert!(!names.iter().any(|n| n.contains("target/")));
+    }
+
+    #[test]
+    fn the_walk_reports_each_directory_holding_a_git_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(root, "plain/a.md", "# A");
+        write(root, "repo/.git/HEAD", "ref: refs/heads/main\n");
+        write(root, "repo/.git/notes.md", "# inside .git");
+        write(root, "worktree/.git", "gitdir: /elsewhere\n");
+
+        let report = discover_workspace(&[root.to_path_buf()], &WorkspaceConfig::default());
+        let mut repositories = report.repositories.clone();
+        repositories.sort();
+        assert_eq!(repositories, vec![root.join("repo"), root.join("worktree")]);
+        assert!(report.files.iter().all(|file| !file.ends_with("notes.md")), "{:?}", report.files);
     }
 
     #[test]

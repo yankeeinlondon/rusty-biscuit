@@ -447,7 +447,14 @@ fn a_forbidden_path_prefix_is_the_same_definition_error_in_md_and_dmls() {
     session.initialize(initialize_params(&fixture.repo()));
     let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
     open(&session, envelope_uri.as_str(), "yaml", &envelope);
-    let diagnostics = session.wait_for_diagnostics(envelope_uri.as_str());
+    // Startup's registry preparation already published the closed file's
+    // diagnostic; the open buffer's publication is versioned.
+    let diagnostics = loop {
+        let params = session.wait_for_diagnostics_params(envelope_uri.as_str());
+        if !params["version"].is_null() {
+            break params["diagnostics"].as_array().cloned().unwrap_or_default();
+        }
+    };
     let messages: Vec<&str> = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))

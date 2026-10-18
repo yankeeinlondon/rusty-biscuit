@@ -151,3 +151,72 @@ fn a_failed_trigger_switches_the_registry_line_to_its_failure_variant() {
     assert!(logs.matching("schema registry ready").is_empty(), "{:#?}", logs.lines());
     fixture.shutdown();
 }
+
+/// One trigger whose match requires `title` and whose payload is
+/// `payload.yaml`, with `payload` as that file's text (`None` leaves it
+/// missing). Returns the startup registry line.
+fn payload_registry_line(payload: Option<&str>) -> (CapturedLogs, String) {
+    let logs = CapturedLogs::global();
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    init_repository(root);
+    write(root, "schemas/notes.trigger.yaml", "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: payload.yaml\n");
+    if let Some(payload) = payload {
+        write(root, "schemas/payload.yaml", payload);
+    }
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(root));
+    let lines = logs.matching("schema registry");
+    assert_eq!(lines.len(), 1, "one registry line: {:#?}", logs.lines());
+    let line = lines[0].clone();
+    fixture.shutdown();
+    (logs, line)
+}
+
+/// Each row varies only the trigger's payload and asserts the registry
+/// line's variant and its trigger counts.
+macro_rules! payload_registry_cases {
+    ($($name:ident: $payload:expr => $message:literal, $triggers:literal / $failed:literal / $scopes:literal;)+) => {$(
+        #[test]
+        fn $name() {
+            let (logs, line) = payload_registry_line($payload);
+            assert!(line.contains($message), "{line}");
+            assert_line(&logs, $message, &[
+                concat!("trigger_schemas=", $triggers).into(),
+                concat!("failed_triggers=", $failed).into(),
+                concat!("failed_scopes=", $scopes).into(),
+            ]);
+        }
+    )+};
+}
+
+payload_registry_cases! {
+    a_loading_payload_counts_a_ready_trigger:
+        Some("$schema:\n  model: string(required)\n") => "schema registry ready", 1 / 0 / 0;
+    a_missing_payload_counts_a_failed_trigger:
+        None => "schema registry initialized with failures", 0 / 1 / 1;
+    an_unparseable_payload_counts_a_failed_trigger:
+        Some("$schema: [unclosed\n") => "schema registry initialized with failures", 0 / 1 / 1;
+    an_unresolved_payload_import_counts_a_failed_trigger:
+        Some("$schema:\n  model: Missing@./missing.yaml\n") => "schema registry initialized with failures", 0 / 1 / 1;
+    an_unresolved_payload_example_counts_a_failed_trigger:
+        Some("$schema:\n  when: \"date(example(../missing.json))\"\n") => "schema registry initialized with failures", 0 / 1 / 1;
+}
+
+#[test]
+fn a_malformed_envelope_counts_a_failed_trigger() {
+    let logs = CapturedLogs::global();
+    let workspace = LspWorkspace::new();
+    let root = workspace.path();
+    init_repository(root);
+    write(root, "schemas/notes.trigger.yaml", "kind: trigger-schema\nmatch: {}\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(root));
+    assert_line(&logs, "schema registry initialized with failures", &[
+        "trigger_schemas=0".into(),
+        "failed_triggers=1".into(),
+        "failed_scopes=1".into(),
+    ]);
+    assert!(logs.matching("schema registry ready").is_empty(), "{:#?}", logs.lines());
+    fixture.shutdown();
+}

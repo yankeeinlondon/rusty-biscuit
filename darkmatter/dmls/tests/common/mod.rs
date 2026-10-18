@@ -28,6 +28,8 @@
 //! exemptions that would drift as tests change.
 #![allow(dead_code)]
 
+pub mod oracle;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -169,6 +171,12 @@ pub struct LspFixture<'workspace> {
     /// per message) or dropped, for a fixture started with
     /// [`LspFixture::start_with_full_index_gate`].
     full_index_gate: Option<crossbeam_channel::Sender<()>>,
+    /// Holds each trigger-registry job until sent to (one job per message)
+    /// or dropped, for a fixture started with
+    /// [`LspFixture::start_with_registry_gate`].
+    registry_gate: Option<crossbeam_channel::Sender<()>>,
+    /// The last [`dmls::StartupEvent::RegistryJobsOutstanding`] count seen.
+    registry_jobs: usize,
 }
 
 impl<'workspace> LspFixture<'workspace> {
@@ -244,6 +252,64 @@ impl<'workspace> LspFixture<'workspace> {
         fixture
     }
 
+    /// Like [`LspFixture::start`], but each trigger-registry job the server
+    /// queues after startup waits for [`LspFixture::release_registry_job`]
+    /// (or [`LspFixture::open_registry_gate`]) before it prepares anything,
+    /// so a test can talk to the server while a preparation is held.
+    pub fn start_with_registry_gate(workspace: &'workspace LspWorkspace) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let mut fixture = Self::spawn_with_all_hooks(
+            workspace,
+            Duration::ZERO,
+            Self::fixture_snapshot(workspace),
+            None,
+            None,
+            Some(gate_rx),
+        );
+        fixture.registry_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// Lets one held trigger-registry job through.
+    pub fn release_registry_job(&self) {
+        if let Some(gate) = &self.registry_gate {
+            gate.send(()).expect("registry gate open");
+        }
+    }
+
+    /// Lets every current and later trigger-registry job through.
+    pub fn open_registry_gate(&mut self) {
+        self.registry_gate = None;
+    }
+
+    /// Waits for a trigger-registry preparation of kind `job` to finish and
+    /// its result to be handled, returning the thread it ran on.
+    pub fn wait_for_registry_prepared(&mut self, job: dmls::RegistryJobKind) -> std::thread::ThreadId {
+        loop {
+            let (seen, thread) = self.next_registry_prepared();
+            if seen == job {
+                return thread;
+            }
+        }
+    }
+
+    /// Waits for the next trigger-registry preparation to finish and its
+    /// result to be handled, returning its kind and the thread it ran on.
+    pub fn next_registry_prepared(&mut self) -> (dmls::RegistryJobKind, std::thread::ThreadId) {
+        loop {
+            match self.next_event() {
+                Ok(dmls::StartupEvent::RegistryPrepared { job, thread }) => return (job, thread),
+                Ok(_) => {}
+                Err(error) => panic!("no registry preparation within {MESSAGE_BOUND:?}: {error}"),
+            }
+        }
+    }
+
+    /// The thread running the server's dispatch loop.
+    pub fn server_thread_id(&self) -> std::thread::ThreadId {
+        self.server_thread.as_ref().expect("server running").thread().id()
+    }
+
     /// Lets one held full-index build round through.
     pub fn release_full_index_round(&self) {
         if let Some(gate) = &self.full_index_gate {
@@ -259,10 +325,35 @@ impl<'workspace> LspFixture<'workspace> {
     /// Waits for the server to report `event`, skipping other startup events.
     pub fn wait_for_event(&mut self, event: dmls::StartupEvent) {
         loop {
-            match self.startup_events.recv_timeout(MESSAGE_BOUND) {
+            match self.next_event() {
                 Ok(seen) if seen == event => return,
                 Ok(_) => {}
                 Err(error) => panic!("no {event:?} within {MESSAGE_BOUND:?}: {error}"),
+            }
+        }
+    }
+
+    /// The next startup event, noting every registry job count it carries.
+    fn next_event(&mut self) -> Result<dmls::StartupEvent, crossbeam_channel::RecvTimeoutError> {
+        let event = self.startup_events.recv_timeout(MESSAGE_BOUND)?;
+        if let dmls::StartupEvent::RegistryJobsOutstanding(outstanding) = event {
+            self.registry_jobs = outstanding;
+        }
+        Ok(event)
+    }
+
+    /// Waits until the server has no trigger-registry job queued or
+    /// running, so every diagnostic and answer those jobs held has been
+    /// sent (not necessarily received: [`LspFixture::flush_server`] also
+    /// buffers it).
+    /// The server reports each count change before it answers the request
+    /// whose handling caused it, so after a response this sees every job
+    /// queued until then.
+    pub fn wait_for_registry_jobs(&mut self) {
+        self.drain_registry_job_counts();
+        while self.registry_jobs > 0 {
+            if let Err(error) = self.next_event() {
+                panic!("{} registry jobs still outstanding after {MESSAGE_BOUND:?}: {error}", self.registry_jobs);
             }
         }
     }
@@ -304,10 +395,22 @@ impl<'workspace> LspFixture<'workspace> {
         file_list_gate: Option<crossbeam_channel::Receiver<()>>,
         full_index_gate: Option<crossbeam_channel::Receiver<()>>,
     ) -> Self {
+        Self::spawn_with_all_hooks(workspace, epilogue_delay, snapshot, file_list_gate, full_index_gate, None)
+    }
+
+    fn spawn_with_all_hooks(
+        workspace: &'workspace LspWorkspace,
+        epilogue_delay: Duration,
+        snapshot: RequestSnapshot,
+        file_list_gate: Option<crossbeam_channel::Receiver<()>>,
+        full_index_gate: Option<crossbeam_channel::Receiver<()>>,
+        registry_gate: Option<crossbeam_channel::Receiver<()>>,
+    ) -> Self {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let hooks = dmls::StartupHooks {
             file_list_gate,
             full_index_gate,
+            registry_gate,
             observer: Some(events_tx),
         };
         let (server_side, client_side) = Connection::memory();
@@ -342,6 +445,8 @@ impl<'workspace> LspFixture<'workspace> {
             startup_events: events_rx,
             file_list_gate: None,
             full_index_gate: None,
+            registry_gate: None,
+            registry_jobs: 0,
         }
     }
 
@@ -464,15 +569,17 @@ impl<'workspace> LspFixture<'workspace> {
     }
 
     /// Initializes the session and waits for the workspace file list, so
-    /// every later diagnostic is computed against it.
+    /// every later diagnostic is computed against it. The startup registry
+    /// line is logged before the list installs.
     pub fn initialize(&mut self, params: Value) -> Value {
         let result = self.initialize_unlisted(params);
         self.wait_for_file_list();
         result
     }
 
-    /// Initializes the session and waits for the startup trigger registries,
-    /// but not for the file list.
+    /// Initializes the session without waiting for the file list or for the
+    /// startup trigger registries, whose line follows the walk (so a gated
+    /// walk would hold it). [`LspFixture::initialize`] waits for both.
     pub fn initialize_unlisted(&mut self, params: Value) -> Value {
         let response = self.request("initialize", params);
         assert!(
@@ -481,17 +588,58 @@ impl<'workspace> LspFixture<'workspace> {
             response.error
         );
         self.notify("initialized", json!({}));
-        self.wait_for_event(dmls::StartupEvent::RegistryReady);
         response.result.expect("initialize result")
     }
 
-    pub fn flush_server(&mut self) {
+    /// Waits until the server has handled every message sent so far, and
+    /// not for the trigger-registry jobs they queued (a held job would never
+    /// finish).
+    pub fn round_trip(&mut self) {
         let response = self.request("workspace/symbol", json!({ "query": "" }));
-        assert!(
-            response.error.is_none(),
-            "server flush request failed: {:?}",
-            response.error
-        );
+        assert!(response.error.is_none(), "round-trip request failed: {:?}", response.error);
+    }
+
+    /// Waits until the server has handled every message sent so far and
+    /// finished the trigger-registry jobs they queued, with every message
+    /// the server sent meanwhile buffered.
+    pub fn flush_server(&mut self) {
+        self.flush_server_with("workspace/symbol", json!({ "query": "" }));
+    }
+
+    /// [`LspFixture::flush_server`] with `method` as the round trip, for a
+    /// test that must not pay for `workspace/symbol`'s full index.
+    pub fn flush_server_with(&mut self, method: &str, params: Value) {
+        loop {
+            let response = self.request(method, params.clone());
+            assert!(
+                response.error.is_none(),
+                "server flush request failed: {:?}",
+                response.error
+            );
+            // A count that moved may have moved after this response, with
+            // what the finished job sent still unread: settle, then make
+            // another round trip to buffer it.
+            if !self.drain_registry_job_counts() && self.registry_jobs == 0 {
+                return;
+            }
+            self.wait_for_registry_jobs();
+        }
+    }
+
+    /// Takes the startup events already sent, noting registry job counts.
+    ///
+    /// ## Returns
+    ///
+    /// Whether any count arrived.
+    fn drain_registry_job_counts(&mut self) -> bool {
+        let mut moved = false;
+        while let Ok(event) = self.startup_events.try_recv() {
+            if let dmls::StartupEvent::RegistryJobsOutstanding(outstanding) = event {
+                self.registry_jobs = outstanding;
+                moved = true;
+            }
+        }
+        moved
     }
 
     /// Pumps messages until a buffered server-initiated request with `method`

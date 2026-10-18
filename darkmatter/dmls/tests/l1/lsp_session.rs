@@ -622,6 +622,10 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
         refreshed_envelope.is_empty(),
         "valid envelope diagnostics after consumer open: {refreshed_envelope:?}"
     );
+    // An open envelope can be published twice for one event; drop any
+    // leftover so the wait below reads a post-save publication.
+    fixture.flush_server();
+    while fixture.take_buffered_diagnostics(envelope_uri.as_str()).is_some() {}
 
     std::fs::remove_file(&payload_path).unwrap();
     fixture.notify(

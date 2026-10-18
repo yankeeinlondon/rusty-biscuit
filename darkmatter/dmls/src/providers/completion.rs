@@ -7,13 +7,13 @@
 //! `textEdit` (never deferred to resolve — the Zed gate), so no snippet or
 //! resolve support is required.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionTextEdit, TextEdit};
 
 use super::DocumentContext;
 use crate::context::reference_candidates;
-use crate::graph::{DocumentId, WorkspaceGraph};
+use crate::graph::{DocumentId, WorkspaceGraph, is_markdown_path};
 
 /// Fenced-code language tokens offered by completion (canonical
 /// `LanguageGrammar` tokens plus a few common aliases). Each resolves through
@@ -86,7 +86,7 @@ fn path_completions(
     };
     let start = offset - partial.len();
     let mut out = Vec::new();
-    for record in ctx.graph.documents() {
+    for record in ctx.graph.documents().iter().filter(|record| !record.dependency) {
         if ctx.graph.document_id(&record.path) == Some(doc_id) {
             continue;
         }
@@ -142,10 +142,25 @@ fn anchor_target(ctx: &DocumentContext, doc_id: DocumentId, path_part: &str) -> 
 /// the cursor is after `#` in an open link destination.
 pub(crate) fn heading_target(ctx: &DocumentContext, offset: usize) -> Option<DocumentId> {
     let doc_id = ctx.doc_id?;
+    anchor_target(ctx, doc_id, anchor_path(ctx, offset)?)
+}
+
+/// The existing Markdown file outside the graph that an anchor completion at
+/// `offset` names, found the way composition resolves the path; parsing it
+/// makes it a graph document [`heading_target`] finds.
+pub(crate) fn heading_target_file(ctx: &DocumentContext, offset: usize) -> Option<PathBuf> {
+    let path_part = anchor_path(ctx, offset).filter(|path_part| !path_part.is_empty())?;
+    let found = ctx.resolve_reference(path_part)?.found()?.to_path_buf();
+    is_markdown_path(&found).then_some(found)
+}
+
+/// The path before `#` when the cursor is after it in an open link
+/// destination (empty for a same-document anchor).
+fn anchor_path<'a>(ctx: &DocumentContext<'a>, offset: usize) -> Option<&'a str> {
     let line_start = ctx.text[..offset].rfind('\n').map(|index| index + 1).unwrap_or(0);
     let dest = link_destination_partial(&ctx.text[line_start..offset])?;
     let hash = dest.rfind('#')?;
-    anchor_target(ctx, doc_id, &dest[..hash])
+    Some(&dest[..hash])
 }
 
 /// `(slug, title)` for every heading in `document`.

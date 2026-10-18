@@ -3484,6 +3484,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "rlsp-yaml-parser",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml_ng",

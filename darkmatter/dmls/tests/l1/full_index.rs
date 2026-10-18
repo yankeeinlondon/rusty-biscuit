@@ -436,3 +436,204 @@ fn shutdown_during_a_build_answers_its_waiters() {
     fixture.open_full_index_gate();
     fixture.exit_after_shutdown(shutdown);
 }
+
+/// Bytes that are not UTF-8: the deterministic read-failure seam.
+const UNREADABLE: [u8; 4] = [0xff, 0xfe, 0x00, 0x80];
+
+/// How a ready full index loses a readable document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Transition {
+    /// A watched change makes the closed referrer unreadable.
+    WatchedModification,
+    /// A watched creation adds an unreadable Markdown file.
+    WatchedCreation,
+    /// A save-driven rescan (no client watcher) finds the closed referrer
+    /// unreadable.
+    RescanOnSave,
+    /// The referrer's buffer closes over unreadable disk bytes.
+    BufferClose,
+    /// An ignore-file event relists the workspace, which adds an unreadable
+    /// Markdown file.
+    Relist,
+}
+
+/// A request that needs the full index.
+#[derive(Debug, Clone, Copy)]
+enum Consumer {
+    References,
+    HeadingRename,
+    FileRename,
+    WorkspaceSymbols,
+}
+
+/// A session over `target.md` (open) and `referrer.md` whose full index is
+/// ready, after `transition` has made one listed file unreadable.
+///
+/// ## Returns
+///
+/// The fixture, and the unreadable file's name.
+fn ready_then(workspace: &LspWorkspace, transition: Transition) -> (LspFixture<'_>, &'static str) {
+    let target = uri(&workspace.path().join("target.md"));
+    let referrer = workspace.path().join("referrer.md");
+    let mut fixture = LspFixture::start(workspace);
+    let mut params = initialize_params(workspace.path(), false);
+    if transition == Transition::RescanOnSave {
+        params["capabilities"]["workspace"] = json!({});
+    }
+    fixture.initialize(params);
+    open_settled(&mut fixture, &target, TARGET);
+    if transition == Transition::BufferClose {
+        open_settled(&mut fixture, &uri(&referrer), REFERRER);
+    }
+    let symbols = fixture.request("workspace/symbol", symbols_params());
+    assert!(symbol_names(&symbols).contains(&("referrer.md".to_string(), "Referrer".to_string())));
+
+    let unreadable = match transition {
+        Transition::WatchedModification => {
+            std::fs::write(&referrer, UNREADABLE).unwrap();
+            watched(&fixture, &[(&referrer, 2)]);
+            "referrer.md"
+        }
+        Transition::WatchedCreation => {
+            let created = workspace.path().join("binary.md");
+            std::fs::write(&created, UNREADABLE).unwrap();
+            watched(&fixture, &[(&created, 1)]);
+            "binary.md"
+        }
+        Transition::RescanOnSave => {
+            std::fs::write(&referrer, UNREADABLE).unwrap();
+            fixture.notify("textDocument/didSave", json!({ "textDocument": { "uri": target } }));
+            "referrer.md"
+        }
+        Transition::BufferClose => {
+            std::fs::write(&referrer, UNREADABLE).unwrap();
+            fixture.notify("textDocument/didClose", json!({ "textDocument": { "uri": uri(&referrer) } }));
+            "referrer.md"
+        }
+        Transition::Relist => {
+            std::fs::write(workspace.path().join("binary.md"), UNREADABLE).unwrap();
+            let ignore = write(workspace, ".ignore", "ignored/\n");
+            watched(&fixture, &[(&ignore, 1)]);
+            "binary.md"
+        }
+    };
+    (fixture, unreadable)
+}
+
+fn rename_params(target: &str) -> Value {
+    json!({ "textDocument": { "uri": target }, "position": { "line": 0, "character": 3 }, "newName": "Goal" })
+}
+
+fn file_rename_params(workspace: &LspWorkspace) -> Value {
+    let target = workspace.path().join("target.md");
+    json!({ "files": [ { "oldUri": uri(&target), "newUri": uri(&workspace.path().join("goal.md")) } ] })
+}
+
+fn consume(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace, consumer: Consumer) -> Response {
+    let target = uri(&workspace.path().join("target.md"));
+    match consumer {
+        Consumer::References => fixture.request("textDocument/references", references_params(&target)),
+        Consumer::HeadingRename => fixture.request("textDocument/rename", rename_params(&target)),
+        Consumer::FileRename => fixture.request("workspace/willRenameFiles", file_rename_params(workspace)),
+        Consumer::WorkspaceSymbols => fixture.request("workspace/symbol", symbols_params()),
+    }
+}
+
+/// Every consumer of the full index fails, with the first build's error
+/// naming the unreadable file and no partial result, after each way a ready
+/// index can lose a readable document.
+macro_rules! readiness_withdrawn {
+    ($($name:ident: $transition:ident, $consumer:ident;)*) => {$(
+        #[test]
+        fn $name() {
+            let workspace = workspace_with_referrer(1);
+            let (mut fixture, unreadable) = ready_then(&workspace, Transition::$transition);
+            let response = consume(&mut fixture, &workspace, Consumer::$consumer);
+            assert!(response.result.is_none(), "no partial result: {:?}", response.result);
+            let error = response.error.expect("the index is incomplete");
+            assert_eq!(error.code, REQUEST_FAILED);
+            assert!(error.message.contains(unreadable), "{}", error.message);
+            fixture.shutdown();
+        }
+    )*};
+}
+
+readiness_withdrawn! {
+    a_ready_index_after_a_watched_modification_fails_references: WatchedModification, References;
+    a_ready_index_after_a_watched_modification_fails_heading_rename: WatchedModification, HeadingRename;
+    a_ready_index_after_a_watched_modification_fails_file_rename: WatchedModification, FileRename;
+    a_ready_index_after_a_watched_modification_fails_workspace_symbols: WatchedModification, WorkspaceSymbols;
+    a_ready_index_after_a_watched_creation_fails_references: WatchedCreation, References;
+    a_ready_index_after_a_watched_creation_fails_heading_rename: WatchedCreation, HeadingRename;
+    a_ready_index_after_a_watched_creation_fails_file_rename: WatchedCreation, FileRename;
+    a_ready_index_after_a_watched_creation_fails_workspace_symbols: WatchedCreation, WorkspaceSymbols;
+    a_ready_index_after_a_save_rescan_fails_references: RescanOnSave, References;
+    a_ready_index_after_a_save_rescan_fails_heading_rename: RescanOnSave, HeadingRename;
+    a_ready_index_after_a_save_rescan_fails_file_rename: RescanOnSave, FileRename;
+    a_ready_index_after_a_save_rescan_fails_workspace_symbols: RescanOnSave, WorkspaceSymbols;
+    a_ready_index_after_a_buffer_close_fails_references: BufferClose, References;
+    a_ready_index_after_a_buffer_close_fails_heading_rename: BufferClose, HeadingRename;
+    a_ready_index_after_a_buffer_close_fails_file_rename: BufferClose, FileRename;
+    a_ready_index_after_a_buffer_close_fails_workspace_symbols: BufferClose, WorkspaceSymbols;
+    a_ready_index_after_a_relist_fails_references: Relist, References;
+    a_ready_index_after_a_relist_fails_heading_rename: Relist, HeadingRename;
+    a_ready_index_after_a_relist_fails_file_rename: Relist, FileRename;
+    a_ready_index_after_a_relist_fails_workspace_symbols: Relist, WorkspaceSymbols;
+}
+
+/// Restoring the bytes and sending another change retries the parse: the
+/// referrer is back in references and in the rename's edits, and nothing is
+/// read again for the next request.
+#[test]
+fn a_repaired_file_after_readiness_is_read_again_and_complete_answers_return() {
+    let workspace = workspace_with_referrer(1);
+    let (mut fixture, _) = ready_then(&workspace, Transition::WatchedModification);
+    let target = uri(&workspace.path().join("target.md"));
+    let referrer = workspace.path().join("referrer.md");
+    assert!(consume(&mut fixture, &workspace, Consumer::References).error.is_some());
+
+    std::fs::write(&referrer, REFERRER).unwrap();
+    watched(&fixture, &[(&referrer, 2)]);
+    // A round trip, so the change has been handled before counting.
+    fixture.request("textDocument/documentSymbol", json!({ "textDocument": { "uri": target } }));
+    assert_eq!(parses_during(|| {
+        let references = fixture.request("textDocument/references", references_params(&target));
+        assert_eq!(referrer_files(&references), vec!["referrer.md".to_string()]);
+    }), 0, "the change event read the repaired file");
+    let edit = fixture.request("textDocument/rename", rename_params(&target)).result.unwrap();
+    assert!(edit.to_string().contains("referrer.md"), "{edit}");
+    fixture.shutdown();
+}
+
+/// The save-driven rescan retries a listed file whose read failed once the
+/// index was built.
+#[test]
+fn a_save_rescan_retries_a_file_that_failed_after_readiness() {
+    let workspace = workspace_with_referrer(1);
+    let (mut fixture, _) = ready_then(&workspace, Transition::RescanOnSave);
+    let target = uri(&workspace.path().join("target.md"));
+    assert!(consume(&mut fixture, &workspace, Consumer::References).error.is_some());
+
+    std::fs::write(workspace.path().join("referrer.md"), REFERRER).unwrap();
+    fixture.notify("textDocument/didSave", json!({ "textDocument": { "uri": target } }));
+    let references = fixture.request("textDocument/references", references_params(&target));
+    assert_eq!(referrer_files(&references), vec!["referrer.md".to_string()]);
+    fixture.shutdown();
+}
+
+/// An unreadable file that is then deleted leaves the list: it is absent,
+/// not unreadable, and the index is complete again.
+#[test]
+fn deleting_a_file_that_failed_after_readiness_completes_the_index() {
+    let workspace = workspace_with_referrer(1);
+    let (mut fixture, _) = ready_then(&workspace, Transition::WatchedCreation);
+    let created = workspace.path().join("binary.md");
+    std::fs::remove_file(&created).unwrap();
+    watched(&fixture, &[(&created, 3)]);
+    let target = uri(&workspace.path().join("target.md"));
+    let references = fixture.request("textDocument/references", references_params(&target));
+    assert_eq!(referrer_files(&references), vec!["referrer.md".to_string()]);
+    let symbols = consume(&mut fixture, &workspace, Consumer::WorkspaceSymbols);
+    assert!(!symbol_names(&symbols).iter().any(|(file, _)| file == "binary.md"));
+    fixture.shutdown();
+}

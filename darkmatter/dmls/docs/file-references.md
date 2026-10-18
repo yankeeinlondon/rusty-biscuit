@@ -145,9 +145,12 @@ target. For example, with only `repo/docs/` open, `[t](&target.md)` links to
 reported. When no file exists, a later candidate that is an open, unsaved
 buffer still counts.
 
-A `#fragment` is checked against a workspace document, which is parsed the
-first time an open document's link or heading completion needs its headings.
-A `#fragment` on a file outside the list is never checked. Features that report
+A `#fragment` is checked against the target's headings, which are parsed the
+first time an open document's link or heading completion needs them. That
+includes an existing Markdown file outside the list (above the workspace
+folder, or excluded from discovery): it is parsed the same way, as a
+dependency that never joins the list. A `#fragment` on a file in another
+format is never checked. Features that report
 a single target, such as directive links and transclusion
 diagnostics, probe the filesystem the way composition does. The
 create-missing-file code action creates the file at the first planned

@@ -37,7 +37,8 @@ use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::resolve::expand_named_types;
 use darkmatter::markdown::schemas::{
-    SchemaError, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
+    SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument,
+    StandaloneSchemaEnvelope,
     SuggestionLintProblem, parse_standalone_schema_document,
 };
 use lsp_types::Uri;
@@ -143,6 +144,11 @@ impl DocumentOverlay {
 #[derive(Default)]
 pub struct OverlayState {
     inner: Mutex<OverlayCache>,
+    /// The repositories the last workspace listing found below the
+    /// workspace folders, whose scopes
+    /// [`prepare_workspace_registries`](Self::prepare_workspace_registries)
+    /// adds. A separate lock, so recording them never waits for a lookup.
+    workspace_repositories: Mutex<Vec<PathBuf>>,
 }
 
 #[derive(Default)]
@@ -164,6 +170,16 @@ struct OverlayCache {
     /// invalidated by content hash, the document's context, or a change to
     /// any file it imports.
     standalone_resolution: HashMap<String, CachedStandalone>,
+}
+
+/// A document's trigger registry that is not fresh: what
+/// [`OverlayState::prepare_registry`] needs to prepare it.
+#[derive(Clone)]
+pub struct RegistryNeed {
+    /// The document the registry belongs to.
+    pub path: PathBuf,
+    /// The document's context, which the registry is prepared in.
+    pub context: FileResolutionContext,
 }
 
 /// A trigger-load diagnostic that must be published or cleared.
@@ -232,7 +248,15 @@ struct StandaloneNamedTypes {
 }
 
 impl OverlayState {
-    /// Builds the overlay for one open document.
+    /// Builds the overlay for one open document, first preparing on the
+    /// calling thread the trigger registry it needs (see
+    /// [`prepare_for_document`](Self::prepare_for_document)).
+    ///
+    /// The entry point for a caller with no server around it (a test, a
+    /// corpus check). The server never calls it: it prepares registries off
+    /// its dispatch thread and builds overlays with
+    /// [`for_document_timed`](Self::for_document_timed), which only looks
+    /// registries up.
     ///
     /// ## Returns
     ///
@@ -249,12 +273,20 @@ impl OverlayState {
         workspace_roots: &[PathBuf],
         resolution: &DocumentResolution,
     ) -> Option<DocumentOverlay> {
+        self.prepare_for_document(text, path, workspace_roots, resolution);
         let timings = RequestTimings::untimed();
         self.for_document_timed(uri, text, path, config, workspace_roots, resolution, &timings)
     }
 
-    /// [`OverlayState::for_document`], recording the schema-assembly and
-    /// trigger-registry stages into the dispatched message's `timings`.
+    /// Builds the overlay for one open document from the installed trigger
+    /// registries, recording the schema-assembly and trigger-registry stages
+    /// into the dispatched message's `timings`.
+    ///
+    /// Never prepares a registry: a document whose registry is not fresh
+    /// ([`registry_demand`](Self::registry_demand)) is served the scope's
+    /// installed state (none, for a document never prepared). The server
+    /// therefore builds an overlay only once the registry the document needs
+    /// is prepared.
     #[allow(clippy::too_many_arguments)]
     pub fn for_document_timed(
         &self,
@@ -345,13 +377,13 @@ impl OverlayState {
                     });
                 }
                 Ok(Some(_)) => {
-                    let mut cache = self.inner.lock().expect("overlay lock poisoned");
-                    if let Ok(context) = resolution.context() {
+                    let cache = self.inner.lock().expect("overlay lock poisoned");
+                    if resolution.context().is_ok() {
                         // A root I/O failure reaches the documents it governs
                         // through `schema_for`; this envelope's own load error
                         // is read below.
                         let _ = timings.time(Stage::TriggerRegistry, || {
-                            cache.trigger_registry(path, workspace_roots, context)
+                            cache.trigger_registry(path, workspace_roots)
                         });
                     }
                     if let Some(error) = cache.triggers.load_error_for(path) {
@@ -506,28 +538,151 @@ impl OverlayState {
         cache.triggers.watch_folders()
     }
 
-    /// Prepares the trigger registry of each workspace folder's own context,
-    /// so the roots a folder's documents share are classified and their
-    /// payloads loaded before the first schema-dependent request.
+    /// Prepares the trigger registries of the workspace scopes (see
+    /// [`workspace_probes`]): each workspace folder, each repository the
+    /// last listing found below one
+    /// ([`set_workspace_repositories`](Self::set_workspace_repositories)),
+    /// and inside each of those the packages and package areas its
+    /// repository's scope catalog lists, plus each first-level directory of
+    /// a monorepo that is a package area only by the catalog's first-directory
+    /// fallback and has a `schemas` folder. Their union is the set of schema
+    /// roots the folders' documents apply, so every root is classified and
+    /// its payloads loaded at startup, and again after every refresh that
+    /// marked them stale.
     ///
-    /// A folder is prepared as a document named [`WORKSPACE_PROBE`] inside
-    /// it; no such file is read. A folder whose context cannot be built is
-    /// skipped, since its documents report the context failure. The lock is
-    /// taken per folder, so the dispatch thread is held for one folder at a
-    /// time.
+    /// Each scope is prepared as a document named [`WORKSPACE_PROBE`] in its
+    /// folder, through [`prepare_registry`](Self::prepare_registry), as a
+    /// document there would be; no such file is read and no Markdown is
+    /// parsed. A registry that is still fresh is not prepared again. A
+    /// folder whose context cannot be built is skipped, since its documents
+    /// report the context failure. Does I/O: the server calls it only off
+    /// its dispatch thread.
     pub fn prepare_workspace_registries(
         &self,
         workspace_roots: &[PathBuf],
         contexts: &crate::context::RepositoryContexts,
     ) {
-        for root in workspace_roots {
-            let probe = root.join(WORKSPACE_PROBE);
+        let repositories = self.workspace_repositories();
+        for probe in workspace_probes(workspace_roots, &repositories, contexts) {
             let resolution = contexts.for_document(&probe);
             let Ok(context) = resolution.context() else {
                 continue;
             };
+            self.prepare_registry(&probe, workspace_roots, context);
+        }
+    }
+
+    /// Records the repositories a workspace listing found
+    /// ([`DiscoveryReport::repositories`](crate::workspace::DiscoveryReport::repositories)).
+    ///
+    /// ## Returns
+    ///
+    /// Whether the set changed, so the caller queues a workspace preparation.
+    pub fn set_workspace_repositories(&self, mut repositories: Vec<PathBuf>) -> bool {
+        repositories.sort();
+        repositories.dedup();
+        let mut current = self.workspace_repositories.lock().expect("repository list lock poisoned");
+        let changed = *current != repositories;
+        *current = repositories;
+        changed
+    }
+
+    /// Adds (`present`) or removes the repository at `repository`, for a
+    /// watched change inside its `.git` entry.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the set changed.
+    pub fn note_workspace_repository(&self, repository: &Path, present: bool) -> bool {
+        let mut current = self.workspace_repositories.lock().expect("repository list lock poisoned");
+        let position = current.iter().position(|known| known == repository);
+        match (position, present) {
+            (None, true) => {
+                current.push(repository.to_path_buf());
+                current.sort();
+                true
+            }
+            (Some(index), false) => {
+                current.remove(index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn workspace_repositories(&self) -> Vec<PathBuf> {
+        self.workspace_repositories.lock().expect("repository list lock poisoned").clone()
+    }
+
+    /// The trigger registry the document at `path` with source `text` needs
+    /// prepared, or `None` when it needs none or its registry is fresh. A
+    /// lookup only: it reads nothing from disk.
+    ///
+    /// A document needs a registry when [`for_document_timed`](Self::for_document_timed)
+    /// would look one up: it has a frontmatter block, or it is a claimed
+    /// trigger envelope in a `schemas` folder, and it lies in a workspace
+    /// folder and has a context.
+    pub fn registry_demand(
+        &self,
+        text: &str,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+        resolution: &DocumentResolution,
+    ) -> Option<RegistryNeed> {
+        let has_frontmatter =
+            matches!(darkmatter::markdown::extract_frontmatter_block(text), Ok(Some(_)));
+        if !has_frontmatter && !is_trigger_envelope(text, path) {
+            return None;
+        }
+        let context = resolution.context().ok()?;
+        schema::trigger_boundary(path, workspace_roots)?;
+        let cache = self.inner.lock().expect("overlay lock poisoned");
+        (!cache.triggers.is_fresh(path, context))
+            .then(|| RegistryNeed { path: path.to_path_buf(), context: context.clone() })
+    }
+
+    /// Prepares the trigger registry of the document at `path` in `context`
+    /// unless it is fresh. The overlay lock is held only to copy the cached
+    /// root contents and to install the result, never across the scan and
+    /// payload reads, so a caller that only looks registries up waits for
+    /// neither. Does I/O: the server calls it only off its dispatch thread.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the registry is fresh afterwards; `false` when a change
+    /// arrived during the preparation and touched what it read.
+    pub fn prepare_registry(
+        &self,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+        context: &FileResolutionContext,
+    ) -> bool {
+        let Some(boundary) = schema::trigger_boundary(path, workspace_roots) else {
+            return true;
+        };
+        let preparation = {
             let mut cache = self.inner.lock().expect("overlay lock poisoned");
-            let _ = cache.trigger_registry(&probe, workspace_roots, context);
+            cache.triggers.begin(path, &boundary, context)
+        };
+        let Some(preparation) = preparation else {
+            return true;
+        };
+        let prepared = preparation.run();
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.install(prepared)
+    }
+
+    /// [`prepare_registry`](Self::prepare_registry) for the registry
+    /// [`registry_demand`](Self::registry_demand) says the document needs.
+    pub fn prepare_for_document(
+        &self,
+        text: &str,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+        resolution: &DocumentResolution,
+    ) {
+        if let Some(need) = self.registry_demand(text, path, workspace_roots, resolution) {
+            self.prepare_registry(&need.path, workspace_roots, &need.context);
         }
     }
 
@@ -559,7 +714,7 @@ impl OverlayCache {
             return FrontmatterSchema::new(SchemaOutcome::Ready(None));
         };
         let registry = match timings.time(Stage::TriggerRegistry, || {
-            self.trigger_registry(path, workspace_roots, context)
+            self.trigger_registry(path, workspace_roots)
         }) {
             Ok(registry) => registry,
             Err(error) => {
@@ -707,28 +862,130 @@ impl OverlayCache {
         resolved
     }
 
-    /// The document's trigger registry, from the registry cache. A
-    /// trigger-file load error keeps the last-good registry (the file is
-    /// likely mid-edit, and its own diagnostic reports the error); a
-    /// schema-root I/O error is returned instead, since any registry would
-    /// silently lack that root's triggers and bare names.
+    /// The document's installed trigger registry, looked up in the registry
+    /// cache (never prepared). A trigger-file load error keeps the last-good
+    /// registry (the file is likely mid-edit, and its own diagnostic reports
+    /// the error); a schema-root I/O error is returned instead, since any
+    /// registry would silently lack that root's triggers and bare names.
     fn trigger_registry(
-        &mut self,
+        &self,
         path: &Path,
         workspace_roots: &[PathBuf],
-        context: &FileResolutionContext,
     ) -> Result<Option<registry::InstalledRegistry>, Arc<SchemaError>> {
-        let Some(boundary) = schema::trigger_boundary(path, workspace_roots) else {
+        if schema::trigger_boundary(path, workspace_roots).is_none() {
             return Ok(None);
-        };
-        self.triggers.lookup(path, &boundary, context)
+        }
+        self.triggers.lookup(path)
     }
 }
 
-/// The document name a workspace folder's startup registry is prepared under
-/// (see [`OverlayState::prepare_workspace_registries`]). Only its folder
-/// matters: the registry is the one any document directly in the folder gets.
+/// Whether `text` at `path` is a claimed trigger envelope in a `schemas`
+/// folder, the documents whose overlay reads the trigger-load error.
+fn is_trigger_envelope(text: &str, path: &Path) -> bool {
+    path.parent().and_then(Path::file_name).is_some_and(|name| name == "schemas")
+        && matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
+        && matches!(darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text), Ok(Some(_)))
+}
+
+/// The document name a workspace scope's registry is prepared under (see
+/// [`OverlayState::prepare_workspace_registries`]). Only its folder matters:
+/// the registry is the one any document directly in the folder gets.
 pub const WORKSPACE_PROBE: &str = ".dmls-workspace";
+
+/// The probe documents of every workspace scope, deduplicated in this
+/// order: one in each workspace folder and each listed repository inside
+/// one; then, for each of those scope folders, one in each package-area and
+/// package root its repository catalog lists inside it, and one in each
+/// [`fallback_areas`] directory.
+///
+/// A scope that contains the folder (a package or repository above a
+/// workspace subfolder) is the folder's own context and needs no probe of
+/// its own; a catalog root outside every folder has no workspace documents.
+fn workspace_probes(
+    workspace_roots: &[PathBuf],
+    repositories: &[PathBuf],
+    contexts: &crate::context::RepositoryContexts,
+) -> Vec<PathBuf> {
+    let mut probes: Vec<PathBuf> = Vec::new();
+    let mut push = |probe: PathBuf| {
+        if !probes.contains(&probe) {
+            probes.push(probe);
+        }
+    };
+    let nested = repositories
+        .iter()
+        .filter(|repository| workspace_roots.iter().any(|root| repository.starts_with(root)));
+    for root in workspace_roots.iter().chain(nested) {
+        let probe = root.join(WORKSPACE_PROBE);
+        let resolution = contexts.for_document(&probe);
+        push(probe);
+        let Some(catalog) = resolution
+            .context()
+            .ok()
+            .and_then(FileResolutionContext::repository_scope_catalog)
+        else {
+            continue;
+        };
+        for scope in catalog.package_area_roots().iter().chain(catalog.package_roots()) {
+            if scope.starts_with(root) && scope != root {
+                push(scope.join(WORKSPACE_PROBE));
+            }
+        }
+        for area in fallback_areas(catalog, root, contexts) {
+            push(area.join(WORKSPACE_PROBE));
+        }
+    }
+    probes
+}
+
+/// The first-level directories of `catalog`'s repository, inside `root`,
+/// that the catalog makes a package area only by its first-directory
+/// fallback (a monorepo directory no listed package or area claims) and
+/// whose package-area schema root [`SchemaRoots::for_document`] searches.
+///
+/// Costs one listing of the repository root and, per child directory, one
+/// `schemas` metadata read; a child without one is never given a context or
+/// a scope, so a directory with no schema root adds no work to preparation.
+/// The context, not this function, decides the area: a child whose probe
+/// context names another area (or none, outside a monorepo) is skipped.
+fn fallback_areas(
+    catalog: &biscuit_file::RepositoryScopeCatalog,
+    root: &Path,
+    contexts: &crate::context::RepositoryContexts,
+) -> Vec<PathBuf> {
+    let repository = catalog.repository_root();
+    if !repository.starts_with(root) {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(repository) else {
+        return Vec::new();
+    };
+    let mut children: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| entry.file_name() != ".git")
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        .filter(|child| !catalog.package_area_roots().contains(child) && !catalog.package_roots().contains(child))
+        .filter(|child| std::fs::symlink_metadata(child.join("schemas")).is_ok_and(|meta| meta.is_dir()))
+        .collect();
+    children.sort();
+    children.retain(|child| {
+        let resolution = contexts.for_document(&child.join(WORKSPACE_PROBE));
+        let Ok(context) = resolution.context() else {
+            return false;
+        };
+        if context.package_area() != Some(child.as_path()) {
+            return false;
+        }
+        // An unreadable root keeps the probe, so preparation reports it.
+        SchemaRoots::for_document(context).map_or(true, |roots| {
+            roots.entries().iter().any(|entry| {
+                entry.kind == SchemaRootKind::PackageArea && matches!(entry.state, SchemaRootState::Searched(_))
+            })
+        })
+    });
+    children
+}
 
 /// Content-and-config identity for the schema cache: the document text plus a
 /// signature of the schema configuration (extensions + strict mode).
@@ -1764,6 +2021,40 @@ mod tests {
         let edited = missing(&build());
         assert!(edited.iter().any(|message| message.contains("reviewer")), "{edited:?}");
         assert!(edited.iter().any(|message| message.contains("model")), "{edited:?}");
+    }
+
+    #[test]
+    fn the_server_overlay_build_only_looks_registries_up() {
+        use crate::work_counters::work_counts;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        write_trigger_fixture(&root);
+        let path = root.join("doc.md");
+        let text = "---\nprompt: hello\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let roots = [root.clone()];
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let build = || {
+            state
+                .for_document_timed(&doc, text, &path, &DmlsConfig::default(), &roots, &resolution, &RequestTimings::untimed())
+                .unwrap()
+        };
+        let triggered = |overlay: &DocumentOverlay| {
+            let bundle = ready_bundle(overlay);
+            !bundle.effective.validate(&bundle.frontmatter_json).valid
+        };
+
+        let before = work_counts();
+        assert!(!triggered(&build()), "no registry is installed yet, and the build prepares none");
+        assert_eq!(work_counts().since(before).registry_scans, 0);
+
+        let need = state.registry_demand(text, &path, &roots, &resolution).expect("not prepared");
+        assert_eq!(need.path, path);
+        assert!(state.prepare_registry(&need.path, &roots, &need.context));
+        assert!(state.registry_demand(text, &path, &roots, &resolution).is_none(), "fresh");
+        assert!(triggered(&build()), "the installed registry's trigger applies");
     }
 
     #[test]

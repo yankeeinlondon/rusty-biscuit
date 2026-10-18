@@ -79,15 +79,24 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   buffers override disk until `close_buffer`. Diagnostics that depend on which paths
   exist are withheld while `WorkspaceGraph::listing()` is `Pending`
   (`router::listing_gates`).
-- Startup order (one background thread, `router::spawn_startup`): prepare
-  each workspace folder's trigger registry
-  (`OverlayState::prepare_workspace_registries`, a probe document
-  `.dmls-workspace` in the folder) → `Internal::RegistryReady` (logs
-  `schema registry ready`, or `… initialized with failures` when
-  `failed_scopes > 0`) → the file-list walk → `Internal::FileList` (logs
+- Startup order (one background thread, `router::spawn_startup`; the
+  overlay lock is not held across preparation I/O): prepare
+  each workspace scope's trigger registry
+  (`OverlayState::prepare_workspace_registries` over `workspace_probes`: a
+  probe document `.dmls-workspace` in each folder, catalog package and
+  area inside it, and monorepo first-directory fallback area with a
+  `schemas` folder, `fallback_areas`) → the file-list walk (its
+  `filter_entry` also records each directory holding `.git` as
+  `DiscoveryReport::repositories`) → the same preparation for those
+  repositories (`OverlayState::set_workspace_repositories`) →
+  `Internal::RegistryReady` (logs `schema registry ready`, or
+  `… initialized with failures` when `failed_scopes > 0`; one line, after
+  the walk, `elapsed_ms` excludes it) → `Internal::FileList` (logs
   `workspace files listed markdown yaml duplicates elapsed_ms`). A re-list
   (`ServerState::relist`: rescan, config or ignore-file change) logs
-  `workspace rescan complete` with the same fields; a built full index logs
+  `workspace rescan complete` with the same fields, and queues
+  `RegistryJob::Workspace` when its repository set changed (as does a
+  watched `.git` change, `ServerState::note_repository_change`); a built full index logs
   `full index built markdown headings links trigger elapsed_ms` (elapsed from
   the first waiter, including any file-list wait). Every workspace log line
   carries `workspace=` (`workspace::workspace_identifier`: the client's
@@ -108,14 +117,36 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   *before* waiters are answered, so a response stays a barrier. Progress
   token `dmls/full-index`. A new `WorkspaceIndex` mutator that changes a
   path's disk, buffer, or list state must call `touch`.
+- Trigger registries (`registry_jobs.rs`, router): the dispatch thread only
+  looks registries up (`TriggerRegistries::lookup`/`is_fresh`,
+  `OverlayState::registry_demand`); it never prepares one. A document whose
+  registry is not fresh gets one `RegistryJob::Document` on the registry
+  worker (`spawn_registry_worker`); schema-dependent requests
+  (`SCHEMA_DEPENDENT`) park as `Waiter`s on it (`Router::proceed` checks the
+  full index, then the registry), `refresh_diagnostics` holds the
+  document's publish until it installs, and refreshes queue
+  `RegistryJob::Workspace` (`ServerState::prepare_workspace_registries`).
+  Preparation is `begin` (lock) → `Preparation::run` (no lock) → `install`
+  (lock; an older `seq` is dropped, a change since `begin` leaves it
+  stale). `OverlayState::for_document` (no server) prepares inline; the
+  router uses `for_document_timed`, lookup only. Cancelling a registry
+  waiter keeps the job; shutdown answers waiters `ServerCancelled`.
 - L1 sessions: `LspFixture::initialize` waits for the list
-  (`StartupEvent::FileListInstalled`), `initialize_unlisted` for
-  `RegistryReady`; `start_with_file_list_gate` holds the walk and
+  (`StartupEvent::FileListInstalled`, which follows `RegistryReady`),
+  `initialize_unlisted` for neither; `start_with_file_list_gate` holds the walk and
   `start_with_full_index_gate` holds each build round after its reads
   (`wait_for_event(FullIndexRoundRead)`, `release_full_index_round`,
-  `open_full_index_gate`). `workspace/symbol` (`flush_server`) builds the
-  full index, so a parse-counting test must not use it as a barrier, and its
-  response lists a `File` symbol per document beside each heading.
+  `open_full_index_gate`); `start_with_registry_gate` holds each registry
+  job after startup (`wait_for_event(RegistryPreparing)`,
+  `release_registry_job`, `open_registry_gate`), and
+  `wait_for_registry_prepared`/`next_registry_prepared` return the thread a
+  job ran on. `flush_server` is a `workspace/symbol` round trip that also
+  waits for every queued registry job (`RegistryJobsOutstanding` events) and
+  buffers what they published; `round_trip` does not wait for jobs. Since
+  `workspace/symbol` builds the full index, a parse-counting test must not
+  use either as a barrier, and its response lists a `File` symbol per
+  document beside each heading. `work_counters::registry_scan_threads`
+  names every thread a registry scan ran on.
   Startup's registry preparation publishes a failing trigger file's
   (unversioned) diagnostic before any open; wait for the versioned one.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
@@ -124,8 +155,13 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `context::resolve_reference`, else, only on a clean `NoMatch`, a later
   graph-document candidate (an unsaved buffer); an `Io` probe failure stays a
   broken path. An existing file outside the list is `EdgeTarget::File`, never
-  a broken link; the list decides graph documents, never existence, and
-  anchors on files outside it are not checked. Tests use `context::test_support`
+  a broken link; the list decides graph documents, never existence. A
+  Markdown `File` target an open document needs (`prepare_targets`, hover,
+  definition, anchor completion) is parsed as a dependency
+  (`DocumentRecord::dependency`: headings and transclusions only; excluded
+  from wiki candidates, path completion, workspace symbols, `transcluded_by`,
+  and `is_full`; its folder joins the schema-location watches; tests in
+  `tests/l1/referenced_targets.rs`). Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
   real `RepositoryContexts`; empty graphs use `NoContexts`

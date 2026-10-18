@@ -48,6 +48,33 @@ pub struct DocumentRecord {
     /// it) but no headings or outgoing references yet, and
     /// `content_hash` is 0.
     pub parsed: bool,
+    /// Whether the document is a referenced dependency: parsed because an
+    /// open document's link, heading wiki link, or transclusion resolved to
+    /// it, while it is neither in the file list nor open. It carries only
+    /// its headings and outgoing transclusions, and it is never a wiki
+    /// candidate, path completion, workspace symbol, or transclusion
+    /// reference, so answers drawn from the file list are unchanged by it.
+    pub dependency: bool,
+}
+
+impl DocumentRecord {
+    /// The document as the wiki matcher sees it. A dependency has no
+    /// logical path, so no wiki target matches it.
+    fn wiki_doc(&self) -> WikiDoc {
+        if self.dependency {
+            return WikiDoc { canonical: Vec::new(), workspace_id: WikiDoc::NO_ROOT };
+        }
+        WikiDoc { canonical: self.canonical.clone(), workspace_id: self.workspace_id }
+    }
+}
+
+/// Whether `path` names a Markdown file (`.md` or `.markdown`, any case): the
+/// only kind of resolved target DMLS parses as a dependency, so a `::code`
+/// target in another format is never read as Markdown.
+pub fn is_markdown_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(wiki::has_markdown_extension)
 }
 
 /// Whether the workspace file list behind a snapshot is ready.
@@ -134,20 +161,29 @@ impl WorkspaceGraph {
 
     /// Assembles a snapshot over parsed documents plus `unparsed` file-list
     /// entries (each a document with a root node and no contents), under the
-    /// file list's `listing` state.
+    /// file list's `listing` state. Each parsed document in `dependencies`
+    /// becomes a [dependency](DocumentRecord::dependency).
     ///
     /// [`build`](Self::build) and [`build_with_roots`](Self::build_with_roots)
-    /// are this with no unparsed entries and a complete listing.
+    /// are this with no unparsed entries, no dependencies, and a complete
+    /// listing.
     pub fn build_listed(
         indices: &BTreeMap<PathBuf, DocumentIndex>,
         unparsed: &BTreeSet<PathBuf>,
+        dependencies: &BTreeSet<PathBuf>,
         listing: Listing,
         generation: u64,
         wiki_roots: &[PathBuf],
         contexts: &dyn DocumentContexts,
     ) -> Self {
-        let mut assembly =
-            Self::assemble_listed(indices, unparsed, generation, wiki_roots, contexts);
+        let mut assembly = Self::assemble_listed(
+            indices,
+            unparsed,
+            dependencies,
+            generation,
+            wiki_roots,
+            contexts,
+        );
         assembly.listing = listing;
         Self::finalize(assembly)
     }
@@ -167,7 +203,8 @@ impl WorkspaceGraph {
         wiki_roots: &[PathBuf],
         contexts: &dyn DocumentContexts,
     ) -> GraphAssembly {
-        Self::assemble_listed(indices, &BTreeSet::new(), generation, wiki_roots, contexts)
+        let none = BTreeSet::new();
+        Self::assemble_listed(indices, &none, &none, generation, wiki_roots, contexts)
     }
 
     /// [`assemble`](Self::assemble) over parsed documents plus unparsed
@@ -175,6 +212,7 @@ impl WorkspaceGraph {
     fn assemble_listed(
         indices: &BTreeMap<PathBuf, DocumentIndex>,
         unparsed: &BTreeSet<PathBuf>,
+        dependencies: &BTreeSet<PathBuf>,
         generation: u64,
         wiki_roots: &[PathBuf],
         contexts: &dyn DocumentContexts,
@@ -219,6 +257,7 @@ impl WorkspaceGraph {
             let doc_id = DocumentId(position as u32);
             by_path.insert(path.clone(), doc_id);
             let (workspace_id, canonical) = document_wiki_meta(path, wiki_roots);
+            let dependency = index.is_some() && dependencies.contains(path);
 
             let root = NodeId(nodes.len() as u32);
             nodes.push(Node {
@@ -234,6 +273,7 @@ impl WorkspaceGraph {
                 canonical,
                 workspace_id,
                 parsed: index.is_some(),
+                dependency,
             });
             let Some(index) = index else {
                 headings_by_doc.insert(doc_id, Vec::new());
@@ -261,7 +301,13 @@ impl WorkspaceGraph {
             }
             headings_by_doc.insert(doc_id, doc_headings);
 
-            for link in &index.links {
+            // A dependency is read for its headings and transclusions only;
+            // its other references would add backlinks and file uses that
+            // the file list does not contain.
+            let links: &[_] = if dependency { &[] } else { &index.links };
+            let wiki_links: &[_] = if dependency { &[] } else { &index.wiki_links };
+
+            for link in links {
                 let node_id = NodeId(nodes.len() as u32);
                 nodes.push(Node {
                     document: doc_id,
@@ -277,7 +323,7 @@ impl WorkspaceGraph {
                 pending_links.push((node_id, doc_id, link.target.clone(), link.raw_target.clone()));
             }
 
-            for wiki in &index.wiki_links {
+            for wiki in wiki_links {
                 let node_id = NodeId(nodes.len() as u32);
                 nodes.push(Node {
                     document: doc_id,
@@ -310,6 +356,9 @@ impl WorkspaceGraph {
                     }),
                 });
                 pending_transclusions.push((node_id, doc_id, transclusion.path.clone()));
+            }
+            if dependency {
+                continue;
             }
 
             for key in &index.frontmatter_keys {
@@ -402,13 +451,7 @@ impl WorkspaceGraph {
 
         // Resolve wiki links against the workspace (R-8), emitting a
         // `references` edge to every resolved (or candidate) target node.
-        let wiki_docs: Vec<WikiDoc> = documents
-            .iter()
-            .map(|record| WikiDoc {
-                canonical: record.canonical.clone(),
-                workspace_id: record.workspace_id,
-            })
-            .collect();
+        let wiki_docs: Vec<WikiDoc> = documents.iter().map(DocumentRecord::wiki_doc).collect();
         let doc_roots: Vec<NodeId> = documents.iter().map(|record| record.root).collect();
         let parsed: Vec<bool> = documents.iter().map(|record| record.parsed).collect();
         for (source, doc_id, fact) in pending_wiki {
@@ -498,6 +541,7 @@ impl WorkspaceGraph {
             documents
                 .iter()
                 .enumerate()
+                .filter(|(_, record)| !record.dependency)
                 .map(|(position, record)| (DocumentId(position as u32), record.path.as_path())),
         );
         let portability = portability_collisions(&documents);
@@ -657,13 +701,19 @@ impl WorkspaceGraph {
     }
 
     /// Documents that transclude `document` via `::file`/`::code` — the source
-    /// document of every incoming `transcludes` edge to the document's root.
+    /// document of every incoming `transcludes` edge to the document's root,
+    /// except a [dependency](DocumentRecord::dependency).
     pub fn transcluded_by(&self, document: DocumentId) -> Vec<NodeId> {
         let Some(root) = self.document(document).map(|record| record.root) else {
             return Vec::new();
         };
         self.incoming(root, EdgeKind::Transcludes)
             .map(|edge| edge.source)
+            .filter(|source| {
+                self.node(*source)
+                    .and_then(|node| self.document(node.document))
+                    .is_some_and(|record| !record.dependency)
+            })
             .collect()
     }
 
@@ -726,13 +776,7 @@ impl WorkspaceGraph {
     /// The documents as the wiki matcher sees them (canonical path + wiki root),
     /// indexed by `DocumentId`, for completion-time suffix resolution.
     pub fn wiki_docs(&self) -> Vec<WikiDoc> {
-        self.documents
-            .iter()
-            .map(|record| WikiDoc {
-                canonical: record.canonical.clone(),
-                workspace_id: record.workspace_id,
-            })
-            .collect()
+        self.documents.iter().map(DocumentRecord::wiki_doc).collect()
     }
 
     /// Documents whose canonical logical path collides with `document`'s under
@@ -1126,7 +1170,7 @@ fn resolve_in_document(
 /// normalization, mapping each colliding document to its twins.
 fn portability_collisions(documents: &[DocumentRecord]) -> HashMap<DocumentId, Vec<DocumentId>> {
     let mut by_key: HashMap<String, Vec<DocumentId>> = HashMap::new();
-    for (position, record) in documents.iter().enumerate() {
+    for (position, record) in documents.iter().enumerate().filter(|(_, record)| !record.dependency) {
         by_key
             .entry(wiki::portability_key(&record.canonical))
             .or_default()

@@ -9,10 +9,17 @@
 //!
 //! ```text
 //! NotStarted ──request──▶ Building ──every round reconciled──▶ Ready
-//!     ▲                     │  │
-//!     │                     │  └──a listed file unreadable──▶ Failed ──request──▶ Building
-//!     └──last waiter cancels┘
+//!     ▲                    │ │ ▲                                  │
+//!     └─last waiter cancels┘ │ └──request, a listed file unparsed─┘
+//!                            │
+//!                            └──a listed file unreadable──▶ Failed ──request──▶ Building
 //! ```
+//!
+//! A ready index is answered from only while every listed document has a
+//! current parse ([`WorkspaceIndex::is_full`]). A listed file that becomes
+//! unreadable afterwards withdraws that, and the next request that needs the
+//! index runs a build round over the unparsed files: it fails, or retries
+//! after a repair, exactly as a first build does.
 //!
 //! A build runs in rounds ([`WorkspaceIndex::begin_full_build`],
 //! [`WorkspaceIndex::finish_full_build`]): a round reads the unparsed listed
@@ -22,6 +29,7 @@
 //!
 //! [`WorkspaceIndex::begin_full_build`]: crate::graph::WorkspaceIndex::begin_full_build
 //! [`WorkspaceIndex::finish_full_build`]: crate::graph::WorkspaceIndex::finish_full_build
+//! [`WorkspaceIndex::is_full`]: crate::graph::WorkspaceIndex::is_full
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -72,7 +80,8 @@ impl Trigger {
     }
 }
 
-/// A request waiting for the full index, with the timing record started
+/// A request waiting for a prerequisite (the full index, or a trigger
+/// registry; see [`crate::registry_jobs`]), with the timing record started
 /// when it was dequeued, so its completion event covers the wait.
 pub(crate) struct Waiter {
     pub request: Request,
@@ -110,7 +119,10 @@ pub(crate) enum FullIndexState {
     #[default]
     NotStarted,
     Building(Build),
-    /// Built; the index stays current file by file from here on.
+    /// Built; the index stays current file by file from here on. Requests
+    /// are answered at once only while it is also
+    /// [full](crate::graph::WorkspaceIndex::is_full); otherwise they start a
+    /// build again.
     Ready,
     /// The last build could not read a listed file; the next request that
     /// needs the index retries.

@@ -295,7 +295,7 @@ fn file_completions(
     };
     let mut out = Vec::new();
     for (index, record) in ctx.graph.documents().iter().enumerate() {
-        if index == source {
+        if index == source || record.dependency {
             continue;
         }
         let insertion = insertion_path(&wiki_docs, index, source, ctx.config.wiki.path_style);

@@ -185,22 +185,23 @@ fn documents_in_one_repository_share_one_context_built_at_its_root() {
     write(&first, first_text);
     write(&second, second_text);
 
+    let before = context_build_count();
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(watched_params(&[workspace.path()]));
     fixture.wait_for_startup_complete();
-    // Startup prepared the workspace folder's own (repository-less) context
-    // for its trigger registry; the documents' repository is built once.
-    let before = context_build_count();
     open(&fixture, &uri(&first), first_text);
     open(&fixture, &uri(&second), second_text);
 
     let root_only = canonical(&repo.join("root-only.md"));
     assert_eq!(link_targets(&mut fixture, &uri(&first)), vec![root_only.clone()]);
     assert_eq!(link_targets(&mut fixture, &uri(&second)), vec![root_only]);
+    // Startup builds the workspace folder's own (repository-less) context
+    // and, for the nested repository's trigger registry, the repository's;
+    // both documents share that one repository build.
     assert_eq!(
         context_build_count() - before,
-        1,
-        "both documents share the repository's one build"
+        2,
+        "the folder's build and the repository's one build"
     );
     fixture.shutdown();
 }
@@ -399,7 +400,9 @@ fn a_watched_manifest_change_rebuilds_the_repository_context() {
     let diagnostics = current_diagnostics(&mut fixture, &doc_uri);
     assert!(!transclusion_broken(&diagnostics), "{diagnostics:#?}");
     assert_eq!(link_targets(&mut fixture, &doc_uri), vec![canonical(&repo.join("pkg/pkg-only.md"))]);
-    assert_eq!(context_build_count() - before, 1, "one rebuild for the repository");
+    // The workspace folder, above the repository, has its own context, which
+    // the refresh rebuilds to prepare the folder's trigger registry.
+    assert_eq!(context_build_count() - before, 2, "one rebuild for the repository and one for the folder");
     fixture.shutdown();
 }
 
@@ -446,7 +449,9 @@ fn a_configuration_change_drops_every_context() {
     fixture.notify("workspace/didChangeConfiguration", json!({ "settings": {} }));
     current_diagnostics(&mut fixture, &uri(&first));
     current_diagnostics(&mut fixture, &uri(&second));
-    assert_eq!(context_build_count() - before, 2, "both repositories rebuild");
+    // Plus the workspace folder's own context, rebuilt to prepare its
+    // trigger registry.
+    assert_eq!(context_build_count() - before, 3, "both repositories and the folder rebuild");
     fixture.shutdown();
 }
 

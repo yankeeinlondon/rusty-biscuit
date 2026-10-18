@@ -14,16 +14,23 @@
 //! performs on DMLS's behalf (a registry scan's payload resolution among
 //! them, which is why scans are counted), and hashes that only build an
 //! in-memory cache key.
+//!
+//! [`registry_scan_threads`] also names every thread a registry scan ran on,
+//! so a test can show that none ran on the server's dispatch thread.
 
 use std::io;
 use std::path::Path;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread::ThreadId;
 
 static READS: AtomicUsize = AtomicUsize::new(0);
 static HASHES: AtomicUsize = AtomicUsize::new(0);
 static PARSES: AtomicUsize = AtomicUsize::new(0);
 static ENUMERATIONS: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCANS: AtomicUsize = AtomicUsize::new(0);
+/// Distinct threads, so the set stays as small as the thread count.
+static REGISTRY_SCAN_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 
 /// A snapshot of the process's work counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -92,9 +99,19 @@ pub(crate) fn record_enumeration() {
     ENUMERATIONS.fetch_add(1, Ordering::SeqCst);
 }
 
-/// Counts one trigger-registry scan.
+/// Counts one trigger-registry scan, and the thread it ran on.
 pub(crate) fn record_registry_scan() {
+    let thread = std::thread::current().id();
+    let mut threads = REGISTRY_SCAN_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !threads.contains(&thread) {
+        threads.push(thread);
+    }
     REGISTRY_SCANS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Every thread a trigger-registry scan has run on, in first-scan order.
+pub fn registry_scan_threads() -> Vec<ThreadId> {
+    REGISTRY_SCAN_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 #[cfg(test)]

@@ -469,8 +469,13 @@ fn request_logs_go_to_stderr_and_never_into_the_stdout_protocol_stream() {
     let session = run_logged_session(workspace.path(), &[]);
 
     let frames = strict_frames(&session.stdout).unwrap();
+    // The conversation is written up front, so `shutdown` can arrive while
+    // the hover still waits for its document's trigger registry; it is then
+    // answered `ServerCancelled`. Either answer is a stdout frame.
     assert!(
-        frames.iter().any(|frame| frame["id"] == json!(2) && frame.get("result").is_some()),
+        frames.iter().any(|frame| {
+            frame["id"] == json!(2) && (frame.get("result").is_some() || frame.get("error").is_some())
+        }),
         "the hover was answered on stdout: {frames:#?}"
     );
     let stdout = String::from_utf8_lossy(&session.stdout);

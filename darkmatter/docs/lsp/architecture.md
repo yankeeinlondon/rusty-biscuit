@@ -97,24 +97,28 @@ flowchart TD
 
 | Consumer | How it resolves | Touches disk? |
 |---|---|---|
-| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **workspace document** (a Markdown file in the workspace file list, or an open buffer); otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not a workspace document |
+| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **graph document** (a Markdown file in the workspace file list, an open buffer, or a parsed dependency); otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not a graph document |
 | Single-target features (directive links, definition and hover, transclusion diagnostics, frontmatter navigation, the create-missing-file action) | `resolve_reference`: the first planned candidate that exists, else the first candidate as the place a new file would go | Yes, as composition does |
-| Anchor completion | The first planned candidate that is a workspace document | Reads that one document if it has not been parsed |
+| Anchor completion | The first planned candidate that is a graph document; otherwise `resolve_reference`, when it finds a Markdown file | Reads that one document if it has not been parsed |
 
 The file list decides which workspace documents exist as graph nodes, never
-whether a file exists. A graph edge lands on a workspace document's node, on
-an existing file outside the list (`EdgeTarget::File`: above the workspace
-folder, in `HOME`, under a magic root, or not Markdown), or stays
-unresolved. For example, with only `repo/docs/` open, `[t](../target.md)`
-links to `repo/target.md` and is not broken.
+whether a file exists. A graph edge lands on a graph document's node, on
+an existing file outside the graph (`EdgeTarget::File`: above the workspace
+folder, in `HOME`, under a magic root, excluded from discovery, or not
+Markdown), or stays unresolved. For example, with only `repo/docs/` open,
+`[t](../target.md)` links to `repo/target.md` and is not broken.
 
-A workspace document that is not open is parsed only when a feature needs
+A Markdown document that is not open is parsed only when a feature needs
 its contents: a `#fragment` link or `[[note#heading]]` from an open document
 (to check the anchor), heading completion, hover, or definition on a link to
 it, and the `::file`/`::code` chain followed outward from an open document
 (for cycle detection). Until then its `#fragment`s are neither resolved to a
-heading nor reported missing. A `#fragment` on a file outside the list is
-never checked. A link to an open, unsaved buffer still resolves, unless a
+heading nor reported missing. This includes a Markdown file outside the
+list that an edge lands on: once parsed it becomes a graph document, a
+**dependency**, whose `#fragment`s are checked like any other, but which is
+never a wiki candidate, a path completion, or part of the full index (see
+[Targets outside the file list](./indexing.md#targets-outside-the-file-list)).
+A file in another format is never parsed. A link to an open, unsaved buffer still resolves, unless a
 place searched before it could not be checked (permission denied, a symlink
 loop): that link stays broken with the `Io` failure class, as `md compose`
 would fail.
