@@ -1115,6 +1115,13 @@ impl FileResolutionContext {
         self.package_area.as_deref()
     }
 
+    /// The repository topology supplied through
+    /// [`with_repository_scope_catalog`](Self::with_repository_scope_catalog),
+    /// carried unchanged by every derivation.
+    pub fn repository_scope_catalog(&self) -> Option<&RepositoryScopeCatalog> {
+        self.repository_scope_catalog.as_ref()
+    }
+
     /// The home directory used for `~` references.
     pub fn home_dir(&self) -> Option<&Path> {
         self.home_dir.as_deref()
@@ -1475,6 +1482,63 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::home_dir().filter(|home| home.is_absolute())
 }
 
+/// Get the per-user cache directory from the process environment.
+///
+/// - macOS: `<home>/Library/Caches`; `XDG_CACHE_HOME` is not consulted.
+/// - Native Windows: `%LOCALAPPDATA%`, or `None` when it is unset.
+/// - Other Unix: `$XDG_CACHE_HOME`, otherwise `<home>/.cache`.
+///
+/// An empty or relative variable counts as unset, and home comes from
+/// [`home_dir`], so a relative home is no home. The result is not
+/// canonicalized and not checked for existence.
+///
+/// ## Notes
+///
+/// Windows has no `<home>`-derived fallback. Windows sets `LOCALAPPDATA` for
+/// every loaded user profile, and where that folder is redirected
+/// `<home>\AppData\Local` would be a wrong guess rather than a default. A
+/// caller that gets `None` runs without a persistent cache.
+///
+/// The environment is an input, not proof of a trusted filesystem boundary:
+/// whoever launches the process chooses it.
+pub fn user_cache_dir() -> Option<PathBuf> {
+    cache_dir_for(CacheOs::current(), |name| std::env::var_os(name), home_dir().as_deref())
+}
+
+/// The platform convention [`user_cache_dir`] follows, separate from the
+/// compile target so every branch is testable on any host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheOs {
+    MacOs,
+    Windows,
+    OtherUnix,
+}
+
+impl CacheOs {
+    fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else if cfg!(windows) {
+            Self::Windows
+        } else {
+            Self::OtherUnix
+        }
+    }
+}
+
+fn cache_dir_for(
+    os: CacheOs,
+    env: impl Fn(&str) -> Option<std::ffi::OsString>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    let absolute_var = |name: &str| env(name).map(PathBuf::from).filter(|path| path.is_absolute());
+    match os {
+        CacheOs::MacOs => home.map(|home| home.join("Library").join("Caches")),
+        CacheOs::Windows => absolute_var("LOCALAPPDATA"),
+        CacheOs::OtherUnix => absolute_var("XDG_CACHE_HOME").or_else(|| home.map(|home| home.join(".cache"))),
+    }
+}
+
 /// Snapshot the process environment for `{{VAR}}` interpolation.
 ///
 /// `std::env::vars()` panics when any variable's name or value is not valid
@@ -1500,6 +1564,125 @@ fn utf8_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod user_cache_dir {
+        use super::*;
+        use std::ffi::OsString;
+
+        // `/home/x` is not absolute on Windows, so fixtures are per-platform.
+        #[cfg(windows)]
+        const ROOT: &str = r"C:\fixture";
+        #[cfg(not(windows))]
+        const ROOT: &str = "/fixture";
+
+        fn abs(rel: &str) -> PathBuf {
+            Path::new(ROOT).join(rel)
+        }
+
+        fn env_of(pairs: &[(&str, OsString)]) -> impl Fn(&str) -> Option<OsString> + use<> {
+            let pairs: Vec<(String, OsString)> =
+                pairs.iter().map(|(name, value)| ((*name).to_string(), value.clone())).collect();
+            move |name| pairs.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone())
+        }
+
+        fn no_env() -> impl Fn(&str) -> Option<OsString> + use<> {
+            env_of(&[])
+        }
+
+        #[test]
+        fn macos_cache_dir_is_library_caches_under_home() {
+            let home = abs("home");
+            let got = cache_dir_for(CacheOs::MacOs, no_env(), Some(&home));
+            assert_eq!(got, Some(home.join("Library").join("Caches")));
+        }
+
+        #[test]
+        fn macos_cache_dir_ignores_xdg_cache_home() {
+            let home = abs("home");
+            let env = env_of(&[("XDG_CACHE_HOME", abs("xdg").into_os_string())]);
+            let got = cache_dir_for(CacheOs::MacOs, env, Some(&home));
+            assert_eq!(got, Some(home.join("Library").join("Caches")));
+        }
+
+        #[test]
+        fn macos_cache_dir_without_home_is_none() {
+            let env = env_of(&[("XDG_CACHE_HOME", abs("xdg").into_os_string())]);
+            assert_eq!(cache_dir_for(CacheOs::MacOs, env, None), None);
+        }
+
+        #[test]
+        fn unix_cache_dir_prefers_absolute_xdg_cache_home() {
+            let home = abs("home");
+            let env = env_of(&[("XDG_CACHE_HOME", abs("xdg").into_os_string())]);
+            assert_eq!(cache_dir_for(CacheOs::OtherUnix, env, Some(&home)), Some(abs("xdg")));
+        }
+
+        #[test]
+        fn unix_cache_dir_without_xdg_is_dot_cache_under_home() {
+            let home = abs("home");
+            let got = cache_dir_for(CacheOs::OtherUnix, no_env(), Some(&home));
+            assert_eq!(got, Some(home.join(".cache")));
+        }
+
+        #[test]
+        fn unix_cache_dir_treats_empty_xdg_as_unset() {
+            let home = abs("home");
+            let env = env_of(&[("XDG_CACHE_HOME", OsString::new())]);
+            assert_eq!(cache_dir_for(CacheOs::OtherUnix, env, Some(&home)), Some(home.join(".cache")));
+        }
+
+        #[test]
+        fn unix_cache_dir_treats_relative_xdg_as_unset() {
+            let home = abs("home");
+            let env = env_of(&[("XDG_CACHE_HOME", OsString::from("rel/cache"))]);
+            assert_eq!(cache_dir_for(CacheOs::OtherUnix, env, Some(&home)), Some(home.join(".cache")));
+        }
+
+        #[test]
+        fn unix_cache_dir_without_home_or_xdg_is_none() {
+            assert_eq!(cache_dir_for(CacheOs::OtherUnix, no_env(), None), None);
+        }
+
+        #[test]
+        fn unix_cache_dir_without_home_uses_absolute_xdg() {
+            let env = env_of(&[("XDG_CACHE_HOME", abs("xdg").into_os_string())]);
+            assert_eq!(cache_dir_for(CacheOs::OtherUnix, env, None), Some(abs("xdg")));
+        }
+
+        #[test]
+        fn windows_cache_dir_is_absolute_local_app_data() {
+            let home = abs("home");
+            let env = env_of(&[("LOCALAPPDATA", abs("local").into_os_string())]);
+            assert_eq!(cache_dir_for(CacheOs::Windows, env, Some(&home)), Some(abs("local")));
+        }
+
+        #[test]
+        fn windows_cache_dir_without_usable_local_app_data_is_none() {
+            let home = abs("home");
+            assert_eq!(cache_dir_for(CacheOs::Windows, no_env(), Some(&home)), None, "unset");
+            for value in ["", r"rel\cache"] {
+                let env = env_of(&[("LOCALAPPDATA", OsString::from(value))]);
+                assert_eq!(cache_dir_for(CacheOs::Windows, env, Some(&home)), None, "LOCALAPPDATA = {value:?}");
+            }
+        }
+
+        #[test]
+        fn windows_cache_dir_ignores_xdg_cache_home() {
+            let env = env_of(&[("XDG_CACHE_HOME", abs("xdg").into_os_string())]);
+            assert_eq!(cache_dir_for(CacheOs::Windows, env, Some(&abs("home"))), None);
+        }
+
+        #[test]
+        fn user_cache_dir_is_absolute_when_home_is_known() {
+            if home_dir().is_none() {
+                return;
+            }
+            let got = user_cache_dir().expect("a known home yields a cache directory");
+            assert!(got.is_absolute(), "{got:?}");
+            #[cfg(target_os = "macos")]
+            assert!(got.ends_with("Library/Caches"), "{got:?}");
+        }
+    }
 
     #[test]
     fn utf8_env_skips_non_unicode_variables() {

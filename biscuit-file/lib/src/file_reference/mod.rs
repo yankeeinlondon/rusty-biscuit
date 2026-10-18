@@ -49,7 +49,7 @@ pub use error::FetchError;
 pub use context::{
     BaseDirOrigin, ContextAnchor, FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
     RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, capture_env, find_git_root,
-    home_dir,
+    home_dir, user_cache_dir,
 };
 
 /// The classified kind of a file reference.

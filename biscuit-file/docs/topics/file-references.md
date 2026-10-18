@@ -257,6 +257,31 @@ typed `MissingHomeContext` — not a silent miss.
 Note the difference from magic references: `@` *includes* HOME in its search
 list, but `~` is home-*pinned* with no other candidate.
 
+**User cache directory.** `biscuit_file::user_cache_dir()` (feature
+`file-reference`) returns the per-user cache directory, built on the same
+`home_dir()`. It is not part of reference resolution; it is the one place
+programs in this workspace ask where a persistent cache belongs.
+
+| OS | Result |
+| --- | --- |
+| macOS | `<home>/Library/Caches` (`XDG_CACHE_HOME` is not read) |
+| Linux and other Unix | `$XDG_CACHE_HOME`, otherwise `<home>/.cache` |
+| native Windows | `%LOCALAPPDATA%`, otherwise `None` |
+
+An empty or relative `XDG_CACHE_HOME` or `LOCALAPPDATA` counts as unset, and
+no home (where one is needed) means `None`. Windows has no home-derived
+fallback because a redirected Local AppData folder would make
+`<home>\AppData\Local` wrong. Like the home, the result is neither
+canonicalized nor checked for existence; a caller that gets `None` runs
+without a persistent cache.
+
+```text
+XDG_CACHE_HOME=/var/cache/me    (Linux)    → /var/cache/me
+XDG_CACHE_HOME=rel/cache        (Linux)    → <home>/.cache
+XDG_CACHE_HOME=/var/cache/me    (macOS)    → <home>/Library/Caches
+LOCALAPPDATA unset              (Windows)  → None
+```
+
 ### Magic (`@`)
 
 Magic references search a prioritized list of root directories — the most
@@ -822,7 +847,7 @@ does not exist is `Io`.
 | `add_magic_path_with_tier(path, position, tier)` | Add a magic root with an explicit `MagicPathTier` (`User` forces the user tier) |
 | `add_vault(path)` | Add an authoritative vault root |
 | `with_launch_magic_scope(scope)` | Seed the launch `@` scope on a context rebuilt around an external source |
-| `source_path()`, `cwd()`, `repository_root()`, `package_root()`, `package_area()`, `home_dir()`, `env()` | Inspect captured inputs |
+| `source_path()`, `cwd()`, `repository_root()`, `package_root()`, `package_area()`, `repository_scope_catalog()`, `home_dir()`, `env()` | Inspect captured inputs |
 | `base_dir()`, `base_dir_origin()`, `base_dir_is_boundary()`, `external_relative_allowed()` | Inspect the file tree and the reader opt-in |
 | `launch_magic_scope()`, `magic_path_registrations()` | Inspect the launch `@` scope and configured magic roots with their tiers |
 | `magic_search_roots()` | The ordered, deduplicated `@` roots with provenance |
