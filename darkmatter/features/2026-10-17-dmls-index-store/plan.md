@@ -113,6 +113,143 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6:
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/src/index_build.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/index_store/source.rs
+    - darkmatter/dmls/src/index_store/source_tests.rs
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/index_store/workspace_tests.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/full_index.rs
+    - darkmatter/dmls/tests/l1/index_build.rs
+    - darkmatter/dmls/tests/l1/bench_index.rs
+    - darkmatter/dmls/tests/l1/full_index_removal_guard.rs
+    - darkmatter/dmls/tests/l1/index_store_log_lines.rs
+    - darkmatter/dmls/tests/l1/index_store_live.rs
+    - darkmatter/dmls/tests/l1/index_store_open.rs
+    - darkmatter/dmls/tests/l1/index_store_requests.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/level1_graph_index.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/justfile
+docs_updated_during_phase_6:
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/editors/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/testing.md
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/remote-cache.md
+source_code:
+    - darkmatter/dmls/Cargo.toml
+    - Cargo.lock
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_oracle.rs
+    - darkmatter/dmls/tests/fixtures/index_store_corpus/
+    - darkmatter/dmls/src/wiki/universe.rs
+    - darkmatter/dmls/src/wiki/mod.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/graph/node.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/providers/rename.rs
+    - darkmatter/dmls/src/providers/wiki.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/tests/l1/level1_wiki.rs
+    - darkmatter/dmls/tests/l1/wiki_universe_equivalence.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/index_store/mod.rs
+    - darkmatter/dmls/src/index_store/facts.rs
+    - darkmatter/dmls/src/index_store/failure.rs
+    - darkmatter/dmls/src/index_store/keys.rs
+    - darkmatter/dmls/src/index_store/location.rs
+    - darkmatter/dmls/src/index_store/lock.rs
+    - darkmatter/dmls/src/index_store/source.rs
+    - darkmatter/dmls/src/index_store/source_tests.rs
+    - darkmatter/dmls/src/index_store/store.rs
+    - darkmatter/dmls/tests/l1/index_store_concurrency.rs
+    - darkmatter/dmls/tests/l1/index_store_facts.rs
+    - darkmatter/dmls/tests/l1/index_store_keys.rs
+    - darkmatter/dmls/tests/l1/index_store_open.rs
+    - darkmatter/dmls/tests/l1/index_store_sweep.rs
+    - darkmatter/dmls/tests/fixtures/index_store_golden.txt
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/index_store/workspace_tests.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/tests/l1/index_store_live.rs
+    - darkmatter/dmls/src/providers/symbols.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/tests/l1/index_store_requests.rs
+    - darkmatter/dmls/tests/l1/index_store_sessions.rs
+    - darkmatter/dmls/tests/l1/index_store_stdio.rs
+    - darkmatter/dmls/src/index_build.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/tests/l1/index_build.rs
+    - darkmatter/dmls/tests/l1/bench_index.rs
+    - darkmatter/dmls/tests/l1/full_index_removal_guard.rs
+    - darkmatter/dmls/tests/l1/index_store_log_lines.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/level1_graph_index.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/justfile
+documentation:
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/README.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/api.md
+    - .claude/skills/darkmatter/testing.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/os/windows.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/editors/README.md
+    - .claude/skills/darkmatter/remote-cache.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: DMLS Index Store
@@ -627,15 +764,15 @@ Needs Phases 2 and 4.
 
 ### Wave 14 (parallel)
 
-- [ ] **R13 log lines.** Emit the six lines of the spec table with the
+- [x] **R13 log lines.** Emit the six lines of the spec table with the
   dependency's R8 style (`workspace` field); one `warn` per process for the
   fallback; never log file contents or heading text.
   - Prerequisite: Phase 4. `trigger` takes the dependency's R8 values.
-- [ ] **`--bench-index` (R14).** Rewrite `dmls/src/bench.rs` to report store
+- [x] **`--bench-index` (R14).** Rewrite `dmls/src/bench.rs` to report store
   fill and revalidation, each cold (no store) and warm (store present,
   unchanged), in the summary and `--json` forms. Update the CLI help text in
   `main.rs`.
-- [ ] **Delete the production full build.** Remove the code the Wave 1 inventory
+- [x] **Delete the production full build.** Remove the code the Wave 1 inventory
   lists (full parse-everything index, workspace-wide resident graph for these
   requests, the R8 `full index built ...` line). Keep `WorkspaceIndex` only for
   the open-document use recorded in the inventory.
@@ -644,17 +781,17 @@ Needs Phases 2 and 4.
 
 ### Wave 15 (after Wave 14; parallel tests)
 
-- [ ] **R13 test.** A captured `tracing` subscriber shows each line and field
+- [x] **R13 test.** A captured `tracing` subscriber shows each line and field
   once, and the fallback `warn` once.
-- [ ] **R14 test.** `bench_index` on a small fixture reports cold and warm fill
+- [x] **R14 test.** `bench_index` on a small fixture reports cold and warm fill
   and revalidation sections (acceptance 10).
-- [ ] **Removal guard.** A source-scan test or `rg` check in the log that no
+- [x] **Removal guard.** A source-scan test or `rg` check in the log that no
   production module references the removed functions (acceptance 12).
 
 ### Validation checkpoint 6
 
-- [ ] `just test` and `just lint` pass in `darkmatter/`.
-- [ ] Downstream consumers: find users of any removed or changed public item
+- [x] `just test` and `just lint` pass in `darkmatter/`.
+- [x] Downstream consumers: find users of any removed or changed public item
   with Sniff / GitNexus (the `dmls` library surface, `bench`). Do not run
   workspace-wide Cargo gates.
 
@@ -662,7 +799,7 @@ Needs Phases 2 and 4.
 
 ### Wave 16 (parallel; documentation agents on disjoint files)
 
-- [ ] **`darkmatter/docs/lsp/indexing.md`.** Extend with the store: what it
+- [x] **`darkmatter/docs/lsp/indexing.md`.** Extend with the store: what it
   holds and why it is only a cache; the sequence diagram; ready and
   revalidation; open-buffer override; rename freshness per watch mode;
   multiple roots; location; `DMLS_CACHE_DIR` and `off`; sweep; multiple
@@ -670,38 +807,38 @@ Needs Phases 2 and 4.
   delete"; the R13 lines; `--bench-index`. Remove the in-memory full-build
   description and state the corrected C-over-A reason (ruling 7).
   - Audience: a developer new to this repository; an example per rule.
-- [ ] **`configuration.md` and `architecture.md`.** `DMLS_CACHE_DIR` and why it
+- [x] **`configuration.md` and `architecture.md`.** `DMLS_CACHE_DIR` and why it
   is not a `.dmls.toml` key; the external wiki universe of `build_with_roots`.
-- [ ] **Dependencies and skills.** Confirm `docs/dependencies.md` entries
+- [x] **Dependencies and skills.** Confirm `docs/dependencies.md` entries
   (Wave 1); update `.claude/skills/darkmatter/dmls.md` (store, `FactsSource`,
   removed full build) and `remote-cache.md` (its no-fallback rule does not
   apply to the store); `biscuit-file` skill done in Wave 2.
   - No `docs/` page or skill names this spec or the dependency fix.
-- [ ] **Docs drift pass.** Re-read every comment and doc touched by a changed
+- [x] **Docs drift pass.** Re-read every comment and doc touched by a changed
   symbol (`build_with_roots`, `wiki_docs`, the removed functions) and fix
   drift; assume the code is correct.
 
 ### Wave 17 (after Wave 16)
 
-- [ ] **Acceptance 11 sample.** One warm restart, first references request on
+- [x] **Acceptance 11 sample.** One warm restart, first references request on
   this repository: record latency (request to answer, and including the file
   list walk) and added peak RSS, against ruling 6's 500 ms / 1 s / 64 MiB.
   A single quick sample on this host, not a spike. If the host is loaded,
   note the load average in the log.
-- [ ] **Implementation log.** Record: gate result, rulings as confirmed,
+- [x] **Implementation log.** Record: gate result, rulings as confirmed,
   every departure from the spec, smell-grep output, the exact
   `storage-strategy` line for the author (ruling 16), and the acceptance
   checklist with the test or measurement behind each of the 12 items.
 
 ### Validation checkpoint 7 (final)
 
-- [ ] `just test` and `just lint` pass in `darkmatter/` and `biscuit-file/`.
-- [ ] `just test-l2` run in `darkmatter/` if any L2 test was touched.
-- [ ] All twelve acceptance criteria have a recorded test or measurement.
-- [ ] Windows evidence: R10/R12 sharing-violation test runs on the native
+- [x] `just test` and `just lint` pass in `darkmatter/` and `biscuit-file/`.
+- [x] `just test-l2` run in `darkmatter/` if any L2 test was touched.
+- [x] All twelve acceptance criteria have a recorded test or measurement.
+- [x] Windows evidence: R10/R12 sharing-violation test runs on the native
   Windows leg (nightly or `just ci-seed`); result recorded or marked pending
   with the reason.
-- [ ] Implementation complete, ready for review. The author moves the spec to
+- [x] Implementation complete, ready for review. The author moves the spec to
   `_completed`.
 
 ## Requirement-to-Test Map

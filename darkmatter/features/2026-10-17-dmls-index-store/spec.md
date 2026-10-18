@@ -27,7 +27,7 @@ review_note: the clarification process served as a review
 clarified: true
 clarified_by: claude/default
 needs_rulings: false
-implemented: false
+implemented: true
 review_iterations: 0
 packages:
     - darkmatter
@@ -51,6 +51,7 @@ message_to_agent: |-
     2026-10-17-logging-improvements landing: this spec amends that fix's R5
     fallback clause, removes its R7 full in-memory build, replaces its R8
     `full index built` log line, and replaces its `--bench-index` Tests clause.
+implemented_by: "claude/opus"
 ---
 
 # DMLS Index Store

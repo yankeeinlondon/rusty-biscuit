@@ -113,13 +113,143 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
-message_to_agent: |-
-  Phase 5 is done: references (including wiki references and DSL transcluded-by), heading rename, file rename, and workspace symbols now *answer* from the index store, but the full index still gates them. For Phase 6:
-  - Answer path: `ServerState::request_graph(targets)` (router/facts.rs) -> `WorkspaceFacts::request_graph` (candidates over every root, listed only, + listed targets + overlay of open buffers and unlisted targets' `disk_parse`, universe = live snapshot's `shared_wiki_universe()`, shared `RepositoryContexts`). Workspace symbols: `ServerState::symbol_documents()` -> `WorkspaceFacts::symbol_documents` -> `registry.workspace_symbols(query, &[SymbolDocument])` (no graph). References targets come from `providers::reference_target_at` over the live snapshot; that keeps working without the full index because every listed file is a (root-only) snapshot document and the open document is parsed.
-  - What is still the full index, and goes in Phase 6: `Router::needs_full_index` requires `index_is_full()` as well as `facts_ready()`; each build round parses for `WorkspaceIndex::begin_full_build`/`finish_full_build` and then runs the store pass with those parses as `known` (so with the full build removed, `revalidate` parses changed files itself); `bridge_to_index`; the `full index built` line. The store pass, `FactsEvents`, the fallback pre-rename build (`Router::revalidated`), and `refresh_rename_referrers` (which now refreshes closed *candidates*, not snapshot referrers) must survive the removal.
-  - Measured on this repository (loaded host): the first references request is about 9 s and the process peaks at about 1.1 GB, all of it the full build; each later references request is 10 ms and workspace symbols 54 ms. Once the build is gone, add the server-level "warm restart parses zero" test Phase 4 deferred, and re-measure for acceptance 11 in Phase 7.
-  - Tests that prove the request path: `tests/l1/index_store_requests.rs` (oracle equivalence at every corpus probe, no-miss, memory modes; the oracle gained `*_over(graph, ...)` methods), `index_store_sessions.rs` (restart, two roots, nested roots), `index_store_stdio.rs` (spawned binary, `off` and corrupt). Mutation check: a `request_graph` without candidates fails 18 of them, so they will catch a removal that falls back to the snapshot.
-  - Pre-existing: a `../` link out of a workspace folder that is in no repository does not resolve (store or not); a two-root fixture needs a `.git` above both folders.
+source_files_during_phase_6:
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/src/index_build.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/index_store/source.rs
+    - darkmatter/dmls/src/index_store/source_tests.rs
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/index_store/workspace_tests.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/full_index.rs
+    - darkmatter/dmls/tests/l1/index_build.rs
+    - darkmatter/dmls/tests/l1/bench_index.rs
+    - darkmatter/dmls/tests/l1/full_index_removal_guard.rs
+    - darkmatter/dmls/tests/l1/index_store_log_lines.rs
+    - darkmatter/dmls/tests/l1/index_store_live.rs
+    - darkmatter/dmls/tests/l1/index_store_open.rs
+    - darkmatter/dmls/tests/l1/index_store_requests.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/level1_graph_index.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/justfile
+docs_updated_during_phase_6:
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/editors/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/testing.md
+source_files_during_phase_7: []
+docs_updated_during_phase_7:
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/remote-cache.md
+source_code:
+    - darkmatter/dmls/Cargo.toml
+    - Cargo.lock
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/common/oracle.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/index_store_oracle.rs
+    - darkmatter/dmls/tests/fixtures/index_store_corpus/
+    - darkmatter/dmls/src/wiki/universe.rs
+    - darkmatter/dmls/src/wiki/mod.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/graph/node.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/providers/rename.rs
+    - darkmatter/dmls/src/providers/wiki.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/tests/l1/level1_wiki.rs
+    - darkmatter/dmls/tests/l1/wiki_universe_equivalence.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/index_store/mod.rs
+    - darkmatter/dmls/src/index_store/facts.rs
+    - darkmatter/dmls/src/index_store/failure.rs
+    - darkmatter/dmls/src/index_store/keys.rs
+    - darkmatter/dmls/src/index_store/location.rs
+    - darkmatter/dmls/src/index_store/lock.rs
+    - darkmatter/dmls/src/index_store/source.rs
+    - darkmatter/dmls/src/index_store/source_tests.rs
+    - darkmatter/dmls/src/index_store/store.rs
+    - darkmatter/dmls/tests/l1/index_store_concurrency.rs
+    - darkmatter/dmls/tests/l1/index_store_facts.rs
+    - darkmatter/dmls/tests/l1/index_store_keys.rs
+    - darkmatter/dmls/tests/l1/index_store_open.rs
+    - darkmatter/dmls/tests/l1/index_store_sweep.rs
+    - darkmatter/dmls/tests/fixtures/index_store_golden.txt
+    - darkmatter/dmls/src/index_store/workspace.rs
+    - darkmatter/dmls/src/index_store/workspace_tests.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/facts.rs
+    - darkmatter/dmls/tests/l1/index_store_live.rs
+    - darkmatter/dmls/src/providers/symbols.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/tests/l1/index_store_requests.rs
+    - darkmatter/dmls/tests/l1/index_store_sessions.rs
+    - darkmatter/dmls/tests/l1/index_store_stdio.rs
+    - darkmatter/dmls/src/index_build.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/tests/l1/index_build.rs
+    - darkmatter/dmls/tests/l1/bench_index.rs
+    - darkmatter/dmls/tests/l1/full_index_removal_guard.rs
+    - darkmatter/dmls/tests/l1/index_store_log_lines.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/level1_graph_index.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/justfile
+documentation:
+    - darkmatter/docs/dependencies.md
+    - docs/dependencies.md
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/README.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/api.md
+    - .claude/skills/darkmatter/testing.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/os/windows.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/editors/README.md
+    - .claude/skills/darkmatter/remote-cache.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-17-dmls-index-store (7 phases)
@@ -595,3 +725,200 @@ The first request and the peak RSS are still the full build's; they say nothing 
 - no other skipped or pre-existing failures
 
 Phase 5 implementation complete, ready for review.
+
+## Phase 6
+
+Implemented directly by the orchestrator, without subagents. The removal touches the router's build state machine, `WorkspaceIndex`, and the store wiring at once (each round's store pass, the ready rule, and the event paths meet in `router.rs` and `router/facts.rs`), so splitting it would have meant several agents editing one state machine.
+
+### What changed
+
+- **The production full build is deleted** (Wave 1 inventory, every item):
+    - `WorkspaceIndex`: `from_indices`, `begin_full_build`, `finish_full_build`, `abandon_full_build`, `is_full`, `unparsed_paths`, `touch`, the `built` and `touched` fields, `FullBuildStep`, and the `built` branches of `close_buffer`, `install_listing`, `disk_changed`, `recheck_parsed`. The index now only parses lazily (open buffers, referenced targets, dependencies); a watched change or relist reads nothing
+    - `workspace/startup.rs`: `index_workspace`, `collect_indices`, `collect_indices_from_files`, `parse_full_index_round`, `FullIndexRound`, `IndexStageTimings`, the parse worker pool. `list_files`, `ProgressReporter`, and `SilentProgress` stay
+    - router: `index_is_full`, `bridge_to_index`, `log_full_index_built` (the `full index built` line), the round's parse; `PassReport::hashes` (only the bridge read it)
+- **`full_index.rs` → `index_build.rs`**, keeping the R7 state machine with "building" now meaning "revalidating the store" (spec amendment to R7): `FullIndexState` → `IndexBuildState`; `Build` gains `totals: PassTotals` (unchanged/reparsed/removed summed over rounds). `Trigger` and `Waiter` unchanged (`Waiter` still shared with `registry_jobs.rs`)
+- **Router**: a round is one store pass (`FactsPlan::Full`, then `Paths(touched)`), with open buffers as `known` parses; `finish_index_round` fails the build only from the pass (`failed` + `missing`, filtered by touched), starts another round when anything was touched or a root switched, and on ready calls `mark_ready` and logs `index store revalidated`. `Router::needs_index_build` = a build runs, or `!facts_ready()`, or (fallback mode) a rename not yet revalidated. The post-ready `refresh_all_diagnostics` is gone: ready no longer changes the live snapshot, so there is nothing new to publish
+- **Renamed for the removed concept** (no production name may say "full index"; acceptance 12): `StartupHooks::full_index_gate` → `index_round_gate`, `StartupEvent::FullIndexRoundRead` → `IndexRoundRead`, `Internal::FullIndexRound` → `IndexRound`, progress token `dmls/full-index` → `dmls/index` (title "Indexing the workspace"), `Wait::FullIndex` → `Wait::Index` with the request-timing field `waited_for_full_index` → `waited_for_index`, failure line `full index build failed` → `index build failed`. Test harness: `start_with_index_round_gate[_and_snapshot]`, `release_index_round`, `open_index_round_gate`
+- **R13 log lines** (all with `workspace=`, Display-formatted like R8's lines):
+    - `index store opened path created facts_version [rows]` (`info`, `rows` only when `created=false`) in `RootFacts::open_with`
+    - `index store revalidated markdown unchanged reparsed removed trigger elapsed_ms` (`info`) in the router
+    - `index store unavailable, using memory reason detail path` (`warn` once per process, then `debug` `… already using memory`)
+    - `index store recreated path reason` (`warn`)
+    - `index store sweep removed skipped_in_use elapsed_ms` (`info` when it removed a store, `debug` otherwise) in `WorkspaceFacts::open`
+    - `WorkspaceFacts::open`, `RootFacts::open`/`open_with`/`with_source` take the workspace identifier; `RootFacts` keeps it for its later fallback line
+- **R14 `--bench-index`** (`bench.rs` rewritten): `bench_cold` (list, create, fill), `bench_warm` (open, revalidate, then a references request, a heading rename, and a workspace-symbols request through the same provider entry points as the server, plus first-references latency with and without the list walk and added peak RSS), `bench_index` (both in one process). The binary runs the cold half in-process and the warm half in a fresh child (`current_exe() --bench-index DIR --bench-warm STORE`, an internal flag not in the usage text), over a temporary store directory under `std::env::temp_dir()` that it removes. New `--bench-target <file>`. `bench_warm`/`bench_index` return `Result<_, String>` (no Markdown listed, unreadable target). `just bench-dmls` comment updated
+- **Live-update additions the removal required**:
+    - closing an open buffer calls `facts_changed([path])`, so a client-watching session re-reads the file into the store (the full index used to re-read it on close; without this a disk change hidden behind the open buffer would never reach the store)
+    - a fallback save's rescan hands the paths `recheck_parsed` found changed to `facts_changed` (they join `pending`, re-read by the same save). Phase 4 deliberately did not, because then that would have re-hashed every parsed file; with the full index gone `recheck_parsed` covers only lazily parsed targets, so it is a few files, and it keeps the store from answering from a row older than bytes the index already saw
+- **Docs**: `darkmatter/docs/lsp/indexing.md` "The full index" rewritten as "The index build" (states over the store, failure, progress token, the bench with a real sample); the store section no longer says a full index gates it; the "Filling and staying current" table and a fallback-mode example; the log-lines table, "Index store lines" (six lines, fields, samples) replacing "Full index lines"; the `waited_for_index` field. `configuration.md`, `architecture.md`, `dmls/README.md`, `dmls/docs/editors/README.md`, `darkmatter/justfile` (comment). Skills: `.claude/skills/darkmatter/dmls.md` (index build, R13 lines, harness names, bench, no production full graph), `testing.md` (oracle is the only full graph). Phase 7 still owns the full `indexing.md` rewrite (sequence diagram, location, sweep, and so on)
+
+### Departures and decisions
+
+- **Fallback watch mode, an unannounced change keeps its old row for references and symbols.** The dependency tests `a_ready_index_after_a_save_rescan_fails_{references,workspace_symbols}` asserted that a referrer made unreadable on disk with only another file saved fails references. That came from the full index's `recheck_parsed` re-reading every parsed file. Spec R6 (amending logging-improvements R5) says a fallback save re-hashes only the saved file plus files with pending events, so those two cases now answer from the old row; renames still fail (their own full pass). The two macro rows were removed and replaced by `index_build::in_fallback_mode_an_unannounced_unreadable_file_fails_only_renames`, which asserts both halves and the repair
+- **An abandoned build keeps the rows it wrote.** `cancelling_the_last_waiter_…` asserted the retry parsed every file again ("nothing of the abandoned build was kept"). Rows are keyed on each file's bytes, so keeping them is correct; the retry still reads every file again (ready requires reads in this process). The test now asserts 4 reads and 0 parses
+- **Bench memory figure needs a fresh process.** `getrusage` peak is monotonic, so an in-process warm half would report the cold fill's peak. Measuring current RSS instead would undercount (the allocator reuses the cold fill's freed memory). Hence the child process; `bench_index` (in-process) is documented as including the cold half's memory and is used only by the shape test
+- **Bench target default**: `README.md`, else the first listed file, cursor at its first heading. The figure is the server's path for that request; Phase 7 should pass `--bench-target` for a representative target (the Phase 5 sample used `## The index store` in `darkmatter/docs/lsp/indexing.md`; the bench always uses the first heading, which there is the uncited H1)
+- **Store log fields are Display-formatted** (`reason=corrupt`, `workspace=file:///…`), matching R8's router lines; three Phase 3 unit tests that asserted Debug quotes (`reason="busy"`) were updated
+
+### Smell grep
+
+`rg 'unwrap_or_default\(\)|\.ok\(\)|filter_map|serde\(default'` over `bench.rs`, `index_build.rs`, `router/facts.rs`, `index_store/source.rs`, `index_store/workspace.rs`, `main.rs`:
+
+- `bench.rs` `std::fs::read_to_string(&target).unwrap_or_default()` (found and **fixed**: an unreadable `--bench-target` now fails with the path, `bench_index::a_bench_over_no_markdown_or_an_unreadable_target_fails_with_the_path`)
+- `bench.rs` `std::fs::metadata(store_path(..)).map(len).ok()` → `store_bytes: None` when no store file exists (memory mode); documented on the field
+- `router/facts.rs` `finish_round`/`known_parses`/`request_graph` and `source.rs:159`: earlier phases, recorded there
+
+### Input Robustness Matrix (this phase)
+
+No new loader. The new CLI flags (`--bench-target`, internal `--bench-warm`) go through the existing `CliArgs::parse`; `main::tests::test_parse_bench_target_and_the_warm_half_flag` covers the value forms (`=` and separate), a missing value (error), and that the internal flag is not in the usage text. The child's JSON is the report's own `Serialize`/`Deserialize` round trip (`the_binary_runs_the_warm_half_over_the_cold_half_store_and_cleans_up`).
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+| --- | --- |
+| R13: cold fill logs `index store opened created=true facts_version` (no `rows`) and `index store revalidated markdown=3 unchanged=0 reparsed=3 removed=0 trigger=workspace-symbols elapsed_ms workspace`, each once; a restart logs `created=false rows=3` and `unchanged=3 reparsed=0 trigger=references`; no fallback, recreate, or `info` sweep; no line holds heading or body text | `dmls` `l1` `index_store_log_lines::a_fill_and_a_warm_restart_log_their_lines_once` |
+| R13: `DMLS_CACHE_DIR=off` over two roots: exactly one `warn` `index store unavailable, using memory reason=disabled path= workspace`, the second root at `debug`, no `opened` line, revalidation still logged | `…::a_fallback_to_memory_warns_once_per_process` |
+| R13: corrupt store → one `warn` `index store recreated reason=corrupt` naming the store, then `opened created=true`; a 31-day-old store of another root → one `info` `index store sweep removed=1 skipped_in_use=0 elapsed_ms`, its files gone | `…::a_recreated_store_and_a_sweep_log_their_lines_once` |
+| R14 / acceptance 10: cold fill (4 parsed, store size), warm revalidation (4 unchanged, 0 parsed), references (1 location over ≥ 2 candidates), rename, symbols, first-references with and without the walk, added RSS (Unix); every JSON key of both sections; summary sections | `bench_index::bench_index_reports_a_cold_fill_and_a_warm_restart` |
+| R14 wiring: the binary's warm half (a child process) read the cold half's store (0 parsed), honors `--bench-target`, and removes its temporary store directory | `bench_index::the_binary_runs_the_warm_half_over_the_cold_half_store_and_cleans_up` |
+| R14 errors: no Markdown listed; unreadable target | `bench_index::a_bench_over_no_markdown_or_an_unreadable_target_fails_with_the_path` |
+| CLI flags | `main::tests::test_parse_bench_target_and_the_warm_half_flag` |
+| acceptance 12: no production source names the removed API, state, log line, or token (mutation-checked: a `// the full index` comment in `lib.rs` fails it) | `full_index_removal_guard::no_production_source_names_the_removed_full_build` |
+| acceptance 12: the oracle builds the only whole-workspace graph | `full_index_removal_guard::the_whole_workspace_graph_is_built_only_by_the_test_oracle` |
+| acceptance 1 through the server (Phase 4 deferred it here): a restart reads 3 files and parses 0 before the first references answer | `index_store_live::a_warm_restart_parses_nothing_before_the_first_references_answer` |
+| acceptance 2 through the server: one file changed between restarts is the only parse, and its new link is answered | `index_store_live::one_file_changed_between_restarts_is_the_only_parse` |
+| R7 state machine over the store (shared build, cancellation, failure, list wait, shutdown, readiness withdrawn per transition × consumer, repair) | `index_build::*` (the renamed dependency suite, 33 tests) |
+| fallback mode, unannounced unreadable referrer: references/symbols answer from the old row, renames fail naming it, a repair and save make the rename edit it | `index_build::in_fallback_mode_an_unannounced_unreadable_file_fails_only_renames` |
+| `WorkspaceIndex` without the full build: watched change and relist read nothing until a need; a failed re-read drops the parse; closing over unreadable bytes leaves it unparsed | lib `graph::invalidate::tests::{test_watched_changes_and_relists_read_nothing_until_a_need, test_a_failed_read_drops_the_parse_and_a_rescan_never_reads_an_unparsed_file}` |
+| startup still opens no store; the revalidation line carries the fixture counts | `startup_log_lines::startup_and_revalidation_lines_carry_the_fixture_counts` |
+
+Tests rewritten to the oracle because `index_workspace` is gone: `entry_point_parity` (the DMLS link-graph row) and `level1_graph_index` (three tests). Removed with their code: `startup.rs` unit tests (`index_workspace`, round, cancelled round, worker count), `bench.rs` stage tests, `invalidate.rs` full-build tests (`from_indices`, build rounds, abandoned round, completeness).
+
+### Measurement sample (informational; acceptance 11 is Phase 7's)
+
+Release `dmls --bench-index <worktree> --bench-target darkmatter/docs/lsp/indexing.md`, load average about 9-10 (other sessions):
+
+| | |
+| --- | --- |
+| files | 5,709 Markdown |
+| cold: list / open / fill | 155 ms / 1 ms / 3,701 ms (5,709 parsed); store 14.7 MiB; process peak RSS 624 MiB |
+| warm: list / open / revalidate | 145 ms / 1 ms / 68 ms (5,709 unchanged, 0 parsed) |
+| first references (open + revalidate + request), without / with the list walk | **111 ms / 256 ms** (targets: 500 ms / 1 s) |
+| references / rename / symbols | 42 ms / 3 ms / 51 ms |
+| added peak RSS in the warm process | **44.0 MiB** (target: 64 MiB) |
+
+Compared with Phase 5's first references request on this repository (9,084 ms, process peak 1,122 MB), the full build is gone from the request path.
+
+### Gates and downstream tests
+
+- the gate-skip calculator was not consulted for skipping: the phase changed source files, so every gate ran
+- scoped during the work: `cargo nextest run -p dmls -E 'test(index_build) | test(index_store) | test(startup_log) | test(entry_point_parity) | test(level1_graph_index) | test(registry_preparation) | test(bench) | test(request_timing) | test(logging_tests) | test(invalidate) | test(workspace_file_list) | test(startup::)'` (236), then `cargo nextest run -p dmls` (1201; the three Phase 3 unit tests that asserted Debug-quoted `reason="…"` were updated)
+- `just test` in `darkmatter/`: **10454 passed, 10 skipped, 0 failed** (Phase 5: 10457; removed with their code: the full-build unit tests in `startup.rs`, `bench.rs`, and `invalidate.rs`, and two `readiness_withdrawn` rows; added: 3 log-line, 3 bench, 1 CLI, 2 guard, 2 restart, 1 fallback-mode, 2 `invalidate` tests)
+- `just lint` in `darkmatter/`: exit 0 (one `clippy::needless_borrow` in `entry_point_parity` fixed first)
+- `just check-tier-coverage darkmatter`: 0 stranded. No new test name carries a tier marker; the four new files are declared in `tests/l1/main.rs` and the renamed `index_build.rs` replaces `full_index.rs` there
+- `just test-l2` not run: no L2 test was touched
+- downstream: no workspace crate depends on `dmls` (`rg` over every `Cargo.toml` for a `dmls` dependency, and over every `.rs` outside `darkmatter/dmls/` for the removed or renamed items `dmls::bench`, `index_workspace`, `collect_indices`, `FullBuildStep`, `StartupEvent::FullIndex*`, `full_index_gate`: no hits)
+- scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` = `dmls`, `test-toolkit`, `darkmatter`, `darkmatter-cli`; `change_class` = `package`. The darkmatter packages ran in the area gate. `cargo nextest run -p test-toolkit`: 475 passed, **2 failed, the same two pre-existing failures Phases 4 and 5 recorded**: `ci_workflow_contracts::just_commit_is_deterministic_under_ci` and `ci_workflow_contracts::the_ci_documentation_states_the_implemented_behavior`. This phase touched neither the root `justfile` nor `.claude/skills/os/ci-evidence.md`
+- cross-OS: `just cross-check dmls --os windows` **pass** on the first attempt (1199 passed, 9 skipped), including every new test: the bench's child-process spawn and temp-directory cleanup, the aged-store sweep's mtime touch, the restart parse counts, and the log-line sessions. Linux and WSL were not run separately: the new code adds no `cfg` branch; its OS risk (spawning `current_exe`, the temp directory, file mtimes, store paths in log fields) is what the Windows leg exercises
+- no other skipped or pre-existing failures
+
+Phase 6 implementation complete, ready for review.
+
+## Phase 7
+
+Implemented directly by the orchestrator, without subagents. Wave 16 is four documentation edits to disjoint files, all small enough that briefing parallel agents would have cost more than writing them, and keeping the host quiet mattered for Wave 17's measurement. No source file changed in this phase.
+
+### What changed (Wave 16)
+
+- **`darkmatter/docs/lsp/indexing.md`**
+    - intro: the "build the full index" bullet (drift; the full build was deleted in Phase 6) now says the four requests read every file into the persistent store, and a restart re-parses only changed files
+    - "The index store": what a row holds and does not hold (table), **why it is only a cache** (a row is a pure function of path and bytes, used only after a same-hash read, no configuration stored), the spec's first-need **sequence diagram**, and **why DMLS keeps no graph over every file** with the corrected reason from ruling 7 (about 97 MiB retained, 0.5-1.9 s per process for A, against about 5 MiB and 0.1 s per request for C; the 600 MiB cold-fill peak is parse working memory either way)
+    - "Where the stores live": every `DMLS_CACHE_DIR` shape including a directory that cannot be created, the one `warn` (including `off`), a shell example, one store per effective root and the file-name layout (tree example, `-wal`, `-shm`, `.lock`), the facts version in the name, root mismatch refill, Unix `0700`/`0600` and the Windows ACL default, **sizing** (about 2.6 KiB per file, about 15 MiB for 5,700 files), **local disks only** (NFS, SMB, `/mnt/c`), **always safe to delete**, no prune command
+    - new "Lock file and sweep" (why a lock file: Unix unlink-while-open; the 30-day sweep as a table of cases including os error 32 and a missing root; the hourly touch), "Several DMLS processes" (WAL, 5 s busy timeout, batches of 200, idempotent writes, foreign rows used only on equal hash, deletes only for missing files, WAL-switch retry), and "When a store cannot be used" (the R12 ladder as a table, memory for the process lifetime, about 16 MiB, mid-request salvage then revalidation, and why no process deletes a store another holds)
+    - ruling 13 (corruption recovery strands another process's orphaned inode on Unix) is **not** documented as a live behavior: with the R10 lock every holder keeps a shared lock and repair needs the exclusive one, so a recreate cannot happen under another DMLS. The page states that instead
+- **`darkmatter/docs/lsp/configuration.md`**: a pointer in the intro, and a new "`DMLS_CACHE_DIR`: the index store directory" section (value table, example, why it is not a `.dmls.toml` key and not a CLI flag, local disks only, link to `indexing.md`)
+- **`darkmatter/docs/lsp/architecture.md`**: new "Graphs and the wiki universe" section (the live snapshot and the request graph, the external `WikiUniverse` that `build_with_roots` takes, an ambiguity and rename-spelling example, `shared_wiki_universe`, why the parameter is required)
+- **Skills**: `.claude/skills/darkmatter/dmls.md` (drift: `record_wait` named "the full index", now the index build `Wait::Index`; pointers to the three user-facing pages), `.claude/skills/darkmatter/remote-cache.md` (its no-fallback and no-eager-directory rules govern the transport cache only; the DMLS store deliberately differs)
+- **Confirmed, unchanged**: `darkmatter/docs/dependencies.md` and `docs/dependencies.md` list `rusqlite` (`bundled`) for `dmls` (Phase 1); no lock crate was added (std `File::try_lock*`); `.claude/skills/os/windows.md` records os error 32 as uncategorized, `set_modified` needing a write handle, and Unix unlink-while-open (Phase 3); the `biscuit-file` skill documents `user_cache_dir()` (Phases 1 and 4)
+- **Docs drift pass**: `rg 'wiki_docs|full index|full_index|full build|index_workspace|collect_indices|FullIndex|full in-memory'` over `dmls/src`, `dmls/README.md`, `dmls/docs`, `darkmatter/docs`, and the darkmatter skill: only local variables named `wiki_docs` in `graph/arena.rs` and `providers/wiki.rs` (they read `universe.docs()`, correct) and the skill's intended "the full in-memory build is deleted" note. The two drifted lines above were fixed. `build_with_roots`'s and `build`'s doc comments match the code. No `docs/` page or skill names this spec or the dependency fix (`rg 'dmls-index-store|logging-improvements'`: no hits)
+
+### Acceptance 11 sample (Wave 17)
+
+Release build (`cargo build --release -p dmls`), `target/release/dmls --bench-index . --bench-target darkmatter/docs/lsp/indexing.md` on this worktree (5,709 Markdown files), three runs back to back. **Host not quiet: load average 13-19** (other sessions; `fseventsd` near 100% CPU). Ruling 14 says one quick warm sample; a quiet-host or cold-disk (`sudo purge`) figure is the author's call.
+
+| Run | load (1 min) | first references, without / with the list walk | added RSS (warm process) | warm revalidate | cold fill | cold peak RSS |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 13.1 | **121.5 ms / 284.7 ms** | **42.9 MiB** | 63.1 ms, 0 parsed | 3,706 ms | 618.7 MiB |
+| 2 | 15.4 | **109.1 ms / 256.0 ms** | **44.0 MiB** | 64.6 ms, 0 parsed | 3,920 ms | 627.9 MiB |
+| 3 | 18.7 | **113.2 ms / 257.8 ms** | **46.2 MiB** | 63.3 ms, 0 parsed | 3,783 ms | 609.9 MiB |
+| targets (ruling 6) | | ≤ 500 ms / ≤ 1 s | ≤ 64 MiB | | none (record only) | none |
+
+- all three runs meet acceptance 11 with margin (worst: 121.5 ms, 284.7 ms, 46.2 MiB)
+- other figures (run 2): list walk 147 ms, open 1.1 ms; references 43 ms, heading rename 3.1 ms, workspace symbols 51 ms; store 14.7 MiB
+- the bench puts the cursor on the target's first heading, the uncited H1 of `indexing.md` (0 locations over 9 candidates). A fourth run on `docs/kind-documents.md` (load 23.3): 109.9 ms / 266.6 ms, 36.6 MiB added (0 locations over 1 candidate). The latency is the server's request path in either case; a heading with many backlinks was not available as a first heading
+- cold fill is recorded only (no target): 3.7-3.9 s and about 610-630 MiB peak, close to the spec's 552 MiB figure from S1 on a different tree
+
+### Rulings as confirmed
+
+Rulings 1-18 were adopted as written in Phase 1 (`yolo: true`, headless) and none was overridden later. Ruling 7's spec corrections are already present in the spec text (`rg '360|680 MB' spec.md`: no hits; the Decisions row gives 97 MiB), so nothing returns to the author on that point. The docs carry the corrected C-over-A reason. Ruling 13 is superseded in practice by the lock file (above). Ruling 14's wider measurement stays the author's decision.
+
+### Departures from the spec (all phases)
+
+Each is recorded with its reason in its phase's "Departures and decisions":
+
+- Phase 1: `user_cache_dir()` has no `<home>\AppData\Local` fallback on Windows (`None` → memory)
+- Phase 3: `FileFacts::from_index` takes only the index; the sweep takes `now: SystemTime` (not the monotonic clock seam); the R10 lock file was added in Phase 3 though the plan listed only the os-error-32 skip; recreate-once applies at open, later failures salvage into memory; reads also touch the store (hourly)
+- Phase 4: `biscuit_file::user_cache_dir_from(env, home)` added so DMLS derives the location from its request snapshot (no ambient read); a listed file missing on disk fails the build like an unreadable one; rename refreshes candidates **before** computing edits
+- Phase 5: per-request store work runs on the dispatch thread (10 ms references, 54 ms symbols measured), not a worker
+- Phase 6: in fallback watch mode, references and workspace symbols answer from an unannounced file's old row (renames still re-read and fail); an abandoned build keeps its rows; closing a buffer refreshes its path into the store; a fallback save also hands `recheck_parsed`'s changed paths to the store; the bench's warm half runs in a child process; store log fields are Display-formatted
+- Phase 7: ruling 13 is documented as "cannot happen" rather than "accepted", because the lock file prevents it
+- pre-existing, not changed: a `../` link out of a workspace folder that is in no repository does not resolve; `willRenameFiles` does not edit a Markdown link carrying a fragment; case- and NFD-differing Markdown links are never references; folder renames make no edits (spec out of scope)
+
+### Smell grep (final)
+
+`rg 'unwrap_or_default\(\)|\.ok\(\)|filter_map|serde\(default'` over `index_store/`, `index_build.rs`, `router/facts.rs`, `bench.rs`, `wiki/universe.rs`: five hits, each already recorded and justified in an earlier phase (`router/facts.rs:82` empty touched set, `:212` and `:249` "no parse held", `bench.rs:215` `store_bytes: None` in memory mode, `index_store/source.rs:159` map lookup). None is a decode that turns an error into "empty".
+
+### `storage-strategy` line for the author (ruling 16)
+
+Unchanged from Phase 3; add to the "safe to delete" list of the user-global `~/.claude/skills/storage-strategy` skill (not in this repository):
+
+> - `<user cache dir>/darkmatter/dmls/` (macOS `~/Library/Caches/darkmatter/dmls/`, Linux `${XDG_CACHE_HOME:-~/.cache}/darkmatter/dmls/`, Windows `%LOCALAPPDATA%\darkmatter\dmls\`, or `$DMLS_CACHE_DIR`): DMLS index stores (`<hex16>-f<N>.sqlite` plus `-wal`, `-shm`, `.lock`), a pure cache of Markdown facts. Always safe to delete; a running `dmls` keeps working and the next start refills. Stores untouched for 30 days are swept automatically.
+
+### Acceptance checklist
+
+| # | Criterion | Evidence |
+| --- | --- | --- |
+| 1 | warm restart re-parses zero before the first references answer | `dmls` `l1` `index_store_live::a_warm_restart_parses_nothing_before_the_first_references_answer`; lib `index_store::workspace::tests::a_restart_with_unchanged_files_parses_nothing`; bench (this repository): 5,709 unchanged, 0 parsed |
+| 2 | one changed file is the only re-parse | `index_store_live::one_file_changed_between_restarts_is_the_only_parse`; lib `index_store::workspace::tests::one_file_changed_between_restarts_is_the_only_parse` |
+| 3 | after a restart, heading and file rename edit a never-open, unreferenced referrer | `index_store_sessions::after_a_restart_renames_edit_a_referrer_never_open` |
+| 4 | six request kinds equal the oracle, incl. wiki ambiguity and spellings | `index_store_requests::{references_equal_the_oracle_at_every_probe, heading_renames_equal_the_oracle_at_every_heading, file_renames_equal_the_oracle_including_wiki_spellings, workspace_symbols_equal_the_oracle_and_list_a_nested_file_once, wiki_ambiguity_is_judged_against_the_whole_file_list}`; `wiki_universe_equivalence` |
+| 5 | candidates never omit a true referrer, incl. bare root-relative paths | `index_store_keys::candidates_never_miss_a_true_referrer_on_the_corpus`; `index_store_requests::candidates_never_miss_an_oracle_referrer` |
+| 6 | two roots: cross-root file rename after a restart; nested roots: no duplicates | `index_store_sessions::{after_a_restart_a_file_rename_edits_a_referrer_in_the_other_root, with_nested_roots_no_result_appears_twice}` |
+| 7 | fallback watch mode rename includes a referrer added on disk without an event | `index_store_live::{a_fallback_rename_edits_a_referrer_added_on_disk_without_an_event, a_rename_edits_the_new_bytes_of_a_referrer_changed_after_ready}` |
+| 8 | read-only, corrupt, locked, `off`: four requests answer from memory, one `warn`; `off` writes no file | `index_store_requests::{with_the_stores_off_every_request_answers_from_memory, with_a_read_only_store_directory_every_request_answers_from_memory, with_corrupt_stores_held_by_another_process_every_request_answers_from_memory}`; `index_store_stdio::the_binary_answers_from_memory_when_the_stores_are_off`; `index_store_log_lines::a_fallback_to_memory_warns_once_per_process` |
+| 9 | two processes filling one store (incl. creating it at once) reach identical rows | `index_store_concurrency::two_processes_cold_filling_one_new_store_reach_identical_rows`; `index_store::source::tests::a_wal_switch_busy_past_its_bound_uses_memory_and_never_recreates` |
+| 10 | no process deletes or recreates a store another holds, any OS | `index_store_sweep::a_store_another_holder_has_open_is_skipped_and_stays_shared`; `index_store::source::tests::a_corrupt_store_another_process_holds_falls_back_to_memory`; `index_store_sweep::windows_skips_a_store_whose_database_is_open_without_its_lock` (`cfg(windows)`) |
+| 11 | warm restart ≤ 500 ms / ≤ 1 s, ≤ 64 MiB added | measurement above: 109-122 ms / 256-285 ms, 42.9-46.2 MiB (load 13-19) |
+| 12 | production full build gone; oracle only in tests | `full_index_removal_guard::{no_production_source_names_the_removed_full_build, the_whole_workspace_graph_is_built_only_by_the_test_oracle}` |
+
+### Windows evidence (R10/R12 sharing violation)
+
+`index_store_sweep::windows_skips_a_store_whose_database_is_open_without_its_lock` (os error 32 skip, write-handle mtime touch) ran and passed on the native Windows rig through `just cross-check dmls --os windows` in Phases 3, 4, 5, and 6 (Phase 6: 1199 passed, 9 skipped). Phase 7 changed no source file, so no new cross-check was run; the nightly native Windows leg covers it after merge.
+
+### Requirement-to-test mapping (this phase)
+
+This phase changed documentation and skills only. No behavior changed, so no test was added. The behaviors the new docs describe are each covered by the tests in the acceptance checklist and earlier phases' maps; the doc statements were checked against the code (`index_store/{mod,location,store,failure}.rs` constants and rules, `wiki/universe.rs`, `graph/arena.rs`).
+
+### Gates and downstream tests
+
+- scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` = `dmls`, `test-toolkit`, `darkmatter`, `darkmatter-cli`; `change_class` = `package`. Not empty, so every gate ran. The packages come from Phase 6's still-uncommitted source changes in the working tree; this phase changed documentation and skills only
+- `just test` in `darkmatter/`: **10454 passed, 10 skipped, 0 failed** (same count as Phase 6; no test added or removed)
+- `just lint` in `darkmatter/`: exit 0 (includes the zed-dmls wasm check)
+- `just check-tier-coverage darkmatter`: 0 stranded
+- `just test` in `biscuit-file/`: 1142 passed, 0 failed; `just lint` in `biscuit-file/`: exit 0
+- `just test-l2` not run: no L2 test was touched in any phase
+- downstream: `cargo nextest run -p test-toolkit --no-fail-fast`: 475 passed, **2 failed, the same two pre-existing failures Phases 4-6 recorded** (`ci_workflow_contracts::just_commit_is_deterministic_under_ci`, `ci_workflow_contracts::the_ci_documentation_states_the_implemented_behavior`); this phase touched neither the root `justfile` nor `.claude/skills/os/ci-evidence.md`. No workspace crate depends on `dmls`
+- cross-OS: not run this phase (no source change, no OS risk); Windows evidence from Phases 3-6 above
+- no other skipped or pre-existing failures
+
+Implementation complete, ready for review. The author moves the spec to `_completed`.
