@@ -188,7 +188,7 @@ pub(super) fn run_step_task(
     let tasks = group_task_results(&outcome);
     match outcome.status {
         TaskStatus::Succeeded => StepOutcome::Succeeded {
-            provider: prompt_runner.take_provider(),
+            providers: prompt_runner.launches.attempts(),
             agent_perf,
             compose_perf,
             tasks,
@@ -333,7 +333,7 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         name,
         label,
         action,
-        params,
+        with,
         timeout,
         when,
         operation,
@@ -355,9 +355,12 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         // Authored commands the action and stacks above already carry.
         shell_sites: _,
         approved_set_values: _,
+        // A graph position and evaluated selection hints, never expression text.
+        identity: _,
+        provider: _,
     } = task;
     push_json_scan(
-        &(name, label, params, timeout, when, operation, flow, setup, teardown),
+        &(name, label, with, timeout, when, operation, flow, setup, teardown),
         scan,
     );
     push_action_scan(action, scan);
@@ -484,7 +487,7 @@ fn group_task_results(outcome: &TaskOutcome) -> Vec<SequenceTaskResult> {
         .collect()
 }
 
-/// The effective (composed) frontmatter a task's stacks and `params` read.
+/// The effective (composed) frontmatter a task's stacks and `with` read.
 fn effective_frontmatter(prepared: &PreparedComposition) -> serde_json::Map<String, Value> {
     prepared
         .effective_frontmatter
@@ -501,6 +504,9 @@ struct WrapperPromptRunner<'a> {
     runtime_state: &'a std::sync::Arc<RuntimeState>,
     /// Submits each group member's stacks when its context is opened.
     prewarm: TaskStackPrewarm<'a>,
+    /// Every attempt every prompt run of this step spawned, group legs and
+    /// handoff targets included, for the step status line.
+    launches: claudine::composition::LaunchLog,
     /// The most recent prompt run's perf record and provider.
     ///
     /// Interior mutability because [`PromptTaskRunner::run`] takes `&self` — the
@@ -512,11 +518,10 @@ struct WrapperPromptRunner<'a> {
     last_run: std::sync::Mutex<PromptRunRecord>,
 }
 
-/// What a prompt run reports back out of band, for the step status line.
+/// What a prompt run reports back out of band, for the step's perf report.
 #[derive(Debug, Default)]
 struct PromptRunRecord {
     perf: Option<crate::perf::AgentExecutionPerf>,
-    provider: Option<claudine::provider::Provider>,
 }
 
 impl<'a> WrapperPromptRunner<'a> {
@@ -546,6 +551,7 @@ impl<'a> WrapperPromptRunner<'a> {
             task_frame_writer: request.frame_writer.clone(),
             env_overrides,
             operation: request.operation.clone(),
+            launch_log: Some(self.launches.clone()),
         };
         let task_ledger: SharedRunLedger = Arc::new(Mutex::new(RunLedger::new(
             source.resolved_path.clone(),
@@ -589,6 +595,7 @@ impl<'a> WrapperPromptRunner<'a> {
             target,
             runtime_state,
             prewarm,
+            launches: claudine::composition::LaunchLog::default(),
             last_run: std::sync::Mutex::new(PromptRunRecord::default()),
         }
     }
@@ -601,34 +608,105 @@ impl<'a> WrapperPromptRunner<'a> {
         self.record().perf.take()
     }
 
-    fn take_provider(&self) -> Option<claudine::provider::Provider> {
-        self.record().provider
-    }
-
-    /// The step's target and environment overrides for `document`: its model
-    /// re-selected under that document's map (see
-    /// [`super::resolve::StepSelection::for_document`]), and `MODEL` naming it.
+    /// The target and environment overrides a task prepares `document`
+    /// under: the task's own selection (see [`super::providers`]), else the
+    /// step's, with its model re-selected under that document's map (see
+    /// [`super::resolve::StepSelection::for_document`]), and `AGENT`/`MODEL`
+    /// naming it. A task with no planned target composes with neither.
     fn document_target(
         &self,
         document: &InvocationContext,
+        identity: &claudine::composition::sequence::preflight::TaskIdentity,
     ) -> (Option<ResolvedExecutionTarget>, BTreeMap<String, String>) {
-        let target = self.target.cloned().map(|planned| {
+        let selected = self.run.task_selections.get(identity);
+        let planned = match selected {
+            Some(selection) => selection.target.planned().cloned(),
+            None => self.target.cloned(),
+        };
+        let hints = selected.map_or(self.run.selection.raw_hints, |selection| &selection.hints);
+        let target = planned.map(|planned| {
             self.run
                 .selection
-                .for_document(planned, document.document_environment())
+                .for_document(planned, hints, document.document_environment())
         });
         let mut env_overrides = self.env_overrides.clone();
-        if let Some(target) = &target {
-            match &target.model {
-                Some(model) => {
-                    env_overrides.insert("MODEL".to_string(), model.clone());
+        match &target {
+            Some(target) => {
+                env_overrides.insert("AGENT".to_string(), target.provider.as_slug().to_string());
+                match &target.model {
+                    Some(model) => {
+                        env_overrides.insert("MODEL".to_string(), model.clone());
+                    }
+                    None => {
+                        env_overrides.remove("MODEL");
+                    }
                 }
-                None => {
-                    env_overrides.remove("MODEL");
-                }
+            }
+            None => {
+                env_overrides.remove("AGENT");
+                env_overrides.remove("MODEL");
             }
         }
         (target, env_overrides)
+    }
+
+    /// The target a task whose `agent` is decided at launch runs under, from
+    /// its composed document: the canonical non-interactive rule over the
+    /// composed hints, or its fallback when the document names no `agent`.
+    /// Every other task keeps `planned`.
+    ///
+    /// ## Errors
+    ///
+    /// [`CompositionError::SequenceTaskProviderSelection`] when the composed
+    /// hint selects no installed provider, before the task spawns.
+    #[allow(clippy::result_large_err)]
+    fn launch_target(
+        &self,
+        identity: &claudine::composition::sequence::preflight::TaskIdentity,
+        planned: Option<ResolvedExecutionTarget>,
+        composed: &claudine::composition::EffectiveSelectionHints,
+        document: &InvocationContext,
+    ) -> Result<Option<ResolvedExecutionTarget>, CompositionError> {
+        let Some(selection) = self.run.task_selections.get(identity) else {
+            return Ok(planned);
+        };
+        if !matches!(selection.target, super::providers::TaskTarget::AtLaunch(_))
+            || self.run.shared.explicit_provider().is_some()
+        {
+            return Ok(planned);
+        }
+        let snapshot = &self.run.prep_context.installed_snapshot;
+        if composed.agent.is_none() && composed.agent_invalid.is_empty() && planned.is_some() {
+            return Ok(planned);
+        }
+        let state = claudine::composition::classify_agent_resolution(composed, snapshot);
+        let Some(provider) = super::providers::auto_selected(&state) else {
+            return Err(super::providers::launch_error(
+                selection,
+                claudine::composition::SequenceTaskProviderProblem::Unresolvable {
+                    state,
+                    installed: snapshot.runnable.clone(),
+                },
+            ));
+        };
+        let (model, model_reason) = crate::commands::wrap::composition::resolve_document_model(
+            self.run.selection.catalog,
+            provider,
+            composed,
+            self.run.selection.cli_model,
+            crate::commands::wrap::composition::ModelResolveMode::REBUILD,
+            document.document_environment(),
+        );
+        Ok(Some(ResolvedExecutionTarget {
+            provider,
+            provider_reason: if composed.agent_was_list {
+                claudine::composition::ProviderResolutionReason::FrontmatterList
+            } else {
+                claudine::composition::ProviderResolutionReason::FrontmatterSingle
+            },
+            model,
+            model_reason,
+        }))
     }
 }
 
@@ -663,7 +741,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         // The barrier composes the document as its run will: inside the
         // enclosing container's loop.
         context.loop_values = request.loop_values.clone();
-        let (_, env) = self.document_target(document);
+        let (_, env) = self.document_target(document, &request.task_identity);
         let mut overrides = request.set_overrides.clone();
         if request.body_only { super::container::mask_body_events(&mut overrides); }
         let options = super::jit::step_prepare_options(
@@ -690,7 +768,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         // A serial leg is a document of its own: it captures its environment
         // once, here, before any of its stages run.
         let document = self.run.prep_context.invocation.capture_document();
-        let (_, env_overrides) = self.document_target(&document);
+        let (_, env_overrides) = self.document_target(&document, &task.identity);
         let (_, context, epoch) = prepare_task_context(&document, task, &env_overrides, &run);
         epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Lifecycle,
@@ -706,7 +784,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
     fn refresh_member_run(&self, task: &PreflightTask, previous: &TaskRun) -> TaskRun {
         let document = previous.document.as_ref().expect("serial members own a document");
         let run = RunEvidence::default();
-        let (_, env_overrides) = self.document_target(document);
+        let (_, env_overrides) = self.document_target(document, &task.identity);
         let (_, context, epoch) = prepare_task_context(document, task, &env_overrides, &run);
         epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Lifecycle,
@@ -726,7 +804,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             std::slice::from_ref(task),
             self.run.graph,
         ));
-        let (_, env_overrides) = self.document_target(&document);
+        let (_, env_overrides) = self.document_target(&document, &task.identity);
         for (key, value) in &env_overrides {
             context.env_mut().insert(key.clone(), value.clone());
         }
@@ -769,8 +847,8 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         // The document the task runs in: a group leg's own view, or the
         // step's. Everything below — composition, the prompt document's
         // lifecycle, and the launch — reads that document's environment.
-        // The task's `params` are injected into its prompt document per task,
-        // so pre-warm treats them as late there.
+        // The task's `with` is injected into its prompt document per task, so
+        // pre-warm treats its keys as late there.
         let document = request
             .document
             .clone()
@@ -785,13 +863,13 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         let prompt_source_context = document
             .derive_source(&source.resolved_path)
             .expect("resolved prompt document always has a parent directory");
-        let params_source_context = document
-            .derive_source(&request.params_origin_path)
+        let with_source_context = document
+            .derive_source(&request.with_origin_path)
             .expect("a preflight task always has an authoring source");
         let mut caller_input_records =
             claudine::composition::CallerInputLayers::from_caller_overrides(
-                Some(Value::Object(request.params.clone())),
-                params_source_context.file_resolution_context().clone(),
+                Some(Value::Object(request.with.clone())),
+                with_source_context.file_resolution_context().clone(),
             )
             .caller_input_records;
         caller_input_records.extend(self.run.compose.caller_input_records.clone());
@@ -822,7 +900,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         prompt_compose_context.deferred_shell_roots = request.deferred_shell_roots.clone();
         prompt_compose_context.document_shell_values = Some(request.document_shell_values.clone());
         prompt_compose_context.loop_values = request.loop_values.clone();
-        let (document_target, document_env_overrides) = self.document_target(&document);
+        let (document_target, document_env_overrides) = self.document_target(&document, &request.task_identity);
         let mut overrides = request.set_overrides.clone();
         if request.body_only { super::container::mask_body_events(&mut overrides); }
         let composed = super::jit::compose_step(
@@ -836,10 +914,24 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             false,
         )?;
 
+        let document_target = self.launch_target(
+            &request.task_identity,
+            document_target,
+            &composed.prepared.selection_hints,
+            &document,
+        )?;
         let shared = self.run.shared;
         let resolved =
             shared.resolve_session_interactivity(composed.prepared.selection_hints.interactive);
         let mut env_overrides = document_env_overrides;
+        // A target decided at launch names the provider the child runs.
+        if let Some(target) = &document_target {
+            env_overrides.insert("AGENT".to_string(), target.provider.as_slug().to_string());
+            match &target.model {
+                Some(model) => env_overrides.insert("MODEL".to_string(), model.clone()),
+                None => env_overrides.remove("MODEL"),
+            };
+        }
         let mut task_owned_env = super::jit::step_owned_env(self.run.effective_fail_fast);
         if let Some(operation) = &request.operation {
             env_overrides.insert("OPERATION".to_string(), operation.clone());
@@ -916,9 +1008,10 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             suppress_output_commit: true,
             // Carries this task's bar to the thread draining the child's stdout.
             task_frame_writer: request.frame_writer.clone(),
-            proxy_overlay: indexmap::IndexMap::new(),
+            proxy_overlay: Default::default(),
             handoff_ledger: Some(Arc::clone(&task_ledger)),
             adopted_handoff: None,
+            launch_log: Some(self.launches.clone()),
         };
 
         let kind = if request.inline_compose {
@@ -939,6 +1032,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             task_frame_writer: request.frame_writer.clone(),
             env_overrides: task_owned_env,
             operation: request.operation.clone(),
+            launch_log: Some(self.launches.clone()),
         };
         let outcome = execute_composition_request_inner(
             execution,
@@ -972,7 +1066,6 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
 
         *self.record() = PromptRunRecord {
             perf: outcome.agent_perf,
-            provider: Some(outcome.provider),
         };
 
         Ok(PromptRunOutcome {

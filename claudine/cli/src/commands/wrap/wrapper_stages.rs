@@ -559,7 +559,7 @@ pub(crate) fn run_execution_stage(
             original_ref: source_path.display().to_string(),
             source_path,
             base_prompt: Some(base_prompt),
-            overlay: indexmap::IndexMap::new(),
+            overlay: Default::default(),
             pending_retry_overlay: None,
             prompt_tail: Vec::new(),
             // A direct wrapper run is one invocation with no caller-owned
@@ -567,6 +567,7 @@ pub(crate) fn run_execution_stage(
             runtime_state: std::sync::Arc::clone(&initial_materialized.runtime_state),
             suppress_output_commit: false,
             last_final_output: None,
+            launched_providers: Vec::new(),
             input_layers,
             entry: claudine::composition::DocumentEntryReason::Direct,
             invocation_context: Some(invocation.clone()),

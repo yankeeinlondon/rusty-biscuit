@@ -199,6 +199,14 @@ pub struct SharedComposeArgs {
     #[arg(long, value_name = "JSON")]
     pub set: Option<String>,
 
+    /// Caller-input records for values in [`Self::set`] that were authored
+    /// somewhere other than the launch directory. A lifecycle `prep` hands
+    /// its target the `with:` overlay as caller values; a relative file value
+    /// in it resolves from the document that authored the `prep`. Applied by
+    /// [`caller_input_records`]. Not parsed by clap.
+    #[arg(skip)]
+    pub set_records: darkmatter::markdown::compose::CallerInputRecords,
+
     /// Enable Claudine-managed MCP session composition.
     #[arg(long)]
     pub mcp: bool,
@@ -700,3 +708,24 @@ pub fn run_inline_compose(
 
 #[cfg(test)]
 mod tests;
+
+/// The caller-input records of `set_overrides`: each value's record from the
+/// launch context `launch`, unless `shared` carries the record it was authored
+/// with ([`SharedComposeArgs::set_records`]) and the value is still the one
+/// that record holds.
+pub(crate) fn caller_input_records(
+    shared: &SharedComposeArgs,
+    set_overrides: Option<serde_json::Value>,
+    launch: biscuit_file::FileResolutionContext,
+) -> darkmatter::markdown::compose::CallerInputRecords {
+    let mut records =
+        claudine::composition::CallerInputLayers::from_caller_overrides(set_overrides, launch).caller_input_records;
+    for (key, record) in &mut records {
+        if let Some(authored) = shared.set_records.get(key)
+            && authored.raw() == record.raw()
+        {
+            *record = authored.clone();
+        }
+    }
+    records
+}

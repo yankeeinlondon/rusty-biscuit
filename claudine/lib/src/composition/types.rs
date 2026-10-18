@@ -456,6 +456,10 @@ pub struct SequenceStepDraft {
     /// The provisional provider: the explicit flag, the auto-selected agent,
     /// or the picker plan's default. `None` when the plan has no options.
     pub resolved_provider: Option<Provider>,
+    /// Set for a row that is shown but never edited, because the task already
+    /// names its provider: the text its provider cell shows (`Codex`,
+    /// `decided at launch`). The review returns no target for such a row.
+    pub read_only: Option<String>,
 }
 
 /// A typed hint for which agent(s) to use, parsed from frontmatter `agent`.
@@ -563,6 +567,87 @@ impl EffectiveSelectionHints {
     /// Explicit CLI/environment intent wins over the document's default.
     pub fn yolo_enabled(&self, cli_yolo: bool) -> bool {
         cli_yolo || self.yolo.unwrap_or(false)
+    }
+}
+
+/// An evaluated `with:` overlay as the document it targets receives it.
+///
+/// A relative file value in a `proxy`, `retry`, or `prep` `with:` resolves from
+/// the file that authored the directive, not from the target and not from the
+/// launch directory, so each value keeps that file's context. Only a value the
+/// target's schema selects as a file is anchored; every other value is plain
+/// data. A `null` value removes the key from the target and carries no origin.
+///
+/// Preparation turns the origins into caller-input records layered below the
+/// caller's own ([`PrepareOptions`](super::PrepareOptions)), so a caller setter
+/// still outranks the overlay, value and origin alike.
+#[derive(Clone, Default, PartialEq)]
+pub struct AnchoredOverlay {
+    values: indexmap::IndexMap<String, serde_json::Value>,
+    origins: BTreeMap<String, biscuit_file::FileResolutionContext>,
+}
+
+impl fmt::Debug for AnchoredOverlay {
+    /// Names the properties, never the values: an overlay may carry secrets.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.values.keys()).finish()
+    }
+}
+
+impl AnchoredOverlay {
+    /// `values`, every one authored in the file `origin` resolves from.
+    pub fn new(
+        values: indexmap::IndexMap<String, serde_json::Value>,
+        origin: &biscuit_file::FileResolutionContext,
+    ) -> Self {
+        let origins = values
+            .iter()
+            .filter(|(_, value)| !value.is_null())
+            .map(|(key, _)| (key.clone(), origin.clone()))
+            .collect();
+        Self { values, origins }
+    }
+
+    #[allow(missing_docs)]
+    pub fn values(&self) -> &indexmap::IndexMap<String, serde_json::Value> {
+        &self.values
+    }
+
+    #[allow(missing_docs)]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// `over` layered key-wise on top: a shared key takes `over`'s value and
+    /// origin.
+    #[must_use]
+    pub fn layered(&self, over: &Self) -> Self {
+        let mut layered = self.clone();
+        for (key, value) in &over.values {
+            layered.values.insert(key.clone(), value.clone());
+            match over.origins.get(key) {
+                Some(origin) => layered.origins.insert(key.clone(), origin.clone()),
+                None => layered.origins.remove(key),
+            };
+        }
+        layered
+    }
+
+    /// Each non-null value paired with the context of the file that authored
+    /// it, as the caller-input records Darkmatter materializes file values by.
+    pub fn input_records(&self) -> darkmatter::markdown::compose::CallerInputRecords {
+        self.origins
+            .iter()
+            .map(|(key, origin)| {
+                (
+                    key.clone(),
+                    darkmatter::markdown::compose::CallerInputRecord::new(
+                        self.values[key].clone(),
+                        origin.clone(),
+                    ),
+                )
+            })
+            .collect()
     }
 }
 
@@ -903,6 +988,33 @@ impl FromStr for OutputFormat {
     }
 }
 
+/// The providers a run's attempts actually spawned, in order, shared by every
+/// document the run executes (retries, resumes, and proxy targets included).
+///
+/// A run that spawned nothing (skipped, blocked, or failed before launch)
+/// leaves it empty, so it never reports a provider it only planned.
+#[derive(Debug, Clone, Default)]
+pub struct LaunchLog(std::sync::Arc<std::sync::Mutex<Vec<Provider>>>);
+
+impl LaunchLog {
+    /// Record one spawned attempt.
+    pub fn record(&self, provider: Provider) {
+        self.0.lock().expect("launch log poisoned").push(provider);
+    }
+
+    /// Every spawned attempt's provider, in launch order.
+    #[must_use]
+    pub fn attempts(&self) -> Vec<Provider> {
+        self.0.lock().expect("launch log poisoned").clone()
+    }
+
+    /// The final spawned attempt's provider.
+    #[must_use]
+    pub fn last(&self) -> Option<Provider> {
+        self.0.lock().expect("launch log poisoned").last().copied()
+    }
+}
+
 /// A fully-specified request to execute a composition through the
 /// wrapper-grade pipeline.
 #[derive(Debug, Clone)]
@@ -1036,9 +1148,10 @@ pub struct CompositionExecutionRequest {
     /// document, when it was reached through a proxy. Re-applied over the
     /// target's authored frontmatter on every re-materialization
     /// (retry/resume), so the immutable pre-schema handoff input survives
-    /// refresh exactly as canonical preparation left it. Empty for a
-    /// directly-invoked document.
-    pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+    /// refresh exactly as canonical preparation left it, each value anchored
+    /// at the source document that authored it. Empty for a directly-invoked
+    /// document.
+    pub proxy_overlay: super::AnchoredOverlay,
 
     /// The invocation-wide run ledger, shared with the provider harness so a
     /// terminal-event proxy can be committed against the one chain while the
@@ -1058,6 +1171,11 @@ pub struct CompositionExecutionRequest {
     /// canonical R4 staging for every route. `None` for a directly-invoked
     /// document and for the caller's first document.
     pub adopted_handoff: Option<Box<crate::composition::ProxyHandoff>>,
+
+    /// Where every attempt this request runs records the provider it spawned,
+    /// shared with the caller that reports them (a sequence step or task).
+    /// `None` records nothing.
+    pub launch_log: Option<LaunchLog>,
 
     /// The invocation-local runtime state cell shared with the caller.
     ///

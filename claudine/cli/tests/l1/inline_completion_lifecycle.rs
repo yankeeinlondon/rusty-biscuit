@@ -868,18 +868,18 @@ fn a_proxy_with_overlay_satisfies_the_targets_completion_schema() {
     );
 }
 
-/// AC14: sequence state is the third transient channel. A step's `params`
-/// satisfy the referenced document's completion schema for that step only, and
+/// AC14: sequence state is the third transient channel. A task's `with`
+/// satisfies the referenced document's completion schema for that step only, and
 /// the referenced file never records the value.
 #[test]
-fn sequence_step_params_satisfy_the_referenced_documents_completion_schema() {
+fn sequence_task_with_satisfies_the_referenced_documents_completion_schema() {
     let plan = concat!(
         "---\n",
         "agent: goose\n",
         "sequence:\n",
         "  - name: research\n",
         "    prompt: research.md\n",
-        "    params:\n",
+        "    with:\n",
         "      researched_by: \"{{ seq.name }}\"\n",
         "---\n",
         "plan body\n",
@@ -928,7 +928,7 @@ fn sequence_step_params_satisfy_the_referenced_documents_completion_schema() {
         "sequence state must never be persisted to the referenced document:\n{member_after}"
     );
 
-    // The same document run on its own fails completion, so the step's params
+    // The same document run on its own fails completion, so the task's `with`
     // — not a missing check — are what satisfied the schema above.
     fs::write(&member, member_source).unwrap();
     let alone = fixture

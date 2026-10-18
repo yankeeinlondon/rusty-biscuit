@@ -88,6 +88,7 @@ impl BlockError for CompositionError {
 
             // Selection / target family.
             CompositionError::AgentResolutionFailed { .. }
+            | CompositionError::SequenceTaskProviderSelection { .. }
             | CompositionError::AutocompleteNoMatches { .. }
             | CompositionError::AutocompleteOverCap { .. }
             | CompositionError::AutocompleteNotInteractive
@@ -775,18 +776,18 @@ impl Diagnostic for CompositionError {
                 actual,
                 ..
             } => {
-                base["property"] = json!(format!("{property}.{path}"));
+                base["property"] = json!(with_property_path(property, path));
                 base["message"] = json!(format!("`with` must be a mapping, got {actual}"));
             }
             CompositionError::LifecycleWithWholeMapping { property, path, .. } => {
-                base["property"] = json!(format!("{property}.{path}"));
+                base["property"] = json!(with_property_path(property, path));
                 base["message"] =
                     json!("`with` cannot be supplied as a whole-mapping interpolation");
             }
             CompositionError::LifecycleWithDynamicKey {
                 property, path, key, ..
             } => {
-                base["property"] = json!(format!("{property}.{path}"));
+                base["property"] = json!(with_property_path(property, path));
                 base["message"] = json!(format!("`with` key `{key}` is not a static string"));
             }
             CompositionError::LifecycleWithEvaluationFailed {
@@ -796,10 +797,10 @@ impl Diagnostic for CompositionError {
                 message,
                 ..
             } => {
-                let verb = overlay_directive(property);
-                base["property"] = json!(format!("{property}.{path}"));
+                base["property"] = json!(with_property_path(property, path));
                 base["message"] = json!(format!(
-                    "could not be resolved for the `{verb}` to `{target}`: {message}"
+                    "could not be resolved for {}: {message}",
+                    with_purpose(property, target)
                 ));
             }
             CompositionError::LifecycleSetPositionalRemoved { property, path, .. } => {
@@ -826,8 +827,9 @@ impl Diagnostic for CompositionError {
             }
             CompositionError::LifecycleWithUnsupported { property, verb, .. } => {
                 base["property"] = json!(property);
-                base["message"] =
-                    json!(format!("`with` is only valid on `proxy` and `retry`, not `{verb}`"));
+                base["message"] = json!(format!(
+                    "`with` is only valid on `proxy`, `retry`, and `prep`, not `{verb}`"
+                ));
             }
             CompositionError::RemovedGrammar {
                 path,

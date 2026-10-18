@@ -118,7 +118,7 @@ pub(super) fn translate_schema_failure(
 
     // Darkmatter names the base it resolved from, which for a caller value can
     // be the document's directory; report the caller's instead (R4).
-    rebase_caller_file_problems(&mut problems, &options.caller_input_records);
+    rebase_caller_file_problems(&mut problems, &options.compose_caller_records());
     let snapshot = build_effective_instance(source, options.set_overrides.as_ref());
     let effective = load_effective_schema(
         source,
@@ -183,7 +183,7 @@ pub(super) fn translate_schema_failure(
                     retry_err,
                     options.file_ref_fallback_dir.as_deref(),
                     &options.file_resolution_context,
-                    &options.caller_input_records,
+                    &options.compose_caller_records(),
                     phase,
                 )
             }

@@ -1738,3 +1738,37 @@ fn runtime_set_reports_the_full_nested_value_path() {
         "{error}"
     );
 }
+
+/// Every directive that takes `with` shares its shape errors, located at that
+/// directive in the file that authored it; whole-mapping interpolation takes
+/// priority over the generic non-mapping error.
+#[test]
+fn proxy_retry_and_prep_share_the_with_shape_errors() {
+    let long_form = |verb: &str, with: serde_json::Value| match verb {
+        "retry" => json!({ "failure": [{ "retry": { "with": with } }] }),
+        _ => json!({ "initialize": [{ verb: { "target": "@n.md", "with": with } }] }),
+    };
+    for verb in ["proxy", "retry", "prep"] {
+        let event = if verb == "retry" { "failure" } else { "initialize" };
+        for (label, with, expected) in [
+            ("null", json!(null), "NotMapping"),
+            ("list", json!([1]), "NotMapping"),
+            ("whole mapping", json!("{{ payload }}"), "WholeMapping"),
+            ("dynamic key", json!({ "{{ key }}": 1 }), "DynamicKey"),
+        ] {
+            let err = parse_lifecycle_config(&long_form(verb, with), dummy_path()).unwrap_err();
+            let (got, property, source_path) = match &err {
+                CompositionError::LifecycleWithNotMapping { property, source_path, .. } => ("NotMapping", property, source_path),
+                CompositionError::LifecycleWithWholeMapping { property, source_path, .. } => ("WholeMapping", property, source_path),
+                CompositionError::LifecycleWithDynamicKey { property, source_path, .. } => ("DynamicKey", property, source_path),
+                other => panic!("{verb} {label}: expected a `with` shape error, got {other:?}"),
+            };
+            assert_eq!(got, expected, "{verb} {label}");
+            assert_eq!(property, &format!("{event}[0].{verb}"), "{verb} {label}");
+            assert_eq!(source_path.as_path(), dummy_path(), "{verb} {label}");
+            assert!(err.to_string().contains(&format!("`{event}[0].{verb}.with")), "{verb} {label}: {err}");
+        }
+        parse_lifecycle_config(&long_form(verb, json!({})), dummy_path())
+            .unwrap_or_else(|err| panic!("{verb}: `with: {{}}` is valid: {err:?}"));
+    }
+}

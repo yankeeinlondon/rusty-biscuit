@@ -3381,7 +3381,7 @@ mod task_stack_diagnostics {
 mod prompt_tasks {
     use super::*;
 
-    fn prompt_fixture(params: Value) -> (TempDir, String) {
+    fn prompt_fixture(with: Value) -> (TempDir, String) {
         let dir = TempDir::new().unwrap();
         write_source(
             dir.path(),
@@ -3391,13 +3391,13 @@ mod prompt_tasks {
         );
         let source = one_step_source(
             dir.path(),
-            json!({ "name": "alpha", "topic": "parsing", "prompt": "review.md", "params": params }),
+            json!({ "name": "alpha", "topic": "parsing", "prompt": "review.md", "with": with }),
         );
         (dir, source)
     }
 
     #[test]
-    fn params_are_evaluated_just_in_time_against_the_effective_state() {
+    fn with_is_evaluated_just_in_time_against_the_effective_state() {
         let (dir, source) = prompt_fixture(json!({
             "topic": "{{ seq.name }}",
             "position": "{{ seq.index }}",
@@ -3414,22 +3414,22 @@ mod prompt_tasks {
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         let request = prompt.last();
-        assert_eq!(request.params.get("topic"), Some(&json!("alpha")));
+        assert_eq!(request.with.get("topic"), Some(&json!("alpha")));
         assert_eq!(
-            request.params.get("position"),
+            request.with.get("position"),
             Some(&json!(1)),
             "a whole-value span keeps its type instead of rendering to text",
         );
-        assert_eq!(request.params.get("literal"), Some(&json!("unchanged")));
+        assert_eq!(request.with.get("literal"), Some(&json!("unchanged")));
         assert_eq!(outcome.stdout, "final text");
     }
 
     #[test]
-    fn layered_overrides_run_params_then_setters_then_mutations_then_overlay() {
+    fn layered_overrides_run_with_then_setters_then_mutations_then_overlay() {
         let (dir, source) = prompt_fixture(json!({
-            "only_param": "from-params",
-            "shared": "from-params",
-            "mutated": "from-params",
+            "only_with": "from-with",
+            "shared": "from-with",
+            "mutated": "from-with",
         }));
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
@@ -3450,11 +3450,11 @@ mod prompt_tasks {
 
         let request = prompt.last();
         let overrides = request.set_overrides.values();
-        assert_eq!(overrides["only_param"], json!("from-params"));
+        assert_eq!(overrides["only_with"], json!("from-with"));
         assert_eq!(
             overrides["shared"],
             json!("from-setters"),
-            "sequence user setters outrank task params",
+            "sequence user setters outrank task `with`",
         );
         assert_eq!(
             overrides["mutated"],
@@ -3469,39 +3469,94 @@ mod prompt_tasks {
         assert_eq!(request.set_overrides.sequence_value().unwrap()["outputs"], json!([]));
         use darkmatter::markdown::compose::OverrideOrigin;
         assert_eq!(
-            request.set_overrides.origin_of("only_param"),
+            request.set_overrides.origin_of("only_with"),
             OverrideOrigin::Data,
-            "an evaluated param is data",
+            "an evaluated `with` value is data",
         );
         assert_eq!(request.set_overrides.origin_of("shared"), OverrideOrigin::Authored);
         assert_eq!(request.set_overrides.origin_of("mutated"), OverrideOrigin::Data);
         assert!(!overrides.contains_key("seq"));
     }
 
+    /// Reserved generated bindings stay protected: a `with` key naming a
+    /// lexical root or a generated step field fails before the provider runs.
     #[test]
-    fn a_param_targeting_a_reserved_key_is_rejected_before_the_provider_runs() {
-        let (dir, source) = prompt_fixture(json!({ "seq": "hijacked" }));
+    fn a_with_key_targeting_a_reserved_key_is_rejected_before_the_provider_runs() {
+        for key in ["seq", "loop", "index"] {
+            let (dir, source) = prompt_fixture(json!({ key: "hijacked" }));
+            let fixture = Fixture::build(dir, &source).unwrap();
+            let recorder = Recorder::default();
+            let shell = FakeTaskShell::default();
+            let prompt = FakePrompt::succeeding("never");
+            let mut wiring = Wiring::new(&recorder, &shell);
+            wiring.prompt = &prompt;
+
+            let outcome = fixture.execute(&wiring);
+
+            assert_eq!(outcome.status, TaskStatus::Failed, "{key}");
+            assert!(
+                failure_message(&outcome).contains(&format!("`with.{key}` in")),
+                "{key}: {}",
+                failure_message(&outcome),
+            );
+            assert!(
+                failure_message(&outcome).contains("targets a reserved key"),
+                "{key}: {}",
+                failure_message(&outcome),
+            );
+            assert!(prompt.requests.lock().unwrap().is_empty(), "{key}");
+        }
+    }
+
+    /// `with: {}` equals no `with`: nothing is layered for the document.
+    #[test]
+    fn an_empty_with_equals_no_with() {
+        let (dir, source) = prompt_fixture(json!({}));
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
-        let prompt = FakePrompt::succeeding("never");
+        let prompt = FakePrompt::succeeding("done");
         let mut wiring = Wiring::new(&recorder, &shell);
         wiring.prompt = &prompt;
 
         let outcome = fixture.execute(&wiring);
 
-        assert_eq!(outcome.status, TaskStatus::Failed);
-        assert!(
-            failure_message(&outcome).contains("reserved key"),
-            "{}",
-            failure_message(&outcome),
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let request = prompt.last();
+        assert!(request.with.is_empty());
+        assert!(request.set_overrides.values().is_empty(), "{:?}", request.set_overrides.values());
+    }
+
+    /// A step's `params:` is ordinary step data now, read as `seq.params`, and
+    /// is not an input to the task's document.
+    #[test]
+    fn a_step_params_value_is_step_data_read_as_seq_params() {
+        let dir = TempDir::new().unwrap();
+        write_source(dir.path(), "review.md", &[("title", json!("Review"))], "Review.\n");
+        let source = one_step_source(
+            dir.path(),
+            json!({
+                "name": "alpha",
+                "prompt": "review.md",
+                "params": { "topic": "from step data" },
+                "with": { "seen": "{{ seq.params.topic }}" },
+            }),
         );
-        assert!(
-            failure_message(&outcome).contains("`seq`, `group`, and `loop` are executor-owned views"),
-            "{}",
-            failure_message(&outcome),
-        );
-        assert!(prompt.requests.lock().unwrap().is_empty());
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let prompt = FakePrompt::succeeding("done");
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.prompt = &prompt;
+
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        let request = prompt.last();
+        assert_eq!(request.with.get("seen"), Some(&json!("from step data")));
+        assert!(!request.with.contains_key("topic"), "step data is not a document input");
+        assert!(!request.set_overrides.values().contains_key("params"));
+        assert!(!request.set_overrides.values().contains_key("topic"));
     }
 
     /// The referenced document's own frontmatter decides the mode; the
@@ -3868,7 +3923,7 @@ mod outcome_contract {
         );
     }
 
-    /// A task-value evaluation failure — `params`, group `variables`, or
+    /// A task-value evaluation failure — `with`, group `variables`, or
     /// `timeout` — reaches a library caller with the original Darkmatter error
     /// on the outcome, not only its rendered text.
     #[test]
@@ -3892,8 +3947,8 @@ mod outcome_contract {
         let bad = "{{ no_such_fn() }}";
         for (field, step) in [
             (
-                "params.x",
-                json!({ "name": "alpha", "prompt": "target.md", "params": { "x": bad } }),
+                "with.x",
+                json!({ "name": "alpha", "prompt": "target.md", "with": { "x": bad } }),
             ),
             (
                 "variables.label",
@@ -3920,6 +3975,13 @@ mod outcome_contract {
             assert_eq!(outcome.status, TaskStatus::Failed, "{field}");
             let info = &outcome.error.as_ref().expect("a failure diagnostic").info;
             assert!(info.msg.contains(field), "{field}: {}", info.msg);
+            if field == "with.x" {
+                // A task `with` fails as every `with` does, at the task's
+                // location (the runtime's root-step path, as `when` uses).
+                assert_eq!(info.variant, "LifecycleWithEvaluationFailed", "{field}");
+                assert!(info.msg.contains("`tasks[0].with.x`"), "{field}: {}", info.msg);
+                assert!(info.msg.contains("the task running `target.md`"), "{field}: {}", info.msg);
+            }
             let cause = info.cause.as_ref().unwrap_or_else(|| panic!("{field}: the typed cause was dropped"));
             assert!(
                 matches!(cause.expression_error(), Some(ExpressionError::UnknownFunction { .. })),
@@ -4245,7 +4307,7 @@ mod group_definitions {
                         {
                             "name": "reader",
                             "prompt": "target.md",
-                            "params": { "seen": "{{ marker }}", "prior": "{{ last(seq.outputs) }}" },
+                            "with": { "seen": "{{ marker }}", "prior": "{{ last(seq.outputs) }}" },
                         },
                 ],
             }),
@@ -4263,8 +4325,8 @@ mod group_definitions {
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         let request = prompt.last();
-        assert_eq!(request.params["seen"], json!("written"));
-        assert_eq!(request.params["prior"], json!(["writer said this"]));
+        assert_eq!(request.with["seen"], json!("written"));
+        assert_eq!(request.with["prior"], json!(["writer said this"]));
         assert_eq!(
             runtime.outputs_value(),
             json!([[["writer said this"], "reader said that"]]),
@@ -4287,7 +4349,7 @@ mod group_definitions {
                         {
                             "name": "member",
                             "prompt": "target.md",
-                            "params": { "which": "{{ group.label }}", "attempt": "{{ group.attempt }}" },
+                            "with": { "which": "{{ group.label }}", "attempt": "{{ group.attempt }}" },
                             "setup": [{ "info": "starting {{ group.label }}" }],
                         },
                     ],
@@ -4305,9 +4367,9 @@ mod group_definitions {
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         let request = prompt.last();
-        assert_eq!(request.params["which"], json!("release"));
+        assert_eq!(request.with["which"], json!("release"));
         // Whole-value typing survives the scope: `attempt` stays a number.
-        assert_eq!(request.params["attempt"], json!(2));
+        assert_eq!(request.with["attempt"], json!(2));
         assert_eq!(recorder.events(), vec!["info:starting release".to_string()]);
         assert_eq!(request.lifecycle_group.as_ref().unwrap()["label"], json!("release"));
         assert!(!request.set_overrides.values().contains_key("group"));
@@ -4337,7 +4399,7 @@ mod group_definitions {
                     {
                         "name": "beta",
                         "prompt": "target.md",
-                        "params": { "which": "{{ group.label }}" },
+                        "with": { "which": "{{ group.label }}" },
                     },
                 ]),
             )],
@@ -4361,7 +4423,7 @@ mod group_definitions {
 
         assert_eq!(later.status, TaskStatus::Failed);
         assert!(
-            failure_message(&later).contains("params.which"),
+            failure_message(&later).contains("with.which"),
             "{}",
             failure_message(&later),
         );

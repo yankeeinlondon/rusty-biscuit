@@ -92,13 +92,16 @@ pub struct PrepareOptions {
     /// Complete lexical sequence root, carried outside frontmatter.
     pub sequence_binding: Option<serde_json::Value>,
     /// The immediate `proxy.with:` overlay of a document entered through a
-    /// hand-off (empty otherwise).
+    /// hand-off, with a pending `retry.with:` layered on top (empty
+    /// otherwise).
     ///
-    /// Its values were evaluated in the source document, so compose receives
-    /// them as the lowest **data** layer, beneath every override above. It
-    /// belongs to this document alone and is never part of the invocation's
-    /// [`CallerInputLayers`](super::CallerInputLayers).
-    pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+    /// Its values were evaluated in the authoring document, so compose
+    /// receives them as the lowest **data** layer, beneath every override
+    /// above, and a schema-selected file value resolves from the file that
+    /// authored it ([`compose_caller_records`](Self::compose_caller_records)).
+    /// It belongs to this document alone and is never part of the
+    /// invocation's [`CallerInputLayers`](super::CallerInputLayers).
+    pub proxy_overlay: super::AnchoredOverlay,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Commands pre-approved during pre-flight shell discovery: resolved
@@ -201,15 +204,40 @@ impl PrepareOptions {
     /// The caller records the schema stage judges `match()` globs by: the
     /// captured records, else every override supplied in the launch area,
     /// as composition derives them.
+    ///
+    /// The overlay's records join below them: an overlay key no override
+    /// above it supplies resolves from the file that authored it.
     pub(crate) fn schema_caller_records(&self) -> darkmatter::markdown::compose::CallerInputRecords {
-        if !self.caller_input_records.is_empty() {
+        let mut records = if self.caller_input_records.is_empty() {
+            darkmatter::markdown::compose::caller_input_records_for_overrides(
+                self.set_overrides.as_ref(),
+                &self.file_resolution_context,
+                self.file_ref_fallback_dir.as_deref(),
+            )
+        } else {
+            self.caller_input_records.clone()
+        };
+        let above = self.set_overrides.as_ref().and_then(serde_json::Value::as_object);
+        for (key, record) in self.proxy_overlay.input_records() {
+            if !records.contains_key(&key) && !above.is_some_and(|above| above.contains_key(&key)) {
+                records.insert(key, record);
+            }
+        }
+        records
+    }
+
+    /// The caller records composition receives.
+    ///
+    /// With no anchored overlay these are exactly the captured records, and
+    /// Darkmatter derives its own launch-area records when there are none.
+    /// An anchored overlay needs explicit records so its values keep their
+    /// authoring origin, which are then the
+    /// [`schema_caller_records`](Self::schema_caller_records).
+    pub(crate) fn compose_caller_records(&self) -> darkmatter::markdown::compose::CallerInputRecords {
+        if self.proxy_overlay.input_records().is_empty() {
             return self.caller_input_records.clone();
         }
-        darkmatter::markdown::compose::caller_input_records_for_overrides(
-            self.set_overrides.as_ref(),
-            &self.file_resolution_context,
-            self.file_ref_fallback_dir.as_deref(),
-        )
+        self.schema_caller_records()
     }
 
     /// Options that prepare against `file_resolution_context`, with every
@@ -437,11 +465,11 @@ fn canonical_compose_options(
         // altering the delivered text and defeating line-count-based report
         // truncation. Preserve the source line breaks for prompt delivery.
         .with_incidental_newline_mode(darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve);
-    let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+    let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
     overrides.extend(&options.layered_overrides());
     overrides.initialize_outputs();
     compose_opts = overrides.apply_to(compose_opts);
-    compose_opts = compose_opts.with_caller_input_records(options.caller_input_records.clone());
+    compose_opts = compose_opts.with_caller_input_records(options.compose_caller_records());
     let mut coercion_keys = options.name_coercion_keys.clone();
     coercion_keys.extend(super::sequence::reserved::NAME_COERCION_KEYS.iter().map(|key| key.to_string()));
     compose_opts = compose_opts.with_name_coercion_keys(coercion_keys);
@@ -1022,7 +1050,7 @@ fn effective_surface(
                 source,
                 options.file_ref_fallback_dir.as_deref(),
                 &options.file_resolution_context,
-                &options.caller_input_records,
+                &options.compose_caller_records(),
             )
             .ok()
             .flatten()
@@ -1191,7 +1219,7 @@ fn reject_removed_sequence_reads_in_source(
     options: &PrepareOptions,
     lifecycle: Option<&super::lifecycle::LifecycleConfig>,
 ) -> Result<(), CompositionError> {
-    let mut supplied = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+    let mut supplied = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
     supplied.extend(&options.layered_overrides());
     let mut authored = frontmatter_to_value(source.markdown.frontmatter());
     if let serde_json::Value::Object(values) = &mut authored {
@@ -1269,7 +1297,7 @@ pub fn validate_document_shell_late_values(
         .map_err(|error| map_compose_error(&source.resolved_path, error))?;
     let mut authored_values = frontmatter_to_value(source.markdown.frontmatter());
     if let serde_json::Value::Object(values) = &mut authored_values {
-        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
         overrides.extend(&options.layered_overrides());
         values.extend(overrides.values().clone());
     }

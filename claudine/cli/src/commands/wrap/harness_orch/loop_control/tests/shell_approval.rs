@@ -228,9 +228,9 @@ fn approved_bytes_equal_the_bytes_a_with_value_resolves_to() {
     let (context, handler) = recording_context(&target, Some(dir.path()));
 
     let mut state = prompt_state(&target);
-    state.overlay.insert(
-        "flag".to_string(),
-        serde_json::Value::String("from-overlay".to_string()),
+    state.overlay = claudine::composition::AnchoredOverlay::new(
+        [("flag".to_string(), serde_json::Value::String("from-overlay".to_string()))].into_iter().collect(),
+        state.file_resolution_context(),
     );
 
     preflight_harness_document(&mut state, context.shell_options(), dir.path())

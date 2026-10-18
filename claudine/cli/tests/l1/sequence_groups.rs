@@ -277,11 +277,11 @@ sequence:
       tasks:
         - name: member
           prompt: member.md
-          params:
+          with:
             label: "{{ group.label }}"
   - name: beta
     prompt: member.md
-    params:
+    with:
       label: "{{ group.label }}"
 ---
 
@@ -328,7 +328,7 @@ sequence:
     shell: "printf 'produced\n'"
   - name: consumer
     prompt: member.md
-    params:
+    with:
       prior: "{{ last(seq.outputs) }}"
 ---
 
@@ -485,7 +485,7 @@ sequence:
           shell: "printf 'from-second\n'"
   - name: beta
     prompt: reader.md
-    params:
+    with:
       entry: "slot0={{ last(seq.outputs).first }} slot1={{ last(seq.outputs).second }}"
 ---
 

@@ -36,8 +36,10 @@ pub struct PreflightTask {
     /// What the task executes.
     pub action: PreflightAction,
     /// Values passed to a prompt document as user setters, unevaluated —
-    /// `params` bind just in time against the caller's effective state.
-    pub params: Map<String, Value>,
+    /// The prompt task's `with:` inputs, unevaluated: they bind just in time
+    /// against the caller's effective state, from the file that authored them
+    /// (`origin_path`).
+    pub with: Map<String, Value>,
     /// The authored `timeout:` value, parsed as a duration at execution time.
     pub timeout: Option<Value>,
     /// The authored `when:` guard, already checked to parse as a condition.
@@ -84,6 +86,52 @@ pub struct PreflightTask {
     /// resolved bytes, which execution runs instead of resolving the authored
     /// text. A template-mode value is absent here.
     pub approved_set_values: Vec<ApprovedSetValue>,
+    /// Where the task sits in the graph; see [`TaskIdentity`].
+    pub identity: TaskIdentity,
+    /// What preflight predicts this task's provider from, for a `prompt:` task.
+    /// `None` for every executable that launches no provider of its own.
+    pub provider: Option<super::providers::ProviderPrediction>,
+}
+
+/// A task's position in the preflight graph, from the root sequence down:
+/// `tasks[1]`, `tasks[1].sequence[0]`, `tasks[2].group.tasks[1]`.
+///
+/// Unlike a task's source-rooted property, it never resets at a file boundary,
+/// so two references to one task file, or two nested tasks with one name, have
+/// different identities. Per-task provider choices are keyed by it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TaskIdentity(String);
+
+impl TaskIdentity {
+    /// The identity of root step `index`.
+    #[must_use]
+    pub fn root(index: usize) -> Self {
+        Self(format!("tasks[{index}]"))
+    }
+
+    /// The identity of child `index` of the nested sequence this task runs.
+    #[must_use]
+    pub fn sequence_child(&self, index: usize) -> Self {
+        Self(format!("{}.sequence[{index}]", self.0))
+    }
+
+    /// The identity of leg `index` of the group this task runs.
+    #[must_use]
+    pub fn group_leg(&self, index: usize) -> Self {
+        Self(format!("{}.group.tasks[{index}]", self.0))
+    }
+
+    #[allow(missing_docs)]
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TaskIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
 }
 
 impl PreflightTask {

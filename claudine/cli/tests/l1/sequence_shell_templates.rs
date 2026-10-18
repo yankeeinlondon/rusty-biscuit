@@ -262,7 +262,7 @@ fn a_prompt_documents_missing_late_value_fails_before_prompt_launch() {
 fn a_prompt_documents_late_parameter_is_filled_as_one_argument() {
     let sequence = Sequence::new(
         "sequence-document-late-parameter",
-        "---\nsequence:\n    - name: first\n      shell: argv-recorder first\n    - name: prompt\n      params:\n          prior_output: '{{ last(seq.outputs) }}'\n      prompt: child.md\n---\nBody.\n",
+        "---\nsequence:\n    - name: first\n      shell: argv-recorder first\n    - name: prompt\n      with:\n          prior_output: '{{ last(seq.outputs) }}'\n      prompt: child.md\n---\nBody.\n",
     );
     std::fs::write(sequence.fixture.cwd().join("child.md"), "::shell argv-recorder '{{ prior_output }}suffix with spaces'\n\nPrompt.\n").unwrap();
     sequence.whitelist("prefix argv-recorder\n");
@@ -444,7 +444,7 @@ invalid_template_case!(a_prefix_cannot_authorize_a_background_template, "argv-re
 fn a_later_tasks_parameter_reads_the_mutation_from_its_predecessor() {
     let sequence = Sequence::new(
         "sequence-changed-task-parameter",
-        "---\nvalue: before\nsequence:\n  - name: change\n    side_effect:\n      set:\n        value: two words\n  - name: consume\n    params:\n      word: '{{ value }}'\n    prompt: child.md\n---\nBody.\n",
+        "---\nvalue: before\nsequence:\n  - name: change\n    side_effect:\n      set:\n        value: two words\n  - name: consume\n    with:\n      word: '{{ value }}'\n    prompt: child.md\n---\nBody.\n",
     );
     sequence.whitelist("template argv-recorder {{ string }}\n");
     std::fs::write(sequence.fixture.cwd().join("child.md"), "::shell argv-recorder {{ word }}\n\nPrompt.\n").unwrap();
@@ -714,7 +714,7 @@ fn referenced_lifecycle_derived_late_value_retains_its_provenance() {
 
 #[test]
 fn referenced_lifecycle_parameter_overrides_the_child_default() {
-    let sequence = Sequence::new("sequence-lifecycle-params", "---\nsequence:\n  - name: prior\n    shell: argv-recorder prior\n  - name: consume\n    params:\n      out: task value\n    prompt: child.md\n---\nBody.\n");
+    let sequence = Sequence::new("sequence-lifecycle-with", "---\nsequence:\n  - name: prior\n    shell: argv-recorder prior\n  - name: consume\n    with:\n      out: task value\n    prompt: child.md\n---\nBody.\n");
     std::fs::write(sequence.fixture.cwd().join("child.md"), referenced_lifecycle_child("start", "shell", "out")).unwrap();
     sequence.whitelist("prefix argv-recorder\n");
     let outcome = sequence.run(&[]);

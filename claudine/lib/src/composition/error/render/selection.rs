@@ -27,6 +27,40 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      interactive terminal, or correct the `agent` frontmatter property."
                 )
         }
+        CompositionError::SequenceTaskProviderSelection {
+            task,
+            task_path,
+            hint_path,
+            property,
+            containers,
+            problem,
+        } => {
+            let hint_link = super::render_file_link(hint_path);
+            let inside = if containers.is_empty() {
+                String::new()
+            } else {
+                format!(", inside {}", containers.join(" → "))
+            };
+            let mut body = format!(
+                "{task} in {}{inside} names its provider with <cyan>{}</cyan> in {hint_link}.",
+                super::render_file_link(task_path),
+                code_span(property),
+            );
+            body.push_str("\n\n");
+            body.push_str(&match problem.as_ref() {
+                SequenceTaskProviderProblem::Unresolvable { state, installed } => {
+                    render_agent_resolution_failed_body(state, installed, &hint_link)
+                }
+                other => format!("It cannot select a provider: {other}."),
+            });
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "task provider selection failed"))
+                .body(crate::composition::agent_message::agent_message_prose(body))
+                .hint(
+                    "No task has started. Name an installed provider in that `agent`, \
+                     or pass --claude, --codex, etc. to run every task on one provider."
+                )
+        }
         CompositionError::AutocompleteNoMatches { query } => StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
             .body(super::with_failure_row(

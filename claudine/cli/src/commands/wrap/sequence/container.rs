@@ -229,7 +229,9 @@ pub(super) fn run_proxy(
     let mut handoff = SurfacedHandoff::Request(composition::EvaluatedProxyRequest::new(target, overlay, provenance));
     let overrides = composition::layered_set_overrides(composition::LayeredOverrides::authored(setters), Some(&runtime.snapshot()), None);
     let scope = StepScope { shell_approvals: approved.cloned(), caller_overrides: overrides.clone(), lifecycle_group: None, runtime_state: Arc::clone(runtime), suppress_output_commit: false,
-        task_frame_writer: None, env_overrides: Default::default(), operation: shared.operation.clone() };
+        task_frame_writer: None, env_overrides: Default::default(), operation: shared.operation.clone(),
+        // The root's own handoff reports no step status line.
+        launch_log: None };
     let mut caller_overrides = Some(overrides.to_value());
     let mut records = caller_input_records.clone();
     let mut active_resolution = source_context.file_resolution_context().clone();
@@ -241,7 +243,8 @@ pub(super) fn run_proxy(
         let target_ref = committed.resolved_target().to_string_lossy().into_owned();
         let mut target_source = resolve_composition_source(&target_ref, CompositionKind::Direct, shared, resolution)?;
         super::super::overlay::merge_frontmatter_overlay(target_source.markdown.frontmatter_mut().as_map_mut(), committed.overlay());
-        let overlay = committed.overlay().clone();
+        // Anchored at the source, whose `with` authored the values.
+        let overlay = composition::AnchoredOverlay::new(committed.overlay().clone(), &active_resolution);
         let target_file = committed.authored_target().to_string();
         let document = invocation.capture_document();
         let context = document.derive_source(&target_source.resolved_path)?;

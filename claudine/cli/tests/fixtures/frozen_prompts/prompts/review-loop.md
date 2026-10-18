@@ -21,19 +21,19 @@ sequence:
     # target commits each phase itself, so no stage/commit step follows it.
     - name: implement
       prompt: "@prompts/_implement/implement-plan.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ repair_agent }}"
           in_loop: true
     - name: review-1
       prompt: "@prompts/_reviews/feature-review.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ review_agent }}"
           in_loop: true
     - name: repair-1
       prompt: "@prompts/_implement/implement-suggestions.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ repair_agent }}"
           in_loop: true
@@ -41,17 +41,17 @@ sequence:
       shell: git add .
     - name: commit-1
       prompt: "@prompts/commit.md"
-      params:
+      with:
           message: "implementation of the findings in review 1 of {{ parent_dir(spec) }}"
     - name: review-2
       prompt: "@prompts/_reviews/feature-review.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ review_agent }}"
           in_loop: true
     - name: repair-2
       prompt: "@prompts/_implement/implement-suggestions.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ repair_agent }}"
           in_loop: true
@@ -59,17 +59,17 @@ sequence:
       shell: git add .
     - name: commit-2
       prompt: "@prompts/commit.md"
-      params:
+      with:
           message: "implementation of the findings in review 2 of {{ parent_dir(spec) }}"
     - name: review-3
       prompt: "@prompts/_reviews/feature-review.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ review_agent }}"
           in_loop: true
     - name: repair-3
       prompt: "@prompts/_implement/implement-suggestions.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ repair_agent }}"
           in_loop: true
@@ -77,17 +77,17 @@ sequence:
       shell: git add .
     - name: commit-3
       prompt: "@prompts/commit.md"
-      params:
+      with:
           message: "implementation of the findings in review 3 of {{ parent_dir(spec) }}"
     - name: review-4
       prompt: "@prompts/_reviews/feature-review.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ review_agent }}"
           in_loop: true
     - name: repair-4
       prompt: "@prompts/_implement/implement-suggestions.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ repair_agent }}"
           in_loop: true
@@ -95,17 +95,17 @@ sequence:
       shell: git add .
     - name: commit-4
       prompt: "@prompts/commit.md"
-      params:
+      with:
           message: "implementation of the findings in review 4 of {{ parent_dir(spec) }}"
     - name: review-5
       prompt: "@prompts/_reviews/feature-review.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ review_agent }}"
           in_loop: true
     - name: repair-5
       prompt: "@prompts/_implement/implement-suggestions.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ repair_agent }}"
           in_loop: true
@@ -113,11 +113,11 @@ sequence:
       shell: git add .
     - name: commit-5
       prompt: "@prompts/commit.md"
-      params:
+      with:
           message: "implementation of the findings in review 5 of {{ parent_dir(spec) }}"
     - name: review-6
       prompt: "@prompts/_reviews/feature-review.md"
-      params:
+      with:
           spec: "{{ spec }}"
           agent: "{{ review_agent }}"
           in_loop: true

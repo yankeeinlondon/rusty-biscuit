@@ -175,7 +175,7 @@ async fn task_inputs_unresolved_values_and_captures_are_left_late() {
         "seq.md",
         &json!({
             "sequence": [
-                { "name": "with-params", "prompt": "shared.md", "params": { "topic": "a task topic" } },
+                { "name": "with-params", "prompt": "shared.md", "with": { "topic": "a task topic" } },
                 { "name": "without", "prompt": "shared.md" },
             ],
         }),

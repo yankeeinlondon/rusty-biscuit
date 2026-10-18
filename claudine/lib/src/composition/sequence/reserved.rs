@@ -1,9 +1,9 @@
 //! The canonical Sequence Plus reserved-key catalog.
 //!
 //! A sequence step object carries three kinds of keys at once: the authored
-//! executable (`prompt`/`shell`/…), the executable's options (`params`,
+//! executable (`prompt`/`shell`/…), the executable's options (`with`,
 //! `timeout`, …), and arbitrary authored *state*. Every layer that inspects a
-//! step — normalization (authored-state collisions), user setters/`params`, and
+//! step — normalization (authored-state collisions), user setters/`with`, and
 //! the runtime `set` side effect — must agree on which names are off-limits as
 //! state. That agreement lives here so the three call sites cannot drift.
 //!
@@ -19,11 +19,14 @@ pub const EXECUTABLE_KEYS: &[&str] = &["prompt", "shell", "side_effect", "group"
 /// Optional task fields that live alongside an executable and are consumed as
 /// task configuration, never as authored state.
 ///
-/// `when` is every task's guard. `loop` is an inline nested sequence's loop;
+/// `with` carries a prompt task's document inputs and `when` is every task's
+/// guard; a step using either name gets the option, never step data. `params`
+/// is not an option, so a step's `params:` is ordinary data (`seq.params`).
+/// `loop` is an inline nested sequence's loop;
 /// [`super::grammar::validate_task_grammar`] rejects it on every other task
 /// before options are partitioned.
 pub const TASK_OPTION_KEYS: &[&str] = &[
-    "name", "params", "timeout", "operation", "flow", "when", "loop",
+    "name", "with", "timeout", "operation", "flow", "when", "loop",
     "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize",
 ];
 
@@ -69,7 +72,7 @@ pub fn is_reserved_state_key(key: &str) -> bool {
 /// and its options.
 pub fn allowed_task_options(field: ExecutableField) -> &'static [&'static str] {
     match field {
-        ExecutableField::Prompt => &["name", "params", "operation", "flow", "when"],
+        ExecutableField::Prompt => &["name", "with", "operation", "flow", "when"],
         ExecutableField::Shell => &["name", "timeout", "when"],
         ExecutableField::SideEffect => &["name", "when"],
         ExecutableField::Group => &["name", "when"],

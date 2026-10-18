@@ -162,7 +162,7 @@ fn sequence_outputs_with_template_syntax_stay_raw() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - name: alpha\n    prompt: producer.md\n  - name: beta\n    prompt: reader.md\n    params:\n      entry: \"{{ last(seq.outputs) }}\"\n---\nBody.\n",
+        "---\nsequence:\n  - name: alpha\n    prompt: producer.md\n  - name: beta\n    prompt: reader.md\n    with:\n      entry: \"{{ last(seq.outputs) }}\"\n---\nBody.\n",
     )
     .unwrap();
 
@@ -203,7 +203,7 @@ sequence:
           shell: "printf 'plain\n'"
   - name: beta
     prompt: reader.md
-    params:
+    with:
       entry: "{{ last(seq.outputs).templated }}"
 ---
 Body.
@@ -804,11 +804,11 @@ fn sequence_state_from_jsonl_item_stays_raw() {
     );
 }
 
-/// Row B12: group `variables:` and task `params:` evaluated from a prior
+/// Row B12: group `variables:` and task `with:` evaluated from a prior
 /// task's output reach the member prompt raw.
 #[test]
-fn task_params_and_group_variables_from_outputs_stay_raw() {
-    let fixture = CliProcessFixture::named("agent-text-params");
+fn task_with_and_group_variables_from_outputs_stay_raw() {
+    let fixture = CliProcessFixture::named("agent-text-with");
     counting_goose(&fixture, "", "ok");
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' 'see {{ title }}'\n").unwrap();
     fs::write(
@@ -831,7 +831,7 @@ sequence:
       tasks:
         - name: read
           prompt: reader.md
-          params:
+          with:
             entry: "{{ last(seq.outputs) }}"
 ---
 Body.

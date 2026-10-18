@@ -55,7 +55,7 @@ use action_shape::*;
 pub(crate) use action_shape::{action_value_to_expr, closest_spelling};
 pub(crate) use audio::*;
 pub use parse::{LifecycleParseOptions, scan_removed_validation_keys};
-pub(crate) use parse::LOOP_ITERATION_KEYS;
+pub(crate) use parse::{LOOP_ITERATION_KEYS, with_mapping_shape};
 pub use validate::{
     collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
     validate_no_err_in_no_error_events, validate_no_nested_spans_in_literals,

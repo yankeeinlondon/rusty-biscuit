@@ -1,533 +1,405 @@
-//! Review-row eligibility, baseline targets, the row-to-step merge, and when
-//! the review screen opens.
+//! Per-task provider selection over real preflight graphs, and how the review
+//! screen's rows map back onto it.
+//!
+//! Each fixture is a sequence written to a temp directory, walked by the
+//! library's preflight, collected into sites, and selected against a fake
+//! installed-provider snapshot; nothing launches.
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::fs;
+use std::io;
+use std::path::Path;
 
 use biscuit_tui::prelude::{ABORTED_KIND, CANCELLED_KIND};
 use claudine::composition::{
-    AgentResolutionState, ExecutableField, ModelResolutionReason, ProviderPickerOption, ProviderPickerPlan,
-    ProviderResolutionReason, ResolvedCompositionSource, ResolvedExecutionTarget, SequenceStep,
-    SequenceStepDraft, StepExecutable, StepState, resolve_sequence_plan,
+    AgentResolutionState, CompositionError, EffectiveSelectionHints, InstalledProviderSnapshot,
+    ModelResolutionReason, ProviderResolutionReason, ResolvedExecutionTarget, SequenceTaskProviderProblem,
 };
+use claudine::composition::sequence::preflight::TaskIdentity;
+use claudine::invocation_context::DocumentEnvironment;
+use claudine::model_catalog::ModelCatalogService;
 use claudine::provider::Provider;
-use serde_json::{Map, Value};
+use serde_json::{Value, json};
+use tempfile::TempDir;
 
+use super::super::providers::{self, SelectionInputs, TaskSelections, TaskTarget};
 use super::*;
 
-/// The sequence from the original report. The shipped file has 22 steps (the
-/// report counted 21 against an earlier revision), five of them `stage-N`
-/// shell steps. A frozen copy of `prompts/review-loop.md`, intentionally not
-/// kept in step with the live prompt.
-const REVIEW_LOOP: &str =
-    include_str!("../../../../../tests/fixtures/frozen_prompts/prompts/review-loop.md");
+fn write(dir: &Path, name: &str, text: &str) {
+    let path = dir.join(name);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, text).unwrap();
+}
 
-fn step(index: usize, name: &str, field: Option<ExecutableField>) -> SequenceStep {
-    SequenceStep {
-        index,
-        name: name.into(),
-        raw_state: Value::String(name.into()),
-        state: StepState {
-            name: name.into(),
-            id: name.into(),
-            sequence_id: "seq".into(),
-            is_first: index == 0,
-            is_last: false,
-            index: index + 1,
-            count: 0,
-            extra: Map::new(),
-        },
-        executable: field.map(|field| StepExecutable {
-            field,
-            value: Value::Null,
-            options: Map::new(),
-        }),
+fn snapshot(installed: &[Provider]) -> InstalledProviderSnapshot {
+    InstalledProviderSnapshot {
+        runnable: installed.to_vec(),
+        excluded: Default::default(),
+        all_installed: installed.to_vec(),
+        binary_paths: Default::default(),
     }
 }
 
-/// Steps built from `(name, executable)` pairs, indexed in order.
-fn steps(spec: &[(&str, Option<ExecutableField>)]) -> Vec<SequenceStep> {
-    spec.iter()
-        .enumerate()
-        .map(|(i, (name, field))| step(i, name, *field))
-        .collect()
+/// Select every site of the sequence `steps` (with `extra` frontmatter)
+/// against `installed`, optionally under `--<provider>`.
+#[allow(clippy::result_large_err)]
+fn select_in(
+    dir: &Path,
+    steps: Value,
+    extra: &str,
+    installed: &[Provider],
+    explicit: Option<Provider>,
+) -> Result<TaskSelections, CompositionError> {
+    write(
+        dir,
+        "seq.md",
+        &format!("---\n{extra}sequence: {}\n---\n\nBody.\n", serde_json::to_string(&steps).unwrap()),
+    );
+    let context = crate::request::test_context_at(dir);
+    let path = dir.join("seq.md").display().to_string();
+    let source = claudine::composition::resolve_composition_source_in_context(&path, &context).unwrap();
+    let plan = claudine::composition::resolve_sequence_plan(&source, &context).unwrap().unwrap();
+    let graph = claudine::composition::build_preflight_graph(&plan, &source, &context).unwrap();
+    let root_hints = claudine::composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter()).unwrap();
+    let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &root_hints);
+    let snapshot = snapshot(installed);
+    let catalog = ModelCatalogService::new();
+    let environment = DocumentEnvironment::default();
+    providers::select(
+        sites,
+        &SelectionInputs {
+            snapshot: &snapshot,
+            catalog: &catalog,
+            cli_model: None,
+            explicit_provider: explicit,
+            favorite: None,
+            environment: &environment,
+            silent: true,
+            dry_run: false,
+        },
+    )
 }
 
-fn draft(step_index: usize, name: &str) -> SequenceStepDraft {
-    SequenceStepDraft {
-        step_index,
-        step_name: name.into(),
-        provider_plan: ProviderPickerPlan {
-            options: vec![
-                ProviderPickerOption {
-                    provider: Provider::Claude,
-                    rank_reason: None,
-                },
-                ProviderPickerOption {
-                    provider: Provider::Codex,
-                    rank_reason: None,
-                },
-            ],
-            default_index: 0,
-        },
-        proposed_model: Some(format!("baseline-{step_index}")),
-        model_reason: ModelResolutionReason::FrontmatterSingle,
-        provider_locked: false,
-        model_locked: false,
-        resolved_provider: Some(Provider::Claude),
+fn identity(text: &str) -> TaskIdentity {
+    // Identities are built only by preflight; find the one a test names.
+    let mut parts = text.split('.');
+    let root = parts.next().unwrap();
+    let index: usize = root.trim_start_matches("tasks[").trim_end_matches(']').parse().unwrap();
+    let mut identity = TaskIdentity::root(index);
+    let rest: Vec<&str> = parts.collect();
+    let mut position = 0;
+    while position < rest.len() {
+        match rest[position] {
+            "group" => {
+                let leg: usize = rest[position + 1].trim_start_matches("tasks[").trim_end_matches(']').parse().unwrap();
+                identity = identity.group_leg(leg);
+                position += 2;
+            }
+            child => {
+                let index: usize = child.trim_start_matches("sequence[").trim_end_matches(']').parse().unwrap();
+                identity = identity.sequence_child(index);
+                position += 1;
+            }
+        }
+    }
+    identity
+}
+
+fn target<'a>(selections: &'a TaskSelections, at: &str) -> &'a TaskTarget {
+    &selections.get(&identity(at)).unwrap_or_else(|| panic!("no site at {at}")).target
+}
+
+fn provider_of(target: &TaskTarget) -> Option<Provider> {
+    target.planned().map(|target| target.provider)
+}
+
+const ALL: &[Provider] = &[Provider::Claude, Provider::Codex, Provider::OpenCode, Provider::Gemini];
+
+// -- classification ----------------------------------------------------------
+
+/// The report's sequence: no document `agent`, one task naming `codex`
+/// through `with`, one running a prompt that declares `opencode`. Both are
+/// their own provider, so nothing is missing and nothing gates the run.
+#[test]
+fn tasks_that_name_their_providers_need_no_document_agent() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    write(dir.path(), "review.md", "---\nagent: opencode\n---\n\nReview.\n");
+    let selections = select_in(
+        dir.path(),
+        json!([
+            { "name": "implement", "prompt": "plain.md", "with": { "agent": "codex" } },
+            { "name": "review", "prompt": "review.md" },
+            { "name": "lint", "shell": "true" }
+        ]),
+        "",
+        ALL,
+        None,
+    )
+    .unwrap();
+    assert!(matches!(target(&selections, "tasks[0]"), TaskTarget::Own(t) if t.provider == Provider::Codex));
+    assert!(matches!(target(&selections, "tasks[1]"), TaskTarget::Own(t) if t.provider == Provider::OpenCode));
+    assert_eq!(selections.iter().count(), 2, "a shell task is no site");
+    assert!(selections.first_unresolved().is_none());
+    assert!(!needs_review(true, &selections));
+}
+
+#[test]
+fn a_task_without_a_hint_takes_the_nearest_enclosing_sequence_agent() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    write(dir.path(), "nested/inner.md", "---\nagent: gemini\nsequence:\n  - name: deep\n    prompt: ../plain.md\n---\n");
+    let selections = select_in(
+        dir.path(),
+        json!([
+            { "name": "outer", "prompt": "plain.md" },
+            { "name": "inner", "sequence": "nested/inner.md" }
+        ]),
+        "agent: claude\n",
+        ALL,
+        None,
+    )
+    .unwrap();
+    assert!(matches!(target(&selections, "tasks[0]"), TaskTarget::Fallback(t) if t.provider == Provider::Claude));
+    // The nested file's own `agent` applies to its tasks ahead of the root's.
+    assert!(matches!(target(&selections, "tasks[1].sequence[0]"), TaskTarget::Fallback(t) if t.provider == Provider::Gemini));
+}
+
+#[test]
+fn a_task_missing_a_provider_with_no_enclosing_agent_is_unresolved() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    let selections = select_in(dir.path(), json!([{ "name": "a", "prompt": "plain.md" }]), "", ALL, None).unwrap();
+    assert!(matches!(
+        target(&selections, "tasks[0]"),
+        TaskTarget::Unresolved { state: AgentResolutionState::NoAgent, own_hint: false, .. }
+    ));
+    assert!(needs_review(true, &selections));
+    assert!(!needs_review(false, &selections), "without a terminal the run fails instead");
+}
+
+#[test]
+fn a_hint_decided_at_launch_keeps_the_enclosing_agent_only_as_a_fallback() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    let selections = select_in(
+        dir.path(),
+        json!([
+            { "name": "pick", "shell": "echo codex" },
+            { "name": "run", "prompt": "plain.md", "with": { "agent": "{{ seq.outputs[0] }}" } }
+        ]),
+        "agent: claude\n",
+        ALL,
+        None,
+    )
+    .unwrap();
+    assert!(matches!(target(&selections, "tasks[1]"), TaskTarget::AtLaunch(Some(t)) if t.provider == Provider::Claude));
+    assert!(selections.first_unresolved().is_none(), "a dynamic hint never gates the run");
+}
+
+#[test]
+fn an_explicit_provider_flag_decides_every_task() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "review.md", "---\nagent: opencode\n---\n\nReview.\n");
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    let selections = select_in(
+        dir.path(),
+        json!([{ "name": "a", "prompt": "review.md" }, { "name": "b", "prompt": "plain.md" }]),
+        "",
+        ALL,
+        Some(Provider::Gemini),
+    )
+    .unwrap();
+    for at in ["tasks[0]", "tasks[1]"] {
+        assert!(matches!(
+            target(&selections, at),
+            TaskTarget::Own(t) if t.provider == Provider::Gemini && t.provider_reason == ProviderResolutionReason::ExplicitFlag
+        ));
     }
 }
 
-fn drafts_for(steps: &[SequenceStep]) -> Vec<SequenceStepDraft> {
-    steps.iter().map(|s| draft(s.index, &s.name)).collect()
+#[test]
+fn list_hints_follow_the_canonical_installed_provider_rule() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    // One installed member: selected, never the uninstalled first entry.
+    let selections = select_in(
+        dir.path(),
+        json!([{ "name": "a", "prompt": "plain.md", "with": { "agent": ["gemini", "codex"] } }]),
+        "",
+        &[Provider::Codex],
+        None,
+    )
+    .unwrap();
+    assert_eq!(provider_of(target(&selections, "tasks[0]")), Some(Provider::Codex));
+    // Two installed: the task's own ambiguous list is reviewed as the task's.
+    let selections = select_in(
+        dir.path(),
+        json!([{ "name": "a", "prompt": "plain.md", "with": { "agent": ["gemini", "codex"] } }]),
+        "",
+        &[Provider::Codex, Provider::Gemini],
+        None,
+    )
+    .unwrap();
+    assert!(matches!(target(&selections, "tasks[0]"), TaskTarget::Unresolved { own_hint: true, .. }));
 }
 
-/// A reviewed target distinguishable from every baseline entry.
-fn reviewed(step_index: usize) -> ResolvedExecutionTarget {
+// -- early failure -------------------------------------------------------------
+
+fn selection_failure(error: CompositionError) -> (String, String, Vec<String>, SequenceTaskProviderProblem) {
+    match error {
+        CompositionError::SequenceTaskProviderSelection { task, property, containers, problem, .. } => {
+            (task, property, containers, *problem)
+        }
+        other => panic!("expected a task provider selection failure, got {other:?}"),
+    }
+}
+
+/// A task naming a provider that is not installed fails before any task
+/// runs, even behind a `when:` that is false, naming the task, the property
+/// that names it, and the enclosing group.
+#[test]
+fn an_uninstalled_provider_fails_preflight_even_behind_a_false_when() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    let error = select_in(
+        dir.path(),
+        json!([{ "name": "g", "group": { "name": "review", "tasks": [
+            { "name": "late", "prompt": "plain.md", "when": "false", "with": { "agent": "gemini" } }
+        ] } }]),
+        "",
+        &[Provider::Claude],
+        None,
+    )
+    .unwrap_err();
+    let (_, property, containers, problem) = selection_failure(error);
+    assert_eq!(property, "tasks[0].group.tasks[0].with.agent");
+    assert_eq!(containers, ["group `review`"]);
+    assert!(matches!(
+        problem,
+        SequenceTaskProviderProblem::Unresolvable { state: AgentResolutionState::SingleNotInstalled { provider: Provider::Gemini }, .. }
+    ));
+}
+
+#[test]
+fn invalid_hint_shapes_fail_as_the_task() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    for (agent, expected) in [
+        (json!("nope"), "unknown"),
+        (json!(7), "type"),
+        (json!(["codex", 7]), "type"),
+        (json!([7]), "type"),
+    ] {
+        let error = select_in(
+            dir.path(),
+            json!([{ "name": "a", "prompt": "plain.md", "with": { "agent": agent.clone() } }]),
+            "",
+            ALL,
+            None,
+        )
+        .unwrap_err();
+        let (_, property, _, problem) = selection_failure(error);
+        assert_eq!(property, "tasks[0].with.agent", "{agent}");
+        match expected {
+            "unknown" => assert!(
+                matches!(problem, SequenceTaskProviderProblem::Unresolvable { state: AgentResolutionState::SingleInvalid { .. }, .. }),
+                "{agent}: {problem:?}"
+            ),
+            _ => assert!(matches!(problem, SequenceTaskProviderProblem::WrongType { key: "agent", .. }), "{agent}: {problem:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_hint_reading_its_own_identity_fails_as_circular() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "self.md", "---\nagent: \"{{ env.AGENT }}\"\n---\n\nSelf.\n");
+    let error = select_in(dir.path(), json!([{ "name": "a", "prompt": "self.md" }]), "", ALL, None).unwrap_err();
+    let (_, property, _, problem) = selection_failure(error);
+    assert_eq!(property, "agent");
+    assert_eq!(problem, SequenceTaskProviderProblem::Circular("env.AGENT".into()));
+}
+
+// -- review ------------------------------------------------------------------
+
+fn chosen(provider: Provider) -> ResolvedExecutionTarget {
     ResolvedExecutionTarget {
-        provider: if step_index.is_multiple_of(2) {
-            Provider::Codex
-        } else {
-            Provider::Gemini
-        },
+        provider,
         provider_reason: ProviderResolutionReason::SequenceReview,
-        model: Some(format!("reviewed-{step_index}")),
+        model: None,
         model_reason: ModelResolutionReason::SequenceReview,
     }
 }
 
-/// `(step_index, step_name)` of each row the review callback was shown.
-type ShownRows = Option<Vec<(usize, String)>>;
-
-/// Runs `review_targets` with a callback that records the rows it was shown
-/// and answers each with [`reviewed`].
-fn review_all(steps: &[SequenceStep]) -> (io::Result<Vec<ResolvedExecutionTarget>>, ShownRows) {
-    let drafts = drafts_for(steps);
-    let baseline = baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle);
-    let mut shown = None;
-    let result = review_targets(steps, drafts, baseline, |rows| {
-        shown = Some(
-            rows.iter()
-                .map(|d| (d.step_index, d.step_name.clone()))
-                .collect::<Vec<_>>(),
-        );
-        Ok(rows.iter().map(|d| reviewed(d.step_index)).collect())
-    });
-    (result, shown)
-}
-
-fn baseline_for(steps: &[SequenceStep]) -> Vec<ResolvedExecutionTarget> {
-    baseline_targets(&drafts_for(steps), ProviderResolutionReason::FrontmatterSingle)
-}
-
-// -- Eligibility ------------------------------------------------------------
-
+/// Own-provider tasks are read-only rows; only the missing task is editable,
+/// and its choice is stored by identity as a fallback, so repeated names in
+/// nested containers never share it.
 #[test]
-fn eligibility_follows_the_outer_executable() {
-    let cases = [
-        (None, true),
-        (Some(ExecutableField::Prompt), true),
-        (Some(ExecutableField::Task), true),
-        (Some(ExecutableField::Group), true),
-        (Some(ExecutableField::Shell), false),
-        (Some(ExecutableField::SideEffect), false),
-        (Some(ExecutableField::Sequence), false),
-    ];
-    for (field, expected) in cases {
-        assert_eq!(
-            is_review_eligible(&step(0, "s", field)),
-            expected,
-            "{field:?}"
-        );
-    }
-}
-
-#[test]
-fn shipped_review_loop_hides_exactly_its_stage_steps() {
-    let path = PathBuf::from("prompts/review-loop.md");
-    let source = ResolvedCompositionSource {
-        original_ref: path.display().to_string(),
-        resolved_path: path,
-        original_text: REVIEW_LOOP.to_string(),
-        markdown: REVIEW_LOOP.to_string().into(),
-    };
-    let plan = resolve_sequence_plan(&source, &crate::request::test_context())
-        .expect("review-loop.md normalizes")
-        .expect("review-loop.md declares a sequence");
-    assert_eq!(plan.steps.len(), 22);
-
-    let hidden: Vec<&str> = plan
-        .steps
-        .iter()
-        .filter(|s| !is_review_eligible(s))
-        .map(|s| s.name.as_str())
-        .collect();
-    assert_eq!(hidden, ["stage-1", "stage-2", "stage-3", "stage-4", "stage-5"]);
-
-    let (result, shown) = review_all(&plan.steps);
-    let shown = shown.expect("the review opens");
-    assert_eq!(shown.len(), 17);
-    assert_eq!(shown[0], (0, "implement".to_string()));
-    assert_eq!(shown[3], (4, "commit-1".to_string()));
-    assert_eq!(result.expect("review succeeds").len(), 22);
-}
-
-// -- Baseline ---------------------------------------------------------------
-
-#[test]
-fn baseline_targets_match_the_review_bypassed_conversion() {
-    let mut unresolved = draft(1, "unresolved");
-    unresolved.resolved_provider = None;
-    unresolved.proposed_model = None;
-    unresolved.model_reason = ModelResolutionReason::ProviderDefault;
-    let drafts = vec![draft(0, "resolved"), unresolved];
-
-    let targets = baseline_targets(&drafts, ProviderResolutionReason::FrontmatterList);
-    assert_eq!(
-        targets,
-        vec![
-            ResolvedExecutionTarget {
-                provider: Provider::Claude,
-                provider_reason: ProviderResolutionReason::FrontmatterList,
-                model: Some("baseline-0".into()),
-                model_reason: ModelResolutionReason::FrontmatterSingle,
-            },
-            // No resolved provider falls back to Claude, as the bypass did.
-            ResolvedExecutionTarget {
-                provider: Provider::Claude,
-                provider_reason: ProviderResolutionReason::FrontmatterList,
-                model: None,
-                model_reason: ModelResolutionReason::ProviderDefault,
-            },
-        ]
-    );
-}
-
-// -- Mapping ----------------------------------------------------------------
-
-#[test]
-fn interleaved_steps_review_only_eligible_rows_and_merge_by_step_index() {
-    let steps = steps(&[
-        ("plan", Some(ExecutableField::Prompt)),
-        ("stage", Some(ExecutableField::Shell)),
-        ("notify", Some(ExecutableField::SideEffect)),
-        ("lint", Some(ExecutableField::Task)),
-        ("fan-out", Some(ExecutableField::Group)),
-        ("body", None),
-    ]);
-    let baseline = baseline_for(&steps);
-    let (result, shown) = review_all(&steps);
-
-    assert_eq!(
-        shown.expect("the review opens"),
-        vec![
-            (0, "plan".to_string()),
-            (3, "lint".to_string()),
-            (4, "fan-out".to_string()),
-            (5, "body".to_string()),
-        ]
-    );
-    let targets = result.expect("review succeeds");
-    assert_eq!(targets.len(), 6);
-    for index in [0, 3, 4, 5] {
-        assert_eq!(targets[index], reviewed(index), "reviewed step {index}");
-    }
-    for index in [1, 2] {
-        assert_eq!(targets[index], baseline[index], "hidden step {index}");
-    }
-}
-
-#[test]
-fn repeated_names_map_by_position_not_name() {
-    let steps = steps(&[
-        ("x", Some(ExecutableField::Prompt)),
-        ("x", Some(ExecutableField::Shell)),
-        ("x", Some(ExecutableField::Prompt)),
-    ]);
-    let baseline = baseline_for(&steps);
-    let (result, shown) = review_all(&steps);
-
-    assert_eq!(
-        shown.expect("the review opens"),
-        vec![(0, "x".to_string()), (2, "x".to_string())]
-    );
-    let targets = result.expect("review succeeds");
-    assert_eq!(targets, vec![reviewed(0), baseline[1].clone(), reviewed(2)]);
-}
-
-#[test]
-fn hidden_first_and_last_steps_keep_their_baseline() {
-    let steps = steps(&[
-        ("stage", Some(ExecutableField::Shell)),
-        ("implement", Some(ExecutableField::Prompt)),
-        ("body", None),
-        ("notify", Some(ExecutableField::SideEffect)),
-    ]);
-    let baseline = baseline_for(&steps);
-    let (result, shown) = review_all(&steps);
-
-    assert_eq!(
-        shown.expect("the review opens"),
-        vec![(1, "implement".to_string()), (2, "body".to_string())]
-    );
-    let targets = result.expect("review succeeds");
-    assert_eq!(
-        targets,
-        vec![baseline[0].clone(), reviewed(1), reviewed(2), baseline[3].clone()]
-    );
-}
-
-#[test]
-fn all_hidden_steps_never_open_the_review() {
-    let steps = steps(&[
-        ("stage", Some(ExecutableField::Shell)),
-        ("notify", Some(ExecutableField::SideEffect)),
-    ]);
-    let drafts = drafts_for(&steps);
-    let baseline = baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle);
-    let called = Cell::new(false);
-
-    let targets = review_targets(&steps, drafts, baseline.clone(), |_| {
-        called.set(true);
-        Ok(Vec::new())
+fn review_edits_only_missing_tasks_and_keys_choices_by_identity() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    write(dir.path(), "review.md", "---\nagent: opencode\n---\n\nReview.\n");
+    let mut selections = select_in(
+        dir.path(),
+        json!([
+            { "name": "same", "prompt": "plain.md" },
+            { "name": "own", "prompt": "review.md" },
+            { "name": "nest", "sequence": [{ "name": "same", "prompt": "plain.md" }] }
+        ]),
+        "",
+        ALL,
+        None,
+    )
+    .unwrap();
+    let shown = Cell::new(Vec::new());
+    let reviewed = review_selections(&mut selections, |drafts| {
+        shown.set(drafts.iter().map(|d| (d.step_name.clone(), d.read_only.clone())).collect());
+        Ok(vec![chosen(Provider::Codex), chosen(Provider::Gemini)])
     })
-    .expect("no review, no error");
-
-    assert!(!called.get(), "an empty review table was opened");
-    assert_eq!(targets, baseline);
-}
-
-#[test]
-fn unexpected_row_count_is_rejected_before_merging() {
-    let steps = steps(&[
-        ("a", Some(ExecutableField::Prompt)),
-        ("stage", Some(ExecutableField::Shell)),
-        ("b", Some(ExecutableField::Prompt)),
-    ]);
-
-    for returned in [vec![reviewed(0)], vec![reviewed(0), reviewed(2), reviewed(4)]] {
-        let found = returned.len();
-        let drafts = drafts_for(&steps);
-        let baseline = baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle);
-        let error = review_targets(&steps, drafts, baseline, |_| Ok(returned))
-            .expect_err("a short or long review must not merge");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{found} rows");
-        assert_ne!(error.kind(), CANCELLED_KIND);
-        let message = error.to_string();
-        assert!(message.contains('2') && message.contains(&found.to_string()), "{message}");
-    }
-}
-
-#[test]
-fn merge_rejects_a_count_mismatch_without_touching_the_baseline() {
-    let steps = steps(&[("a", None), ("b", None)]);
-    let baseline = baseline_for(&steps);
+    .unwrap();
+    assert!(reviewed);
     assert_eq!(
-        merge_reviewed_targets(baseline, &[0, 1], vec![reviewed(0)]),
-        Err(ReviewRowCountMismatch {
-            expected: 2,
-            found: 1,
-        })
+        shown.take(),
+        [("same".to_string(), None), ("own".to_string(), Some("OpenCode".to_string())), ("same".to_string(), None)]
     );
+    assert!(matches!(target(&selections, "tasks[0]"), TaskTarget::Fallback(t) if t.provider == Provider::Codex));
+    assert!(matches!(target(&selections, "tasks[1]"), TaskTarget::Own(t) if t.provider == Provider::OpenCode));
+    assert!(matches!(target(&selections, "tasks[2].sequence[0]"), TaskTarget::Fallback(t) if t.provider == Provider::Gemini));
 }
 
 #[test]
-fn review_cancellation_propagates_its_kind() {
-    let steps = steps(&[("a", Some(ExecutableField::Prompt))]);
-    let drafts = drafts_for(&steps);
-    let baseline = baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle);
-    let error = review_targets(&steps, drafts, baseline, |_| {
-        Err(io::Error::new(CANCELLED_KIND, "interrupted"))
-    })
-    .expect_err("cancellation is an error");
-    assert_eq!(error.kind(), CANCELLED_KIND);
-}
-
-// -- Opening the review -----------------------------------------------------
-
-#[test]
-fn review_opens_only_for_a_prompting_state_on_a_terminal() {
-    let prompting = [
-        AgentResolutionState::NoAgent,
-        AgentResolutionState::SingleInvalid {
-            hint: "not-real".into(),
-        },
-        AgentResolutionState::SingleNotInstalled {
-            provider: Provider::Gemini,
-        },
-        AgentResolutionState::ListMultipleInstalled {
-            installed: vec![Provider::Claude, Provider::Codex],
-            not_installed: Vec::new(),
-            invalid: Vec::new(),
-        },
-        AgentResolutionState::ZeroInstalledList {
-            not_installed: vec![Provider::Gemini],
-            invalid: Vec::new(),
-        },
-    ];
-    for state in &prompting {
-        assert!(needs_review(true, Some(state)), "{state:?} on a terminal");
-        assert!(!needs_review(false, Some(state)), "{state:?} without a terminal");
+fn leaving_the_review_starts_nothing_and_a_wrong_row_count_is_an_error() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    let steps = json!([{ "name": "a", "prompt": "plain.md" }]);
+    for kind in [ABORTED_KIND, CANCELLED_KIND] {
+        let mut selections = select_in(dir.path(), steps.clone(), "", ALL, None).unwrap();
+        assert!(!review_selections(&mut selections, |_| Err(io::Error::new(kind, "left"))).unwrap());
     }
-
-    let auto_selected = [
-        AgentResolutionState::Selected {
-            provider: Provider::Claude,
-        },
-        AgentResolutionState::ListOneInstalled {
-            selected: Provider::Codex,
-            not_installed: Vec::new(),
-            invalid: Vec::new(),
-        },
-    ];
-    for state in &auto_selected {
-        assert!(!needs_review(true, Some(state)), "{state:?}");
-    }
-
-    // An explicit `--<provider>` flag leaves no classified state.
-    assert!(!needs_review(true, None));
-}
-
-#[test]
-fn a_bypassed_review_never_calls_the_callback_and_keeps_the_baseline() {
-    let steps = steps(&[
-        ("plan", Some(ExecutableField::Prompt)),
-        ("stage", Some(ExecutableField::Shell)),
-    ]);
-    let drafts = drafts_for(&steps);
-    let called = Cell::new(false);
-
-    let targets = live_targets(
-        false,
-        &steps,
-        drafts.clone(),
-        ProviderResolutionReason::ExplicitFlag,
-        |_| {
-            called.set(true);
-            Ok(Vec::new())
-        },
-    )
-    .expect("no review, no error");
-
-    assert!(!called.get(), "a bypassed review opened the table");
-    assert_eq!(
-        targets,
-        Some(baseline_targets(&drafts, ProviderResolutionReason::ExplicitFlag))
-    );
-}
-
-#[test]
-fn a_shell_only_sequence_on_a_terminal_never_opens_the_review() {
-    let steps = steps(&[
-        ("stage", Some(ExecutableField::Shell)),
-        ("notify", Some(ExecutableField::SideEffect)),
-    ]);
-    let drafts = drafts_for(&steps);
-    let called = Cell::new(false);
-
-    let targets = live_targets(
-        true,
-        &steps,
-        drafts.clone(),
-        ProviderResolutionReason::FrontmatterSingle,
-        |_| {
-            called.set(true);
-            Ok(Vec::new())
-        },
-    )
-    .expect("no review, no error");
-
-    assert!(!called.get(), "an empty review table was opened");
-    let targets = targets.expect("not cancelled");
-    assert_eq!(targets.len(), 2);
-    assert_eq!(
-        targets,
-        baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle)
-    );
-}
-
-#[test]
-fn leaving_the_review_with_esc_or_ctrl_c_yields_no_targets() {
-    let steps = steps(&[
-        ("a", Some(ExecutableField::Prompt)),
-        ("stage", Some(ExecutableField::Shell)),
-    ]);
-    // `Esc` aborts and `Ctrl+C` cancels; both mean no step may start.
-    for (kind, message) in [(ABORTED_KIND, "cancelled"), (CANCELLED_KIND, "interrupted")] {
-        let outcome = live_targets(
-            true,
-            &steps,
-            drafts_for(&steps),
-            ProviderResolutionReason::FrontmatterSingle,
-            |_| Err(io::Error::new(kind, message)),
-        )
-        .expect("cancellation is not an error");
-        assert_eq!(outcome, None, "{kind:?}");
-    }
-}
-
-#[test]
-fn a_failed_review_is_an_error_not_a_cancellation() {
-    let steps = steps(&[("a", Some(ExecutableField::Prompt))]);
-    let error = live_targets(
-        true,
-        &steps,
-        drafts_for(&steps),
-        ProviderResolutionReason::FrontmatterSingle,
-        |_| Ok(Vec::new()),
-    )
-    .expect_err("a zero-row answer for one shown row must fail");
+    let mut selections = select_in(dir.path(), steps.clone(), "", ALL, None).unwrap();
+    let error = review_selections(&mut selections, |_| Ok(Vec::new())).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(selections.first_unresolved().is_some(), "a failed review changes nothing");
+    let mut selections = select_in(dir.path(), steps, "", ALL, None).unwrap();
+    let error = review_selections(&mut selections, |_| Err(io::Error::other("tty gone"))).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Other);
 }
 
+/// A body step composes its sequence document, so the document's own hints
+/// are the step's: an unusable `agent` there is the document's to review,
+/// never a task failure.
 #[test]
-fn a_wrong_row_count_with_hidden_steps_fails_the_run_instead_of_cancelling_or_truncating() {
-    let steps = steps(&[
-        ("stage-1", Some(ExecutableField::Shell)),
-        ("plan", Some(ExecutableField::Prompt)),
-        ("notify", Some(ExecutableField::SideEffect)),
-        ("build", Some(ExecutableField::Task)),
-    ]);
-    // Two rows are shown. Four is the full step count, the answer a review
-    // that ignored the filter would give.
-    for found in [0, 1, 3, 4, 5] {
-        let error = live_targets(
-            true,
-            &steps,
-            drafts_for(&steps),
-            ProviderResolutionReason::FrontmatterSingle,
-            |rows| {
-                assert_eq!(rows.len(), 2);
-                Ok((0..found).map(reviewed).collect())
-            },
-        )
-        .expect_err("a mismatched answer is neither targets nor a cancellation");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{found} rows");
-        assert_eq!(
-            error.get_ref().and_then(|source| source.downcast_ref::<ReviewRowCountMismatch>()),
-            Some(&ReviewRowCountMismatch { expected: 2, found }),
-        );
-    }
-}
-
-#[test]
-fn a_submitted_review_returns_one_target_per_step() {
-    let steps = steps(&[
-        ("stage", Some(ExecutableField::Shell)),
-        ("plan", Some(ExecutableField::Prompt)),
-    ]);
-    let drafts = drafts_for(&steps);
-    let baseline = baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle);
-
-    let targets = live_targets(
-        true,
-        &steps,
-        drafts,
-        ProviderResolutionReason::FrontmatterSingle,
-        |rows| Ok(rows.iter().map(|d| reviewed(d.step_index)).collect()),
-    )
-    .expect("review succeeds")
-    .expect("not cancelled");
-
-    assert_eq!(targets, vec![baseline[0].clone(), reviewed(1)]);
+fn a_body_step_uses_the_sequence_documents_agent() {
+    let dir = TempDir::new().unwrap();
+    let selections = select_in(dir.path(), json!(["first", "second"]), "agent: codex\n", ALL, None).unwrap();
+    assert_eq!(provider_of(target(&selections, "tasks[1]")), Some(Provider::Codex));
+    let selections = select_in(dir.path(), json!(["first"]), "agent: nope\n", ALL, None).unwrap();
+    assert!(matches!(
+        target(&selections, "tasks[0]"),
+        TaskTarget::Unresolved { state: AgentResolutionState::SingleInvalid { .. }, own_hint: false, .. }
+    ));
+    let _ = EffectiveSelectionHints::default();
 }

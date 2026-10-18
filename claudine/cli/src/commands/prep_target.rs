@@ -6,7 +6,8 @@
 //! approved, and run with its own `initialize`, runtime layer, and output.
 //! The caller's provider and approval flags carry over; the caller's
 //! setters, loop, sequence, and group roots do not. The `with:` overlay
-//! becomes the target's caller values, as data.
+//! becomes the target's caller values, as data, anchored at the document that
+//! authored the `prep`.
 //!
 //! The runner is installed per thread by the top-level composition commands
 //! ([`install_for`]); the library refuses a `prep` on a thread without one.
@@ -43,8 +44,16 @@ impl PrepRunner for CliPrepRunner {
         let _call = prep::enter_call(call, &target).map_err(|error| failure(&color_eyre::eyre::Report::from(error)))?;
         let kind = target_kind(&target).map_err(|error| failure(&error))?;
         let mut shared = self.shared.clone();
-        // The target receives the overlay as its only caller values.
-        shared.set = Some(call.overlay_as_data().to_string());
+        // The target receives the overlay as its only caller values, authored
+        // by the document whose `prep` fired, so a relative file value
+        // resolves from that document rather than the launch directory.
+        let overlay = call.overlay_as_data();
+        shared.set_records = claudine::composition::CallerInputLayers::from_caller_overrides(
+            Some(overlay.clone()),
+            call.file_resolution_context.for_source(call.caller),
+        )
+        .caller_input_records;
+        shared.set = Some(overlay.to_string());
         shared.caller_arguments = Default::default();
         let file = biscuit_file::to_portable_string(&target);
         let status = match kind {

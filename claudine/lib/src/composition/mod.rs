@@ -74,7 +74,7 @@ pub use coordinator::{
 };
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
-    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource,
+    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, SequenceTaskProviderProblem,
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
     LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
     SequenceExpressionCause,
@@ -184,8 +184,8 @@ pub use sequence::{
     build_step_overlay, resolve_sequence_plan, resolve_sequence_plan_with,
 };
 pub use types::{
-    AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
-    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
+    AgentHint, AnchoredOverlay, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
+    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan, LaunchLog,
     InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, LoopLocation,
     LoopOwner, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,

@@ -403,7 +403,7 @@ types:
         group:
             - group
             - "string -> a group file reference"
-        params: "object -> parameters passed to the executable"
+        with: "object -> a prompt task's frontmatter values for the document it runs"
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command timeout"
@@ -451,7 +451,7 @@ types:
         group:
             - group-2
             - "string -> a group file reference"
-        params: "object -> parameters passed to the executable"
+        with: "object -> a prompt task's frontmatter values for the document it runs"
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command timeout"

@@ -120,7 +120,7 @@ pub(super) fn step_set_overrides(
 
 /// This step's lexical `seq` payload, without any frontmatter layers.
 ///
-/// A task executor needs it unmixed: it folds its own layers (`params` <
+/// A task executor needs it unmixed: it folds its own layers (`with` <
 /// user setters < mutations < overlay), and handing it the already-folded object
 /// would raise user setters above the runtime mutations that must outrank them.
 pub(super) fn reserved_overlay(plan: &SequencePlan, step_index: usize) -> Value {

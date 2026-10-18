@@ -83,7 +83,7 @@ impl Fixture {
             name: Some("external".to_string()),
             label: "external".to_string(),
             action: PreflightAction::Shell { commands: vec!["true".to_string()] },
-            params: Map::new(),
+            with: Map::new(),
             timeout: None,
             when: None,
             operation: None,
@@ -103,6 +103,8 @@ impl Fixture {
             position: claudine::composition::TaskPosition::First,
             shell_sites: Vec::new(),
             approved_set_values: Vec::new(),
+            identity: Default::default(),
+            provider: None,
         }
     }
 }
@@ -216,9 +218,9 @@ fn every_expression_bearing_field_is_scanned_for_ctx_references() {
             }),
         ),
         (
-            "params",
+            "with",
             Box::new(|task| {
-                task.params.insert("target".to_string(), json!(CTX_REF));
+                task.with.insert("target".to_string(), json!(CTX_REF));
             }),
         ),
         ("timeout", Box::new(|task| task.timeout = Some(json!(CTX_REF)))),

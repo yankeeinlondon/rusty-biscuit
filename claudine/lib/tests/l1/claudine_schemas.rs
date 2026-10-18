@@ -1196,7 +1196,7 @@ fn sequence_container_schema_contract() {
         ("retry", "cancelled: [retry]", false),
         ("bundle-retry", "cancelled: {retry: null}", false),
         ("number", "cancelled: 7", false),
-        ("task-fields", "cancelled: []\nsequence: [{name: review, prompt: './step.md', operation: review, flow: audit, topic: parsing, params: {x: 1}}]", true),
+        ("task-fields", "cancelled: []\nsequence: [{name: review, prompt: './step.md', operation: review, flow: audit, topic: parsing, with: {x: 1}}]", true),
         ("nested", "cancelled: []\nsequence: [{name: child, sequence: [], cancelled: []}, {group: {tasks: [{name: leg, shell: 'echo done'}], fail_fast: false, cancelled: []}}]", true),
     ] {
         let path = repo.write_document(&format!("container-{name}.md"), &format!("---\n{yaml}\n---\n"));

@@ -1100,26 +1100,29 @@ fn object_step_rejects_two_executables() {
     );
 }
 
+/// `with` is a prompt task's option alone: every other executable rejects it
+/// by name, including a `task:` reference (put `with` inside the task file).
 #[test]
-fn shell_step_rejects_prompt_only_task_option() {
-    let dir = TempDir::new().unwrap();
-    let source = make_source(
-        &dir,
-        &[(
-            "sequence",
-            json!([{"name": "alpha", "shell": "just test", "params": {"x": 1}}]),
-        )],
-        "Prompt",
-    );
-    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            CompositionError::SequenceInvalidTaskField { index: 0, ref field, ref executable }
-                if field == "params" && executable == "shell"
-        ),
-        "`params` on a shell task must be rejected, got: {err:?}"
-    );
+fn with_is_rejected_on_every_executable_but_prompt() {
+    for (executable, step) in [
+        ("shell", json!({"name": "alpha", "shell": "just test", "with": {"x": 1}})),
+        ("side_effect", json!({"name": "alpha", "side_effect": {"stderr": "note"}, "with": {"x": 1}})),
+        ("group", json!({"name": "alpha", "group": {"name": "g", "tasks": [{"name": "leg", "shell": "true"}]}, "with": {"x": 1}})),
+        ("task", json!({"name": "alpha", "task": "./task.yaml", "with": {"x": 1}})),
+        ("sequence", json!({"name": "alpha", "sequence": [{"name": "inner", "shell": "true"}], "with": {"x": 1}})),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!([step]))], "Prompt");
+        let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                CompositionError::SequenceInvalidTaskField { index: 0, field, executable: got }
+                    if field == "with" && got == executable
+            ),
+            "`with` on a {executable} task must be rejected, got: {err:?}"
+        );
+    }
 }
 
 #[test]
@@ -1129,7 +1132,7 @@ fn single_executable_step_extracts_executable_and_options() {
         &dir,
         &[(
             "sequence",
-            json!([{"name": "review", "prompt": "@p.md", "params": {"topic": "x"}, "color": "blue"}]),
+            json!([{"name": "review", "prompt": "@p.md", "with": {"topic": "x"}, "color": "blue"}]),
         )],
         "Prompt",
     );
@@ -1137,11 +1140,69 @@ fn single_executable_step_extracts_executable_and_options() {
     let step = &plan.steps[0];
     let executable = step.executable.as_ref().expect("executable extracted");
     assert_eq!(executable.field, ExecutableField::Prompt);
-    assert_eq!(executable.options.get("params"), Some(&json!({"topic": "x"})));
+    assert_eq!(executable.options.get("with"), Some(&json!({"topic": "x"})));
     // Arbitrary state stays in the generated state; task keys never leak into it.
     assert_eq!(step.state.extra.get("color"), Some(&json!("blue")));
     assert!(!step.state.extra.contains_key("prompt"));
-    assert!(!step.state.extra.contains_key("params"));
+    assert!(!step.state.extra.contains_key("with"));
+}
+
+/// `params` is no longer a task option: on any step, with or without an
+/// executable, it is ordinary step data.
+#[test]
+fn params_on_a_step_is_ordinary_step_data() {
+    for step in [
+        json!({"name": "review", "prompt": "@p.md", "params": {"topic": "x"}}),
+        json!({"name": "check", "shell": "true", "params": {"topic": "x"}}),
+        json!({"name": "body", "params": {"topic": "x"}}),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!([step.clone()]))], "Prompt");
+        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
+            .unwrap_or_else(|err| panic!("{step}: {err:?}"))
+            .unwrap();
+        let state = &plan.steps[0];
+        assert_eq!(state.state.extra.get("params"), Some(&json!({"topic": "x"})), "{step}");
+        if let Some(executable) = &state.executable {
+            assert!(!executable.options.contains_key("params"), "{step}");
+        }
+    }
+}
+
+/// A prompt task's `with` shares every `with`'s shape errors, located at the
+/// task in the file that authored it. `{}` is valid and equals no `with`.
+#[test]
+fn task_with_shape_errors_are_the_with_family_at_the_task() {
+    let leg = |with: Value| json!({"name": "g", "group": {"name": "g", "tasks": [{"name": "leg", "prompt": "@p.md", "with": with}]}});
+    let top = |with: Value| json!({"name": "review", "prompt": "@p.md", "with": with});
+    for (label, step, variant, at) in [
+        ("null", top(Value::Null), "NotMapping", "sequence[0].with"),
+        ("number", top(json!(42)), "NotMapping", "sequence[0].with"),
+        ("string", top(json!("plain")), "NotMapping", "sequence[0].with"),
+        ("list", top(json!([{"x": 1}])), "NotMapping", "sequence[0].with"),
+        ("whole mapping", top(json!("{{ payload }}")), "WholeMapping", "sequence[0].with"),
+        ("dynamic key", top(json!({"{{ key }}": 1})), "DynamicKey", "sequence[0].with"),
+        ("shell key", top(json!({"$(echo k)": 1})), "DynamicKey", "sequence[0].with"),
+        ("group leg", leg(json!(7)), "NotMapping", "sequence[0].group.tasks[0].with"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!([step]))], "Prompt");
+        let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+        let (got, source_path) = match &err {
+            CompositionError::LifecycleWithNotMapping { source_path, .. } => ("NotMapping", source_path),
+            CompositionError::LifecycleWithWholeMapping { source_path, .. } => ("WholeMapping", source_path),
+            CompositionError::LifecycleWithDynamicKey { source_path, .. } => ("DynamicKey", source_path),
+            other => panic!("{label}: expected a `with` shape error, got {other:?}"),
+        };
+        assert_eq!(got, variant, "{label}: {err}");
+        assert_eq!(source_path, &source.resolved_path, "{label}");
+        assert!(err.to_string().contains(&format!("`{at}")), "{label}: {err}");
+    }
+
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("sequence", json!([top(json!({}))]))], "Prompt");
+    resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
+        .expect("`with: {}` is valid");
 }
 
 // -- template rendering (Darkmatter expression engine) --------------------

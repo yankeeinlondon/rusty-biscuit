@@ -55,12 +55,13 @@ use crate::invocation_context::{InvocationContext, SourceContext};
 mod reapproval;
 mod shape;
 mod containers;
+pub mod providers;
 
 pub use reapproval::PreflightApproval;
 pub use shape::{
     ApprovedCommand, ApprovedSetValue, CommandSiteId, GroupExecution, PreflightAction,
     PreflightGroup, PreflightLoop, PreflightSequence, PreflightStep, PreflightTask, PreparedShellSite, ShellSiteKind, SiteMode,
-    TaskDiagnosticProvenance, TaskPosition,
+    TaskDiagnosticProvenance, TaskIdentity, TaskPosition,
 };
 
 use darkmatter::markdown::compose::shell_expansion::template::{
@@ -157,12 +158,12 @@ pub struct PromptReference {
     pub path: PathBuf,
     /// The referencing task's position.
     pub position: TaskPosition,
-    /// The task's `params` whose values exist at approval, evaluated against
+    /// The task's `with` entries whose values exist at approval, evaluated against
     /// the step's early-binding state. The document reads them as data.
-    pub params: Map<String, Value>,
-    /// The task's `params` whose values read a late root, which the document's
+    pub with: Map<String, Value>,
+    /// The task's `with` keys whose values read a late root, which the document's
     /// discovery treats as late roots themselves. Sorted.
-    pub deferred_params: Vec<String>,
+    pub deferred_with: Vec<String>,
 }
 
 impl PromptReference {
@@ -174,7 +175,7 @@ impl PromptReference {
                 .iter()
                 .filter(|root| **root != "group" || self.in_group)
                 .map(|root| (*root).to_string())
-                .chain(self.deferred_params.iter().cloned()),
+                .chain(self.deferred_with.iter().cloned()),
         );
         match self.position {
             TaskPosition::First => roots,
@@ -428,7 +429,7 @@ pub fn build_preflight_graph_with_context(
 ) -> Result<PreflightGraph, CompositionError> {
     let mut loader = Loader::new(source, context, file_resolution_context.clone());
     loader.walk_plan(plan)?;
-    Ok(loader.graph)
+    Ok(loader.finish())
 }
 
 /// Build preflight from one invocation's retained repository observations.
@@ -454,7 +455,7 @@ pub fn build_preflight_graph_with_invocation(
     );
     loader.caller_setters = caller_setters.and_then(Value::as_object).cloned().unwrap_or_default();
     loader.walk_plan(plan)?;
-    Ok(loader.graph)
+    Ok(loader.finish())
 }
 
 fn load_preparation_source(path: &Path) -> Result<ResolvedCompositionSource, CompositionError> {
@@ -585,6 +586,9 @@ struct Loader<'a> {
     /// writes so far, which a referenced sequence document reads above its
     /// own properties.
     caller_setters: Map<String, Value>,
+    /// Keys an inline container event of the graph may write, collected as
+    /// the walk reads them; [`Self::finish`] adds every retained stack's.
+    written_keys: HashSet<String>,
 }
 
 /// Where in the sequence a task being loaded sits.
@@ -616,6 +620,7 @@ impl<'a> Loader<'a> {
             step_derived: HashSet::new(),
             source_schema: None,
             caller_setters: Map::new(),
+            written_keys: HashSet::new(),
         }
     }
 
@@ -640,6 +645,7 @@ impl<'a> Loader<'a> {
             step_derived: HashSet::new(),
             source_schema: None,
             caller_setters: Map::new(),
+            written_keys: HashSet::new(),
         }
     }
 
@@ -788,17 +794,17 @@ impl<'a> Loader<'a> {
 
         let mut preflight_approvals = Vec::new();
         let mut shell_sites = Vec::new();
+        let mut provider = None;
         let action = match field {
             ExecutableField::Prompt => {
                 let reference = expect_reference(value, "prompt", label)?;
                 let document = self.load_prompt(&reference, origin)?;
-                self.record_prompt_reference(
-                    &document,
-                    &option_map(options, "params"),
-                    origin,
-                    state,
-                    placement,
-                );
+                let with = option_map(options, "with");
+                let (with_evaluated, with_deferred) =
+                    self.record_prompt_reference(&document, &with, origin, state, placement);
+                provider = Some(self.predict_provider(
+                    &document, &with, &with_evaluated, &with_deferred, origin, property,
+                )?);
                 PreflightAction::Prompt {
                     path: document,
                     reference,
@@ -874,7 +880,7 @@ impl<'a> Loader<'a> {
             name: option_string(options, "name"),
             label: label.to_string(),
             action,
-            params: option_map(options, "params"),
+            with: option_map(options, "with"),
             timeout: options.get("timeout").cloned(),
             when: option_string(options, "when"),
             operation,
@@ -894,6 +900,9 @@ impl<'a> Loader<'a> {
             position: placement.position,
             shell_sites,
             approved_set_values: Vec::new(),
+            // Assigned once the whole graph is walked.
+            identity: TaskIdentity::default(),
+            provider,
         };
 
         let site = SiteScope {
@@ -949,6 +958,7 @@ impl<'a> Loader<'a> {
                 "a nested `sequence:` must be a list or file reference".into(),
             )),
         };
+        providers::collect_written_keys(&Value::Object(events.clone()), &mut self.written_keys);
         let mut event_root = Map::new();
         for key in super::grammar::CONTAINER_EVENT_KEYS {
             if let Some(value) = events.get(*key) { event_root.insert((*key).into(), value.clone()); }
@@ -1138,6 +1148,7 @@ impl<'a> Loader<'a> {
         state: &EffectiveState,
         position: TaskPosition,
     ) -> Result<PreflightGroup, CompositionError> {
+        providers::collect_written_keys(&Value::Object(map.clone()), &mut self.written_keys);
         let name = match map.get("name") {
             Some(Value::String(s)) => s.clone(),
             _ => "<inline>".to_string(),
@@ -1900,29 +1911,29 @@ impl<'a> Loader<'a> {
     }
 
     /// Record a prompt task's reference to its document, with the position
-    /// and parameters its discovery needs.
+    /// and `with` inputs its discovery needs.
     ///
-    /// A parameter whose value reads a late root (directly or through a step
+    /// A `with` entry whose value reads a late root (directly or through a step
     /// value derived from one) is late inside the document too. Every other
-    /// parameter is evaluated now, against the step's early-binding values, so
+    /// entry is evaluated now, against the step's early-binding values, so
     /// the document's commands see it as they will at the task's turn; one
     /// that cannot be evaluated here is treated as late rather than failing
-    /// preflight, because `params` otherwise bind only at the task's turn.
+    /// preflight, because `with` otherwise binds only at the task's turn.
     fn record_prompt_reference(
         &mut self,
         path: &Path,
-        params: &Map<String, Value>,
+        with: &Map<String, Value>,
         origin: &Path,
         state: &EffectiveState,
         placement: Placement,
-    ) {
+    ) -> (Map<String, Value>, Vec<String>) {
         let mut deferred: Vec<String> =
-            derived_deferred_keys(params.iter(), &sequence_deferred_roots(), &self.step_derived)
+            derived_deferred_keys(with.iter(), &sequence_deferred_roots(), &self.step_derived)
                 .into_iter()
-                .filter(|key| params.contains_key(key))
+                .filter(|key| with.contains_key(key))
                 .collect();
         let mut evaluated = Map::new();
-        for (key, value) in params {
+        for (key, value) in with {
             if deferred.contains(key) {
                 continue;
             }
@@ -1950,12 +1961,117 @@ impl<'a> Loader<'a> {
             in_group: placement.in_group,
             path: path.to_path_buf(),
             position: placement.position,
-            params: evaluated,
-            deferred_params: deferred,
+            with: evaluated.clone(),
+            deferred_with: deferred.clone(),
         };
         if !self.graph.prompt_references.contains(&reference) {
             self.graph.prompt_references.push(reference);
         }
+        (evaluated, deferred)
+    }
+
+    /// Predict a prompt task's provider from its document, its `with`, and the
+    /// caller's setters (see [`providers`]). Read-only: a document value is
+    /// evaluated against early-binding state, and nothing else runs.
+    fn predict_provider(
+        &mut self,
+        document: &Path,
+        with: &Map<String, Value>,
+        with_evaluated: &Map<String, Value>,
+        with_deferred: &[String],
+        origin: &Path,
+        task_property: &str,
+    ) -> Result<providers::ProviderPrediction, CompositionError> {
+        let frontmatter: Map<String, Value> = self
+            .graph
+            .prompt_document(document)
+            .map(|loaded| {
+                loaded.markdown.frontmatter().as_map().iter()
+                    .map(|(key, value)| (key.clone(), value.clone())).collect()
+            })
+            .unwrap_or_default();
+        let file_resolution_context = self
+            .source_context_for(document)
+            .map(|context| context.file_resolution_context().clone())
+            .unwrap_or_else(|| self.file_resolution_context.clone());
+        let context = self.context.clone();
+        let step_frontmatter = Arc::clone(&self.step_frontmatter);
+        let layers = providers::HintLayers {
+            document: &frontmatter,
+            document_path: document,
+            with,
+            with_evaluated,
+            with_deferred,
+            with_origin: origin,
+            task_property,
+            step_frontmatter: &step_frontmatter,
+            caller_setters: &self.caller_setters,
+            sequence_path: &self.source.resolved_path,
+        };
+        let mut evaluate = |value: &Value, values: &HashMap<String, Value>| {
+            let state = reapproval::early_binding_state(values, context.clone())?;
+            Ok(reapproval::compose_approval_value(value, document, &state, &context, &file_resolution_context)?
+                .map_err(|error| crate::composition::lifecycle_context::LifecycleCause::new(Box::new(error).into())))
+        };
+        providers::predict(&layers, &mut evaluate)
+    }
+
+    /// Finish the walk: give every task its graph identity and move each
+    /// prediction that reads a key the graph's lifecycle may write to the
+    /// launch.
+    fn finish(mut self) -> PreflightGraph {
+        let mut written = std::mem::take(&mut self.written_keys);
+        providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()), &mut written);
+        for document in &self.graph.prompt_documents {
+            providers::collect_written_keys(&crate::composition::prepare::frontmatter_to_value(document.markdown.frontmatter()), &mut written);
+        }
+        fn visit(task: &mut PreflightTask, identity: TaskIdentity, written: &mut HashSet<String>, pass: u8) {
+            match pass {
+                0 => {
+                    for stack in [&task.setup, &task.teardown].into_iter().flatten() {
+                        providers::collect_written_keys(stack, written);
+                    }
+                    match &task.action {
+                        PreflightAction::SideEffect { action, .. } => providers::collect_written_keys(action, written),
+                        PreflightAction::Sequence(sequence) => {
+                            if let Some(frontmatter) = &sequence.frontmatter {
+                                providers::collect_written_keys(&Value::Object(frontmatter.clone()), written);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {
+                    task.identity = identity.clone();
+                    if let Some(prediction) = &mut task.provider {
+                        prediction.defer_runtime_written(written);
+                    }
+                }
+            }
+            match &mut task.action {
+                PreflightAction::Sequence(sequence) => {
+                    for (index, step) in sequence.steps.iter_mut().enumerate() {
+                        if let Some(child) = &mut step.task {
+                            visit(child, identity.sequence_child(index), written, pass);
+                        }
+                    }
+                }
+                PreflightAction::Group(group) => {
+                    for (index, leg) in group.tasks.iter_mut().enumerate() {
+                        visit(leg, identity.group_leg(index), written, pass);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for pass in 0..2 {
+            for (index, step) in self.graph.steps.iter_mut().enumerate() {
+                if let Some(task) = &mut step.task {
+                    visit(task, TaskIdentity::root(index), &mut written, pass);
+                }
+            }
+        }
+        self.graph
     }
 
     /// Resolve a reference authored inside `origin` to an absolute path.

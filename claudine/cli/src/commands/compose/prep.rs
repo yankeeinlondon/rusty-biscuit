@@ -134,6 +134,9 @@ pub(crate) struct StepScope {
     pub(crate) env_overrides: BTreeMap<String, String>,
     /// A task's own `operation`, which outranks the command's `--operation`.
     pub(crate) operation: Option<String>,
+    /// Where every document the step runs, a handoff target included,
+    /// records the provider each attempt spawned.
+    pub(crate) launch_log: Option<claudine::composition::LaunchLog>,
 }
 
 /// The operation a document's run reports: the step's, inside a sequence task
@@ -231,11 +234,8 @@ pub(crate) fn run_composition_inner(
         parsed.shorthand_setters,
         parsed.positionals,
     )?;
-    let mut caller_input_records = claudine::composition::CallerInputLayers::from_caller_overrides(
-        set_overrides.clone(),
-        provisional_context.clone(),
-    )
-    .caller_input_records;
+    let mut caller_input_records =
+        super::caller_input_records(&shared, set_overrides.clone(), provisional_context.clone());
     record_prep_substage(
         &mut prep_substages,
         perf_enabled,
@@ -311,11 +311,7 @@ pub(crate) fn run_composition_inner(
         // invalid optional; the caller records must carry the same values,
         // still anchored at the launch origin.
         caller_input_records =
-            claudine::composition::CallerInputLayers::from_caller_overrides(
-                pre.set_overrides.clone(),
-                provisional_context.clone(),
-            )
-            .caller_input_records;
+            super::caller_input_records(&shared, pre.set_overrides.clone(), provisional_context.clone());
         (pre.source, pre.set_overrides)
     };
     // The inline `prompt` verdict comes after eager collection so a collected
@@ -384,8 +380,7 @@ pub(crate) fn run_composition_inner(
     // matching the pre-schema handoff input exactly as canonical preparation left
     // it (AC26). Replaced — never merged — on each handoff: forwarding is
     // explicit, so a downstream hop that omits `with:` starts from empty.
-    let mut current_overlay: indexmap::IndexMap<String, serde_json::Value> =
-        indexmap::IndexMap::new();
+    let mut current_overlay = claudine::composition::AnchoredOverlay::default();
     // The already-committed handoff the *next* active document adopts for its
     // staged bootstrap. `None` for the caller's document; set to each committed
     // handoff below so the target re-runs its own `initialize`/reread/audit (R4)
@@ -470,7 +465,12 @@ pub(crate) fn run_composition_inner(
                 // (retry/resume), not just baked once into the first prepared
                 // composition. Replaced, not merged: an omitted downstream `with:`
                 // starts the next target from empty (forwarding is explicit).
-                current_overlay = handoff.overlay().clone();
+                // Each value keeps the source document's context: a relative
+                // file value resolves from the file that authored the `with`.
+                current_overlay = claudine::composition::AnchoredOverlay::new(
+                    handoff.overlay().clone(),
+                    &active_file_resolution_context,
+                );
                 // The target adopts this committed handoff for its staged
                 // bootstrap on the next iteration.
                 adopted_handoff = Some(Box::new(handoff));
@@ -502,7 +502,7 @@ pub(crate) fn prepare_and_run_active_document(
     kind: CompositionKind,
     source: ResolvedCompositionSource,
     current_file: &str,
-    current_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    current_overlay: &claudine::composition::AnchoredOverlay,
     adopted_handoff: Option<Box<ProxyHandoff>>,
     first: bool,
     inline_state: &mut Option<crate::commands::compose::InlinePromptState>,
@@ -821,7 +821,7 @@ fn eager_shell_preflight(
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
     document_epoch: &claudine::invocation_context::DocumentEpoch,
     file_resolution_context: &biscuit_file::FileResolutionContext,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     caller_overrides: &claudine::composition::LayeredOverrides,
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     approval_options: &claudine::harness::ShellApprovalOptions,
@@ -1018,7 +1018,7 @@ fn build_and_run_loop(
     document_epoch: &claudine::invocation_context::DocumentEpoch,
     verbose: u8,
     shared: &SharedComposeArgs,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     handoff_ledger: &SharedRunLedger,
     step_scope: Option<&StepScope>,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
@@ -1414,7 +1414,7 @@ fn build_execution_request(
     mode: CompositionMode,
     prep_context: &CompositionPrepContext,
     runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     handoff_ledger: SharedRunLedger,
     adopted_handoff: Option<Box<ProxyHandoff>>,
     step_scope: Option<&StepScope>,
@@ -1475,6 +1475,8 @@ fn build_execution_request(
         // The already-committed handoff a proxied target adopts for its staged
         // bootstrap (R4), or `None` for the caller's own document.
         adopted_handoff,
+        // A step or task reports what its documents' attempts spawned.
+        launch_log: step_scope.and_then(|scope| scope.launch_log.clone()),
     }
 }
 
@@ -1518,7 +1520,7 @@ fn execute_loop_or_single(
     // The immediate proxy overlay for this active document (empty for the
     // caller's document), re-applied on every re-materialization of a proxied
     // target so a retry/resume keeps the pre-schema handoff input (AC26).
-    proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: claudine::composition::AnchoredOverlay,
     // The already-committed handoff a proxied target adopts for the harness's
     // staged bootstrap on the eager single (non-loop) path, or `None` for the
     // caller's document. A looping target routes its `initialize` through the
@@ -1875,13 +1877,18 @@ fn prepare_collecting_missing(
                         .and_then(serde_json::Value::as_object)
                         .cloned()
                         .unwrap_or_default();
+                    // Collected values were typed in the launch area; the values
+                    // already supplied keep the origin they were captured with.
+                    let mut records = options.caller_input_records.clone();
+                    records.extend(
+                        claudine::composition::CallerInputLayers::from_caller_overrides(
+                            Some(serde_json::Value::Object(collected.clone())),
+                            prep_context.invocation.launch_file_resolution_context().clone(),
+                        )
+                        .caller_input_records,
+                    );
                     merged.extend(collected);
                     let merged = serde_json::Value::Object(merged);
-                    let records = claudine::composition::CallerInputLayers::from_caller_overrides(
-                        Some(merged.clone()),
-                        prep_context.invocation.launch_file_resolution_context().clone(),
-                    )
-                    .caller_input_records;
                     kind.prepare_staged(
                         source,
                         PrepareOptions {
@@ -1914,7 +1921,7 @@ fn run_staged_single(
     staged: StagedBoot,
     entry: claudine::composition::DocumentEntryReason,
     options: PrepareOptions,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     prep_context: &CompositionPrepContext,
     resolved_target: Option<ResolvedExecutionTarget>,
     env_overrides: &BTreeMap<String, String>,

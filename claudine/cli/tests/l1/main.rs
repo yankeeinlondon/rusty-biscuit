@@ -209,6 +209,8 @@ mod sequence_schema;
 #[cfg(feature = "test-fixtures")]
 mod sequence_shell_templates;
 mod sequence_sources_cli;
+#[cfg(unix)]
+mod sequence_task_providers;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;
@@ -220,6 +222,7 @@ mod test_seam_gate_guard;
 // compile, and records launches with Unix shell-stub providers.
 #[cfg(all(unix, feature = "test-fixtures"))]
 mod tts_prewarm;
+mod with_file_provenance;
 #[cfg(unix)]
 mod wrap_antigravity_exit_signal;
 mod wrap_basics;

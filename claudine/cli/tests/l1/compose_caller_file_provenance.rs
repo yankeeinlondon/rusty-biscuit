@@ -475,7 +475,7 @@ fn a_sequence_prompt_task_proxy_reads_the_invocation_wide_caller_file() {
 }
 
 #[test]
-fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
+fn sequence_task_with_and_cli_file_inputs_keep_distinct_authoring_origins() {
     let fixture = CliProcessFixture::named("caller-file-sequence-layer-origins");
     fixture.initialize_repository();
     fixture.seed_user_config();
@@ -490,7 +490,7 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
     let sequence = package.join("sequence.md");
     write(
         &sequence,
-        "---\nsequence:\n  - name: mixed\n    prompt: prompts/router.md\n    params:\n      task_spec: task/spec.md\n---\nSequence.\n",
+        "---\nsequence:\n  - name: mixed\n    prompt: prompts/router.md\n    with:\n      task_spec: task/spec.md\n---\nSequence.\n",
     );
     write(
         &package.join("prompts/router.md"),
@@ -540,7 +540,7 @@ fn a_sequence_cli_setter_shadows_the_same_named_task_file_param() {
     let sequence = fixture.cwd().join("sequence.md");
     write(
         &sequence,
-        "---\nsequence:\n  - name: consume\n    prompt: router.md\n    params:\n      spec: task/spec.md\n---\nSequence.\n",
+        "---\nsequence:\n  - name: consume\n    prompt: router.md\n    with:\n      spec: task/spec.md\n---\nSequence.\n",
     );
     write(
         &fixture.cwd().join("router.md"),
@@ -587,7 +587,7 @@ fn a_sequence_runtime_mutation_shadows_the_same_named_task_file_param() {
     let sequence = fixture.cwd().join("sequence.md");
     write(
         &sequence,
-        "---\nsequence:\n  - name: mutate\n    prompt: mutator.md\n  - name: consume\n    prompt: router.md\n    params:\n      spec: task/spec.md\n---\nSequence.\n",
+        "---\nsequence:\n  - name: mutate\n    prompt: mutator.md\n  - name: consume\n    prompt: router.md\n    with:\n      spec: task/spec.md\n---\nSequence.\n",
     );
     write(
         &fixture.cwd().join("mutator.md"),
