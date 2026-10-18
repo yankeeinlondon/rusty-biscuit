@@ -61,7 +61,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   trigger payloads cannot resolve without one, and `DarkmatterSchemas::new`
   requires a context.
 - User-facing docs: `darkmatter/docs/lsp/indexing.md` (startup order, file
-  list, on-demand parsing, full index, log lines) and
+  list, on-demand parsing, the index build and store, log lines) and
   `darkmatter/docs/lsp/configuration.md` (`.dmls.toml`, the `[workspace]`
   `root`/`include`/`exclude` keys). Update them with any behavior change here.
 - Startup lists files and parses only open buffers. `discover_workspace`
@@ -96,34 +96,49 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (`ServerState::relist`: rescan, config or ignore-file change) logs
   `workspace rescan complete` with the same fields, and queues
   `RegistryJob::Workspace` when its repository set changed (as does a
-  watched `.git` change, `ServerState::note_repository_change`); a built full index logs
-  `full index built markdown headings links trigger elapsed_ms` (elapsed from
-  the first waiter, including any file-list wait). Every workspace log line
-  carries `workspace=` (`workspace::workspace_identifier`: the client's
-  folder URIs, comma-joined, one line per server). Log string fields with `%`
-  so they print unquoted.
-- The full index (`full_index.rs`, router): references, rename,
+  watched `.git` change, `ServerState::note_repository_change`); a ready
+  index build logs `index store revalidated markdown unchanged reparsed
+  removed trigger elapsed_ms` (counts summed over its rounds, elapsed from the
+  first waiter, including any file-list wait). Every workspace log line,
+  including the store's (`index store opened`, `… unavailable, using
+  memory`, `… recreated`, `… sweep`; `RootFacts`/`WorkspaceFacts::open` take
+  the identifier), carries `workspace=` (`workspace::workspace_identifier`:
+  the client's folder URIs, comma-joined, one line per server). Log string
+  fields with `%` so they print unquoted. Never log file contents or heading
+  text; `tests/l1/index_store_log_lines.rs` asserts each store line once.
+- The index build (`index_build.rs`, router): references, rename,
   `willRenameFiles`, and `workspace/symbol` (`Trigger::for_method`; never
   `prepareRename`) are parked as `Waiter`s with their own `RequestTimings`
-  while `WorkspaceIndex::is_full()` is false. `FullIndexState`
-  (`NotStarted`/`Building(Build)`/`Ready`/`Failed`) holds at most one
-  `Build`, which runs rounds on a thread
-  (`parse_full_index_round`, no index lock); the dispatch thread reconciles
-  each with `finish_full_build`, which drops parses of paths `touch`ed
-  during the round and starts another round until nothing is unparsed. Any
-  current unreadable file fails the build (`RequestFailed`, file named);
+  while the store is not ready (`Router::needs_index_build`).
+  `IndexBuildState` (`NotStarted`/`Building(Build)`/`Ready`/`Failed`) holds
+  at most one `Build`, whose rounds each run one store pass on a thread
+  (`FactsPlan::Full`, then `Paths(touched)`); the dispatch thread
+  (`finish_index_round`) starts another round while anything changed during
+  the last. A listed file the pass could not read, or found missing, fails
+  the build (`RequestFailed`, file named) unless it changed meanwhile;
   cancelling the last waiter drops the build (its `Drop` sets the cancel
-  flag); shutdown answers waiters `ServerCancelled`. Diagnostics refresh
-  *before* waiters are answered, so a response stays a barrier. Progress
-  token `dmls/full-index`. A new `WorkspaceIndex` mutator that changes a
-  path's disk, buffer, or list state must call `touch`.
+  flag; rows already written stay); shutdown answers waiters
+  `ServerCancelled`. Progress token `dmls/index`. There is **no** production
+  graph over every listed file (the full in-memory build is deleted;
+  `tests/l1/full_index_removal_guard.rs` rejects its names in `src/`): the
+  live snapshot holds open buffers and lazily parsed targets only, and a
+  whole-workspace graph exists only as the test `Oracle`.
+- `dmls --bench-index <dir>` (`bench.rs`): `bench_cold` (list, create and
+  fill a store in a caller-given directory) and `bench_warm` (open,
+  revalidate, then references, heading rename, and workspace symbols as the
+  server answers them, plus the peak resident memory the warm half adds).
+  The binary runs the warm half in a child process (internal
+  `--bench-warm <store dir>`, not in the usage text) so the cold fill's peak
+  does not mask it, over a temporary store directory it removes;
+  `bench_index` runs both in one process (tests:
+  `tests/l1/bench_index.rs`).
 - Trigger registries (`registry_jobs.rs`, router): the dispatch thread only
   looks registries up (`TriggerRegistries::lookup`/`is_fresh`,
   `OverlayState::registry_demand`); it never prepares one. A document whose
   registry is not fresh gets one `RegistryJob::Document` on the registry
   worker (`spawn_registry_worker`); schema-dependent requests
   (`SCHEMA_DEPENDENT`) park as `Waiter`s on it (`Router::proceed` checks the
-  full index, then the registry), `refresh_diagnostics` holds the
+  index build, then the registry), `refresh_diagnostics` holds the
   document's publish until it installs, and refreshes queue
   `RegistryJob::Workspace` (`ServerState::prepare_workspace_registries`).
   Preparation is `begin` (lock) → `Preparation::run` (no lock) → `install`
@@ -134,16 +149,16 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
 - L1 sessions: `LspFixture::initialize` waits for the list
   (`StartupEvent::FileListInstalled`, which follows `RegistryReady`),
   `initialize_unlisted` for neither; `start_with_file_list_gate` holds the walk and
-  `start_with_full_index_gate` holds each build round after its reads
-  (`wait_for_event(FullIndexRoundRead)`, `release_full_index_round`,
-  `open_full_index_gate`); `start_with_registry_gate` holds each registry
+  `start_with_index_round_gate` holds each build round after its store pass
+  (`wait_for_event(IndexRoundRead)`, `release_index_round`,
+  `open_index_round_gate`); `start_with_registry_gate` holds each registry
   job after startup (`wait_for_event(RegistryPreparing)`,
   `release_registry_job`, `open_registry_gate`), and
   `wait_for_registry_prepared`/`next_registry_prepared` return the thread a
   job ran on. `flush_server` is a `workspace/symbol` round trip that also
   waits for every queued registry job (`RegistryJobsOutstanding` events) and
   buffers what they published; `round_trip` does not wait for jobs. Since
-  `workspace/symbol` builds the full index, a parse-counting test must not
+  `workspace/symbol` runs the index build, a parse-counting test must not
   use either as a barrier, and its response lists a `File` symbol per
   document beside each heading. `work_counters::registry_scan_threads`
   names every thread a registry scan ran on.
@@ -160,7 +175,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   definition, anchor completion) is parsed as a dependency
   (`DocumentRecord::dependency`: headings and transclusions only; excluded
   from wiki candidates, path completion, workspace symbols, `transcluded_by`,
-  and `is_full`; its folder joins the schema-location watches; tests in
+  and the index store; its folder joins the schema-location watches; tests in
   `tests/l1/referenced_targets.rs`). Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
@@ -181,8 +196,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   equivalence tests are `tests/l1/wiki_universe_equivalence.rs`
   (`Oracle::scoped`, `UniverseScope`).
 - `index_store` (persistent per-file facts behind references, rename, and
-  workspace symbols, which now answer from it; the full index is still built
-  as their gate until it is removed): `FileFacts` is the
+  workspace symbols, which answer only from it): `FileFacts` is the
   R1 row (`from_index`/`into_index`, unstored fields empty), `keys` derives
   over-approximating candidate keys (joined key for `./`/`../`, joined plus
   file-name key for bare paths, file-name key for wiki and root-prefixed
@@ -195,6 +209,11 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `warn`; after a mid-process switch, `take_switched()` tells the caller to
   revalidate). `StoreLocation::prepare` takes the `DMLS_CACHE_DIR` value and
   `user_cache_dir()` as parameters, so the module reads no environment.
+  User-facing contract (location, lock and sweep, multiple processes, the
+  ladder, sizing, network-filesystem limit): `docs/lsp/indexing.md` "The
+  index store"; `DMLS_CACHE_DIR` and why it is no `.dmls.toml` key:
+  `docs/lsp/configuration.md`; the request graph's external wiki universe:
+  `docs/lsp/architecture.md`. Update those pages with any store change.
   Bump `FACTS_VERSION` for any extraction change; the golden test
   (`tests/l1/index_store_facts.rs`, regenerate with `DMLS_UPDATE_GOLDEN=1`)
   refuses to regenerate without the bump. Tests: `tests/l1/index_store_*.rs`
@@ -203,9 +222,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `RootFacts` per effective root plus the hash of every file read in this
   process. `revalidate` (full pass, deletes missing rows) and `refresh` (a
   few paths) read and hash in parallel and re-parse only rows that differ,
-  reusing any supplied parse whose hash matches the bytes (the build round's
-  parses and open buffers, so the dependency's parse counts are unchanged);
-  `request_documents` overlays buffers and never writes. Ready =
+  reusing any supplied parse whose hash matches the bytes (open buffers, and
+  for a refresh the index's own parses); `request_documents` overlays
+  buffers and never writes. Ready =
   `mark_ready` after a round with no touched paths, same roots, every listed
   path verified; a store switch withdraws it. The router side is
   `router/facts.rs`: `StoreInputs` takes `DMLS_CACHE_DIR` and
@@ -214,8 +233,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   workspace), each build round runs a `FactsPlan` pass on its thread
   (`Full` first, then `Paths(touched)`; `Full` again after a switch), events
   after ready refresh at once (client watching) or wait for the next save
-  (fallback), and `bridge_to_index` tells `WorkspaceIndex` about any read
-  whose hash differs from its disk parse. Every rename first refreshes its
+  (fallback; the save also hands over what `recheck_parsed` found changed),
+  and closing a buffer counts as a change to its path. Every rename first
+  refreshes its
   closed target and closed candidates (`refresh_rename_referrers`, before the
   graph is built: a stale span would make the provider drop the edit); in
   fallback mode a rename waits for its own full pass (`Router::revalidated`).
@@ -297,8 +317,8 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   request or notification (`slow request`/`slow notification` at `warn` from
   500 ms, else `request complete`/`notification complete` at `debug`). Wrap
   new measured work in `timings.time(Stage::…, ..)`, call
-  `record_wait(Wait::…)` when a request blocks on the file list or full
-  index, and call `OverlayState::for_document_timed` from dispatch paths.
+  `record_wait(Wait::…)` when a request blocks on the file list or the
+  index build (`Wait::Index`), and call `OverlayState::for_document_timed` from dispatch paths.
   `RunOptions::with_clock` injects the clock. Never log text, frontmatter
   values, or payloads; `lsp_server`'s own debug trace already prints full
   payloads, so a leak test must scope to `dmls`/`darkmatter` records.

@@ -8,9 +8,11 @@ then dispatches every request and notification against one `ServerState`:
 - the layered configuration (`.dmls.toml` under `workspace/configuration`;
   see [DMLS Configuration](./configuration.md))
 - the workspace index and the graph snapshot that readers load: the
-  workspace file list, the documents parsed so far, and the full index,
-  built only when a feature needs every document (see
-  [DMLS Indexing](./indexing.md))
+  workspace file list and the documents parsed so far (open buffers and the
+  targets they reference)
+- the index store, the per-file facts that references, rename, file
+  rename, and workspace symbols are answered from, filled only when a
+  feature first needs every document (see [DMLS Indexing](./indexing.md))
 - the provider registry, the ordered chain of providers per capability
 - the diagnostics scheduler and the frontmatter overlay caches
 - the watch mode, which decides how on-disk changes are learned
@@ -21,6 +23,34 @@ For each request on an open document, the router assembles a
 overlay, and file-resolution context) and runs the provider chain against
 it. The [DMLS README](../../dmls/README.md#architecture) covers the graph,
 source map, provider registry, and concurrency model in more detail.
+
+## Graphs and the wiki universe
+
+DMLS never holds a graph over every workspace file. It builds a
+`WorkspaceGraph` in two places:
+
+| Graph | Documents | Lifetime |
+| --- | --- | --- |
+| the live snapshot | open buffers, the targets they reference, and their dependencies | replaced on each change |
+| a request graph | the index store's candidate referrers of one request's target, the target, and the open buffers (see [Answering a request from the store](./indexing.md#answering-a-request-from-the-store)) | one references, rename, or file-rename request |
+
+Neither graph holds every file, but a wiki link must still be matched, and
+judged ambiguous, against every file. So
+`WorkspaceGraph::build_with_roots(indices, generation, universe, contexts)`
+takes the **wiki universe** from its caller: a `WikiUniverse`
+([`wiki/universe.rs`](../../dmls/src/wiki/universe.rs)) with one entry per
+listed Markdown file and open buffer, each named by its path relative to
+the wiki roots, built from the file list without reading any file. Wiki resolution, ambiguity
+diagnostics, wiki completion, and the wiki spelling a file rename writes
+all index the universe, never the graph's own documents.
+
+For example, with `alpha/topic.md` and `beta/topic.md` listed, a request
+graph over `notes/b.md` alone still reports `[[topic]]` in `notes/b.md` as
+ambiguous, and a file rename of `alpha/topic.md` still writes the
+shortest spelling unique across both files. A request graph shares the
+live snapshot's universe (`WorkspaceGraph::shared_wiki_universe`), so both
+graphs judge wiki links identically. The universe is a required parameter:
+no caller can silently judge ambiguity against a partial set.
 
 ## File resolution contexts
 
@@ -116,7 +146,7 @@ it, and the `::file`/`::code` chain followed outward from an open document
 heading nor reported missing. This includes a Markdown file outside the
 list that an edge lands on: once parsed it becomes a graph document, a
 **dependency**, whose `#fragment`s are checked like any other, but which is
-never a wiki candidate, a path completion, or part of the full index (see
+never a wiki candidate, a path completion, or part of the index store (see
 [Targets outside the file list](./indexing.md#targets-outside-the-file-list)).
 A file in another format is never parsed. A link to an open, unsaved buffer still resolves, unless a
 place searched before it could not be checked (permission denied, a symlink

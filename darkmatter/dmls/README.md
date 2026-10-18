@@ -94,8 +94,9 @@ covered in the [editor-setup troubleshooting section](docs/editors/README.md#tro
   per-provider `catch_unwind` boundary and deterministic merge policies.
 - **Concurrency** (AD-3): one dispatch thread handles every message and owns
   every index mutation. Startup work (the trigger registries, then the
-  workspace file list) runs on a background thread, and a full-index build
-  parses on a crossbeam worker pool; both report back to the dispatch thread.
+  workspace file list) runs on a background thread, and the index store's
+  revalidation reads on a crossbeam worker pool; both report back to the
+  dispatch thread.
   Readers load immutable generation-stamped snapshots — no async runtime.
 - **Extension model**: baseline schema extensions activate by config + globs
   (the generic mechanism Claudine is the first consumer of).
@@ -105,7 +106,7 @@ covered in the [editor-setup troubleshooting section](docs/editors/README.md#tro
 ```
 dmls [--stdio] [--config <path>] [--log-level <level>] [--log-file <path>]
 dmls --version
-dmls --bench-index <dir> [--json]        # R-6 stage timings, graph counts, peak RSS
+dmls --bench-index <dir> [--bench-target <file>] [--json]  # index store cold fill, warm restart, peak RSS
 dmls --gen-corpus <tier> <dir>           # deterministic synthetic corpus
 ```
 

@@ -140,7 +140,7 @@ Windows), so a `CliProcessFixture` home reaches `md` and `claudine`.
 user prompt root; the `md` runner passes it as `md --magic-root <DIR>`, and the
 library and DMLS runners register it on their snapshot; production DMLS has no
 extra-root setting). Every runner runs every form. DMLS runs every consumer at
-every editor surface (graph through `index_workspace`; code actions assert no
+every editor surface (graph through the test `Oracle`; code actions assert no
 create-file fix except for a broken Markdown link). Compare failures only by `ResolutionFailure`:
 `MarkdownError::resolution_failure()` walks the cause chain (nested children,
 `TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
@@ -157,7 +157,8 @@ file of a corpus and answers references, heading rename, `willRenameFiles`, and
 workspace symbols through the same provider functions the router calls, as
 sorted `OracleLocation`/`OracleEdit`/`OracleSymbol` values. It is the reference
 any narrowed (per-request, small-graph) answer must equal. It owns its own
-sequential parse loop and never calls the server's full-index build. Its corpus
+sequential parse loop and is the only graph over every listed file (production
+has none). Its corpus
 is `dmls/tests/fixtures/index_store_corpus/`, materialized into a tempdir by
 `Corpus::materialize` (which adds the `.git` markers, a fixture home, the
 absolute-link file, and the symlinked directory at runtime). The self-check in

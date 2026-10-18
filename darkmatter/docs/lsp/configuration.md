@@ -13,6 +13,10 @@ these you can:
 - toggle code-action categories, frontmatter outline symbols, and semantic
   tokens
 
+One setting is not in `.dmls.toml`: the index store directory, which comes
+from the `DMLS_CACHE_DIR` environment variable (see
+[`DMLS_CACHE_DIR`](#dmls_cache_dir-the-index-store-directory)).
+
 Every key is optional. An empty file, or no file at all, gives the built-in
 defaults listed below. A minimal file:
 
@@ -228,7 +232,7 @@ no behavior.
 
 `[workspace]` decides which files DMLS lists as the workspace. The file list
 is what wiki links resolve against, what workspace symbols search, and what
-the full index parses; see [DMLS Indexing](./indexing.md).
+the index store holds; see [DMLS Indexing](./indexing.md).
 
 ```toml
 [workspace]
@@ -524,3 +528,38 @@ debounce_ms = 200
 
 `debounce_ms` (default `200`) is **parsed only**. DMLS publishes diagnostics
 as soon as each change is applied; no debounce delays them.
+
+## `DMLS_CACHE_DIR`: the index store directory
+
+DMLS keeps a persistent [index store](./indexing.md#the-index-store) of
+per-file facts so that find references, rename, file rename, and workspace
+symbols do not re-parse every file after a restart. `DMLS_CACHE_DIR` in the
+server's environment chooses where the stores live:
+
+| Value | Effect |
+| --- | --- |
+| unset or empty | `<user cache dir>/darkmatter/dmls/`: `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` (when absolute) or `~/.cache` on Linux, `%LOCALAPPDATA%` on Windows |
+| an absolute path | that directory, created when missing |
+| `off` (any case) | no store and no file written; facts are kept in memory for the life of the process |
+| a relative path, a path naming a file, or a directory that cannot be created | no store; facts are kept in memory, with one `warn` in the log |
+
+Every value answers the same requests with the same results; only the
+cost of the first request after a restart changes. Set it where the editor
+starts DMLS, for example in the shell that launches the editor:
+
+```sh
+DMLS_CACHE_DIR=off code .
+```
+
+**Why it is not a `.dmls.toml` key.** `.dmls.toml` is usually committed with
+the repository, so everyone who clones it shares the file. Where a machine
+keeps its caches belongs to that machine, not to the repository: one
+person's scratch disk is another's missing path. DMLS has no command-line
+flag for it either (an editor's server command line is often committed
+too); the environment is the one place.
+
+Keep the directory on a local disk; network filesystems and WSL's
+Windows-drive mounts (`/mnt/c`) are not supported. The directory is always
+safe to delete. See [DMLS Indexing](./indexing.md#where-the-stores-live)
+for file names, permissions, the 30-day sweep, and what happens when a
+store cannot be used.
