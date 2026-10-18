@@ -39,14 +39,6 @@ packages:
     - dmls
     - claudine
 human_review: false
-message_to_agent: |-
-    Phase 4 (R5/R6 file list and lazy parsing) is complete. Facts Phase 5 depends on:
-    - Startup no longer parses Markdown. `router::spawn_file_listing` walks the workspace on a background thread and sends `Internal::FileList` to the dispatch thread (the router loop is a `crossbeam_channel::select!` over the client and internal channels; `handle_internal` installs results). Add Phase 5's background results (registry ready, full index built) as new `Internal` variants so every index mutation stays on the dispatch thread. The walk currently starts right after the handshake; the plan wants it scheduled after registry preparation, so spawn it after your new startup registry step.
-    - Interim full index: `ServerState::ensure_full_index` is synchronous on the dispatch thread and is called by `workspace_symbol`, `references`, `rename`, and `will_rename_files` (not `prepare_rename`). Replace its body with the R7 state machine. Keep the entry points and the `WorkspaceIndex` interface (`unparsed_paths`, `adopt_full`, `is_full`; `open_buffer`/`close_buffer`; `disk_changed`/`disk_deleted`; `install_listing`). Read failures are skipped today (`startup::read_and_index`); R7 needs them to fail the build. `adopt_full` already skips open buffers and unlisted paths.
-    - Log lines already emitted (Phase 5 owns their tests and the `workspace` field, ruling 5): `workspace files listed markdown yaml duplicates elapsed_ms` (in `Router::install_internal`) and `workspace rescan complete` with the same fields (in `ServerState::relist`, which also runs on config and ignore-file changes). `startup index complete` is gone. Nothing logs `schema registry ready` or `full index built` yet.
-    - Graph model: every listed Markdown file is a `WorkspaceGraph` document. Unparsed ones have `DocumentRecord::parsed == false`, `content_hash` 0, and a root node only, so the graph's document count is the listed count, not the parsed count. Use `WorkspaceIndex::len()` (parsed) or `listed().len()` for R8 counts. `WorkspaceGraph::listing()` is `Pending` until the list lands.
-    - Tests: `LspFixture::initialize` waits for `StartupEvent::FileListInstalled` (through `RunOptions::with_startup_hooks`); `start_with_file_list_gate` with `initialize_unlisted` holds the walk. `flush_server` (`workspace/symbol`) now builds the full index, so do not use it as a barrier in a parse-counting test; `workspace_file_list.rs` uses a `documentSymbol` round trip (`latest`). The R7 build-once tests should count `work_counters` parses.
-    - Progress: the startup token `dmls/startup-index` now covers only the walk, and its `end` is sent after the list is installed. The full-index build reports no progress yet (R7 asks for it).
 source_files_during_phase_2:
     - darkmatter/dmls/src/request_timing.rs
     - darkmatter/dmls/src/router.rs
@@ -106,6 +98,143 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/full_index.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6:
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/graph/edge.rs
+    - darkmatter/dmls/src/graph/node.rs
+    - darkmatter/dmls/src/graph/substrate.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/definition.rs
+    - darkmatter/dmls/src/providers/hover.rs
+    - darkmatter/dmls/src/providers/rename.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/workspace/discover.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/docs/lsp/how-to-use.md
+    - darkmatter/docs/topics/dmls.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/schema-activation.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/dmls/docs/hover.md
+docs_created_during_phase_6:
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/indexing.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/dmls/src/clock.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/src/log_capture.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/graph/substrate.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/fixtures/triggers/feature-review-incident.yaml
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/tests/l1/stdio_subprocess.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/workspace/discover.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/capabilities.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/completion.rs
+    - darkmatter/dmls/src/providers/wiki.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/semantic_tokens.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+    - darkmatter/dmls/src/full_index.rs
+    - darkmatter/dmls/tests/l1/full_index.rs
+    - darkmatter/dmls/tests/l1/startup_log_lines.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/graph/edge.rs
+    - darkmatter/dmls/src/graph/node.rs
+    - darkmatter/dmls/src/providers/definition.rs
+    - darkmatter/dmls/src/providers/hover.rs
+    - darkmatter/dmls/src/providers/rename.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+documentation:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/lsp/how-to-use.md
+    - darkmatter/docs/topics/dmls.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-activation.md
+    - darkmatter/dmls/README.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/indexing.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-17-logging-improvements (6 phases)
@@ -751,3 +880,394 @@ referenced targets. This is not a numeric gate.
 - Pre-existing, unchanged: `dmls --bench-index .` with a relative path logs
   a context-build error (`request directory . is not an absolute path`).
   Pass an absolute path.
+
+## Phase 5
+
+### What changed
+
+- **Startup order (`router::spawn_startup`, R3/R8).** One background
+  thread now runs startup in the planned order:
+  - It prepares each workspace folder's trigger registry
+    (`OverlayState::prepare_workspace_registries`). A folder is prepared as
+    a probe document, `<folder>/.dmls-workspace`, which is never read.
+  - It sends `Internal::RegistryReady { summary, elapsed_ms }`. The dispatch
+    thread logs the registry line, refreshes diagnostics (preparation can
+    publish a failing trigger file's diagnostic), and notifies the observer
+    with `StartupEvent::RegistryReady`.
+  - The file-list walk follows; it waits on `file_list_gate` when a test
+    sets one.
+  - `ServerState::overlay` is now `Arc<OverlayState>`, so the thread
+    shares the cache. The overlay lock is taken per folder.
+- **Full index on demand (`full_index.rs`, router, R7).**
+  - `FullIndexState` is `NotStarted`, `Building(Build)`, `Ready`, or
+    `Failed`. `ServerState::ensure_full_index` is gone. Instead,
+    `Router::handle_request` parks references, rename,
+    `willRenameFiles`, and `workspace/symbol` requests
+    (`Trigger::for_method`) as `Waiter`s while
+    `WorkspaceIndex::is_full()` is false. `prepareRename` is never parked.
+  - A parked request keeps the `RequestTimings` started when it was
+    dequeued, with `Wait::FullIndex` recorded (and `Wait::FileList` while
+    the build waits for the startup list). Its single completion event is
+    emitted when it is answered.
+  - A build runs in rounds. `WorkspaceIndex::begin_full_build` lists the
+    unparsed or stale files. A thread reads and parses them with no index
+    lock (`parse_full_index_round`, which checks the cancel flag between
+    files). `Internal::FullIndexRound` brings the round back, and
+    `WorkspaceIndex::finish_full_build` reconciles it:
+    - every path whose disk, buffer, or list state changed during the round
+      is recorded (`touch`), and the round's parse of it is discarded;
+    - so is any parse of a path no longer listed, now open, or already
+      parsed by a newer lazy read;
+    - another round runs until nothing is unparsed, and only then is the
+      index full.
+  - A read failure on a still-current listed file fails the build. Every
+    waiter gets `RequestFailed` (-32803) with a message naming the file, the
+    state becomes `Failed`, and the next request retries. A failure on a
+    file deleted or renamed during the round is ignored.
+  - Cancelling one waiter answers it `RequestCanceled` at once. Cancelling
+    the last one drops the build: its `Drop` sets the cancel flag, its round
+    is discarded by build id, and nothing is adopted. Shutdown answers any
+    waiters `ServerCancelled` before the `shutdown` response.
+  - When the index becomes ready, the router logs, refreshes diagnostics,
+    and then answers the waiters in arrival order. Diagnostics go first so
+    that a response stays a barrier (see "Load-sensitive failure" below).
+  - Progress uses the token `dmls/full-index`, covers every round, and is
+    sent only when the client supports `workDoneProgress`. `LspProgress` now
+    takes its token, and the create request id is `<token>/create`.
+- **Log lines (R8).**
+  - `schema registry ready` (or `schema registry initialized with failures`
+    when `failed_scopes > 0`) carries `roots tree_schemas scoped_schemas
+    trigger_schemas unclassified failed_triggers failed_scopes elapsed_ms
+    workspace`.
+  - `workspace files listed` and `workspace rescan complete` gained
+    `workspace`.
+  - New: `full index built markdown headings links trigger elapsed_ms
+    workspace`.
+  - `workspace::workspace_identifier` builds the identifier (ruling 5): the
+    client's workspace-folder URIs comma-joined, else the root URI, else the
+    root paths.
+  - String fields use `%`, so they print unquoted (`trigger=references`).
+- **Test seams.**
+  - `StartupHooks::full_index_gate` holds each round after its reads.
+  - New `StartupEvent` variants: `RegistryReady` and `FullIndexRoundRead`
+    (sent from the worker before the gate).
+  - New `LspFixture` helpers: `start_with_full_index_gate`,
+    `release_full_index_round`, `open_full_index_gate`, `wait_for_event`,
+    `wait_for_progress_end`, and `exit_after_shutdown`.
+    `initialize_unlisted` now waits for `RegistryReady`, so the startup
+    registry scan never races a test's work counters.
+
+### Departures and decisions
+
+- **`workspace` is one comma-joined value, not one line per folder.**
+  Startup prepares, lists, and indexes all folders together, so each R8
+  line describes the whole server. The identifier still distinguishes
+  servers and folder sets in a shared log. Per-folder lines would need the
+  counts split by folder; that was not attempted.
+- **The startup registry covers the workspace folders' own contexts.**
+  The prepared contexts are one per workspace folder, from the probe
+  document. Package and package-area roots join when a document there
+  opens (Phase 3's late-context path). So at startup, `roots` counts the
+  folder contexts' searched roots.
+- **`links` counts Markdown links plus wiki links.** Image and
+  transclusion nodes are not counted. Phase 6's `indexing.md` should state
+  this.
+- **A build nobody waits for is cancelled.** Ruling 7 says a canceled
+  waiter must not abort a build that another caller still needs. With no
+  caller left, the build is dropped and later work starts from scratch.
+  Its partial parses are discarded rather than adopted.
+- **An unreadable Markdown file blocks references, rename, and symbols
+  until it is fixed.** A non-UTF-8 `.md` file is one example. This is the
+  spec's rule ("report the build failure … rather than silently issuing
+  partial rename edits or incomplete results"). The error names the file
+  so it can be fixed or excluded. Lazy features are unaffected.
+- **Two existing tests changed expectations; both behavior changes are
+  intended.**
+  - `lsp_session::a_claimed_unparseable_trigger_envelope_is_diagnosed_at_its_yaml_position`:
+    startup now publishes the broken trigger file's closed-file
+    diagnostic before the test opens it. The test now waits for the open
+    buffer's versioned publication.
+  - `repository_contexts::documents_in_one_repository_share_one_context_built_at_its_root`:
+    startup builds the workspace folder's own context, which here has no
+    repository. The baseline is now taken after startup; the assertion
+    that both documents share one repository build is unchanged.
+- **Load-sensitive failure that exposed a real race.**
+  `lsp_session::bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes`
+  failed once in the full `just test` and passed three times alone. The
+  cause was real. The first version refreshed diagnostics *after*
+  answering the waiters, so a publication could arrive after the
+  `flush_server` response that the test uses as a barrier. The refresh now
+  runs first. After that, a full `just test` passed.
+- **Stale comments seen and left for Phase 6** (not part of this phase's
+  symbols): test-module docs in `tests/l1/repository_contexts.rs:19` and
+  `tests/l1/entry_point_parity.rs:58,348,373` still say "startup index".
+
+### Requirement-to-test mapping (R7, R8)
+
+| Requirement | Test |
+| --- | --- |
+| first references builds once (parses exactly the closed listed documents), a repeat parses nothing, answer includes a never-opened referrer | `dmls::l1 full_index::the_first_references_request_builds_the_full_index_once` |
+| first rename builds once and edits a never-opened, never-referenced referrer; `prepareRename` parses nothing | `…::the_first_rename_builds_the_full_index_once_and_edits_a_never_opened_referrer` |
+| first workspace-symbols builds once | `…::the_first_workspace_symbols_request_builds_the_full_index_once` |
+| first file rename builds once and rewrites a never-opened wiki referrer | `…::the_first_file_rename_builds_the_full_index_and_rewrites_a_never_opened_wiki_referrer` |
+| simultaneous callers share one build; progress token `dmls/full-index` created and ended | `…::simultaneous_callers_share_one_build` |
+| cancelling one waiter answers it at once while the round is held; the other is answered | `…::cancelling_one_waiter_leaves_the_shared_build_running` (fails with waiter cancellation removed) |
+| cancelling the last waiter abandons the build; the retry reads everything again | `…::cancelling_the_last_waiter_abandons_the_build_and_a_later_request_retries` (fails with waiter cancellation removed) |
+| unreadable input (non-UTF-8, no chmod) fails the build: `RequestFailed` naming the file, no partial rename edit; fixed file → retry succeeds | `…::an_unreadable_listed_file_fails_the_build_and_a_later_request_retries` |
+| disk edit, deletion, and buffer open during a round never reach the ready index | `…::edits_and_deletes_during_a_build_never_reach_the_ready_index` (fails with the `touched` check removed) |
+| workspace file rename during a build leaves no stale snapshot | `…::a_file_rename_during_a_build_cannot_leave_a_stale_snapshot` |
+| a request before the file list waits for it and for the build | `…::a_request_before_the_file_list_waits_for_it_and_the_build` |
+| shutdown mid-build answers waiters | `…::shutdown_during_a_build_answers_its_waiters` |
+| round reconciliation (changed, opened, newly listed paths → another round) | unit `graph::invalidate::tests::test_a_build_round_discards_what_changed_while_it_read` (fails with the `touched` check removed) |
+| failures count only for current files; a failed build adopts nothing and retries | unit `…::test_a_build_round_fails_only_for_current_unreadable_files` |
+| an abandoned round records nothing more | unit `…::test_an_abandoned_round_records_nothing_more` |
+| full index stays current file by file | unit `…::test_full_index_stays_current_file_by_file` (now through `begin`/`finish`) |
+| round parsing reports unreadable files; cancellation reads nothing more | unit `workspace::startup::tests::test_a_full_index_round_reports_unreadable_files`, `…::test_a_cancelled_round_reads_nothing_more` |
+| trigger mapping; `prepareRename` excluded; dropped build cancels | unit `full_index::tests::*` |
+| R8: registry, files-listed, full-index (`trigger=workspace-symbols`), and rescan lines with fixture counts and `workspace`; no `startup index complete` | `dmls::l1 startup_log_lines::startup_and_full_index_lines_carry_the_fixture_counts` |
+| R8: failure variant `schema registry initialized with failures` with `failed_triggers=1 failed_scopes=1` | `…::a_failed_trigger_switches_the_registry_line_to_its_failure_variant` |
+| `dmls --bench-index` still measures the full index | `bench::tests` (5 pass), and a debug run over `darkmatter/docs`: 135 files read and parsed |
+
+### Spec Tests table → tests (checkpoint 5)
+
+| Spec row | Test(s) |
+| --- | --- |
+| R1 envelope table | Phase 1: `lib l1 trigger_envelope_claim::*` |
+| R1 discovery beside unclaimed file | `lib l1 schema_roots::an_unparseable_unclaimed_schema_root_file_does_not_fail_discovery` |
+| R1 incident fixture | `lib l1 trigger_envelope_claim::the_incident_file_is_not_a_trigger` |
+| R1 CLI e2e | `cli l1 schema_triggers::an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working` |
+| R1 corpus | `lib l1 shipped_schema_corpus::shipped_schema_artifacts_parse_passively` |
+| R2 variant, line/column, YAML help | `lib l1 trigger_envelope_claim::the_yaml_error_names_yaml_not_the_match_grammar` |
+| R2 DMLS position | `dmls l1 lsp_session::a_claimed_unparseable_trigger_envelope_is_diagnosed_at_its_yaml_position` |
+| R1 DMLS unclaimed no diagnostic | `dmls l1 lsp_session::an_unclaimed_unparseable_schema_root_file_gets_no_trigger_diagnostic` |
+| R3 equality | `dmls overlay::registry::tests::per_document_registries_equal_direct_discovery` |
+| R3 no-I/O lookups | `…::repeated_ready_lookups_do_no_io`; `overlay::tests::repeated_overlay_builds_skip_the_registry_but_keep_schema_freshness` |
+| R3 watched events / unchanged hash | `…::watched_changes_to_an_envelope_an_external_payload_and_a_new_root_file_update_the_registry`, `…::an_event_for_an_unchanged_file_does_not_rescan` |
+| R3 last-good / cold failure | `…::last_good_is_retained_only_where_the_malformed_file_is_unshadowed`, `…::deleting_a_trigger_removes_it_and_creating_a_missing_payload_recovers` |
+| R4 transitions | `…::repeated_identical_failures_warn_once_and_recovery_logs_info`, `…::a_cold_failure_logs_unavailable_once` |
+| R5 fixture list and counts | `dmls workspace::discover::tests::test_lists_markdown_and_yaml_skipping_ignored_git_and_symlinks` |
+| R5 non-repo and linked-worktree `.gitignore` | `…::test_gitignore_applies_outside_a_repository`, `…::test_gitignore_applies_in_a_linked_worktree` |
+| R5 startup parses only open documents | `dmls::l1 workspace_file_list::startup_parses_only_the_open_documents` |
+| R5 broken link waits for list | `…::path_diagnostics_wait_for_the_file_list` |
+| R6 missing anchor parses exactly the target | `…::a_missing_anchor_check_parses_exactly_its_target_and_reuses_it` |
+| R7 first requests build once; never-opened referrer | `dmls::l1 full_index::the_first_*` (four tests) |
+| R8 lines and fields | `dmls::l1 startup_log_lines::*` |
+| R9 boundaries, error, cancellation, notifications, URI-less | Phase 2: `request_timing::tests::*`, `router::logging_tests::*` |
+| R1 quoted/JSON, CRLF/BOM, nonclaims, embedded | `trigger_envelope_claim::*`, `schema_embedded_trigger_bundles::an_unparseable_embedded_document_fails_only_when_it_claims_the_envelope` |
+| R3 root I/O fail-closed, unclassified shadowing, scoped contexts | `registry::tests::a_root_io_error_fails_closed_and_recovers`, `…::per_document_registries_equal_direct_discovery`, `…::scoped_contexts_keep_distinct_payload_and_pattern_resolution` |
+| R3/R5 external roots, non-YAML examples, missing payload, rejected watch | `…::external_home_and_environment_roots_recover`, `…::a_non_yaml_example_change_reloads_its_trigger`, `workspace_file_list::a_rejected_watcher_registration_falls_back_to_rescanning_on_save` |
+| R3 open YAML save vs unsaved; recovery refreshes | `lsp_session::saving_an_open_trigger_buffer_updates_consumers_and_unsaved_edits_do_not` and the Phase 3 recovery tests |
+| R5/R6 fallback save, config/ignore, unchanged bytes, buffers | `workspace_file_list::the_save_fallback_lists_without_parsing_and_rechecks_only_parsed_targets`, `…::an_ignore_file_change_rebuilds_the_list_without_parsing`, `…::an_open_buffer_overrides_disk_and_closing_it_restores_the_disk_view` |
+| R7 shared build, cancellation, unreadable, edits/deletes, file rename | `full_index::simultaneous_callers_share_one_build`, `…::cancelling_*`, `…::an_unreadable_listed_file_*`, `…::edits_and_deletes_during_a_build_*`, `…::a_file_rename_during_a_build_*` |
+
+The input robustness matrix does not apply. This phase reads no new file
+format or configuration.
+
+### Gates and downstream tests
+
+- Targeted runs: `cargo nextest run -p dmls -E 'test(/full_index|startup_log_lines|workspace::startup|graph::invalidate|repository_contexts|bench/)'`.
+- Mutation checks:
+  - The edit-during-build tests (L1 and unit) failed with the `touched`
+    check removed.
+  - Both cancellation tests failed with waiter cancellation removed.
+  - Each passed once the code was restored.
+- `just lint` (darkmatter): clean after one clippy fix
+  (`slice::from_ref` in a unit test).
+- `just test` (darkmatter): 10235 passed, 10 skipped, 0 failed. This is the
+  run after the diagnostics-ordering fix; the earlier run had the one
+  failure described above.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Downstream: no workspace package depends on `dmls`, and the darkmatter
+  library was not changed in this phase.
+- The scope calculator, run with all of this phase's edits saved, gave
+  `packages: [dmls, test-toolkit, darkmatter]` and `change_class: package`,
+  so the gates ran. It also scheduled a `test-toolkit` lint cell (a changed
+  suite input), and `just lint` in `tools/` is clean.
+- Cross-OS check: `just cross-check dmls --os windows` passed on the first
+  attempt, with 984 passed and 9 skipped. No observation was published,
+  because the rig tested this uncommitted tree. Risks checked: threads in
+  the background build, a file renamed or deleted during a build, and
+  non-UTF-8 reads.
+
+## Phase 6
+
+### What changed
+
+Four subagents worked in parallel on disjoint files. Each verified its own
+slice: links, and `cargo check -p dmls --tests` plus `just lint` for the
+comment edits. The phase gates ran once afterward.
+
+- **New page `darkmatter/docs/lsp/configuration.md`.** It is the canonical
+  `.dmls.toml` reference:
+  - where the file is found (each workspace folder, first loadable wins;
+    `--config` replaces discovery);
+  - what a broken file does, and hot reload;
+  - precedence (editor settings > file > defaults), with a Mermaid diagram,
+    deep-merge rules, and the leaf-by-leaf `formatting` merge;
+  - a key table with every default, and whether each key is applied;
+  - `[workspace]` in depth: how `root` is joined, `include` (Markdown
+    discovery and document watch globs, independent of the always-on
+    YAML/schema/dependency watches), `exclude` (Markdown and YAML), the
+    ignore rules, and the fact that schema roots are context-defined.
+- **New page `darkmatter/docs/lsp/indexing.md`.** It covers:
+  - the startup order, with a Mermaid flowchart and a table of what each
+    request waits for;
+  - the schema registry (roots, classification, shadowing, no-I/O lookups,
+    invalidation inputs, watches and the save fallback, last-good per
+    scope, fail-closed root I/O);
+  - the file list and ignore rules, incomplete lists, and the diagnostics
+    that wait for the list;
+  - referenced-target parsing;
+  - the full index (state diagram; failure, cancellation, and shutdown
+    answers; the `dmls/full-index` progress token; `--bench-index`);
+  - a log-line reference: R4 registry transitions, R8 startup and index
+    lines with field meanings and counting rules, and R9 request timing
+    with the stage-nesting tree.
+- **`dmls-schema-support.md`.** Its general configuration content moved to
+  `configuration.md`. The heading is kept (other pages link to its anchor),
+  and it now holds only the `[schema]` section and links to the new page.
+  Registry timing and scope are corrected: startup preparation per workspace
+  folder, package roots on first open, unclassified versus claimed-invalid
+  YAML, and log-once. A false "(debounced, default 200 ms)" claim was
+  removed.
+- **Sweep.**
+  - `lsp/architecture.md`: the top bullets now name the on-demand full
+    index and link both new pages. The rescan row and paragraph now say a
+    save re-lists the workspace and re-reads parsed closed documents.
+  - `topics/dmls.md`: rescan behavior; "documents it has indexed" became
+    "workspace documents".
+  - `topics/schemas/definition.md`: new subsection "Which files claim the
+    envelope", with the R1 claim table and limitation note, and the
+    `TriggerEnvelopeYaml` error with its real message and help. The
+    "unrelated YAML files are ignored" sentence is now accurate.
+  - `topics/schemas/schema-activation.md`: new section "When DMLS
+    Discovers Rules". Only a claiming file can fail discovery. The
+    last-good trigger registry is stated as the exception to "no fallback
+    to old definitions".
+  - `lsp/how-to-use.md`: links to the new pages. Its pre-existing link to
+    a feature spec was removed (docs never name a feature).
+  - `dmls/docs/` (`features`, `diagnostics`, `file-references`, `hover`,
+    `autocomplete`): on-demand parsing replaces the "no disk read" and
+    "indexed paths" claims. `diagnostics.md` lists the codes withheld
+    until the file list is ready, and the trigger YAML diagnostic's range.
+  - `dmls/README.md`: Configuration links `docs/lsp/configuration.md`. A
+    log-output line links `docs/lsp/indexing.md`. The Concurrency bullet is
+    corrected: diagnostics run on the dispatch thread, and the worker pool
+    parses full-index builds.
+  - `lsp/features.md`, `docs/research/`, and `lsp-research-for-darkmatter.md`
+    state no current behavior that this fix changed; left as is.
+- **Source comments and skill.** See "Comment/code drift" below.
+  `.claude/skills/darkmatter/dmls.md` gained pointers to both new pages and
+  the missing R8 lines. `FullIndexState` is now described correctly.
+  `schema.md` states the `TriggerEnvelopeYaml` wrapping and points to
+  `indexing.md`.
+
+### Comment/code drift found and resolved
+
+The code was taken as correct every time. All edits are comment-only.
+
+- `workspace/discover.rs` module docs and `DiscoveryReport::duplicates`:
+  - they said duplicates come from symlinks or hard links;
+  - now they say symlinks are skipped before the duplicate check, and
+    duplicates come from overlapping or aliased roots;
+  - hard links are not detected.
+- "startup index" wording, now "workspace file list" or "startup":
+  `tests/l1/repository_contexts.rs:19`, `tests/l1/entry_point_parity.rs:58,348,373`,
+  and `tests/common/mod.rs` (the `dmls/startup-index` progress end).
+- `providers/hover.rs` module docs claimed no target is read on hover. Now
+  they say the router parses an unparsed target first (`prepare_target`).
+- `workspace/startup.rs`:
+  - `collect_indices` named a caller that no longer exists;
+  - "cold-start cost" became "full-index cost".
+- `bench.rs` described `--bench-index` as the server's startup path. It now
+  describes the full-index build.
+- "indexed document" became "graph document" (listed or open, parsed or
+  not) in `graph/arena.rs`, `graph/edge.rs`, `graph/node.rs`,
+  `graph/substrate.rs`, `providers/definition.rs`, and `providers/rename.rs`.
+- Spec-ruling references, which point at a snapshot, were dropped:
+  `router.rs` "(ruling 4)", `workspace/watch.rs` "(ruling: …)", and
+  `overlay/mod.rs` "(R3)".
+- `diagnostics/frontmatter.rs`: a stray doc line for `zero_range` sat on top
+  of `trigger_yaml_span` (from Phase 1). It was moved to `zero_range`.
+- `config/mod.rs` (found while writing `configuration.md`; pre-existing):
+  - `WorkspaceConfig::root`: an absolute value replaces the folders;
+  - `SchemaExtensionConfig::path`: it resolves against the first workspace
+    folder, not `workspace.root`;
+  - `SchemaConfig::strict`: unknown keys are always reported, and strict
+    makes them errors and adds missing-required checks;
+  - `apply_client_settings`: clients do watch `.dmls.toml`, and the reload
+    serves clients without a reliable watcher.
+- `workspace/watch.rs` `scan_manifests` claimed it skips hidden directories
+  "as workspace discovery does", but discovery descends into them. The
+  comment now states the difference.
+
+### Departures and findings
+
+- **Missing `$schema` targets do not wait for the file list.** This departs
+  from the spec's R5 list. `router::listing_gates` holds back only these
+  codes: `dm.links.broken_path`, `dm.links.missing_anchor`,
+  `dm.transclusion.broken_path`, `dm.transclusion.cycle`, and the three
+  `wiki.*` codes. A `$schema` target is resolved by reading disk, not from
+  the list, so an early publish cannot falsely report it missing. That is
+  the spec's intent. The docs describe the code.
+- **`trigger registry unavailable`** carries `scope trigger_file error` but
+  not `has_last_good`. It is used for every root I/O failure, and repeats
+  log at `debug`. The `scope` field is the failing document's folder.
+  `indexing.md` documents this.
+- **Formatting waits for the trigger registry, not for the file list**: it
+  builds the overlay through `with_document`. `indexing.md` says so.
+- **`waited_for_file_list` is true only for full-index waiters.**
+  Diagnostics held for the list are deferred; they do not block a request.
+- **Parsed but unused configuration keys (pre-existing).** `style.strict`,
+  `hints.inlay` (there is no inlay-hint provider), and
+  `diagnostics.debounce_ms` (stored, but no debounce is applied).
+  `configuration.md` says each one has no effect. Not changed here.
+- **Possible pre-existing bug.** A relative `shell.policy_path` resolves
+  against the server process's working directory, not the workspace.
+  `configuration.md` recommends an absolute path. Not changed here.
+- **Pre-existing rustdoc issue.** `graph/arena.rs` has a broken intra-doc
+  link to `EdgeTarget::Node`. `just lint` does not check it. Left as is.
+- **Link check.** `md validate refs` reports 0 issues on `configuration.md`
+  (9 references), `indexing.md` (24), `architecture.md`, `schema-activation.md`,
+  and `dmls/docs/file-references.md`. The other swept pages report the same
+  failures on `HEAD` and in the working tree:
+  - directory links (`docs/editors/`, `zed-dmls/`);
+  - `{{ … }}` prose that `md validate` tries to interpolate.
+  The README went from 7 issues to 6. Every link added in this phase was
+  checked by hand, including the `#which-files-claim-the-envelope` anchor.
+  No page links to or names a fix or feature. No kinded document was
+  created or changed.
+- **Smell grep** (`#[serde(default)]`, `unwrap_or_default()`, `.ok()` in
+  `envelope.rs`): no hits.
+
+### Requirement-to-test mapping
+
+This phase changed documentation and comments only, so it added no tests.
+The spec-row-to-test mapping for the whole fix is in Phase 5, "Spec Tests
+table → tests (checkpoint 5)". Every row there maps to a test that passes in
+this phase's `just test` run. No ruling was changed by the author after
+2026-10-17.
+
+### Gates and downstream tests
+
+- `just lint` (darkmatter): clean.
+- `just test` (darkmatter): 10235 passed, 10 skipped, 0 failed (48 s). No
+  subagent was running at the time.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- `just test-l2`: not run. No terminal-facing behavior changed; this phase
+  touched only comments and docs.
+- Downstream: no workspace package depends on `dmls`. The darkmatter
+  library has not changed since Phase 3. Its consumer subset was re-run
+  anyway as the final gate: `cargo nextest run -p claudine -E
+  'test(/schema|trigger|embedded/)'` gave 334 passed.
+- Scope calculator, run with all edits saved:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs
+  python3 scripts/ci/affected_scope.py`. It gave `packages: [dmls,
+  test-toolkit, darkmatter]` and `change_class: package`, so the gates ran.
+  The working tree still holds Phase 5's uncommitted changes, which is why
+  `test-toolkit` appears. `just lint` in `tools/` is clean.
+- Cross-OS check: not run. This phase changed comments and docs only, so it
+  carries no OS risk. Phase 5's Windows run covers the behavior.
+
+Implementation complete, ready for review. The spec was left as written and
+was not moved to `_completed`.

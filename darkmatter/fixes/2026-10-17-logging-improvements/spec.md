@@ -34,7 +34,8 @@ related:
     - 2026-10-11-dmls-request-timeouts
     - 2026-10-17-dmls-index-store
 human_review: true
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # DMLS Startup Schema Registry and Logging
