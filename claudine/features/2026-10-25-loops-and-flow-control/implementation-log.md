@@ -110,15 +110,6 @@ packages:
     - dmls
 human_review: false
 human_review_items: []
-message_to_agent: |-
-  Phase 4 landed `break`, `prep`, task `when:`, caller-value approval on later passes, and the dry-run preview; the log's Phase 4 section has the design and every deviation. Phase 5 is prompts and docs; what matters for it:
-
-  1. **Docs are already current for Phase 4 behavior** (`flow-control.md` with a break-propagation Mermaid diagram, `flow-control-reference.md`, `looping.md`, `sequences.md` incl. task guards and dry run, `lifecycle.md`, `composition.md`, `schemas.md`, `docs/cli/sequence.md`, both READMEs, the `claudine` skill). Phase 5's "Current behavior docs" task is a review-and-polish pass, plus two stale items left on purpose: the `FAIL_FAST` mentions in `cli/README.md` and `lib/README.md` (pre-existing), and the `=== Document N of M ===` divider `composition.md` describes, which the CLI may not print.
-  2. **Still marked planned in the docs:** `defer`, persisted checkpoint/resume, `kind: group` files as `prep` targets, and inventorying `prep` targets in a sequence's up-front approval. Leave them planned unless a later change builds them.
-  3. **`prep` runs a target by re-entering the command entry points in process** (`cli/src/commands/prep_target.rs`); a target is approved as its own invocation when it runs. If a migrated prompt uses `prep` without `--yolo` in a test, expect the target's own approval, not the caller's.
-  4. **`initialize` `skip` no longer appends an empty `seq.outputs` entry** (a skipped child adds none, spec section 2). `commit.md` already uses `skip`; a rehearsal counting outputs after a skipped commit step sees one fewer entry than before.
-  5. **Dry run now renders `shell:` and `side_effect:` tasks instead of running them** (`--dry-run-shell` runs the shells). `sequence_containers::recursive_dry_run_fires_no_container_events` was updated for that.
-  6. **Not covered by tests, reported as deviations:** acceptance criterion 6's transitive preflight approval of a `prep` target and its deadline pass-through (Claudine has no invocation-wide deadline).
 source_files_during_phase_3:
     - claudine/cli/src/commands/compose/loop_run.rs
     - claudine/cli/src/commands/compose/prep.rs
@@ -266,6 +257,179 @@ skills_files_updated_during_phase_4:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/cli-reference.md
     - .claude/skills/claudine/timeline.md
+source_files_during_phase_5:
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+docs_updated_during_phase_5:
+    - claudine/cli/README.md
+    - claudine/lib/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/cli/tests/l1/sequence_frozen_graph.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/os/windows.md
+source_code:
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/report.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/error_guards/boxed-diagnostic-allow.toml
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/lifecycle_directive_matrix.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/lifecycle_prep.rs
+    - claudine/cli/tests/l1/loop_break.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/loop_config_matrix.rs
+    - claudine/cli/tests/l1/loop_gate_ambient.rs
+    - claudine/cli/tests/l1/loop_primitives.rs
+    - claudine/cli/tests/l1/loop_retry_passes.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/sequence_dry_run.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_frozen_graph.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/task_guards.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/features/2026-10-25-loops-and-flow-control/spike/loop_flow_spike.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/prep.rs
+    - claudine/lib/src/composition/lifecycle/prep/tests.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/signatures.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/dsl.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/pass_order.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/rate_limits.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/frame.rs
+    - claudine/lib/src/composition/looping/frame/tests.rs
+    - claudine/lib/src/composition/looping/mod.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/path_function_contracts.rs
+documentation:
+    - claudine/cli/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/coverage-inventory.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/dependency-audit.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/matrix-contracts.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/path-inventory.md
+    - claudine/features/2026-10-25-loops-and-flow-control/spike/README.md
+    - claudine/lib/README.md
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/remote-url-references.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-25-loops-and-flow-control (6 phases)
@@ -953,3 +1117,241 @@ Run one at a time, with no subagent or other build running:
   recorded for loop tests: no portable prompt recorder).
 
 Phase 4 status: complete, ready for review.
+
+## Phase 5
+
+Phase 5 ran 2026-10-17 (claude/opus), one orchestrator, no subagents: the
+work was a docs review plus one prompt test, too small to split.
+
+### Review prompt migration: skipped
+
+Not implemented, per the author's 2026-10-17 ruling (Phase 2, ruling 7):
+`prompts/review-loop.md` was retired and `just fix` stays the loop.
+Acceptance criterion 11 and the `review-loop.md` rehearsals are deferred with
+it. `commit.md` already used `skip` (Phase 4), so its `initialize` opt-out
+needed no change.
+
+### Current behavior docs
+
+The Phase 4 docs were already current; this pass fixed what was left:
+
+- `cli/README.md` and `lib/README.md` said a sequence had "`FAIL_FAST`
+  propagation". Loop and sequence fail-fast are removed grammar. Both now say
+  a failed step ends the sequence unless a lifecycle stack recovers it.
+- `docs/topics/composition.md` said a sequence dry run prints a
+  `=== Document N of M ===` divider. The CLI draws a horizontal rule, and
+  `wrap_sequence_composition::sequence_dry_run_concatenates_bodies_with_dividers`
+  already asserts the old text is gone. The doc was wrong (code wins); so was
+  that test's doc comment, which is fixed too (comment only).
+- `docs/topics/flow-control/flow-control.md` did not explain why an opt-out
+  `initialize` uses `skip`, not `stop` (plan item). The `skip` section now
+  explains it with a nothing-staged commit example and notes that a skipped
+  document adds no `seq.outputs` entry. The `stop` section links to it.
+- Checked and already current: iteration-order and break-propagation Mermaid
+  diagrams (`looping.md`, `flow-control.md`), cap-only `is_last`, retry pass
+  restoration, partial results, root-only exit codes, disk-only `prep`
+  return, guard snapshots, template approval, dry-run limits. No topic page
+  names a feature or fix. Darkmatter's `darkmatter-expressions.md`,
+  `expression-functions.yaml`, and the `darkmatter` skill already describe
+  `absolute` on a missing target (first candidate, HTTP(S) rejected) and
+  `dirname` keeping an absolute input's anchor. No crate dependency changed,
+  so `docs/dependencies.md` is unchanged.
+- Still planned, left as is: `defer`, persisted checkpoint/resume,
+  `kind: group` files as `prep` targets, and `prep` targets in a sequence's
+  up-front approval.
+- The `claudine` skill needed no change: Phase 4 already updated it, and
+  this phase changed no behavior.
+
+### Workflow rehearsals
+
+- **Empty staged commit (new test):**
+  `shipped_prompt_contract::shipped_commit_prompt_with_nothing_staged_launches_no_agent`
+  (`prompts` binary, `prompt-tests`, L1 tier, F3: real shipped `commit.md`,
+  the real CLI, the compiled fake Codex, a scratch Git repository with an
+  unstaged file only). It asserts exit 0, no provider launch, no audio spool,
+  and a clean lifecycle. To prove the test checks something, `skip` in
+  `prompts/commit.md` was changed to `stop` for one run: the test failed with
+  "no agent may launch". The file was restored and `git status` is clean.
+  A first draft also asserted that the `message:` text was printed. That was
+  wrong: `message` goes to the outbound messaging route, not the terminal.
+  The assertion was dropped.
+- **Route drift (failure from an earlier commit, fixed):** `shipped_prompt_route_drift` failed
+  because `prompts/_implement/implement-plan.md` changed one prose line ("name
+  the boundary … fidelity rung (F1/F2/F3) and tier") in a commit before this
+  phase, and nobody refreshed the fixture. The change is body prose, with no
+  schema or loop meaning, so the line was copied into
+  `cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`
+  and the hash was refreshed with
+  `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 just test-prompts shipped_prompt_route_drift::`.
+- `just test-prompts`: 87 passed (15 slow, all in the existing
+  `pr_flow_rehearsal`/`prompt_guide_defects`).
+- `compose_caller_file_provenance` and `compose_initialize_acceptance` are L1
+  and run in `just test` below.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+|---|---|
+| Empty staged state launches no provider; no host audio spool | `shipped_prompt_contract::shipped_commit_prompt_with_nothing_staged_launches_no_agent` (new) |
+| A staged commit still composes and launches (control) | `shipped_prompt_contract::shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly` |
+| Frozen route fixture agrees with the shipped prompt | `shipped_prompt_route_drift::*` |
+| Shipped prompt contracts, caller-file provenance, initialize acceptance | `shipped_prompt_contract::*`, `compose_caller_file_provenance::*`, `compose_initialize_acceptance::*` |
+| Dry-run divider text described in docs | `wrap_sequence_composition::sequence_dry_run_concatenates_bodies_with_dividers` (existing) |
+
+The input robustness matrix does not apply: no parser, loader, or config
+reader changed.
+
+### Verification (macOS, 2026-10-17)
+
+Run one at a time, with no other build or test on the host:
+
+- `just test-prompts` in `claudine/`: 87 passed, 0 failed.
+- `just test` in `claudine/`: 10,321 passed, 9 skipped, 0 failed (131 slow).
+- `just lint` in `claudine/`: clean.
+- `just check-tier-coverage claudine`: 0 stranded.
+- Dependents: not run. This phase changed only `claudine-cli` test files,
+  test fixtures, and docs. No package compiles them, and `claudine/schemas/`
+  (read by `darkmatter-cli` and `dmls`) is unchanged.
+- Windows cross-check: not run. No production code changed. The new test is
+  `cfg(unix)` like its neighbor commit test, because the fixture's Windows
+  `PATH` has no `git` to stage with.
+
+Phase 5 status: complete, ready for review. Acceptance criterion 11 stays
+deferred by the author's ruling.
+
+## Phase 6
+
+Phase 6 ran 2026-10-17 (claude/opus), one orchestrator, no subagents: the
+phase is verification, and its gates must run one at a time on this host.
+
+### Claudine verification
+
+- `just test` in `claudine/`: 10,321 passed, 9 skipped, 0 failed.
+- `just lint` in `claudine/`: clean.
+- `just test-prompts` (feature `prompt-tests`): 87 passed.
+- `just check-tier-coverage claudine` (repository root): 0 stranded.
+- Affected L2, `just _test_l2 claudine-cli --features terminal-tests
+  level2_lifecycle_control level2_sequence`: 114 passed. These tests run in
+  detached tmux panes, so no window gains focus. The other L2 and L3 tests
+  are not affected by this feature, which changed no terminal rendering.
+- Review items:
+  - `prep` spawns no `claudine` process. `commands/prep_target.rs`,
+    `compose/prep.rs`, and `lifecycle/prep.rs` contain no `Command::new` or
+    `current_exe`, and the runner re-enters the command entry points in
+    process.
+  - `break` and `prep` are in `signatures.rs::LIFECYCLE_CONTROL_VERBS` and in
+    `schemas/lifecycle.yaml`, and the existing parity tests pass.
+  - Every new test is in a declared binary: the layout gate test and the
+    tier audit both pass.
+
+### Darkmatter verification
+
+- `just test` in `darkmatter/`: 10,133 passed, 10 skipped, 0 failed.
+- `just lint` in `darkmatter/`: clean (including the `zed-dmls` wasm check).
+- Darkmatter source did not change after Phase 2. That phase checked the
+  path-function dependents (`darkmatter-cli`, `dmls`, Claudine), and
+  Claudine's suite above covers the callers of `absolute` and `dirname`.
+
+### Portable evidence
+
+Remote runs with `just cross-check`, from this worktree's uncommitted tree.
+Because the tree is uncommitted, no run published a rig observation; these
+logs are targeted evidence, not CI receipts.
+
+| Environment | Package | First run | After fixes |
+|---|---|---|---|
+| macOS (local) | claudine, claudine-cli | all pass | all pass (final gate below) |
+| native Windows | claudine | 5,400 passed, **1 failed** | 5,401 passed |
+| native Windows | claudine-cli | 3,622 passed, **19 failed** | 3,641 passed, 12 skipped |
+| Linux | claudine-cli | — | 4,545 passed, 304 skipped |
+| Linux | claudine | — | 5,459 passed |
+| WSL2 | — | not run | the nightly schedule runs it; no local evidence |
+
+All 20 Windows failures were in tests, and one fix attempt resolved them. Only one
+failing test came from this feature. The others came from features this
+branch depends on (sequence containers, shell templates, the frozen-graph
+fix, core schema presence). Earlier phases never ran Windows, so none of them
+had been seen. The production code was unchanged. The fixes:
+
+- `lib/src/composition/error/tests.rs`
+  `a_break_outside_a_loop_renders_as_its_own_error_not_as_a_crashed_expression`
+  (this feature): it rendered through an ambient `Terminal::default()`. The
+  Windows runner detects no color, and at `ColorDepth::None` inline code keeps
+  its backticks, so "lifecycle break outside a loop" did not match. To
+  confirm the cause on macOS, the test was first pinned to `ColorDepth::None`:
+  it failed the same way. It now pins `Terminal::new_optimistic(80)`.
+- `cli/tests/l1/sequence_frozen_graph.rs` (11 tests): `redact_rewrites`
+  parsed `{{ seq.outputs }}` as JSON. A lifecycle `stdout` action prints
+  `\\` as `\` (also true on macOS: `stdout: 'x\\y'` prints `x\y`, and
+  `{{ ['a\b"q'] }}` prints `["a\b\"q"]`), so a Windows path reached stdout
+  unescaped. Path strings are now redacted in the text before parsing.
+- `cli/tests/l1/ctx_per_run.rs`
+  `container_events_refresh_current_after_nested_child_work`: its `git add`
+  shell task used the default minimal `PATH`, which has no Git for Windows.
+  It now uses the file's existing `host_path()` escape, with the reason
+  written at the call site.
+- `cli/tests/l1/document_environment_routes.rs`
+  `parallel_group_leg_shells_start_from_their_legs_map`: two parallel legs
+  appended to one `events.log` with `cmd`'s `>>`, and Windows failed one leg
+  with a sharing violation. Each leg now writes its own log, and the
+  assertion merges them.
+- `cli/tests/l1/compose_presence_parity.rs` (6 tests): the Windows stub was a
+  `goose.cmd`, and Rust refuses to pass the multi-line prompt to a batch file
+  ("batch file arguments are invalid"). It now copies the compiled
+  `claudine-fake-goose`, whose marker mode is driven by `PROVIDER_MARKER` (the
+  Unix stub reads the same variable now).
+
+The `os` skill (`windows.md`) gained three of these traps: concurrent `cmd`
+appends, a lifecycle `stdout` printing `\\` as `\`, and the ambient terminal
+in rendering tests. The batch-file rule was already there.
+
+### Acceptance criteria accounted for
+
+| AC | State | Evidence |
+|---|---|---|
+| 1–4, 14 | covered | Phase 3 mapping: `loop_primitives`, `loop_retry_passes`, engine `pass_order`, `frame::tests`, `loop_config_matrix` |
+| 5 | covered | Phase 4 mapping: `loop_break::*`, `break_prep::*`, `container_runtime` |
+| 6 | covered except two cells | Phase 4 mapping (`lifecycle_prep::*`, `prep::tests::*`). **Not covered:** transitive preflight approval of a statically known target's shell (not built: targets are approved as their own invocation when they run), and deadline pass-through (Claudine has no invocation-wide deadline; `--timeout` and `--step-timeout` are per provider child and the target inherits them) |
+| 7–9 | covered | `task_guards::*`, `sequence_grammar_matrix`, `sequence_dry_run::*` |
+| 10 | covered | Phase 2 Darkmatter path-anchor fixtures (Darkmatter `just test` above) |
+| 11 | deferred | author ruling 2026-10-17: `review-loop.md` retired, `just fix` stays the loop |
+| 12, 13 | covered | `shipped_prompt_contract::*` (including the Phase 5 empty-staged commit test), `compose_caller_file_provenance`, `compose_initialize_acceptance`, `shipped_prompt_route_drift` |
+
+Robustness: no parser or loader changed in this phase, so the input
+robustness matrix does not apply.
+
+### Remaining review risks
+
+- **No native-Windows test of the new behavior.** Most new `prep`, `break`,
+  and loop tests through a prompt document, and the `--dry-run-shell` tests,
+  are `cfg(unix)` because `launch_recorder` is Unix-only. The Windows runs
+  above prove that what compiles there passes, not that these paths work
+  there.
+- **`stdout` prints `\\` as `\`.** This lifecycle `stdout` behavior is older
+  than this feature and was not changed here. A `{{ … }}` value printed by
+  `stdout` is not reliably JSON when it holds a backslash. If that is
+  unintended, it needs its own fix.
+- The two AC6 cells above, and the deferred AC11.
+
+### Final gates (macOS, after the Windows fixes)
+
+- `just lint` in `claudine/`: clean.
+- `just test` in `claudine/`: 10,321 passed, 9 skipped, 0 failed.
+- Scope calculator on the uncommitted tree (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages` = `claudine`, `claudine-cli`,
+  `test-toolkit`, `darkmatter`; `change_class` = `package`; source packages
+  `claudine`, `claudine-cli`; reverse dependency `claudine-contract`.
+  - `darkmatter` and `test-toolkit` are test-input cells for changed docs and
+    skills. Darkmatter's full suite passed above.
+  - `just test test-toolkit`: 474 passed, **2 failed, both pre-existing and
+    unrelated**. `ci_workflow_contracts::the_ci_documentation_states_the_implemented_behavior`
+    requires `.claude/skills/os/ci-evidence.md` to say
+    `BISCUIT_CI_CONSTRAINTS_DIR`, and the committed file at `HEAD` does not.
+    `ci_workflow_contracts::just_commit_is_deterministic_under_ci` checks the
+    root `justfile`'s `commit` recipe. This phase changed neither file; both
+    match `HEAD`.
+  - `claudine-contract`: not run separately. It has no code that this
+    phase's test-only changes affect.
+
+Phase 6 status: implementation complete, ready for review.

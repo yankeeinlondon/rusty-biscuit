@@ -258,6 +258,179 @@ skills_files_updated_during_phase_4:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/cli-reference.md
     - .claude/skills/claudine/timeline.md
+source_files_during_phase_5:
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+docs_updated_during_phase_5:
+    - claudine/cli/README.md
+    - claudine/lib/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/cli/tests/l1/sequence_frozen_graph.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/os/windows.md
+source_code:
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/report.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/error_guards/boxed-diagnostic-allow.toml
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/lifecycle_directive_matrix.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/lifecycle_prep.rs
+    - claudine/cli/tests/l1/loop_break.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/loop_config_matrix.rs
+    - claudine/cli/tests/l1/loop_gate_ambient.rs
+    - claudine/cli/tests/l1/loop_primitives.rs
+    - claudine/cli/tests/l1/loop_retry_passes.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/sequence_dry_run.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_frozen_graph.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/task_guards.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/features/2026-10-25-loops-and-flow-control/spike/loop_flow_spike.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/prep.rs
+    - claudine/lib/src/composition/lifecycle/prep/tests.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/signatures.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/dsl.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/pass_order.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/rate_limits.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/frame.rs
+    - claudine/lib/src/composition/looping/frame/tests.rs
+    - claudine/lib/src/composition/looping/mod.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/tests/l1/compose_remote_caching.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/path_function_contracts.rs
+documentation:
+    - claudine/cli/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/coverage-inventory.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/dependency-audit.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/matrix-contracts.md
+    - claudine/features/2026-10-25-loops-and-flow-control/phase-1/path-inventory.md
+    - claudine/features/2026-10-25-loops-and-flow-control/spike/README.md
+    - claudine/lib/README.md
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/remote-url-references.md
+completed_phase: 6
+implemented: true
 ---
 
 # Loops and flow control implementation plan
@@ -469,12 +642,12 @@ The coordinator reserves shared request/options/result structs and patches them 
 
 ### Wave 9 — parallel prompt and documentation work
 
-- [ ] **Review prompt migration** *(deferred by the author's 2026-10-17 ruling: `prompts/review-loop.md` was retired and `just fix` stays the loop; skip this task and acceptance criterion 11, see the implementation log's Phase 2 rulings)*
+- [x] **Review prompt migration** *(skipped in Phase 5, not implemented; deferred by the author's 2026-10-17 ruling: `prompts/review-loop.md` was retired and `just fix` stays the loop; skip this task and acceptance criterion 11, see the implementation log's Phase 2 rulings)*
   - Rewrite `prompts/review-loop.md` as the specified looping sequence, using current task `params`. Guard implementation, keep review as a group of one, and capture review counter/path in the group's start layer for the successful state merge.
   - Use presence-aware pre-review counter validation, require a previously absent numbered file, an increment of exactly one, and actual boolean flags. Recurrence wins over ready; error before repair/stage/commit for malformed, missing, stale, or pre-existing files. Never delete a pre-existing review to make rehearsal succeed.
   - Preserve caller-file/space-safe sibling paths and fresh explicit file reads. Keep cap 5 semantics: at most five reviews and repairs; an unverified final repair exhausts. Ensure implementation's own multi-phase loop runs fully as a prompt task.
   - Replace commit initialize `stop` with `skip`. Remove `in_loop` gating from the three specified implementation/review helpers and all shipped callers/frozen routes; retain explicit inputs and standalone repair behavior.
-- [ ] **Current behavior docs**
+- [x] **Current behavior docs**
   - Update Claudine README, `looping.md`, `sequences.md`, lifecycle and flow-control/reference pages, CLI/dry-run guidance, and the Claudine skill. Remove implemented-feature planned markers, the loop defect note, and incorrect prep-output append claims; leave `defer` planned.
   - Explain practical examples for every primitive, post-run order, cap-only `is_last`, retry pass restoration, partial results, nearest-loop/root exit codes, disk-only helper return, guard snapshots, template approval, and dry-run limitations.
   - Add Mermaid diagrams for iteration order and break propagation. Explain why opt-out initialization uses `skip` instead of `stop`. Keep topic docs self-contained and free of feature/spec references.
@@ -482,7 +655,7 @@ The coordinator reserves shared request/options/result structs and patches them 
 
 ### Wave 10 — serial fixture integration
 
-- [ ] **Workflow rehearsals** *(the `review-loop.md` rehearsals are deferred with the migration; the empty-staged-commit check and the four shipped-prompt suites still apply)*
+- [x] **Workflow rehearsals** *(the `review-loop.md` rehearsals are deferred with the migration; the empty-staged-commit check and the four shipped-prompt suites still apply)*
   - Derive frozen behavior fixtures from the migrated prompts and preserve their load-bearing schema/loop/body semantics. Refresh route hashes through the existing Darkmatter/biscuit-hash workflow only after checking fixture deltas; include provenance and initialize fixtures.
   - Use recording stub providers, private CWD/home/spool, and scratch Git repositories. Rehearse an unimplemented two-phase plan through one repair/commit then ready, and an already implemented spec becoming ready without implementation/commit launches.
   - Cover recurrence exit 2, both flags true, ready on the last permitted pass, cap exhaustion exit 1, invalid flags/counters/files, existing next-numbered review, caller spec outside prompt directories, and names containing spaces. For the commit behavior, record/stub commit execution so no test needs a signing prompt.
@@ -494,14 +667,14 @@ The coordinator reserves shared request/options/result structs and patches them 
 
 ### Wave 11 — parallel independent validation
 
-- [ ] **Claudine verification**
+- [x] **Claudine verification**
   - Run `just test` and `just lint` from the exact `claudine/` worktree area; explicitly run prompt-feature contracts, since ordinary L1 does not enable them. Verify all new tests are registered in consolidated binaries and no format/acceptance case is stranded.
   - Run `just test-l2` only for affected real-terminal behavior/routes. Use the shared harness and visibility policy without gaining terminal/browser focus. Keep behavior proofs at L1 wherever a hermetic subprocess or fake body suffices.
   - Review public diagnostics and summaries for raw outputs, loop iteration/reason/code, skipped versus broken status, and source locations. Audit comments changed by behavior, schema/signature parity, and absence of recursive CLI prep.
-- [ ] **Darkmatter verification**
+- [x] **Darkmatter verification**
   - Independently run `just test` and `just lint` in the exact `darkmatter/` area. Check affected direct dependents according to the path-function blast radius, without a workspace-wide test run.
   - Confirm every inventoried path operation retains its documented type, missing/read contract, captured context, and URL/probe-error handling. Validate existing/missing examples against public expressions.
-- [ ] **Portable evidence**
+- [x] **Portable evidence**
   - Load the OS skill and use existing environment-specific evidence/host procedures for macOS, Linux, native Windows, and WSL2. Reuse qualifying evidence; record which required checks actually ran and any unavailable evidence. Do not claim cross-compilation proves native runtime behavior.
   - Keep portable stub providers, native path fixtures, archived runtime fixture roots, noninteractive command builders, deterministic concurrency, and no focus changes. Where another OS exposes a trap, fix it and update the OS skill in the same change.
   - Use existing CI scope only; no new matrix/gate or speculative full run. Do not initiate a push as part of implementation closure.

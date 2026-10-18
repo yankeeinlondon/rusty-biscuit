@@ -37,7 +37,7 @@ related:
     - 2026-10-20-lifecycle-grammar
     - 2026-10-23-shell-template-approval
     - 2026-10-26-task-inputs-and-providers
-implemented: false
+implemented: true
 implemented_by: claude/opus
 ---
 
