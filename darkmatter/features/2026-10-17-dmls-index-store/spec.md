@@ -28,7 +28,8 @@ clarified: true
 clarified_by: claude/default
 needs_rulings: false
 implemented: true
-review_iterations: 0
+review_iterations: 3
+completed: true
 packages:
     - darkmatter
     - dmls
