@@ -52,6 +52,52 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/router/logging_tests.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - darkmatter/dmls/src/workspace/discover.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/capabilities.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/completion.rs
+    - darkmatter/dmls/src/providers/wiki.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/semantic_tokens.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Plan: DMLS Startup Schema Registry and Logging
@@ -74,11 +120,11 @@ The spec makes nine changes across the `darkmatter` library and `dmls`:
 
 **Done means** (the spec's acceptance criteria):
 
-- [ ] Unrelated malformed YAML in a schema root cannot disable triggers
+- [x] Unrelated malformed YAML in a schema root cannot disable triggers
   (`md compose`, `md schema triggers`, DMLS).
-- [ ] Repeated ready trigger-registry lookups do no directory scan, file read,
+- [x] Repeated ready trigger-registry lookups do no directory scan, file read,
   hash, or payload resolution.
-- [ ] Startup parses only open documents; unopened Markdown is parsed on first
+- [x] Startup parses only open documents; unopened Markdown is parsed on first
   need.
 - [ ] References, rename, and workspace symbols return complete answers from a
   full index built on first use.
@@ -271,7 +317,7 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
 
 ### Wave 5 (parallel)
 
-- [ ] **Root enumeration and classification.** In the new registry module,
+- [x] **Root enumeration and classification.** In the new registry module,
   enumerate the immediate regular `.yaml`/`.yml` children of the roots from
   `SchemaRoots::for_document`.
   - Classify each as named schema, trigger schema, or unclassified, per the
@@ -283,20 +329,20 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
   - Schema discovery is independent of Markdown include/exclude.
   - Claimed trigger failures are recorded as trigger failures; I/O failures
     are never `unclassified`.
-- [ ] **Per-document registry composition.** Compose the registry for a
+- [x] **Per-document registry composition.** Compose the registry for a
   document from the cached classification of its five roots with filename
   shadowing.
   - Unclassified files still shadow later triggers.
   - Resolve payloads and `$path` in the document's context.
   - Cache parsed root contents separately from document-bound registries.
   - Result must equal `triggers::scan`, trigger for trigger and in order.
-- [ ] **Dependency records.** Record payload, import, and example files, with
+- [x] **Dependency records.** Record payload, import, and example files, with
   xxHash from `biscuit_hash`, including deleted and missing dependencies,
   failed-load inputs, and searched directories for unresolved names.
 
 ### Wave 6 (after Wave 5)
 
-- [ ] **Lookup path.** Replace the uncached `scan_triggers` call in
+- [x] **Lookup path.** Replace the uncached `scan_triggers` call in
   `OverlayCache::trigger_registry` with a lookup of the ready registry.
   - A ready, unchanged lookup does no scan, read, hash, or payload resolution.
   - Install updates atomically; prepare them outside the provider chain.
@@ -304,7 +350,7 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
     less-local root.
   - Keep per-scope transactional loading and last-good retention. A cold
     failure reports unavailable.
-- [ ] **Invalidation.** Handle `didChangeWatchedFiles` and YAML `didSave`
+- [x] **Invalidation.** Handle `didChangeWatchedFiles` and YAML `didSave`
   (including for open buffers; the scan reads disk), `rescan_workspace`,
   configuration/context generation changes, and package-manifest changes.
   - Re-read the changed path, compare xxHash, and reclassify only on a
@@ -312,45 +358,45 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
   - Creation, deletion, and root-membership changes invalidate lookups
     without a comparable hash.
   - Clear stale diagnostics and refresh affected open documents on recovery.
-- [ ] **Late contexts.** For a newly opened document outside the prepared
+- [x] **Late contexts.** For a newly opened document outside the prepared
   contexts (including an untitled buffer), prepare its applicable roots before
   answering schema-dependent requests. Never substitute the workspace roots.
-- [ ] **Registry log transitions (R4).** Implement the three-row table plus
+- [x] **Registry log transitions (R4).** Implement the three-row table plus
   `trigger registry unavailable`, driven by the same comparison that decides
   diagnostic transitions (one source of truth).
 
 ### Wave 7 (after Wave 6)
 
-- [ ] **Equality tests.** Per-document registry equals `triggers::scan` for
+- [x] **Equality tests.** Per-document registry equals `triggers::scan` for
   documents in a package, a package area, and the tree root, with
   `SCHEMAS_DIR` and a fixture home set.
-- [ ] **No-I/O test.** Repeated ready lookups hit the read-counting seam zero
+- [x] **No-I/O test.** Repeated ready lookups hit the read-counting seam zero
   times; other schema assembly keeps its freshness behavior.
-- [ ] **Invalidation tests.**
+- [x] **Invalidation tests.**
   - Watched events for an envelope, an external payload, and a new root file
     update the registry; an unchanged xxHash does not reclassify.
   - Missing payload creation, deletion, external home/environment roots, and
     non-YAML examples recover.
   - Saving an open YAML buffer invalidates; unsaved edits do not.
-- [ ] **Failure and shadowing tests.**
+- [x] **Failure and shadowing tests.**
   - Last-good is retained only where the malformed file is unshadowed.
   - Root I/O errors fail closed.
   - Scoped contexts keep distinct payload and pattern resolution.
-- [ ] **R4 log tests** with the captured subscriber: repeated identical
+- [x] **R4 log tests** with the captured subscriber: repeated identical
   failures give one `warn`, a different error gives a second, recovery gives
   one `info`, and a repeat of the same failure logs at `debug`.
 
 ### Validation checkpoint 3
 
-- [ ] `just test` and `just lint` pass.
-- [ ] Re-run the incident reproduction: with the registry up, a mid-edit
+- [x] `just test` and `just lint` pass.
+- [x] Re-run the incident reproduction: with the registry up, a mid-edit
   malformed unrelated YAML file produces zero repeated warnings.
 
 ## Phase 4: File List and Lazy Parsing (R5, R6)
 
 ### Wave 8 (parallel)
 
-- [ ] **File-list walk.** In `dmls/src/workspace/discover.rs`, replace the
+- [x] **File-list walk.** In `dmls/src/workspace/discover.rs`, replace the
   parse-everything startup walk with a flat list per effective workspace root.
   - Markdown filtered by `include`/`exclude`; YAML (`*.yaml`, `*.yml`) filtered
     by `exclude` only.
@@ -361,7 +407,7 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
   - Read no file contents.
   - Run on a background thread, scheduled after registry preparation.
   - A listing error is logged as incomplete and marks the list incomplete.
-- [ ] **Lazy target cache.** Add the referenced-target cache keyed by path with
+- [x] **Lazy target cache.** Add the referenced-target cache keyed by path with
   xxHash.
   - Stale marking keeps the prior hash and parse; a re-read reuses the parse
     when the hash is unchanged.
@@ -374,20 +420,20 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
 
 ### Wave 9 (after Wave 8)
 
-- [ ] **Switch consumers to the file list.** Replace "is this indexed?" with
+- [x] **Switch consumers to the file list.** Replace "is this indexed?" with
   "is this in the file list?" for graph edge targets and anchor-completion
   candidates. Path completion in `completion.rs`, `frontmatter.rs`, and
   `wiki.rs` reads the file list.
-- [ ] **Gate path-existence diagnostics.** Publish broken-link, missing
+- [x] **Gate path-existence diagnostics.** Publish broken-link, missing
   `::file`/`::code`/`$schema` target, and wiki-link diagnostics only after the
   file list is ready. Publish syntax and schema findings immediately, then
   refresh when ready. An incomplete list never yields a definitive "missing".
-- [ ] **On-demand parse features.** Wire missing-anchor diagnostics, heading
+- [x] **On-demand parse features.** Wire missing-anchor diagnostics, heading
   completion, link hover preview, and transclusion cycle detection (visited
   set, followed outward from the open document) to the lazy cache. Targets
   outside the workspace still resolve via `FileReference` in the source
   document's context and get dependency invalidation.
-- [ ] **Watches and fallback.** Add `**/*.yaml` and `**/*.yml` to workspace
+- [x] **Watches and fallback.** Add `**/*.yaml` and `**/*.yml` to workspace
   watch globs even when Markdown `include` is empty. Register watches on the
   actual schema directories and dependency locations (ruling 4) when the
   client supports it. If registration is unsupported or rejected, rescan on
@@ -396,14 +442,14 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
 
 ### Wave 10 (after Wave 9)
 
-- [ ] **File-list tests.**
+- [x] **File-list tests.**
   - Fixture with Markdown, YAML, gitignored `node_modules/`, a symlink, and
     `.git/` containing `.md` files gives the expected list and counts.
   - A non-repository root honors `.gitignore`; a linked-worktree fixture
     (`.git` as a file) still does.
   - Startup with a large fixture parses only open documents (parse counter).
   - A broken-link diagnostic is not published before the list is ready.
-- [ ] **Lazy-parse tests.**
+- [x] **Lazy-parse tests.**
   - A missing-anchor check parses exactly the target, a second check reuses
     it, and a changed target is re-read.
   - Fallback save and config/ignore changes keep parsing lazy; unchanged
@@ -412,8 +458,8 @@ The riskiest phase. Builds on rulings 1, 4, 5, and 6 (confirmed).
 
 ### Validation checkpoint 4
 
-- [ ] `just test` and `just lint` pass.
-- [ ] Same-host sample of startup/listing only, labeled separately from the
+- [x] `just test` and `just lint` pass.
+- [x] Same-host sample of startup/listing only, labeled separately from the
   full index (no new numeric gate).
 
 ## Phase 5: Full Index on Demand and Startup Logs (R7, R8)
