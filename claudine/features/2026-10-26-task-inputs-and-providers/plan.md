@@ -4,11 +4,134 @@ created: 2026-10-12
 phase: 1
 agent: claude/sonnet
 yolo: true
-packages: []
+packages:
+    - claudine
+    - claudine-cli
+    - biscuit-tui
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/lifecycle.yaml
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review-loop.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/with_file_provenance.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+docs_updated_during_phase_2:
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_3:
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/src/composition/sequence/preflight/providers/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/selection.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/providers.rs
+    - claudine/cli/src/commands/wrap/sequence/resolve.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/tests.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/common/review_screen.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_task_providers.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/level2/level2_sequence_review_screen.rs
+    - claudine/docs/providers/dispatch-inventory.json
+    - biscuit-tui/lib/src/components/input_table/table.rs
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+docs_updated_during_phase_3:
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/execution-flow.md
+    - biscuit-tui/docs/components/input_table.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Task Inputs and Providers Implementation Plan
@@ -249,21 +372,21 @@ fixtures, and DMLS).
 
 ### Wave 3 — Rename and error family
 
-- [ ] **Task rename** — In the task parser, `layered_overrides`, the task
+- [x] **Task rename** — In the task parser, `layered_overrides`, the task
   runner, and the reserved-key catalog, replace `params` with `with`. Make
   `with`/`when` reserved, remove `params` from both lists in `reserved.rs`,
   and keep `params` readable as `seq.params` step data. Update doc comments in
   the same change.
-- [ ] **Acceptance of `with`** — Accept only on `prompt:` tasks; reject on
+- [x] **Acceptance of `with`** — Accept only on `prompt:` tasks; reject on
   `shell`, `side_effect`, `group`, `task`, nested `sequence` with the existing
   task-option error naming `with`; reject `task:` + sibling `with`.
-- [ ] **Error family** — Apply Rule 2. Raise `NotMapping`, `DynamicKey`,
+- [x] **Error family** — Apply Rule 2. Raise `NotMapping`, `DynamicKey`,
   `WholeMapping`, `EvaluationFailed` for task `with` with task source
   locations, whole-mapping taking priority over non-mapping, `with: {}` equal
   to no `with`; keep typing rules (single span keeps type; text with spans →
   string; YAML types preserved). Share one evaluator between task and lifecycle
   `with` instead of duplicating it.
-- [ ] **Tests** — Acceptance 1 and 3 (task side) plus the matrix `with` column.
+- [x] **Tests** — Acceptance 1 and 3 (task side) plus the matrix `with` column.
 
 Checkpoint: `just test` in `claudine/` green; `params:` on a step is plain data.
 
@@ -297,20 +420,20 @@ Depends on Phase 2 (`with.agent` must reach the task document).
 
 ### Wave 5 — Prediction core
 
-- [ ] **Prediction pass** — Add a read-only preflight inspection (lib side,
+- [x] **Prediction pass** — Add a read-only preflight inspection (lib side,
   `sequence/preflight/`) that, for each provider-launching prompt task, evaluates
   `agent`/`model` in launch order in the shell-approval early-binding context,
   following nested sequences, groups, and external task files with their source
   contexts. Output per task: `Predicted{provider, model?}`, `DecidedAtLaunch`,
   or `MissingProvider`, keyed by task identity + container ancestry.
-- [ ] **Purity guard** — Ensure no lifecycle action, `prep`, shell
+- [x] **Purity guard** — Ensure no lifecycle action, `prep`, shell
   substitution, body composition, or model-catalog network refresh runs; add a
   stub that fails the test if invoked (acceptance 8).
-- [ ] **Early failure** — Typed error naming the task, source, and enclosing
+- [x] **Early failure** — Typed error naming the task, source, and enclosing
   container names for an invalid/uninstalled predicted provider, before any
   launch, including false-`when` tasks (acceptance 6). Static higher-precedence
   override makes a lower dynamic hint irrelevant.
-- [ ] **Resolver reuse** — Route scalar/list hints through the canonical
+- [x] **Resolver reuse** — Route scalar/list hints through the canonical
   provider resolver and the shared model resolver (Rule 11).
 
 Checkpoint: unit tests for each classification state and for a shell-only graph.
@@ -319,23 +442,23 @@ Checkpoint: unit tests for each classification state and for a shell-only graph.
 
 *Wave 6 tasks share `sequence/mod.rs` and `review.rs`; one owner integrates.*
 
-- [ ] **Gate** — Replace the single planned-target gate in the sequence entry
+- [x] **Gate** — Replace the single planned-target gate in the sequence entry
   point with the per-task rule (Rule 9); enclosing-document `agent` lookup nested
   first, outward to root.
-- [ ] **Review screen** — Read-only rows for predicted tasks, editable rows only
+- [x] **Review screen** — Read-only rows for predicted tasks, editable rows only
   for *missing* tasks, selections stored by identity + ancestry as fallbacks;
   decided-at-launch tasks are shown and never overwritten by a picker value.
   L2 test (acceptance 7) with the terminal harness, no window focus.
-- [ ] **Launch** — Ensure the launch-time rebuild uses a review fallback only
+- [x] **Launch** — Ensure the launch-time rebuild uses a review fallback only
   below the task's own hint, drops an incompatible inherited model on a
   provider switch, clears stale `MODEL`, and fails a dynamic unresolved/
   unavailable hint at preparation *before* spawning; detect self-referential
   `env.AGENT`/`env.MODEL` hints.
-- [ ] **Reporting** — Preflight/dry-run rows show prediction or "decided at
+- [x] **Reporting** — Preflight/dry-run rows show prediction or "decided at
   launch"; status lines, completion lines, and reports use actual launch
   identity; per-attempt records for retry/proxy; refresh `env.AGENT`/`env.MODEL`
   at the preparation boundary so composition and the child agree.
-- [ ] **Tests** — Acceptance 4 (looping sequence, stub providers, no document
+- [x] **Tests** — Acceptance 4 (looping sequence, stub providers, no document
   `agent`, each stub sees only its own prompts every pass, status lines name
   the stub), 5 (table over every precedence row incl. caller `agent=gemini`
   over `with.agent`, nested-file sequence `agent`, runtime `set` over caller

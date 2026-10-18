@@ -7,61 +7,148 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - claudine
+    - claudine-cli
+    - biscuit-tui
 human_review: false
+source_files_during_phase_2:
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/lifecycle.yaml
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review-loop.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/with_file_provenance.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+docs_updated_during_phase_2:
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_3:
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/src/composition/sequence/preflight/providers/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/selection.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/providers.rs
+    - claudine/cli/src/commands/wrap/sequence/resolve.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/tests.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/common/review_screen.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_task_providers.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/level2/level2_sequence_review_screen.rs
+    - claudine/docs/providers/dispatch-inventory.json
+    - biscuit-tui/lib/src/components/input_table/table.rs
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+docs_updated_during_phase_3:
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/execution-flow.md
+    - biscuit-tui/docs/components/input_table.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
 message_to_agent: |-
-    Phase 1 was inventory and a spike only; no source, doc, or skill file changed. Read the
-    `## Phase 1` section of this log before starting: it holds file:line maps for every task
-    `params` reader/writer, every `with` evaluator, and every planned-target consumer, plus the
-    migration inventory for Phase 5.
+    Phase 3 is complete; read `## Phase 3` of this log. What Phase 4 and Phase 5 need to know:
 
-    Rulings settled (no author input needed):
-    - Rule 1: every dependency spec is implemented; Phase 4 is unblocked.
-    - Rule 2: the error family is already `LifecycleWith*` (NotMapping, DynamicKey, WholeMapping,
-      EvaluationFailed, Unsupported). Rename nothing. `LifecycleWithUnsupported`'s doc and message
-      still say "only `proxy` and `retry`" and omit `prep`; fix that while in the area.
-    - Rule 14: `claudine/schemas/` is the only schema definition. The embedded bundle is the
-      explicit `include_str!` list in `claudine/lib/src/composition/schema/bundle.rs`
-      (`CLAUDINE_SCHEMA_FILES`, `CLAUDINE_TRIGGER_FILES`). `claudine/docs/schemas/*.yaml` are empty
-      design drafts no reader loads, and `darkmatter/docs/schemas/` has no claudine.yaml: nothing
-      to mirror.
-
-    Facts that differ from the plan's assumptions:
-    - Task `params` already resolve relative file values from the authoring file
-      (`cli/src/commands/wrap/sequence/task_run.rs:772-795` builds origin-anchored
-      `CallerInputRecord`s). The task-side provenance work is mostly the key rename.
-    - `proxy.with`/`retry.with` overlays carry no origin and resolve against the TARGET document
-      (layered as `OverrideOrigin::Data`). `prep.with` resolves from the LAUNCH directory
-      (`cli/src/commands/prep_target.rs` hands it over as `shared.set`). Both must move to
-      authoring-file-relative; the natural carrier is a `CallerInputRecord` built from the
-      authoring document's `FileResolutionContext`, layered below caller setters.
-    - Why a task's own `agent:` is ignored today: `task_run.rs:611-630` `document_target` passes
-      the step's planned target into `composition/target.rs:99-106` `resolve_execution_target`,
-      which reuses it verbatim.
-    - `cli/tests/l1/wrap_sequence_composition.rs::sequence_live_shell_only_no_agent_still_aborts_headless`
-      (around line 538) asserts the abort that AC6 removes; Phase 3 must invert it.
-    - `cli/tests/l1/sequence_errors_cli.rs:133-144` asserts `params` is rejected on a shell task;
-      after the rename it would pass silently unless switched to `with:`.
-    - `claudine/schemas/lifecycle.yaml` already has `cancelled-stack`, `loop`, and two typed
-      container levels (`task`/`group`, `-2`); its `task`/`task-2` still declare `params`.
-    - The 2026-09-27 amendments file is already gone; Phase 5 has nothing to delete.
-
-    Phase 4 spike results (full construction in the log):
-    - Spec section 6's trigger `match:` (a property-level union) is REJECTED by the loader. Use
-      `match: { any: [ {sequence: string(required)}, {sequence: number(required)},
-      {sequence: boolean(required)}, {sequence: object(required)},
-      {sequence: "unknown[](required)"} ] }`.
-    - Root `fail_fast` is NOT reported: the trigger payload leaves the root open. AC9 needs it
-      reported by name, so find a construction (for example, declare `fail_fast` with a type that
-      always fails and a "removed" description, if the engine supports one) and record the choice.
-      Group `execution` and `max_paralel` ARE reported (groups are closed).
-    - Number-to-string coercion applies at level 1 only (`name: 7` passes at L1, fails at L2/L3;
-      `sequence: 42` may coerce through the `string` arm). Assert the real outcome of AC9's
-      `sequence: 42` case and use lists/objects for invalid values that must fail at every level.
-    - The sequence trigger adds about 0.8 s (release) / 3.5 s (debug) per validated document. Keep
-      schema tests in-process; one debug `md` spawn per fixture costs about 8 s, which breaks the
-      5 s L1 budget. Also measure the launch-verdict cost of `claudine sequence --dry-run` on a
-      shipped sequence before and after, and log it.
+    - Provider prediction is lib `composition/sequence/preflight/providers.rs` (`PreflightTask.provider`,
+      `PreflightTask.identity: TaskIdentity`); the CLI side is `wrap/sequence/providers.rs`. A sequence
+      no longer has one planned target; `docs/cli/sequence.md` "Choosing providers" and "The review
+      screen", `sequences.md` "Phase 1 — Static preflight", and `execution-flow.md` Phase 1b/1c were
+      rewritten for it in this phase. Phase 5's docs task only needs a final review of them.
+    - `null` and `[]` for `agent` follow the canonical hint parser (no agent), not the plan's matrix;
+      see "Departures and rulings". If a schema fixture in Phase 4 encodes `agent: null`, it is valid.
+    - The status line now says `rendered (dry-run)` for every dry-run step (it used to claim
+      `succeeded (via <planned>)`).
+    - `SequenceStepDraft` gained `read_only`, and `biscuit-tui`'s `InputTableState::try_new` accepts a
+      `CellValue::StaticText` value in any column (a read-only cell). `biscuit-tui` is now in `packages`.
+    - Run CLI tests with `--features test-fixtures` (or `just test`); without it the fixture-enabled
+      binary is replaced and `document_environment_routes` fails with `captures=0`.
+    - Codex and OpenCode stubs hang under `common::launch_recorder`; use Claude and Goose stubs.
 ---
 
 # Implementation Log for 2026-10-26-task-inputs-and-providers (5 phases)
@@ -474,3 +561,386 @@ left as written):**
   architecture.
 - **Open ASK items:** none. Rules 1, 2, and 14 were resolved from the
   repository state (see "Dependency check and rulings").
+
+## Phase 2
+
+### Wave 3 — Rename and error family (done)
+
+- **Rename.** `params` → `with` in `reserved.rs` (`TASK_OPTION_KEYS`, the
+  `Prompt` arm of `allowed_task_options`; `params` is in neither list, so a
+  step's `params:` is ordinary step data read as `seq.params`). Fields renamed:
+  `PreflightTask.with`, `PromptReference.{with, deferred_with}`,
+  `PromptTaskRequest.{with, with_origin_path}`; `evaluate_params` →
+  `evaluate_with`. Doc comments updated in the same change (task/mod.rs,
+  preflight, prewarm/sequence.rs, reapproval.rs, model.rs, CLI
+  `wrap/sequence/{mod,jit,iterate,task_run}.rs`). `lifecycle.yaml`'s
+  `task`/`task-2` types now declare `with` instead of `params` (Phase 4
+  rewrites these types; the one-line change keeps the shipped schema honest
+  meanwhile).
+- **Acceptance.** `with` is allowed only on `prompt:` tasks; every other
+  executable (including `task:` references) raises the existing
+  `SequenceInvalidTaskField` naming `with`; a `kind: task` file carries its own.
+- **Error family (Rule 2: no rename).** One shared shape check,
+  `lifecycle::with_mapping_shape` (parse.rs), now backs both lifecycle
+  `parse_with` and the task grammar (`grammar.rs::task_with`, run from
+  `validate_task_grammar`, so inline steps, group legs, and `kind: task`
+  files all get it): whole-mapping first, then not-mapping (`null` included),
+  then dynamic key (`{{ }}` or `$(`). `WithOverlay::new` uses the same
+  `is_dynamic_with_key`. A task value that fails at its turn raises
+  `LifecycleWithEvaluationFailed` (via `resolve_with_entry`) with the task's
+  source file and property; `SequenceTaskParamReserved` became
+  `SequenceTaskWithReserved` (its message no longer claimed only
+  `seq`/`group`/`loop`: generated step fields such as `index` are refused too).
+- **Departure from the plan: one *shape* checker, not one *evaluator*.**
+  Lifecycle `with` values are typed as action expressions and resolved by the
+  stack executor; task `with` values are resolved by the task's
+  `SubtreeCompose` against the sequence's live state (same typing rules:
+  whole-span keeps type, text-with-spans is a string, YAML types kept).
+  Merging the two evaluators would mean moving the task onto the lifecycle
+  executor's context, which is a larger refactor than this spec asks for; the
+  observable contract (errors, typing, atomicity) is shared.
+- **Error rendering.** `with_property_path` joins owner and `with` path (an
+  external task file's owner is empty, so the path is just `with`);
+  `overlay_directive` now returns `Some(verb)` only for `proxy`/`retry`/`prep`
+  and `None` for a task; `with_purpose` renders "the `proxy` to `x`" or "the
+  task running `x`". The status block labels a task's error "Task input".
+  `LifecycleWithUnsupported`'s doc, message, JSON projection, and hint now
+  include `prep` (stale since `prep` gained `with`).
+- **Pre-existing drift noticed, not changed:** static grammar errors root a
+  sequence step at `sequence[N]` (the authored key), while preflight's runtime
+  task diagnostics root it at `tasks[N]` (`preflight/mod.rs` root loop; the
+  same path `task guard \`tasks[1].when\`` already uses). A task `with`
+  shape error therefore says `sequence[0].with`, an evaluation failure says
+  `tasks[0].with.x`. Unifying the runtime root on `sequence[N]` touches every
+  root-step diagnostic and is out of this spec's scope.
+
+Tests added or changed (all L1, in-process unless noted):
+
+| Requirement | Test |
+| --- | --- |
+| AC1 `with` reaches the document, JIT, typed | `task::tests::prompt_tasks::with_is_evaluated_just_in_time_against_the_effective_state` (renamed) |
+| AC1/Rule 4 precedence `with` < setters < mutations < overlay | `…::layered_overrides_run_with_then_setters_then_mutations_then_overlay` (renamed) |
+| AC1 `params` is step data, read as `seq.params` | `sequence::tests::params_on_a_step_is_ordinary_step_data` (prompt, shell, body steps), `task::tests::prompt_tasks::a_step_params_value_is_step_data_read_as_seq_params` |
+| AC1 `with` rejected on shell/side_effect/group/task/sequence | `sequence::tests::with_is_rejected_on_every_executable_but_prompt`; CLI wiring `sequence_errors_cli::a_task_field_meaningless_for_the_executable_is_rejected` (switched to `with:`); `preflight::tests::…::meaningless_task_field_is_rejected` (group leg) |
+| Rule 3 `task:` + sibling `with` rejected; task file carries its own | `preflight::tests::loading::with_beside_a_task_reference_is_rejected`, `…::a_task_file_carries_its_own_with` |
+| AC3 shape rows for task `with` (null, number, string, list, whole mapping, `{{ }}` key, `$( )` key, group leg), source-located; `{}` valid | `sequence::tests::task_with_shape_errors_are_the_with_family_at_the_task`; external file: `preflight::tests::loading::a_task_file_with_a_malformed_with_is_located_at_the_file`; CLI wiring `sequence_errors_cli::a_malformed_task_with_is_the_with_family_error_at_the_task` |
+| `with: {}` equals no `with` | `task::tests::prompt_tasks::an_empty_with_equals_no_with` |
+| AC3 evaluation failure → `LifecycleWithEvaluationFailed`, nothing launched | `task::tests::outcome_contract::a_task_value_failure_keeps_the_typed_darkmatter_cause` (`with.x` row asserts the variant and location) |
+| reserved generated bindings protected | `task::tests::prompt_tasks::a_with_key_targeting_a_reserved_key_is_rejected_before_the_provider_runs` (`seq`, `loop`, `index`) |
+
+Input-robustness matrix, `with` column: absent, `null`, whole-field wrong type,
+empty, and the special rows go through the field validator above. Duplicate
+key (`with:` twice, a key twice inside `with`) and trailing content are
+decided by the frontmatter loader before any field is read; checked by hand
+against the built CLI (`frontmatter parse failed` for all three) and owned by
+Darkmatter's loader tests, so no new per-field cell. Element rows do not apply
+(`with` is a mapping).
+
+Converted fixtures/tests (`params:` → `with:`): `cli/tests/l1/{sequence_groups,
+agent_text_is_data,sequence_shell_templates,compose_caller_file_provenance,
+inline_completion_lifecycle,sequence_errors_cli}.rs`,
+`cli/tests/level2/level2_file_resolution_capture.rs`,
+`cli/tests/fixtures/frozen_prompts/prompts/review-loop.md`,
+`lib/tests/l1/claudine_schemas.rs`, and the lib unit tests
+(`sequence/{tests,task/tests,preflight/tests}.rs`,
+`lifecycle/prewarm/sequence/tests.rs`, CLI `task_run/tests.rs`).
+Scoped run: 594 + 1285 lib tests and 471 CLI L1 tests green.
+
+### Wave 4 — Provenance (done)
+
+**What was wrong before.** A `proxy.with` value had no origin. It was merged
+into the target's authored frontmatter and also handed to compose as a data
+layer, so where a relative file value resolved depended on the caller: with
+no caller setters, Darkmatter's fallback treated every override (the overlay
+included) as launch-area caller input; with any setter, the overlay had no
+record and resolved as if the target wrote it. `prep.with` resolved from the
+launch directory (it became the target's `--set`). Task `with` was already
+authoring-file-relative (Phase 1 finding).
+
+**Origin carrier.** New `composition::AnchoredOverlay` (`lib/src/composition/types.rs`):
+the evaluated values plus a per-key `FileResolutionContext`; `layered` lets a
+retry's value replace the proxy's with its origin; `input_records` yields
+Darkmatter `CallerInputRecords` (a `null` removal carries none); `Debug` names
+keys only. It replaces the bare `IndexMap` in `PrepareOptions::proxy_overlay`,
+`CompositionExecutionRequest::proxy_overlay`, `HarnessPromptState::overlay`,
+and every CLI pass-through (`compose/prep.rs`, `staged_boot.rs`,
+`sequence/{iterate,container}.rs`).
+
+- Anchoring sites: the compose coordinator loop, the sequence step proxy loop
+  (`iterate.rs`), and the root sequence proxy (`container.rs`) anchor a
+  committed handoff at the active (source) document's context; the harness's
+  in-place adoption (`coordinator.rs::repoint_prompt_state`) anchors at
+  `ProxyProvenance::source_path` — **not** the prompt state, which for an
+  adopted handoff already points at the target (found by a failing provenance
+  row: the second preparation re-anchored the overlay on the target). A
+  pending `retry.with` is anchored at the retried document itself
+  (`prompt.rs::active_overlay`).
+- Preparation: `PrepareOptions::compose_caller_records` returns the captured
+  caller records unchanged when no overlay value is anchored (no behavior
+  change for the common case); otherwise `schema_caller_records` = the
+  caller's records (or the launch-area fallback for `set_overrides` when there
+  are none) plus each overlay record whose key no higher override layer
+  supplies (caller setters, runtime mutations). Used for compose, the authored
+  schema load, and both `rebase_caller_file_problems` sites.
+- `prep.with`: `CliPrepRunner` sets `SharedComposeArgs::set_records` (records
+  anchored at `call.file_resolution_context.for_source(call.caller)`);
+  `compose::caller_input_records` uses a carried record only while its raw
+  value still equals the effective one, else the launch-area record. A first
+  draft used `Option<FileResolutionContext>`, which the CLI's
+  context-construction guard forbids (the optional-context gate takes no
+  allowance); records avoid it.
+- The interactive missing-value collection (`prepare_collecting_missing`) now
+  keeps existing records and adds launch records only for collected keys
+  (previously it relabeled every value as launch input).
+- Container `retry.with` (a sequence/group retry) writes runtime state through
+  `set_batch`, not a document's frontmatter, so it has no file materialization
+  and was left alone.
+
+Tests added (all L1):
+
+| Requirement (AC2/AC3) | Test |
+| --- | --- |
+| proxy.with from the router, with and without caller setters | `cli/tests/l1/with_file_provenance.rs::a_proxy_with_file_resolves_from_the_router_not_the_target_or_the_launch_directory`; in-process `lib composition::prepare::tests::an_anchored_overlay_file_value_resolves_from_its_authoring_file` |
+| caller setter from launch dir outranks `with` (value and origin) | `…::a_caller_setter_still_resolves_from_the_launch_directory_and_outranks_proxy_with`; lib test above (`pinned` case) |
+| retry.with from the retried document (Unix stub) | `…::a_retry_with_file_resolves_from_the_retried_document` |
+| prep.with from the calling document | `…::a_prep_with_file_resolves_from_the_calling_document` |
+| `kind: task` file in another directory | `…::a_task_file_with_resolves_from_the_task_file_in_another_directory` |
+| proxy from inside a sequence task | `…::a_proxy_from_a_sequence_task_resolves_from_the_router` |
+| eager present / eager missing | `…::an_eager_file_resolves_from_the_authoring_file`, `…::an_eager_missing_file_fails_from_the_authoring_file_and_launches_nothing` |
+| lazy missing binds from origin | `…::a_lazy_missing_file_binds_from_the_authoring_file` |
+| remote lazy stays URL | `…::a_lazy_remote_value_stays_a_url` |
+| ambiguous `[file, string]` stays raw | `…::an_ambiguous_file_or_string_value_stays_raw` |
+| forwarded anchored value keeps identity | `…::a_forwarded_anchored_value_keeps_its_identity` |
+| chained handoff, middle schema `string` vs `file` | `…::a_chained_handoff_follows_each_hops_schema` |
+| no partial overlay, nothing launched (proxy, prep) | `…::an_evaluation_error_installs_no_partial_overlay`, `…::a_prep_evaluation_error_calls_no_target` |
+| layering keeps origin with value; null has none; Debug redacts | `lib composition::prepare::tests::anchored_overlays_layer_value_and_origin_together` |
+| AC3 shape rows for proxy/retry/prep, located | `lib composition::lifecycle::tests::action_shape_control::proxy_retry_and_prep_share_the_with_shape_errors` |
+
+Regression proof: with the overlay records and `set_records` disabled, six
+rows fail (proxy, retry, prep, lazy-missing, forwarded, chained) and the lib
+test reports `ROUTE=launch`; the other rows are controls for unchanged rules.
+
+Changed existing test: `harness_orch/loop_control/tests/overlay_layering.rs::a_file_valued_overlay_property_resolves_through_the_targets_own_context`
+pinned the old launch-area rule. It is now
+`a_file_valued_overlay_property_resolves_from_the_router_that_authored_it`,
+with decoys in the target's directory and the launch area and a bare
+(`spec.md`) reference. The other harness unit tests moved to the new type
+(`overlay.values().get`, `AnchoredOverlay::new`).
+
+**Docs and skill (done in this phase, because the behavior changed now).**
+`docs/topics/flow-control/sequences.md` (new "Task inputs (`with:`)" section,
+the reserved-key list, `params` as step data), `flow-control-reference.md`
+(new "Relative files resolve from the file that wrote them", with the
+intentional-change note), `composition.md` (the one-rule table in "Caller
+File Provenance and Materialization"), `lifecycle.md`, `pre-flight-checks.md`,
+`docs/cli/sequence.md` (`params` → `with` only; its provider section is
+Phase 3/5's). Skill: `SKILL.md`, `architecture.md` (provenance paragraph
+rewritten; it stated a launch-relative `proxy.with` rule), `cli-commands.md`,
+`timeline.md` (new entry). Phase 5's docs task still owns the provider
+prediction text and a final review of these pages.
+
+### Phase 2 close
+
+**Follow-ups noticed, not changed:**
+
+- An eager-missing file error says `did not match a file from \`<launch dir>\``
+  for a `with` value, because Darkmatter's no-match text names the origin
+  context's `base_dir`/`cwd` (the launch directory) even when a `./` reference
+  is resolved from the context's `source_path`. Resolution is correct (the
+  eager-present and lazy rows prove the directory); only the wording names the
+  wrong base. Same for task `with`. `claudine/lib/src/composition/schema/supplied.rs::caller_no_match_reason`
+  uses `origin.cwd()` the same way.
+- A body step (no executable) still drops task options silently, now `with:`
+  as it did `params:` (the spec keeps body-step option rules).
+- Root-step task diagnostics use `tasks[N]`, static grammar uses `sequence[N]`
+  (see Wave 3).
+- The LifecycleEvaluationError status block for a `proxy`/`prep` overlay
+  failure names `initialize[0].proxy` and the reason, not the nested
+  `with.<key>` path (pre-existing rendering of `LifecycleErrorInfo`).
+
+**Robustness smell grep** (`#[serde(default)]`, `Option<T>`,
+`unwrap_or_default()`, `filter_map(.. as_str())`, `.ok()` on the changed
+parses): `option_map(options, "with")` maps a non-object to an empty map, but
+every path that reaches it (inline steps, legs, `kind: task` files) has passed
+`grammar::task_with` first, so a non-mapping is already an error;
+`deferred_with … unwrap_or_default()` in `run_primary` is pre-existing and
+means "no reference recorded → nothing deferred"; the coordinator's
+`derive_source(..).ok()` falls back to `for_source` on the same path. No other
+hit on the changed `with` parses.
+
+**Gates (macOS host, load average 55–75 from other sessions):**
+
+| Gate | Result |
+| --- | --- |
+| scope: `git status … \| xargs python3 scripts/ci/affected_scope.py` | `packages: [claudine, claudine-cli, test-toolkit, darkmatter, darkmatter-cli, dmls]`, `change_class: package` → gates required |
+| `claudine/`: `just lint` | exit 0 |
+| `claudine/`: `just test` | 10347 passed, 9 skipped, 30 slow (254.8 s); exit 0. A first run failed one test, `context_construction_guard::production_source_builds_contexts_only_through_the_builder`, on the `Option<FileResolutionContext>` draft; fixed (see Wave 4) and rerun green |
+| `just check-tier-coverage claudine` | 0 stranded |
+| darkmatter (reads `claudine/schemas`, docs, skills): `cargo nextest run -p darkmatter -p darkmatter-cli -p dmls -E 'test(/claudine_schema_bundle\|schema_validate\|shipped_schema_corpus\|claudine_schema_discovery\|base_schema_end_to_end\|lsp_session\|compose_transclusion\|ambient_ctx_capture/)'` | 302 passed |
+| test-toolkit (selected by changed test files): layout/nextest-config tests | 17 passed. The `tools/test-audit` Vitest suite was **skipped**: this worktree has no `node_modules` and installing needs the network; CI runs it |
+| `claudine-contract` (reverse dependency) | inside `just test` |
+| Windows cross-check (`./scripts/cross-check.sh <pkg> --os windows <filters>`; `just cross-check` mangles a parenthesized `-E` filter) | `claudine` filtered to `composition::{prepare,sequence,lifecycle::tests::action_shape,error}`: 836 passed; `claudine-cli` filtered to the provenance, overlay, sequence-error, prep, guard, and group tests: 123 passed (13 of 14 provenance rows; the retry row is Unix-only) |
+
+The 30 slow tests (13 at baseline) are existing schema-matrix and CLI tests,
+none added here; the host was under load from other sessions. No test failed
+on rerun.
+
+## Phase 3
+
+### Wave 5 — Prediction core (done)
+
+- **Where the prediction lives.** `lib/src/composition/sequence/preflight/providers.rs`.
+  `Loader::load_task` records, for every `prompt:` task, a `ProviderPrediction`
+  (`agent` and `model`, each a `HintState`: `Absent`, `Static`, `DecidedAtLaunch`
+  with a `LaunchDecision`, `Failed` with a typed `LifecycleCause`, or `Circular`)
+  on the new `PreflightTask.provider`. Layers, lowest first: the prompt
+  document's frontmatter, the task's `with` (reusing the evaluated/deferred split
+  `record_prompt_reference` already computes, which now returns it), the caller
+  setters. Runtime `set` is not predicted: the launch rebuild stays
+  authoritative.
+- **Classification.** A value is *decided at launch* when it (or any key it
+  reads, transitively, through `derived_deferred_keys`) reads `seq`, `loop`,
+  `group`, or `current`, a deferred `with` key, a `$( … )`, or a key any graph
+  `set` may write. Written keys are collected over-inclusively (any `set:`
+  mapping in the root and nested sequence frontmatter, every prompt document's
+  frontmatter, inline container events, group maps, side-effect actions) and
+  applied in `Loader::finish` (`ProviderPrediction::defer_runtime_written`),
+  because the whole graph has to be known first. A read of `env.AGENT`,
+  `env.MODEL`, `ctx.agent`, or `ctx.model` (the existing
+  `first_target_identity_root`) is `Circular`. Only a value with `{{` that is
+  none of these is evaluated (`reapproval::compose_approval_value`, the
+  shell-approval early-binding scope).
+- **Identity.** `PreflightTask.identity: TaskIdentity` (`tasks[N]`,
+  `.sequence[N]`, `.group.tasks[N]`), assigned in `Loader::finish`, carried on
+  `PromptTaskRequest.task_identity`; a nested sequence's body task gets
+  `sequence_child(i)`. JIT re-preparation keeps the frozen children, so
+  identities survive. The runtime convention (`tasks[N]`) was followed, as the
+  Phase 2 message advised.
+- **Purity.** Prediction runs no lifecycle action, `prep`, shell, or body
+  composition, and the CLI resolves models with `refresh: false`.
+  `prediction_calls_the_evaluator_only_for_an_evaluable_template` drives
+  `predict` with an evaluator that panics; `a_shell_substitution_is_never_evaluated_at_preflight`
+  asserts a `$(touch …)` marker is never created.
+- **Typed error.** `CompositionError::SequenceTaskProviderSelection { task,
+  task_path, hint_path, property, containers, problem: Box<SequenceTaskProviderProblem> }`
+  with `Unresolvable { state, installed }`, `WrongType { key, found }`,
+  `Evaluation(LifecycleCause)` (a `#[source]`), `Circular(variable)`; rendered in
+  `error/render/selection.rs` (header "task provider selection failed"; body
+  reuses `render_agent_resolution_failed_body`). Boxed because the state would
+  widen every `CompositionError`.
+
+### Wave 6 — Gate, review, launch, reporting (done)
+
+- **Gate** (`wrap/sequence/mod.rs`): the old document-level classification,
+  drafts, and `dry_run_sequence_target` are gone. `providers::collect_sites`
+  walks the graph (prompt tasks at any depth, body steps), `providers::select`
+  resolves each with the canonical non-interactive rule (`--<provider>` decides
+  all), and only an unresolved site gates: no terminal → `AgentResolutionFailed`
+  for the sequence document (or `SequenceTaskProviderSelection` for a task's own
+  ambiguous list), terminal → review. A static unusable task hint fails before
+  any task starts, `when: false` included. A body step's hints are the sequence
+  document's, so an invalid root `agent` keeps its old review/abort behavior.
+  `--dry-run` renders an unusable task hint instead of failing (preview rule).
+- **Fallbacks.** A task with no `agent` takes the nearest enclosing sequence
+  document's (`PreflightSequence.frontmatter` for a referenced file, then
+  outward); its own `model` stays above the document's.
+- **Review screen** (`review.rs` rewritten; `selection_ui.rs`): one draft per
+  site; `SequenceStepDraft.read_only: Option<String>` marks own-provider
+  (`Codex`) and decided-at-launch rows, which render as static cells and return
+  no target. Choices map back by row order to `TaskIdentity` and are stored as
+  `TaskTarget::Fallback`. Rows are labeled with the root step position and the
+  task's name (a group leg shows its leg name, so the L2 fixture's row
+  `5 build` is now `5 member`).
+- **biscuit-tui** (needed for read-only rows): `InputTableState::try_new`
+  accepts a `CellValue::StaticText` row value in a column of any type and pins
+  that one cell read-only. Documented in `biscuit-tui/docs/components/input_table.md`.
+- **Launch** (`task_run.rs`): `WrapperPromptRunner::document_target` prepares
+  each task under its own selection's target (setting `AGENT` and `MODEL`, or
+  removing both); `launch_target` resolves a decided-at-launch task from its
+  composed hints and fails with `SequenceTaskProviderSelection` before spawn.
+  `StepSelection::for_document` now takes the hints its model is re-selected
+  from (the task's own). The launch rebuild is unchanged and still wins.
+- **Reporting.** `LaunchLog` (lib `types.rs`) on `CompositionExecutionRequest`
+  and `StepScope`; `HarnessPromptState.launched_providers` records each
+  attempt whose child spawned (`loop_control.rs`), and `runner.rs` copies it into
+  the log. `StepOutcome::Succeeded.providers` replaces the planned provider;
+  status lines print `via <final>` plus `; attempts: A → B` when they differ. A
+  preview, a skip, and a shell task claim none (dry-run steps now say
+  `rendered (dry-run)` instead of `succeeded (via …)`). `--dry-run` (and
+  `--verbose` live) lists `Providers:` rows (`name → Codex`,
+  `→ Claude (from the sequence)`, `→ decided at launch`).
+
+### Departures and rulings
+
+- **Null and empty hints follow the canonical parser.** The plan's matrix
+  wanted `agent: null` and `agent: []` to be typed errors. Rule 11 ("one
+  resolver") wins: the canonical `parse_selection_hints_from_frontmatter`
+  reads both as no agent, so such a task is *missing a provider* (fallback or
+  gate), exactly as a directly composed document would be. Wrong-type whole
+  fields and elements (`7`, `[codex, 7]`, `[7]`) are typed errors naming the
+  property (`invalid_hint_shapes_fail_as_the_task`).
+- **Stub providers.** Codex and OpenCode stubs hang under
+  `common::launch_recorder` (OpenCode keeps stdin inherited, Codex waits on
+  its structured protocol), so the L1 tests launch Claude and Goose stubs and
+  use Gemini as the uninstalled provider. The behavior under test is
+  provider-agnostic.
+- **Model catalog refresh dropped for sequences.** The old planned-target path
+  refreshed a provider's listing once (cache warming for the drift channel);
+  prediction must not contact providers, so per-task targets resolve with
+  `refresh: false` and still warn once per provider.
+- **Incident, fixed.** One `python3` edit ran with the shell's cwd reset to
+  the main checkout and ticked three Wave 5 boxes in
+  `/Volumes/coding/personal/rusty-biscuit/claudine/features/2026-10-26-task-inputs-and-providers/plan.md`.
+  Those three lines were restored to `[ ]`; that file's other pre-existing
+  edits (its Wave 4 boxes) were not this session's and were left untouched.
+
+### Tests added or changed
+
+| Requirement | Test |
+| --- | --- |
+| Each prediction state, layer, property | lib `preflight::providers::tests::{a_literal_document_agent_is_predicted_from_the_document, a_task_with_agent_outranks_the_document_and_names_its_property, a_caller_setter_outranks_the_task_with, a_document_agent_template_over_static_values_is_evaluated, a_task_without_an_agent_is_missing_a_provider_but_keeps_its_model}` |
+| AC8 decided at launch: late value, runtime write, shell | `…::{a_hint_reading_a_later_output_is_decided_at_launch, a_hint_reading_a_key_the_graph_writes_at_runtime_is_decided_at_launch, a_shell_substitution_is_never_evaluated_at_preflight}` |
+| Circular `env.AGENT`/`env.MODEL`, evaluation failure | `…::{a_hint_reading_its_own_identity_is_circular, an_otherwise_static_hint_that_fails_to_evaluate_is_a_failure}` |
+| AC8 purity (evaluator stub) | `…::prediction_calls_the_evaluator_only_for_an_evaluable_template` |
+| Identity + ancestry | `…::every_task_gets_a_distinct_graph_identity` |
+| Selection classes, fallbacks, nested file `agent`, flag, list hints | CLI `sequence::review::tests::{tasks_that_name_their_providers_need_no_document_agent, a_task_without_a_hint_takes_the_nearest_enclosing_sequence_agent, a_task_missing_a_provider_with_no_enclosing_agent_is_unresolved, a_hint_decided_at_launch_keeps_the_enclosing_agent_only_as_a_fallback, an_explicit_provider_flag_decides_every_task, list_hints_follow_the_canonical_installed_provider_rule, a_body_step_uses_the_sequence_documents_agent}` |
+| AC6 early failure, shape matrix, circular | `…::{an_uninstalled_provider_fails_preflight_even_behind_a_false_when, invalid_hint_shapes_fail_as_the_task, a_hint_reading_its_own_identity_fails_as_circular}` |
+| Review mapping by identity, read-only rows, cancel, count mismatch | `…::{review_edits_only_missing_tasks_and_keys_choices_by_identity, leaving_the_review_starts_nothing_and_a_wrong_row_count_is_an_error}`; `selection_ui::tests::read_only_drafts_render_static_provider_and_model_cells` |
+| biscuit-tui static cell | `input_table::table::tests::a_static_row_value_pins_one_cell_of_an_editable_column_read_only` |
+| AC4 (looping, no doc `agent`, own prompts, status lines) | CLI L1 `sequence_task_providers::tasks_name_their_providers_in_a_looping_sequence_with_no_document_agent` |
+| AC5 caller setter over `with`, nested file `agent`, model drop/stale `MODEL`, runtime `set` | `…::{a_caller_agent_outranks_with_and_a_nested_sequence_agent_applies_to_its_tasks, a_provider_switch_drops_the_inherited_model, a_task_agent_read_from_a_runtime_write_is_decided_at_launch}` |
+| AC6 uninstalled + false `when`, no launch; shell/side-effect-only | `…::{an_uninstalled_task_provider_fails_before_any_task_launches, a_shell_and_side_effect_graph_needs_no_provider}`; `wrap_sequence_composition::sequence_live_shell_only_no_agent_runs_headless` (inverted from `…_still_aborts_headless`) |
+| AC8 `seq.outputs`, skipped claims none, concurrent-leg snapshot, unavailable dynamic hint pre-spawn, retry attempt identities | `…::{a_task_agent_read_from_an_earlier_output_is_decided_at_launch, a_concurrent_leg_hint_reads_the_group_start_snapshot, an_unavailable_dynamic_hint_fails_before_its_task_spawns, a_retry_that_switches_provider_reports_every_attempt}` |
+| Dry-run rows | `…::a_dry_run_lists_each_tasks_predicted_provider` |
+| AC7 (L2) read-only row, editable choice launches | `level2_sequence_review_screen::level2_tmux_review_screen_shows_own_provider_tasks_read_only` (fixture `ReviewFixture::stage_with`) |
+
+Not covered: a `proxy` provider switch's attempt identities inside a sequence
+(the attempt log is shared by every document of the run, and the retry row
+proves the chain rendering), and a "blocked" task (no launch → empty log, the
+same code path as the skipped row).
+
+**Robustness smell grep** (changed parses): `providers.rs` uses
+`.unwrap_or_default()` only for a prompt document missing from the graph
+(impossible after `load_prompt`) and `.ok()` on a nested sequence's hints,
+which makes an unparsable enclosing `agent` "does not resolve" (the gate then
+applies) rather than a silent pick; no `#[serde(default)]`. `null` agent is
+absent by the canonical parser's definition (see Departures).
+
+### Gates (macOS host)
+
+| Gate | Result |
+| --- | --- |
+| scope: `git status … \| xargs python3 scripts/ci/affected_scope.py` | `packages: [biscuit-tui, claudine, claudine-cli, test-toolkit, darkmatter, darkmatter-cli, dmls]`, `change_class: package` (Phase 2 is still uncommitted in this tree) → gates required |
+| `claudine/`: `just lint` | exit 0 (after allowing `result_large_err` on the new selection functions, as the area does elsewhere, and keeping typed causes for the transport guard) |
+| `claudine/`: `just test` | 10366 passed, 9 skipped, 20 slow; exit 0. A first run failed `dispatch_inventory_matches_committed_file`: the new sites were all in test files (`review/tests.rs`, `sequence/tests.rs`; production `review.rs` lost one), so the inventory was regenerated with `CLAUDINE_UPDATE_INVENTORY=1` |
+| `claudine/`: `just test-l2 sequence_review_screen` | 5 passed |
+| `just check-tier-coverage claudine` | 0 stranded |
+| `biscuit-tui/`: `just test` / `just lint` | 1013 passed / exit 0 |
+| darkmatter (reads claudine docs, schemas, skills) | the Phase 2 filter: 302 passed; `schema_roots`, `schema_phase_validation`: 40 passed |
+| test-toolkit layout/nextest tests | 20 passed |
+| Windows cross-check (`./scripts/cross-check.sh`) | `claudine` `preflight::providers`: 12 passed; `claudine-cli` `sequence::review selection_ui sequence::tests`: 42 passed; `biscuit-tui` `input_table`: 96 passed. The L1 CLI tests are Unix-only (shell stubs) |
+
+**Trap noted:** running `cargo nextest -p claudine-cli` without
+`--features test-fixtures` replaces the fixture-enabled `claudine` binary, and
+`document_environment_routes` then fails (`captures=0`). Use `just test` or pass
+the feature.
