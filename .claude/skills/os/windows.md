@@ -115,6 +115,16 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   `MoveFileExW(REPLACE_EXISTING)` fail transiently with `ERROR_ACCESS_DENIED`
   or `ERROR_SHARING_VIOLATION`. Retry those two for a short bounded interval,
   keep the replacement atomic, and never delete the destination first.
+- **A delete refused because the file is open is os error 32 with an
+  uncategorized `ErrorKind`.** Match `raw_os_error() == Some(32)` under
+  `cfg(windows)`; no `io::ErrorKind` matches it. SQLite opens its database,
+  `-wal`, and `-shm` without delete sharing, so this is how deleting an open
+  DMLS index store fails (`dmls/src/index_store/location.rs`). Unix unlinks
+  the same open files and the holder keeps writing to an orphan, so a delete
+  failing is a liveness test on Windows only; the store uses a lock file.
+- **`File::set_modified` needs a write handle.** Through a handle opened
+  read-only it fails with os error 5; open with `.write(true)` first
+  (`index_store::touch_mtime`).
 - **`std::fs::rename` and `tempfile::persist` differ against open readers.**
   Std opens files with `FILE_SHARE_DELETE`, so `std::fs::rename` over a
   destination held by such a handle succeeds, while

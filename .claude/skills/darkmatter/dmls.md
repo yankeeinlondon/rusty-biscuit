@@ -166,6 +166,38 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
   real `RepositoryContexts`; empty graphs use `NoContexts`
   (`ContextFailure::NotProvided`).
+- Wiki candidates come from a caller-supplied `wiki::WikiUniverse` (one slot
+  per file, canonicalized against its wiki roots), not from the graph's
+  documents: `build_with_roots`/`build_listed` take it, `assemble` appends any
+  graph document it lacks (a dependency as an unmatchable slot), and every
+  wiki matcher call indexes `graph.wiki_universe().docs()` by
+  `wiki_slot(doc)` / `slot_document(slot)`, never by `DocumentId`. A graph
+  over a few documents therefore judges ambiguity and rename spellings
+  against the whole universe: an ambiguous link lists only in-graph
+  candidates, and a unique match outside the graph is
+  `WikiResolution::OutsideGraph` (no edge, no diagnostic).
+  `WorkspaceIndex::rebuild` passes its own file list plus non-dependency
+  documents; `WorkspaceGraph::build` (tests) passes its documents. The
+  equivalence tests are `tests/l1/wiki_universe_equivalence.rs`
+  (`Oracle::scoped`, `UniverseScope`).
+- `index_store` (persistent per-file facts behind references, rename, and
+  workspace symbols; **not yet wired into the server**): `FileFacts` is the
+  R1 row (`from_index`/`into_index`, unstored fields empty), `keys` derives
+  over-approximating candidate keys (joined key for `./`/`../`, joined plus
+  file-name key for bare paths, file-name key for wiki and root-prefixed
+  forms; both raw and Markdown-extension-elided final segments), and
+  `IndexStore` is one root's `STRICT` SQLite store in WAL mode. Every row
+  decode failure is `StoreFailure::Corrupt`, never an empty result. Each
+  holder takes a shared `std::fs::File` lock on `<store>.lock`; the sweep and
+  corruption repair need the exclusive lock. `RootFacts` is the infallible
+  R12 ladder (recreate once at open, else `MemoryFacts` with one process-wide
+  `warn`; after a mid-process switch, `take_switched()` tells the caller to
+  revalidate). `StoreLocation::prepare` takes the `DMLS_CACHE_DIR` value and
+  `user_cache_dir()` as parameters, so the module reads no environment.
+  Bump `FACTS_VERSION` for any extraction change; the golden test
+  (`tests/l1/index_store_facts.rs`, regenerate with `DMLS_UPDATE_GOLDEN=1`)
+  refuses to regenerate without the bump. Tests: `tests/l1/index_store_*.rs`
+  and the ladder's unit tests in `src/index_store/source_tests.rs`.
 - Invalidation: every watched path calls `invalidate_contexts`, which drops
   ancestor-keyed entries (plus folder keys inside the repository for a
   `.git/` path), then `relink`s the graph. Package manifests and `.git/config`
