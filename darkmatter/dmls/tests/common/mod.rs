@@ -175,6 +175,10 @@ pub struct LspFixture<'workspace> {
     /// or dropped, for a fixture started with
     /// [`LspFixture::start_with_registry_gate`].
     registry_gate: Option<crossbeam_channel::Sender<()>>,
+    /// Holds each workspace-pass probe until sent to (one probe per message)
+    /// or dropped, for a fixture started with
+    /// [`LspFixture::start_with_registry_probe_gate`].
+    registry_probe_gate: Option<crossbeam_channel::Sender<()>>,
     /// The last [`dmls::StartupEvent::RegistryJobsOutstanding`] count seen.
     registry_jobs: usize,
 }
@@ -268,6 +272,7 @@ impl<'workspace> LspFixture<'workspace> {
             None,
             None,
             Some(gate_rx),
+            None,
         );
         fixture.registry_gate = Some(gate_tx);
         fixture
@@ -283,6 +288,83 @@ impl<'workspace> LspFixture<'workspace> {
     /// Lets every current and later trigger-registry job through.
     pub fn open_registry_gate(&mut self) {
         self.registry_gate = None;
+    }
+
+    /// Like [`LspFixture::start`], but each probe of a workspace pass on the
+    /// registry worker waits for [`LspFixture::release_registry_probe`] (or
+    /// [`LspFixture::open_registry_probe_gate`]) before it is prepared, so a
+    /// test can hold a pass between two probes. Document jobs are not held.
+    pub fn start_with_registry_probe_gate(workspace: &'workspace LspWorkspace) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let mut fixture = Self::spawn_with_all_hooks(
+            workspace,
+            Duration::ZERO,
+            Self::fixture_snapshot(workspace),
+            None,
+            None,
+            None,
+            Some(gate_rx),
+        );
+        fixture.registry_probe_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// Lets one held workspace probe through.
+    pub fn release_registry_probe(&self) {
+        if let Some(gate) = &self.registry_probe_gate {
+            gate.send(()).expect("registry probe gate open");
+        }
+    }
+
+    /// Lets every current and later workspace probe through.
+    pub fn open_registry_probe_gate(&mut self) {
+        self.registry_probe_gate = None;
+    }
+
+    /// The kinds of the trigger-registry preparations that finish, in the
+    /// order the server handled them, until no job is queued or running.
+    ///
+    /// The server reports a job's decremented count before its
+    /// [`dmls::StartupEvent::RegistryPrepared`], so each decrement owes one
+    /// completion still to read.
+    pub fn registry_jobs_until_idle(&mut self) -> Vec<dmls::RegistryJobKind> {
+        let mut jobs = Vec::new();
+        let mut owed = 0usize;
+        let mut waiting = false;
+        loop {
+            let event = if waiting {
+                match self.startup_events.recv_timeout(MESSAGE_BOUND) {
+                    Ok(event) => event,
+                    Err(error) => panic!(
+                        "{} registry jobs still outstanding after {MESSAGE_BOUND:?}: {error}",
+                        self.registry_jobs
+                    ),
+                }
+            } else {
+                match self.startup_events.try_recv() {
+                    Ok(event) => event,
+                    Err(_) if self.registry_jobs == 0 && owed == 0 => return jobs,
+                    Err(_) => {
+                        waiting = true;
+                        continue;
+                    }
+                }
+            };
+            match event {
+                dmls::StartupEvent::RegistryJobsOutstanding(outstanding) => {
+                    owed += self.registry_jobs.saturating_sub(outstanding);
+                    self.registry_jobs = outstanding;
+                }
+                dmls::StartupEvent::RegistryPrepared { job, .. } => {
+                    owed = owed.saturating_sub(1);
+                    jobs.push(job);
+                }
+                _ => {}
+            }
+            if waiting && self.registry_jobs == 0 && owed == 0 {
+                return jobs;
+            }
+        }
     }
 
     /// Waits for a trigger-registry preparation of kind `job` to finish and
@@ -398,7 +480,7 @@ impl<'workspace> LspFixture<'workspace> {
         file_list_gate: Option<crossbeam_channel::Receiver<()>>,
         index_round_gate: Option<crossbeam_channel::Receiver<()>>,
     ) -> Self {
-        Self::spawn_with_all_hooks(workspace, epilogue_delay, snapshot, file_list_gate, index_round_gate, None)
+        Self::spawn_with_all_hooks(workspace, epilogue_delay, snapshot, file_list_gate, index_round_gate, None, None)
     }
 
     fn spawn_with_all_hooks(
@@ -408,12 +490,14 @@ impl<'workspace> LspFixture<'workspace> {
         file_list_gate: Option<crossbeam_channel::Receiver<()>>,
         index_round_gate: Option<crossbeam_channel::Receiver<()>>,
         registry_gate: Option<crossbeam_channel::Receiver<()>>,
+        registry_probe_gate: Option<crossbeam_channel::Receiver<()>>,
     ) -> Self {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let hooks = dmls::StartupHooks {
             file_list_gate,
             index_round_gate,
             registry_gate,
+            registry_probe_gate,
             observer: Some(events_tx),
         };
         let (server_side, client_side) = Connection::memory();
@@ -449,6 +533,7 @@ impl<'workspace> LspFixture<'workspace> {
             file_list_gate: None,
             index_round_gate: None,
             registry_gate: None,
+            registry_probe_gate: None,
             registry_jobs: 0,
         }
     }

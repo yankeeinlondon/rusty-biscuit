@@ -8,7 +8,30 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - darkmatter
+    - dmls
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Plan: DMLS Trigger-Registry Cache Optimization
@@ -31,10 +54,10 @@ fixes plus visibility, spread over two crates:
 
 **Done when** (spec acceptance criteria 1–6 all hold):
 
-- [ ] An unchanged config notification adds no workspace pass and no blanket invalidation
+- [x] An unchanged config notification adds no workspace pass and no blanket invalidation
 - [ ] A cold scan of the three-trigger input set records 3 payload misses; a second forced scan records 0
-- [ ] Multiple workspace schedules merge; schedules during a running pass yield exactly one follow-up (including the worker-completion/dispatch boundary)
-- [ ] Document completion releases waiters before the remaining probes
+- [x] Multiple workspace schedules merge; schedules during a running pass yield exactly one follow-up (including the worker-completion/dispatch boundary)
+- [x] Document completion releases waiters before the remaining probes
 - [ ] No two server preparations run concurrently; relevant changes during preparation leave the scope stale
 - [ ] Resolved registries, diagnostics, and trigger summaries are identical on `darkmatter/tests/fixtures/schema-triggers/`
 - [ ] `just test` and `just lint` pass in `darkmatter/`; docs updated; before/after repro sample recorded in the implementation log
@@ -154,35 +177,35 @@ the counter seam that Phase 5 consumes.
 
 **Wave 2** (single file; sequential within):
 
-- [ ] **New key**
+- [x] **New key**
     - Replace `folder_context` keying with the `K` from ruling 1. Build `K`
       per lookup (cheap derivations) and compare by full equality.
     - Remove the old doc comment's "request context" wording; document the
       new key and why the requester's folder is excluded.
-- [ ] **Equivalence checks**
+- [x] **Equivalence checks**
     - For relative payload files, inline payloads/imports/examples, a
       delegated schema, and a trusted external root: confirm a hit returns
       what a fresh resolution would. Where direct derivation from the original
       differs from derivation from a normalized context, keep the original
       state in the key (ruling 1). Never clear a validation failure or widen
       a trust boundary to get a hit.
-- [ ] **LRU at 32**
+- [x] **LRU at 32**
     - Capacity constant 32; a hit moves the entry to most recent; eviction
       removes the least recently used. Keep the existing fingerprint check
       (dependency bytes and searched folder listings) and "only successes
       kept" rule unchanged.
-- [ ] **Counter seam**
+- [x] **Counter seam**
     - Add the thread-scoped hit/miss collector (ruling 2) and record at the
       exact points: hit after a passing fingerprint, miss on each attempted
       uncached resolution.
 
 **Wave 3** (tests; parallel, `feature-tester-rust`):
 
-- [ ] Two documents in different package folders of one repo, same schema roots: the second resolution is a hit and returns the same schema `Arc`
-- [ ] Incompatibility matrix, one edit per cell from a real fixture, with a control row proving the unedited fixture hits: different repository/request boundary, launch `@` scope, home, environment, explicit tree control, inherited failure. Cover a trusted external root and inline imports/examples as well as relative payload files
-- [ ] 18 genuinely distinct full keys then a forced repeat scan: 0 misses. LRU: a hit protects an entry; the least recently used is evicted at 32
-- [ ] A changed dependency file, and a file added to a schema root, still miss (fingerprint path)
-- [ ] Existing `schema-triggers` fixtures: registries, diagnostics, and trigger summaries unchanged (criterion 6)
+- [x] Two documents in different package folders of one repo, same schema roots: the second resolution is a hit and returns the same schema `Arc`
+- [x] Incompatibility matrix, one edit per cell from a real fixture, with a control row proving the unedited fixture hits: different repository/request boundary, launch `@` scope, home, environment, explicit tree control, inherited failure. Cover a trusted external root and inline imports/examples as well as relative payload files
+- [x] 18 genuinely distinct full keys then a forced repeat scan: 0 misses. LRU: a hit protects an entry; the least recently used is evicted at 32
+- [x] A changed dependency file, and a file added to a schema root, still miss (fingerprint path)
+- [x] Existing `schema-triggers` fixtures: registries, diagnostics, and trigger summaries unchanged (criterion 6)
 
 **Checkpoint 2:** `just test` and `just lint` in `darkmatter/`; code smell
 grep: no new `#[serde(default)]`, `unwrap_or_default()`, or `.ok()` on a
@@ -197,7 +220,7 @@ and the worker. Run Wave 4 in parallel with Phase 2.
 
 **Wave 4** (parallel; separate files until the worker integration):
 
-- [ ] **Unchanged reload (R2)**
+- [x] **Unchanged reload (R2)**
     - In `update_config`, snapshot `before`, apply `update`, compare effective
       config **first**. Unchanged: no `invalidate_all_trigger_registries`,
       no `schedule_workspace`; keep `contexts.clear()`, and the existing
@@ -210,7 +233,7 @@ and the worker. Run Wave 4 in parallel with Phase 2.
       differently rebuilt context re-prepare on demand.
     - Rewrite the `reload_config`/`update_config` doc comments ("even when the
       effective config is unchanged" is now false).
-- [ ] **Queue core (R3)**
+- [x] **Queue core (R3)**
     - In `registry_jobs.rs` implement the two-lane queue and the workspace
       state machine from rulings 4–5: a document job always dequeues before a
       workspace job; `schedule_workspace` is a no-op while queued; a schedule
@@ -222,7 +245,7 @@ and the worker. Run Wave 4 in parallel with Phase 2.
 
 **Wave 5** (sequential, after Wave 4):
 
-- [ ] **Worker integration**
+- [x] **Worker integration**
     - Rewrite `spawn_registry_worker` on the new queue. Move probe-list
       construction into the worker. Between probes (and before the first),
       run any waiting document job, post its completion immediately, then
@@ -232,13 +255,13 @@ and the worker. Run Wave 4 in parallel with Phase 2.
 
 **Wave 6** (tests; parallel):
 
-- [ ] R2: unchanged `didChangeConfiguration` leaves every registry fresh and queues no job; an effective change (for example workspace discovery settings) invalidates; unrelated file/config diagnostics and refresh behavior intact
-- [ ] R2: a context that rebuilds differently after a reload re-prepares on next need without blanket invalidation
-- [ ] R3 (worker gated): Workspace, Workspace, Document queued → document first, exactly one workspace pass
-- [ ] R3: a document job queued during a gated pass runs after the current probe and before the next, and its completion is posted before the pass resumes
-- [ ] R3: a workspace schedule during a running pass yields exactly one follow-up
-- [ ] R3: schedule after worker completion but before dispatch handles it → exactly one new pass
-- [ ] Gates have bounded cleanup (timeouts) so a regression fails instead of hanging
+- [x] R2: unchanged `didChangeConfiguration` leaves every registry fresh and queues no job; an effective change (for example workspace discovery settings) invalidates; unrelated file/config diagnostics and refresh behavior intact
+- [x] R2: a context that rebuilds differently after a reload re-prepares on next need without blanket invalidation
+- [x] R3 (worker gated): Workspace, Workspace, Document queued → document first, exactly one workspace pass
+- [x] R3: a document job queued during a gated pass runs after the current probe and before the next, and its completion is posted before the pass resumes
+- [x] R3: a workspace schedule during a running pass yields exactly one follow-up
+- [x] R3: schedule after worker completion but before dispatch handles it → exactly one new pass
+- [x] Gates have bounded cleanup (timeouts) so a regression fails instead of hanging
 
 **Checkpoint 3:** `just test` in `darkmatter/` green for `dmls`; existing
 change-replay and failure-transition tests pass unchanged (criterion 5).

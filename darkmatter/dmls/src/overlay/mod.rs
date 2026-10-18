@@ -562,13 +562,34 @@ impl OverlayState {
         workspace_roots: &[PathBuf],
         contexts: &crate::context::RepositoryContexts,
     ) {
-        let repositories = self.workspace_repositories();
-        for probe in workspace_probes(workspace_roots, &repositories, contexts) {
-            let resolution = contexts.for_document(&probe);
-            let Ok(context) = resolution.context() else {
-                continue;
-            };
-            self.prepare_registry(&probe, workspace_roots, context);
+        for probe in self.workspace_probes(workspace_roots, contexts) {
+            self.prepare_workspace_probe(&probe, workspace_roots, contexts);
+        }
+    }
+
+    /// The probe documents [`prepare_workspace_registries`](Self::prepare_workspace_registries)
+    /// prepares, from the repositories and catalogs current now. Builds
+    /// contexts, so it does I/O.
+    pub fn workspace_probes(
+        &self,
+        workspace_roots: &[PathBuf],
+        contexts: &crate::context::RepositoryContexts,
+    ) -> Vec<PathBuf> {
+        workspace_probes(workspace_roots, &self.workspace_repositories(), contexts)
+    }
+
+    /// Prepares one of the [`workspace_probes`](Self::workspace_probes) in
+    /// its folder's current context, skipping a folder whose context cannot
+    /// be built.
+    pub fn prepare_workspace_probe(
+        &self,
+        probe: &Path,
+        workspace_roots: &[PathBuf],
+        contexts: &crate::context::RepositoryContexts,
+    ) {
+        let resolution = contexts.for_document(probe);
+        if let Ok(context) = resolution.context() {
+            self.prepare_registry(probe, workspace_roots, context);
         }
     }
 

@@ -173,9 +173,15 @@ job on the **registry worker**, a background thread
   schema change) keeps the diagnostics already published, and publishes new
   ones when the job's result is installed, before any waiting request is
   answered.
-- A refresh that marks the workspace scopes stale queues one job that
-  prepares them again; the trigger-file diagnostics it changes are published
-  when it finishes.
+- A refresh that marks the workspace scopes stale schedules a **workspace
+  pass** that prepares them again; the trigger-file diagnostics it changes
+  are published when it finishes. Schedules merge: any number made while a
+  pass is queued add nothing, and any number made while one runs add a
+  single follow-up pass, which reads the scopes when it starts.
+- Document jobs come first. The worker starts a workspace pass only when no
+  document job is queued, and a running pass, before each scope it prepares,
+  first runs every document job queued meanwhile. A request therefore waits
+  for at most the one scope in progress, never for a whole pass.
 
 ```mermaid
 sequenceDiagram
@@ -275,7 +281,8 @@ for changes on each lookup.
 | a file created or deleted in a searched root, or in a folder holding a payload, import, or example | the affected registries are prepared again (no hash to compare) |
 | `textDocument/didSave` of any `.yaml` or `.yml` file, open in the editor or not | the same as a watched change for that path |
 | a server rescan (see below) | every registry is marked stale; each file is re-hashed on next use and keeps its class if unchanged |
-| a configuration change, or a watched `.dmls.toml` | every registry is marked stale |
+| a configuration change, or a watched `.dmls.toml`, that changes the effective configuration | every registry is marked stale |
+| a configuration notification that leaves the effective configuration as it was | no registry is marked stale and no workspace pass runs; an open document whose file-resolution context rebuilds differently (a package declared with no manifest event) is prepared again when it next needs its registry |
 | a watched package manifest (`Cargo.toml`, `package.json`, `pyproject.toml`, `go.mod`) or `.git/config` | every registry is marked stale, since a root can move |
 
 After each of these, the registry worker works the workspace scopes out

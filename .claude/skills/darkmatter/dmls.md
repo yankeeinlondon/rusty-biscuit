@@ -139,9 +139,22 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   worker (`spawn_registry_worker`); schema-dependent requests
   (`SCHEMA_DEPENDENT`) park as `Waiter`s on it (`Router::proceed` checks the
   index build, then the registry), `refresh_diagnostics` holds the
-  document's publish until it installs, and refreshes queue
-  `RegistryJob::Workspace` (`ServerState::prepare_workspace_registries`).
-  Preparation is `begin` (lock) → `Preparation::run` (no lock) → `install`
+  document's publish until it installs, and refreshes schedule a workspace
+  pass (`ServerState::prepare_workspace_registries`). `RegistryQueue` has a
+  document lane and one workspace slot (`Idle`/`Queued`/`Running`/
+  `RequestedAgain`, changed under one lock by both threads): documents always
+  go first, schedules merge into one queued pass or one follow-up, and a
+  running pass runs waiting document jobs before each probe
+  (`RegistryWorker::run_workspace`). `outstanding` counts each queued document
+  job plus the queued/running pass and its follow-up. A
+  `didChangeConfiguration` with an unchanged effective config invalidates no
+  registry and schedules nothing (`update_config`); `is_fresh` comparing the
+  context re-prepares a document whose context rebuilt differently. Test
+  seams: `StartupHooks::registry_gate` holds each job,
+  `registry_probe_gate` (`LspFixture::start_with_registry_probe_gate`,
+  `StartupEvent::WorkspaceProbePreparing`) holds each probe, and
+  `LspFixture::registry_jobs_until_idle` returns the finished job kinds in
+  order. Preparation is `begin` (lock) → `Preparation::run` (no lock) → `install`
   (lock; an older `seq` is dropped, a change since `begin` leaves it
   stale). `OverlayState::for_document` (no server) prepares inline; the
   router uses `for_document_timed`, lookup only. Cancelling a registry
