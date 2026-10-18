@@ -8,6 +8,9 @@ packages:
     - claudine
     - claudine-cli
     - biscuit-tui
+    - darkmatter
+    - darkmatter-cli
+    - dmls
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -132,6 +135,203 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/timeline.md
+source_files_during_phase_4:
+    - claudine/schemas/sequence.yaml
+    - claudine/schemas/sequence-types.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/fixtures/sequence-schema/both-triggers-malformed-with.md
+    - claudine/lib/tests/fixtures/sequence-schema/deeper-than-typed-levels.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-kinds.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-published-outputs.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-sibling-cancellation.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-teardown-migration.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-tolerant-group.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-loops-looping-prompt-step.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-loops-review-loop.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-loops-task-guard.md
+    - claudine/lib/tests/fixtures/sequence-schema/group-execution.md
+    - claudine/lib/tests/fixtures/sequence-schema/group-misspelled-max-parallel.md
+    - claudine/lib/tests/fixtures/sequence-schema/level1-invalid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level1-valid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level2-invalid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level2-valid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level3-invalid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level3-valid.md
+    - claudine/lib/tests/fixtures/sequence-schema/root-fail-fast.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-absent.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-mapping.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-null.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-number.md
+    - claudine/lib/tests/fixtures/sequence-schema/step-data.md
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+docs_updated_during_phase_4:
+    - claudine/schemas/README.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_5:
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+source_code:
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/schemas/lifecycle.yaml
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review-loop.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/with_file_provenance.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/src/composition/sequence/preflight/providers/tests.rs
+    - claudine/lib/src/composition/error/render/selection.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/commands/wrap/sequence/providers.rs
+    - claudine/cli/src/commands/wrap/sequence/resolve.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/tests.rs
+    - claudine/cli/tests/common/review_screen.rs
+    - claudine/cli/tests/l1/sequence_task_providers.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/level2/level2_sequence_review_screen.rs
+    - claudine/docs/providers/dispatch-inventory.json
+    - biscuit-tui/lib/src/components/input_table/table.rs
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+    - claudine/schemas/sequence.yaml
+    - claudine/schemas/sequence-types.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/sequence_schema.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/fixtures/sequence-schema/both-triggers-malformed-with.md
+    - claudine/lib/tests/fixtures/sequence-schema/deeper-than-typed-levels.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-kinds.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-published-outputs.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-sibling-cancellation.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-teardown-migration.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-containers-tolerant-group.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-loops-looping-prompt-step.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-loops-review-loop.md
+    - claudine/lib/tests/fixtures/sequence-schema/example-loops-task-guard.md
+    - claudine/lib/tests/fixtures/sequence-schema/group-execution.md
+    - claudine/lib/tests/fixtures/sequence-schema/group-misspelled-max-parallel.md
+    - claudine/lib/tests/fixtures/sequence-schema/level1-invalid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level1-valid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level2-invalid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level2-valid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level3-invalid.md
+    - claudine/lib/tests/fixtures/sequence-schema/level3-valid.md
+    - claudine/lib/tests/fixtures/sequence-schema/root-fail-fast.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-absent.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-mapping.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-null.md
+    - claudine/lib/tests/fixtures/sequence-schema/sequence-number.md
+    - claudine/lib/tests/fixtures/sequence-schema/step-data.md
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+documentation:
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+    - claudine/docs/topics/execution-flow.md
+    - biscuit-tui/docs/components/input_table.md
+    - claudine/schemas/README.md
+    - claudine/docs/topics/schemas.md
+completed_phase: 5
+implemented: true
 ---
 
 # Task Inputs and Providers Implementation Plan
@@ -392,18 +592,18 @@ Checkpoint: `just test` in `claudine/` green; `params:` on a step is plain data.
 
 ### Wave 4 — Provenance
 
-- [ ] **Origin carrier** — Attach an authoring-file origin to each `with` value
+- [x] **Origin carrier** — Attach an authoring-file origin to each `with` value
   (inline task → sequence doc; task/group file → that file; proxy/retry/prep →
   the document holding the lifecycle event), parallel to how caller setters
   carry launch origin. Materialize against the target schema via
   `FileReference` (eager file resolves from origin; lazy binds first candidate;
   lazy remote stays URL; recursive lazy keeps its typed refusal).
-- [ ] **Preservation** — Keep raw data + origin through nested containers,
+- [x] **Preservation** — Keep raw data + origin through nested containers,
   retry, and proxy chains, including when a chained target's schema changes;
   keep identity for copied anchored values; atomic evaluation; re-evaluate task
   `with` at each task turn using a concurrent group's start snapshot; evaluate a
   lifecycle `with` once when the directive fires.
-- [ ] **Tests (table-driven)** — Acceptance 2: task `with`, `proxy.with`,
+- [x] **Tests (table-driven)** — Acceptance 2: task `with`, `proxy.with`,
   `retry.with`, `prep.with` each from its authoring file; a `kind: task` file
   and a proxy target in another directory; caller setter from launch dir and
   above `with`; lazy-missing, eager-missing, remote lazy, ambiguous file/string
@@ -477,23 +677,23 @@ Concurrent with Phases 2–3 *after* Wave 2 where file ownership permits.
 
 ### Wave 7 — Schema authoring
 
-- [ ] **Lifecycle additions** — Extend `lifecycle.yaml` with `cancelled-stack`
+- [x] **Lifecycle additions** — Extend `lifecycle.yaml` with `cancelled-stack`
   (container contract's restricted actions); reuse `loop`, `stack`,
   `initialize-stack`, including the loose verb keys from the loop spec.
-- [ ] **Type library** — Create `claudine/schemas/sequence-types.yaml`
+- [x] **Type library** — Create `claudine/schemas/sequence-types.yaml`
   (`kind: schema`): `steps`, `step`, `task`, `group`, and the bounded-expansion
   variants for three typed levels plus the untyped boundary, using bare local
   names and YAML-list unions. Omit removed keys (`group.execution`, root
   `fail_fast`); `<string>: any` keeps authored step data (so `params` is valid
   data while `setup`/`teardown` remain parser errors).
-- [ ] **Trigger** — Create `claudine/schemas/sequence.yaml`
+- [x] **Trigger** — Create `claudine/schemas/sequence.yaml`
   (`kind: trigger-schema`) matching `sequence: [string(required), number,
   boolean, object, "unknown[]"]`; payload types the root including `template`,
   `loop`, and the lifecycle events.
-- [ ] **claudine.yaml upgrade** — Replace the loose `sequence` declaration with
+- [x] **claudine.yaml upgrade** — Replace the loose `sequence` declaration with
   the imported type so both triggers agree; keep `agent`, `model`, and common
   fields, with no document-level provider requirement.
-- [ ] **Embedding and install** — Add both files to the embedded
+- [x] **Embedding and install** — Add both files to the embedded
   launch-validation bundle and disk discovery; verify every relative import
   resolves with no checkout; update install instructions to copy the whole
   schema bundle. Sync any mirrored copies determined in Wave 1.
@@ -503,7 +703,7 @@ Concurrent with Phases 2–3 *after* Wave 2 where file ownership permits.
 *May split across subagents: Claudine fixtures vs DMLS/darkmatter tests; each
 owns disjoint files.*
 
-- [ ] **Example fixtures** — Save every sequence example from
+- [x] **Example fixtures** — Save every sequence example from
   `2026-10-24-sequence-containers` and `2026-10-25-loops-and-flow-control` as
   valid fixtures; add invalid fixtures for `execution`, `max_paralel:` on a
   group object, and `fail_fast` at the root; valid + invalid fixture at each of
@@ -511,10 +711,10 @@ owns disjoint files.*
   `sequence: 42` and mapping → activates and fails payload validation; missing/
   null `sequence` → no activation; both triggers active with malformed task
   `with` still fails; unknown step key is accepted step data.
-- [ ] **Tests** — Acceptance 9 through `md schema triggers`, `md schema validate`
+- [x] **Tests** — Acceptance 9 through `md schema triggers`, `md schema validate`
   (`CliProcessFixture`), and DMLS L1; installed-launch validation test without
   checkout files; trigger-column matrix cells.
-- [ ] **Docs link** — Add `sequence.yaml` to the schema topic in
+- [x] **Docs link** — Add `sequence.yaml` to the schema topic in
   `claudine/docs/` (boundary explained: typed levels, then untyped; parser still
   allows unlimited nesting).
 
@@ -527,13 +727,13 @@ Checkpoint: `just test` and `just lint` green in `claudine/` and `darkmatter/`
 
 *Sweep and docs can run in parallel (disjoint files).*
 
-- [ ] **Sweep** — Apply the Wave 1 migration inventory: convert task-input
+- [x] **Sweep** — Apply the Wave 1 migration inventory: convert task-input
   `params:` to `with:` in maintained prompts (`prompts/review-loop.md`),
   fixtures, tests, docs, and skills; rewrite relative `proxy|retry|prep` `with`
   paths to be authoring-file-relative; preserve unrelated `params` data,
   historical snapshots, and timeline evidence. Shipped-prompt tests use the new
   grammar (prompt tests stay opt-in; frozen copies stay frozen).
-- [ ] **Docs** — Update `sequences.md` (reserved keys list, "Keys you cannot
+- [x] **Docs** — Update `sequences.md` (reserved keys list, "Keys you cannot
   author as state", "Phase 1 — Static preflight": per-task prediction, all-named
   tasks run without document `agent`/review screen, uninstalled provider fails
   before any launch, status lines name the provider that ran),
@@ -543,22 +743,22 @@ Checkpoint: `just test` and `just lint` green in `claudine/` and `darkmatter/`
   compact example per rule, and uses a Mermaid diagram for the provider
   decision flow. Docs state behavior, never link to or name this feature.
   Describe the intentional `proxy.with` change.
-- [ ] **Skills and amendments** — Update the `claudine` skill; remove the
+- [x] **Skills and amendments** — Update the `claudine` skill; remove the
   2026-09-27 amendments file if it still exists beside the old sequence spec
   (verify it exists first); update `claudine/docs/dependencies.md` only if
   crates changed.
-- [ ] **Comment drift pass** — Every behavior-changing symbol gets its `///`/
+- [x] **Comment drift pass** — Every behavior-changing symbol gets its `///`/
   `//` comments reviewed; report drift found and how it was resolved.
 
 ### Wave 10 — Final validation
 
-- [ ] `just test`, `just test-l2` (review screen), `just lint` in `claudine/`;
+- [x] `just test`, `just test-l2` (review screen), `just lint` in `claudine/`;
   darkmatter schema/DMLS suites; confirm no new CI cell
   (`just ci-local --plan`).
-- [ ] Walk acceptance criteria 1–10 against test names in the log; run the
+- [x] Walk acceptance criteria 1–10 against test names in the log; run the
   robustness smell greps; confirm `grep` finds no maintained task-input
   `params:`.
-- [ ] Set the spec/plan status per the repo's convention (*implementation
+- [x] Set the spec/plan status per the repo's convention (*implementation
   complete, ready for review*); do not run `just complete`, move directories, or
   commit.
 

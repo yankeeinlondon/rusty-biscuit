@@ -38,6 +38,8 @@ related:
     - 2026-10-24-sequence-containers
     - 2026-10-14-union-type-constraints
     - 2026-10-13-named-type-presence-and-local-names
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Task inputs and providers
