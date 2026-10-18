@@ -311,90 +311,117 @@ fn resolve_file_payload(
 /// `Arc` identity, so returning the same `Arc` for unchanged inputs also
 /// keeps those warm.
 ///
-/// An entry is reused only when the trigger path, the payload value, the
-/// schema roots, and the request context are equal, every dependency file
+/// The key is what resolution reads, not who asked. Resolution never reads
+/// the requesting context directly: it derives `for_cwd(folder)` for the
+/// trigger's folder and every nested file's folder, and
+/// `for_trusted_external_cwd(root)` for each schema root. The key therefore
+/// holds the trigger path, the payload value, the schema roots, the context
+/// derived onto the trigger's folder, the context derived onto each schema
+/// root, and the requesting context's own tree. The tree is kept because two
+/// requesters can derive the same context for the trigger's folder yet
+/// derive differently for a nested file's folder when one keeps a boundary
+/// tree and the other selects a tree per folder. Documents in different
+/// package folders of one repository share a key, since derivation
+/// recomputes the folder-dependent scopes.
+///
+/// An entry is reused only when its key is equal, every dependency file
 /// still hashes the same, and the entry list of every searched directory (the
 /// schema roots and each dependency's folder) is unchanged, so a file added
-/// in front of a bare-name target is noticed. Only successes are kept.
+/// in front of a bare-name target is noticed. Only successes are kept, at
+/// most 32 of them; a reuse refreshes an entry's recency and the least
+/// recently used entry is evicted.
 mod file_payload_memo {
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
 
+    use biscuit_file::{BaseDirOrigin, FileResolutionContext};
     use biscuit_hash::xx_hash_bytes;
     use serde_yaml_ng::Value as YamlValue;
 
-    use super::{ResolvedPayload, resolve_file_payload};
+    use super::{ResolvedPayload, resolve_file_payload, tally};
     use crate::markdown::schemas::errors::SchemaError;
 
-    const RECENT_PAYLOADS: usize = 16;
+    /// Room for one DMLS workspace pass over this repository (18 distinct
+    /// inputs before keys stopped naming the requester) with headroom.
+    /// Expanded payloads can be megabytes, so the bound is fixed.
+    pub(super) const CAPACITY: usize = 32;
 
-    struct Entry {
+    #[derive(PartialEq)]
+    struct Key {
         source: PathBuf,
         payload: YamlValue,
         schema_roots: Vec<PathBuf>,
-        context: biscuit_file::FileResolutionContext,
+        tree: PathBuf,
+        tree_origin: BaseDirOrigin,
+        folder_context: FileResolutionContext,
+        root_contexts: Vec<FileResolutionContext>,
+    }
+
+    impl Key {
+        fn new(source: &Path, payload: &YamlValue, schema_roots: &[PathBuf], original: &FileResolutionContext) -> Self {
+            // Mirrors `resolve_file_payload`'s base folder.
+            let folder = source.parent().unwrap_or_else(|| Path::new("."));
+            Self {
+                source: source.to_path_buf(),
+                payload: payload.clone(),
+                schema_roots: schema_roots.to_vec(),
+                tree: original.base_dir().to_path_buf(),
+                tree_origin: original.base_dir_origin().clone(),
+                folder_context: original.for_cwd(folder),
+                root_contexts: schema_roots.iter().map(|root| original.for_trusted_external_cwd(root)).collect(),
+            }
+        }
+    }
+
+    struct Entry {
+        key: Key,
         fingerprint: u64,
         resolved: ResolvedPayload,
     }
 
+    /// Least recently used first.
     static ENTRIES: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
 
     pub(super) fn resolve(
         source: &Path,
         payload: &YamlValue,
         schema_roots: &[PathBuf],
-        original: &biscuit_file::FileResolutionContext,
+        original: &FileResolutionContext,
     ) -> Result<ResolvedPayload, SchemaError> {
-        let context = &folder_context(original);
-        let same_inputs = |entry: &Entry| {
-            entry.source == source
-                && entry.schema_roots == schema_roots
-                && entry.payload == *payload
-                && entry.context == *context
-        };
+        let key = Key::new(source, payload, schema_roots, original);
         let held = {
             let entries = ENTRIES.lock().expect("trigger payload memo poisoned");
             entries
                 .iter()
-                .find(|entry| same_inputs(entry))
+                .find(|entry| entry.key == key)
                 .map(|entry| (entry.fingerprint, entry.resolved.clone()))
         };
         if let Some((fingerprint, resolved)) = held
             && fingerprint == inputs_fingerprint(schema_roots, &resolved.dependencies)
         {
+            let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
+            if let Some(position) = entries.iter().position(|entry| entry.key == key) {
+                let entry = entries.remove(position);
+                entries.push(entry);
+            }
+            tally::record_hit();
             return Ok(resolved);
         }
 
+        tally::record_miss();
         let resolved = resolve_file_payload(source, payload, schema_roots, original)?;
         let fingerprint = inputs_fingerprint(schema_roots, &resolved.dependencies);
         let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
-        entries.retain(|entry| !same_inputs(entry));
-        if entries.len() == RECENT_PAYLOADS {
+        entries.retain(|entry| entry.key != key);
+        if entries.len() == CAPACITY {
             entries.remove(0);
         }
         entries.push(Entry {
-            source: source.to_path_buf(),
-            payload: payload.clone(),
-            schema_roots: schema_roots.to_vec(),
-            context: context.clone(),
+            key,
             fingerprint,
             resolved: resolved.clone(),
         });
         Ok(resolved)
-    }
-
-    /// The memo key's context: a document context with its source path
-    /// replaced by its folder. Every document in one folder shares the
-    /// derived `cwd`, tree, and anchors; the source path itself only names
-    /// the resolution source in diagnostics and the containment check, which
-    /// the folder decides alike. Any other context is kept whole.
-    fn folder_context(context: &biscuit_file::FileResolutionContext) -> biscuit_file::FileResolutionContext {
-        match context.source_path() {
-            Some(source) if source.parent() == Some(context.cwd()) => {
-                context.clone().with_source_path(context.cwd())
-            }
-            _ => context.clone(),
-        }
     }
 
     /// Hashes each dependency's bytes and the sorted entry names of every
@@ -431,6 +458,101 @@ mod file_payload_memo {
             }
         }
         fingerprint
+    }
+}
+
+/// Trigger-payload memo outcomes counted by a [`PayloadMemoTally`].
+///
+/// A hit is a reuse whose dependency fingerprint still matched; a miss is an
+/// attempted uncached resolution, counted whether or not it succeeded. A
+/// registry lookup that never resolves a payload records neither.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PayloadMemoCounts {
+    pub hits: u64,
+    pub misses: u64,
+}
+
+/// Counts the trigger-payload memo's hits and misses on the calling thread
+/// while it is alive.
+///
+/// Only the most recently started tally on a thread counts, so a host that
+/// interrupts one unit of work with another on the same thread starts a
+/// second tally for the interruption and the first one excludes it. Tallies
+/// nest lexically: drop the inner one before reading the outer one again.
+/// Work on other threads is never counted.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::triggers::PayloadMemoTally;
+///
+/// let pass = PayloadMemoTally::start();
+/// {
+///     let interruption = PayloadMemoTally::start();
+///     // ... a scan here counts only toward `interruption`
+///     # let _ = interruption.counts();
+/// }
+/// assert_eq!(pass.counts().misses, 0);
+/// ```
+#[derive(Debug)]
+pub struct PayloadMemoTally {
+    depth: usize,
+    /// Thread-bound: the counts live in a thread-local stack.
+    _thread_bound: std::marker::PhantomData<*const ()>,
+}
+
+impl PayloadMemoTally {
+    /// Start counting on this thread; this tally takes over from any tally
+    /// already running here until it is dropped.
+    #[must_use]
+    pub fn start() -> Self {
+        let depth = tally::TALLIES.with_borrow_mut(|tallies| {
+            tallies.push(PayloadMemoCounts::default());
+            tallies.len() - 1
+        });
+        Self {
+            depth,
+            _thread_bound: std::marker::PhantomData,
+        }
+    }
+
+    /// The counts recorded so far.
+    #[must_use]
+    pub fn counts(&self) -> PayloadMemoCounts {
+        tally::TALLIES.with_borrow(|tallies| tallies.get(self.depth).copied().unwrap_or_default())
+    }
+}
+
+impl Drop for PayloadMemoTally {
+    fn drop(&mut self) {
+        tally::TALLIES.with_borrow_mut(|tallies| tallies.truncate(self.depth));
+    }
+}
+
+mod tally {
+    use std::cell::RefCell;
+
+    use super::PayloadMemoCounts;
+
+    thread_local! {
+        /// One slot per live [`super::PayloadMemoTally`]; the last one counts.
+        pub(super) static TALLIES: RefCell<Vec<PayloadMemoCounts>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn record_hit() {
+        TALLIES.with_borrow_mut(|tallies| {
+            if let Some(counts) = tallies.last_mut() {
+                counts.hits += 1;
+            }
+        });
+    }
+
+    pub(super) fn record_miss() {
+        TALLIES.with_borrow_mut(|tallies| {
+            if let Some(counts) = tallies.last_mut() {
+                counts.misses += 1;
+            }
+        });
     }
 }
 
