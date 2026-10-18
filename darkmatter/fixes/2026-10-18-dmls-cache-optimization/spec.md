@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: draft-spec
+status: finalized-spec
 $schema:
     status: |-
         enum(
@@ -25,7 +25,9 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-18
 review_iterations: 0
-clarified: false
+clarified: true
+clarified_by: claude/opus
+needs_rulings: false
 implemented: false
 created: 2026-10-18
 owner: Ken Snyder <ken@ken.net>
@@ -291,31 +293,43 @@ preparation concurrently. This is a DMLS guarantee, not a promise to serialize
 all callers of the process-wide library memo.
 
 Preserve startup's two phases: prepare the initially known workspace scopes,
-list files, record the discovered repositories, and prepare any newly known
-scopes. Coordinate these phases through completion messages; never block
-dispatch waiting for the worker. A document job can overtake either phase.
-The existing one-time `schema registry ready` summary and startup observer
-completion occur after discovery and the final required preparation, with
-preparation elapsed time excluding the file walk and queue waits. Publish the
-file-list result once and preserve its existing ordering after startup's
-registry-ready event. A later invalidation still makes affected scopes stale;
-startup completion does not assert that no future refresh is needed.
+then, once discovery has recorded the repositories it found, prepare any newly
+known scopes. **File discovery starts at once and runs concurrently with the
+initial phase** (it reads no schema files and does not use the worker); only
+the second phase waits for both. Coordinate these phases through completion
+messages; never block dispatch waiting for the worker. A document job can
+overtake either phase.
+
+Install and publish the file-list result once, as soon as discovery returns,
+without waiting for any registry phase: the list's arrival is what releases
+withheld path diagnostics and lets the index store start. This reverses
+today's order, in which the file list is sent after the registry-ready event;
+tests and docs that assert that order are updated. The existing one-time
+`schema registry ready` summary and startup observer completion occur after
+the final required preparation, so the summary still counts every startup
+scope, with preparation elapsed time excluding the file walk and queue waits.
+A later invalidation still makes affected scopes stale; startup completion
+does not assert that no future refresh is needed.
 
 ```mermaid
 sequenceDiagram
     participant Dispatch
     participant Worker as Registry worker
     participant Discovery as File discovery
-    Dispatch->>Worker: Initial workspace preparation
-    Worker-->>Dispatch: Initial phase complete
-    Dispatch->>Discovery: List files and repositories
+    par
+        Dispatch->>Worker: Initial workspace preparation
+    and
+        Dispatch->>Discovery: List files and repositories
+    end
     Discovery-->>Dispatch: Discovery result
-    Dispatch->>Worker: Prepare newly discovered scopes
+    Note over Dispatch: Install and publish the file list now
+    Worker-->>Dispatch: Initial phase complete
+    Dispatch->>Worker: Prepare newly discovered scopes (after both)
     Dispatch->>Worker: Document needed by a request
     Note over Worker: Finish current probe, then prioritize document
     Worker-->>Dispatch: Document ready; resume its waiters
     Worker-->>Dispatch: Final startup phase complete
-    Note over Dispatch: Registry-ready summary, then file-list publication
+    Note over Dispatch: Registry-ready summary
 ```
 
 - Keep preparation I/O outside the overlay lock, and preserve the existing
@@ -404,6 +418,7 @@ area's `just lint` after implementation; no new CI tier or scope is needed.
 | R4 | L1 dmls | a change recorded during the single in-flight preparation leaves the scope stale |
 | R5 | L1 dmls | captured `tracing` shows pass-local counts excluding interrupting document jobs; an injected clock proves summed registry waits, including resume/requeue, cancellation, and shutdown, on one completion event |
 | Startup request ordering | L1 dmls | hermetic stdio session with the existing `LspFixture`: gate an unrelated workspace probe, send unchanged configuration, open a document and request semantic tokens; release the current probe and observe the response before the next workspace probe completes; allow `waited_for_trigger_registry=true` for a cold document |
+| Concurrent discovery | L1 dmls | with the worker's initial phase gated, discovery completes and the file list is installed and published before the gate is released; the second phase starts only after both, and the registry-ready summary follows it and counts every startup scope |
 | Worker completion boundary | L1 dmls | schedule a workspace refresh after the worker completes but before dispatch handles its completion; exactly one new pass runs |
 | Lifecycle | L1 dmls | multiple waiters share a document job; cancel one and answer the other once; shutdown during either startup phase releases waiters and coordination; a context change during queued work cannot strand them |
 
@@ -440,6 +455,13 @@ least-recently-used even though the code evicts by insertion order; the new
 recency rule is now explicit. It also required a cold document to report no
 registry wait, which conflicts with per-document preparation; the acceptance
 criteria now prove queue ordering and notification behavior directly.
+
+## Rulings
+
+1. **Discovery runs concurrently with the initial registry phase** (author,
+   2026-10-18). The walk does not depend on that phase, and the file list
+   gates path diagnostics and the index store, so it is published as soon as
+   it is ready rather than after the registry-ready event.
 
 ## Open Questions
 
