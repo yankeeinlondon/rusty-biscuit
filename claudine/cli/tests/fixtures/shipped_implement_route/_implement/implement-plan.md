@@ -150,7 +150,8 @@ For every changed behavior:
 YAML values, missing versus present values, and boundary values
 - assert dependent outputs and downstream state, not only the immediate value
 - include negative/error behavior where malformed or invalid input is possible
-- choose the verification level required by `rust-testing`; unit coverage alone
+- name the boundary the behavior depends on and choose the fidelity rung (F1/F2/F3) and tier
+required by `rust-testing`; unit coverage alone
 is insufficient when behavior crosses crate, CLI, filesystem, terminal, or
 persistence boundaries
 - log important details of your work to {{log}} under the `## Phase {{phase}}` section

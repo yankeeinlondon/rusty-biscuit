@@ -141,8 +141,8 @@ fn sequence_yolo_approves_lifecycle_shell_during_preflight() {
 
 /// `claudine sequence --dry-run` over a multi-step sequence:
 /// - each step's composed body is concatenated to **stdout** in order,
-/// - a `=== Document N of M ===` divider precedes documents 2..M on
-///   **stderr** (none before the first document),
+/// - a horizontal rule precedes documents 2..M on **stderr** (none before
+///   the first document),
 /// - no provider is ever launched (sentinel absent).
 #[cfg(unix)]
 #[test]
