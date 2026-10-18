@@ -151,6 +151,16 @@ let (composed, report) = md.compose_with(&request)?;
 println!("{}", report.summary());
 ```
 
+`Markdown::compose_with_frontmatter_hook(&request, &mut hook)` is
+`compose_with` plus one host callback, `ResolvedFrontmatterHook`, called for
+the root document only, after its frontmatter fully resolves (both
+interpolation passes and every `$( … )`) and before any body stage: it may edit
+the request environment the body, transclusions, and `as_markdown()` read. The
+hook is a borrowed parameter threaded to `run_compose_pipeline_node`, never a
+`ComposeOptions` field, so a non-`'static` host closure fits and no compose
+runs twice. Claudine selects a prompt's launch identity with it. User docs:
+`darkmatter/docs/topics/compose-requests.md`.
+
 `ComposeRequest::prepare` fails with `ContextBuildError` (relative request
 directory, opening reference outside the request's repository, repository
 discovery error) instead of letting a bad context surface later as a missing
