@@ -126,9 +126,10 @@ sequence document with no other control is judged too:
 | `sequence: [build, test]` | applies | valid |
 | `sequence: "@steps.yaml"` | applies | valid: a file reference |
 | `sequence: { tasks: [a] }` | applies | invalid: `sequence` is a list or a file reference |
-| `sequence: 42` | applies | valid to the schema, which coerces a top-level number to text; the sequence parser rejects it before anything runs |
+| `sequence: 42` or `sequence: true` | applies | valid to the schema, which coerces a top-level number or boolean to text; the sequence parser rejects it before anything runs |
 | `sequence: null`, or no `sequence` | — | no sequence trigger |
 | `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
+| `fail_fast: null` beside `sequence:` | applies | valid to the schema; the sequence parser rejects any root `fail_fast`, null included, before anything runs |
 
 Only `sequence.yaml` declares `sequence`. A sequence document's lifecycle
 events and `loop` select `claudine.yaml` whenever they are set, and are typed
@@ -527,6 +528,12 @@ triggers:
   `say:`), and `loop:` keys (`max`);
 - hover on a property describes its type and purpose; hovering `text` in a
   `say` item also names the communication alternative the item matches.
+
+Each key is declared by exactly one trigger, and completion offers only the
+keys of triggers that already apply. A sequence document whose root has only
+`sequence` (and `template`) matches `sequence.yaml` alone, so it is not
+offered `start`, `loop`, or the other root event keys. Once one of those keys
+is written, `claudine.yaml` applies and the rest are offered and typed.
 
 A property the document's own `$schema` redeclares is completed and hovered
 from the author's declaration, as it is validated (see below). One limit

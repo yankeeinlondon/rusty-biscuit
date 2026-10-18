@@ -381,8 +381,17 @@ anything) and keys every task by its graph `TaskIdentity`. The CLI
 unusable static hint with `SequenceTaskProviderSelection` before any task
 starts, and gates only on unresolved tasks (review on a terminal, else
 `AgentResolutionFailed`). `WrapperPromptRunner::document_target` prepares
-each task under its own target; `launch_target` resolves a decided-at-launch
-task from its composed hints before spawn. The launch rebuild
+each task under its own target; `launch_target` mirrors the rebuild's rule over
+the document's effective hints, and `jit::compose_step_selecting` calls it
+twice: on a frontmatter-only read (`composition::read_selection_hints`, no
+shells) so frontmatter values see the choice, and inside the one full
+preparation (`prepare_{direct,inline}_with_schema_selecting` →
+`ResolvedIdentitySelector`, over Darkmatter's
+`Markdown::compose_with_frontmatter_hook`) after frontmatter `$(…)` runs and
+before the body renders, so the prompt's `env.AGENT`/`env.MODEL`, the child
+environment, and the spawn agree with each command run once. The selected
+overrides replace `CallerInputLayers.env_overrides`, so a retry/resume reread
+keeps them. The launch rebuild
 (`select_rebuilt_provider`) stays authoritative, and status lines read the
 spawned attempts from the run's `LaunchLog`, never the plan. Review rows map
 back by identity; read-only rows use `CellValue::StaticText` in an editable

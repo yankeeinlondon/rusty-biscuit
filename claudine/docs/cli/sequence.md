@@ -128,8 +128,23 @@ Each task falls into one of three classes:
 | Class | When | What happens |
 | :--- | :--- | :--- |
 | **predicted** | its `agent` is known now | checked now; an unusable one fails the run, naming the task, the property, and the enclosing containers |
-| **decided at launch** | its `agent` reads `seq.outputs`, `loop.*`, `group.*`, `current.*`, a key a lifecycle `set` writes, or a `$( … )` | evaluated when the task is prepared; an unusable value fails that task before it spawns, after earlier tasks ran |
-| **missing a provider** | no `agent` of its own | takes the nearest enclosing sequence document's `agent` (a referenced sequence file's own first, then outward to the root); with none, a terminal reviews it and anything else fails |
+| **decided at launch** | its `agent` reads `seq.outputs`, `loop.*`, `group.*`, `current.*`, a key a lifecycle `set` writes (even one with no value before that write), or a `$( … )` | evaluated when the task is prepared; an unusable value fails that task before it spawns, after earlier tasks ran |
+| **missing a provider** | no `agent` of its own: absent, or `null` in whichever layer decides it (a caller's `agent=[]` too) | takes the nearest enclosing sequence document's `agent` (a referenced sequence file's own first, then outward to the root); with none, a terminal reviews it and anything else fails |
+
+`null` is not a hint, so an `agent: null` in a task's `with:` or a caller's
+`agent=null` hides a lower layer's `agent` and leaves the task missing one.
+An empty string `""` is an invalid provider name, not an empty hint. A caller
+setter also applies to the sequence document, so `agent=null` or `agent=[]`
+leaves nothing to inherit.
+
+`agent: []` in a task's prompt frontmatter or its `with:` is not an empty
+hint: the [launch schema](../topics/schemas.md#when-the-schemas-apply) requires
+an agent list to have at least one entry, so the run fails before any task
+launches, naming where the list was written (`tasks[1].with.agent`, or
+`agent` in the prompt file). A body step of a referenced sequence file whose
+`agent` is `[]` fails the same way, naming that file, unless a caller's
+`agent=` replaces it. A root sequence document's `agent: []` fails its own
+schema check before any task launches. `model: []` is valid and means no model.
 
 A task naming a provider that isn't installed fails before any task
 launches, even when its `when:` is false:
@@ -140,7 +155,24 @@ launches, even when its `when:` is false:
 ```
 
 A hint that reads the provider it selects (`agent: "{{ env.AGENT }}"`, or
-`env.MODEL` for `model`) is rejected the same way. Prediction runs no shell,
+`env.MODEL` for `model`) is rejected the same way, unless something above it
+decides that key. Provider and model are decided separately:
+
+| Hint | Made irrelevant by |
+| :--- | :--- |
+| `agent: "{{ env.AGENT }}"` (or `ctx.agent`) | `--claude`, `--provider claude`, or a caller's `agent=` |
+| `model: "{{ env.MODEL }}"` (or `ctx.model`) | `--model`, a `MODEL` or provider-specific model variable (`CLAUDE_MODEL` for Claude), or a caller's `model=` |
+
+So `claudine sequence seq.md --claude` runs a task whose prompt says
+`agent: "{{ env.AGENT }}"` on Claude, and the prompt reads `claude` there.
+A provider flag does not excuse a circular `model`.
+
+An `agent` or `model` whose expression is simply wrong is rejected too,
+under any flag, because the task's prompt still evaluates it when it
+composes; so is an `agent: []`. Wherever it is written, a typo is not a
+later value, so `with: { agent: "{{ no_such_function() }}" }` on the second
+task stops the run before the first launches, naming `tasks[1].with.agent`.
+A document hint reading a `with` entry that fails is located at that entry. Prediction runs no shell,
 lifecycle event, or `prep` target, composes no prompt body, and refreshes no
 model catalog. A graph of only `shell:` and `side_effect:` tasks needs no
 provider at all.
@@ -177,8 +209,42 @@ switched provider:
 
 A skipped task, a preview, and a task that launched nothing claim no
 provider. `{{ env.AGENT }}` and `{{ env.MODEL }}` in a task's composed
-prompt name the task's own provider and model; for a task decided at
-launch, they name its fallback (or nothing) until its document composes.
+prompt name the provider and model the task launches with, and so does the
+child's environment. That holds for a task decided at launch too: its
+document's frontmatter is evaluated first, the provider is chosen from it,
+and only then does the body render. It holds when an earlier task rewrote the
+prompt document to name another provider: the task launches on the fresh
+`agent`, and its prompt says so.
+
+```yaml
+sequence:
+  - name: pick
+    shell: echo goose
+  - name: run
+    prompt: report.md              # body: "You are {{ env.AGENT }}."
+    with: { agent: "{{ seq.outputs[0] }}" }
+# Goose launches, with AGENT=goose, and reads "You are goose."
+```
+
+An `agent` or `model` that comes from a `$( … )` in the prompt's
+frontmatter agrees too. The command runs once; its answer chooses the
+provider and model after the frontmatter resolves and before the body
+renders, and a retry of the task rereads the document under that choice.
+A task's `with:` value that only looks like a command, such as
+`model: "$(echo x)"`, is data: nothing runs it, and the body and the child
+both receive it as written.
+
+```markdown
+---
+agent: '$(echo goose)'
+---
+You are {{ env.AGENT }}.
+```
+
+The task above launches Goose, with `AGENT=goose`, and its prompt reads
+"You are goose." A frontmatter value that itself reads `env.AGENT` resolves
+before that command runs, so it sees the identity the rest of the
+frontmatter names without the command's answer.
 
 ### The review screen
 

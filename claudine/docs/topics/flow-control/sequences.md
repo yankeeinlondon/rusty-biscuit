@@ -534,13 +534,17 @@ Claudine walks the **entire task graph**:
 - **Every task's provider is predicted** from its own `agent`, the same way its
   launch chooses it: its prompt document's frontmatter, then its `with:`, then
   the caller's setters. A sequence whose tasks all name providers runs with no
-  document-level `agent` and no review screen; a task with none takes the
+  document-level `agent` and no review screen; a task with none (`null`
+  counts as none; an `agent: []` fails here, because an agent list needs at
+  least one entry) takes the
   nearest enclosing sequence document's `agent`, and only a task left without
   one opens the review screen (or fails the run without a terminal). A task
   naming a provider that is not installed fails here, before any task launches,
   even behind a false `when:`. A hint that reads a later value (`seq.outputs`,
   `loop`, `group`, `current`, a key a lifecycle `set` writes, or a `$( … )`) is
-  *decided at launch* and checked when its task is prepared. Prediction runs
+  *decided at launch* and checked when its task is prepared; an expression
+  error in a hint that reads none of those (an unknown function, say) fails
+  here like an uninstalled provider. Prediction runs
   nothing and composes nothing. Each step's status line names the provider that
   ran. See [`claudine sequence` → Choosing providers](../../cli/sequence.md#choosing-providers).
 - **Schemas validate and missing properties aggregate** across all steps and all
@@ -636,9 +640,15 @@ Claudine walks the **entire task graph**:
   captures its own environment, and the model is selected again from it: a
   later step whose environment sets `MODEL=b` launches with `b`, even if the
   launch environment named another model. A predicted provider stands,
-  because no environment variable selects it; a task *decided at launch*
-  resolves its provider from its composed document just before it spawns. A
-  model given with `--model`, or confirmed on the review screen, also stands.
+  because no environment variable selects it, unless the task's prompt
+  document, read fresh at its turn, names a different `agent`. A task
+  *decided at launch* resolves its provider at its turn. Either way the
+  provider and model are chosen from the document's evaluated frontmatter
+  before its body renders, so the body's `env.AGENT`/`env.MODEL` and the
+  child's environment name what launches. An `agent` or `model` produced by
+  a frontmatter `$( … )` is chosen after that command runs, still before the
+  body renders, and each command runs once. A model given with `--model`, or
+  confirmed on the review screen, also stands.
 
 A preflight failure aborts the sequence. Preparation
 never degrades to best-effort.

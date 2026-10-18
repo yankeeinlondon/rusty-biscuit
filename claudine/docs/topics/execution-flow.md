@@ -653,9 +653,9 @@ failing step so the user can fix the entire sequence in one edit pass.
 1. Detects installed providers and builds the snapshot; loads the selection config and model catalog
 2. Collects one site per provider-launching task from the preflight graph (`prompt:` tasks at any depth, and body steps), keyed by its graph identity (`tasks[2].group.tasks[1]`). `shell` and `side_effect` tasks have none, so a graph of only those needs no provider
 3. Classifies each site from preflight's read-only prediction of its own `agent` (prompt frontmatter < `with` < caller setters):
-    - **predicted** — resolved now by the canonical non-interactive rule; an unknown, uninstalled, wrong-typed, or self-referential (`env.AGENT`) hint is `SequenceTaskProviderSelection`, naming the task, the property, and the enclosing containers, before any task starts (a false `when:` included)
-    - **decided at launch** — the hint reads a later value; it is resolved from the composed document before the task spawns
-    - **missing a provider** — the nearest enclosing sequence document's `agent` (nested file first, then outward) is its fallback
+    - **predicted** — resolved now by the canonical non-interactive rule; an unknown, uninstalled, wrong-typed, self-referential (`env.AGENT`; irrelevant under a provider flag, and a self-referential `model` under `--model`, a provider-specific model variable, or `MODEL`), or failing-expression hint (including one that reads a failing `with` entry), or an `agent: []` in prompt frontmatter or `with` (the launch schema needs at least one entry), is `SequenceTaskProviderSelection`, naming the task, the property, and the enclosing containers, before any task starts (a false `when:` included). A body step composing a referenced sequence file whose `agent` is `[]` fails the same way unless a caller setter replaces it
+    - **decided at launch** — the hint reads a later value; it is resolved at the task's turn, before its body renders (see below)
+    - **missing a provider** — no hint of its own (absent, or `null` in the deciding layer, or a caller setter's `[]`); the nearest enclosing sequence document's `agent` (nested file first, then outward) is its fallback
 4. Resolves each target's model with the shared resolver, without refreshing any catalog
 
 **Phase 1c: Gate and review:**
@@ -697,6 +697,27 @@ rereads its live source, layers runtime mutations and the current lexical
 roots, composes, validates, and executes it. The task graph stays frozen, but
 later children can observe earlier file edits. Group legs use private
 in-memory branches and merge in declaration order; the filesystem is shared.
+
+A `prompt:` task chooses its launch identity before its body renders:
+
+```mermaid
+flowchart LR
+    A["evaluate the prompt's frontmatter<br/>(no shell, no body)"] --> B["choose provider and model<br/>from its agent / model"]
+    B --> C["compose: resolve the frontmatter<br/>with AGENT / MODEL set to that choice,<br/>running its $( … ) commands"]
+    C --> E["choose again from the<br/>resolved agent / model"]
+    E --> F["render the body with<br/>AGENT / MODEL set to that choice"]
+    F --> D["spawn: the child gets the same AGENT / MODEL"]
+```
+
+The choice keeps the planned provider while the document names none, or
+still names it; otherwise the document's `agent` decides, by the same rule the
+launch applies. So a hint decided at launch, and a prompt an earlier task
+rewrote to name another provider, both launch on what the document says, and
+`{{ env.AGENT }}` in the body agrees. An `agent` or `model` produced by a
+frontmatter `$( … )` is known only once the compose has run that command, so
+the second choice, made inside the same compose before the body renders,
+decides it; nothing is composed twice. A retry or resume of the task rereads
+the document under that choice.
 
 A completed child publishes one native result after successful `finalize`.
 Nested sequences return arrays and groups return dictionaries keyed by leg
