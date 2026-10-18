@@ -123,6 +123,11 @@ impl InputTableState {
     /// whenever `initial_rows` originate from user, config, or other
     /// untrusted input.
     ///
+    /// A row value of [`CellValue::StaticText`] is accepted in a column of any
+    /// type and pins that one cell read-only: it renders as text, focus skips
+    /// it, and [`Self::rows_typed`] returns the same text. The rest of the
+    /// column stays editable.
+    ///
     /// An over-length row (more cells than columns) is a pure count
     /// error that no single id mismatch can explain, so it short-circuits
     /// to [`InputTableError::RowShapeMismatch`]. Every other shape
@@ -160,6 +165,11 @@ impl InputTableState {
                     .iter()
                     .zip(row.cells.iter())
                     .map(|(column, row_cell)| {
+                        // A static value pins that one cell read-only, whatever
+                        // its column's input type.
+                        if let CellValue::StaticText(text) = &row_cell.value {
+                            return CellState::StaticText(text.clone());
+                        }
                         let mut cell = CellState::from_column(column);
                         apply_cell_value(&mut cell, &row_cell.value);
                         cell
@@ -825,7 +835,7 @@ fn validate_row(row_idx: usize, row: &Row, columns: &[InputTableColumn]) -> Resu
             .find(|c| c.id() == cell.column_id)
             .expect("unknown ids rejected above");
         let seed = CellState::from_column(column);
-        if !cell_value_compatible(&seed, &cell.value) {
+        if !matches!(cell.value, CellValue::StaticText(_)) && !cell_value_compatible(&seed, &cell.value) {
             return Err(InputTableError::CellTypeMismatch {
                 row: row_idx,
                 id: cell.column_id.clone(),
