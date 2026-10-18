@@ -148,6 +148,20 @@ pub enum StackControl {
         max_attempts: u32,
     },
 
+    /// End the nearest enclosing loop after the interrupted pass's cleanup.
+    ///
+    /// The executor has already recorded the break in that loop's
+    /// [`LoopBreakSlot`](crate::composition::looping::LoopBreakSlot): this
+    /// control only ends the event. Every primitive between the `break` and
+    /// its loop reads the slot.
+    Break {
+        /// Evaluated reason, if one was authored.
+        reason: Option<String>,
+        /// The process exit code when the loop it ends is the root
+        /// invocation's.
+        code: u8,
+    },
+
     /// Push this prompt onto the deferred-execution queue.
     Defer {
         /// Evaluated delay duration.
@@ -576,8 +590,9 @@ pub struct StackExecutionContext<'a> {
     /// The event being processed.
     pub signal: LifecycleSignal,
     /// The binding scope expressions evaluate in; `None` is the event
-    /// `signal` names. A sequence task's `setup:`/`teardown:` stack sets its
-    /// own scope ([`Self::in_scope`]) because it reuses the step's context.
+    /// `signal` names. A sequence `side_effect:` task's action sets its own
+    /// scope ([`Self::in_scope`]) because it runs in the step's context, not in
+    /// a document event.
     pub scope: Option<LifecycleScope>,
     /// Composed frontmatter — the base namespace for expression evaluation.
     pub frontmatter: &'a Map<String, Value>,
@@ -715,6 +730,22 @@ impl StackExecutionContext<'_> {
     /// signal the stack was parsed under.
     pub fn execute_action_stack(&self, nodes: &[LifecycleNode]) -> LifecycleEventOutcome {
         self.execute_stack(nodes)
+    }
+
+    /// Evaluate a task's `when:` guard against this context's frontmatter and
+    /// bindings, with the lifecycle `when` truthiness rule.
+    ///
+    /// The guard is read-only: it runs no stack and dispatches nothing.
+    ///
+    /// ## Errors
+    ///
+    /// The parse or evaluation failure. A guard that raises is never read as
+    /// false.
+    pub fn evaluate_task_guard(&self, condition: &str) -> Result<bool, crate::composition::error::TaskGuardFailure> {
+        let expr = darkmatter::markdown::compose::expression::parse_condition(condition)?;
+        self.eval_expr(&expr, self.frontmatter)
+            .map(|value| is_truthy(&value))
+            .map_err(|error| LifecycleCause::new(error).into())
     }
 
     /// Dispatch one action as a task's `side_effect:` primary and return the
@@ -1303,6 +1334,10 @@ impl StackExecutionContext<'_> {
         working: &mut Map<String, Value>,
     ) -> Result<Option<StackControl>, ActionFailure> {
         match &action.kind {
+            // `prep` returns: the event continues with the next item.
+            LifecycleActionKind::LifecycleControl(LifecycleControlAction::Prep { target, with }) => {
+                self.run_prep(target, with, &location, working).map(|()| None)
+            }
             LifecycleActionKind::LifecycleControl(control) => self
                 .resolve_control(control, location, working)
                 .map(Some)
@@ -2082,6 +2117,67 @@ impl StackExecutionContext<'_> {
                 delay: self.render_message(delay, fm).map_err(classify)?,
                 reason: self.eval_opt_string(reason.as_ref(), fm).map_err(classify)?,
             },
+            // A `break` belongs to the innermost loop around this page. With
+            // none, it is a run-time error of the event, which `no_error`
+            // cannot suppress, so it is never read as `stop`.
+            C::Break { reason, code } => {
+                let Some(ambient) = self.loop_values else {
+                    let mut info = LifecycleErrorInfo::from_composition_error(
+                        &CompositionError::LifecycleBreakWithoutLoop {
+                            source_path: self.source_path.to_path_buf(),
+                            property: location.path().to_string(),
+                        },
+                    );
+                    info.reason = LifecycleEvaluationReason::BreakWithoutLoop;
+                    return Err(info);
+                };
+                let reason = self.eval_opt_string(reason.as_ref(), fm).map_err(classify)?;
+                ambient.breaks.record(crate::composition::looping::LoopBreak { reason: reason.clone(), code: *code });
+                StackControl::Break { reason, code: *code }
+            }
+            C::Prep { .. } => unreachable!("`prep` is a returning action, run by `run_prep`"),
+        })
+    }
+
+    /// Run a `prep` call to completion through this thread's target runner.
+    ///
+    /// The target and the whole overlay evaluate first, as `proxy`'s do, so
+    /// an evaluation failure calls nothing. A target that did not return
+    /// successfully is a dispatch failure of this event, with the target's
+    /// failure as its cause: the event takes its ordinary error route, and
+    /// `no_error` suppresses it as it does a failed shell action.
+    fn run_prep(
+        &self,
+        target: &Expr,
+        with: &WithOverlay,
+        location: &ActionLocation,
+        fm: &Map<String, Value>,
+    ) -> Result<(), ActionFailure> {
+        let target = self
+            .render_message(target, fm)
+            .map_err(|error| ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error("prep", error)))?;
+        let overlay = self.resolve_with_overlay(with, &target, location, fm).map_err(ActionFailure::Evaluation)?;
+        let property = location.path().to_string();
+        let Some(runner) = super::prep::current() else {
+            return Err(ActionFailure::Evaluation(LifecycleErrorInfo::from_composition_error(
+                &CompositionError::LifecyclePrepUnavailable { source_path: self.source_path.to_path_buf(), property },
+            )));
+        };
+        let call = super::prep::PrepCall {
+            target: &target,
+            overlay: &overlay,
+            caller: self.source_path,
+            file_resolution_context: self.file_resolution_context,
+            property: &property,
+        };
+        runner.run(&call).map_err(|failure| {
+            ActionFailure::Dispatch(LifecycleErrorInfo::from_composition_error(&CompositionError::LifecyclePrepFailed {
+                source_path: self.source_path.to_path_buf(),
+                property: property.clone(),
+                target: target.clone(),
+                message: failure.message,
+                snapshot: failure.snapshot,
+            }))
         })
     }
 

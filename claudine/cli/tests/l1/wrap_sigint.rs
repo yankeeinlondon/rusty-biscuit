@@ -905,7 +905,7 @@ fn cancelled_prompt_start(looping: bool) {
     );
     let prompt = fixture.cwd().join("prompt.md");
     let start = serde_json::to_string(&barrier.block_snippet()).unwrap();
-    let loop_config = if looping { "loop: { while: 'true', fail_fast: false }\n" } else { "" };
+    let loop_config = if looping { "loop: { while: 'true' }\n" } else { "" };
     write(&prompt, &format!(r#"---
 {loop_config}start: [{{ shell: {start} }}]
 failure:

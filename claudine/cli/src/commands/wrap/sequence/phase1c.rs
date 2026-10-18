@@ -232,6 +232,7 @@ fn run_phase_1c_attempt(
         // passive until the step reaches its turn.
         let step_context = StepComposeContext {
             lifecycle_group: None,
+            loop_values: None,
             validation_probe: true,
             deferred_shell_roots: super::jit::sequence_shell_roots(step_index),
             ..ctx.clone()

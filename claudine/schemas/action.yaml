@@ -78,11 +78,11 @@ types:
         break:
             - null
             - "unknown[](max(0))"
-            - "string -> planned: leave the loop or sequence with this reason; not yet accepted by the parser"
+            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
             - "{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }"
         prep:
-            - "string -> planned: prepare the target prompt (a file reference such as @prompts/next.md or a whole-value interpolation); not yet accepted by the parser"
-            - "{ target: string(required), with: object, no_error: boolean }"
+            - "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
+            - "{ target: string(not-empty; required), with: object, no_error: boolean }"
         $constraints:
             min-keys: 1
             max-keys: 1
@@ -254,8 +254,8 @@ types:
         break:
             - null
             - "unknown[](max(0))"
-            - "string -> planned: leave the loop or sequence with this reason; not yet accepted by the parser"
-        prep: "string -> planned: prepare the target prompt (a file reference such as @prompts/next.md or a whole-value interpolation); not yet accepted by the parser"
+            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
         shell: "shell -> run a shell command (never in initialize)"
         set: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
         append_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
@@ -416,8 +416,8 @@ types:
         break:
             - null
             - "unknown[](max(0))"
-            - "string -> planned: leave the loop or sequence with this reason; not yet accepted by the parser"
-        prep: "string -> planned: prepare the target prompt (a file reference such as @prompts/next.md or a whole-value interpolation); not yet accepted by the parser"
+            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
         set: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
         append_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
         append_jsonl: "unknown -> Darkmatter side effect; the parser checks its arguments"

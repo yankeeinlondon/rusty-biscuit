@@ -40,6 +40,10 @@ pub struct PreflightTask {
     pub params: Map<String, Value>,
     /// The authored `timeout:` value, parsed as a duration at execution time.
     pub timeout: Option<Value>,
+    /// The authored `when:` guard, already checked to parse as a condition.
+    /// It is evaluated at the task's turn, never during preflight, so a task
+    /// whose guard will be false is still validated and approved.
+    pub when: Option<String>,
     /// Effective operation after group defaults and task overrides.
     pub operation: Option<String>,
     /// Effective flow after group defaults and task overrides.
@@ -306,6 +310,17 @@ pub struct PreflightSequence {
     pub lifecycle: Box<crate::composition::LifecycleConfig>,
     /// Source used to resolve child references and compose body-only steps.
     pub origin_path: PathBuf,
+    /// The referenced sequence document's authored root properties, for a
+    /// reference that names a whole document (no offset or operator).
+    ///
+    /// When present it replaces the caller's frontmatter as the base state of
+    /// this container's events and children; invocation setters and runtime
+    /// mutations still layer above it. `None` (inline lists, offset and
+    /// operator references) keeps the enclosing scope's state.
+    pub frontmatter: Option<Map<String, Value>>,
+    /// The sequence's `loop:` controls, when it repeats. Its gate is
+    /// [`Self::lifecycle`]'s `loop` stack.
+    pub loop_config: Option<PreflightLoop>,
 }
 
 /// A resolved group and its member tasks.
@@ -327,6 +342,20 @@ pub struct PreflightGroup {
     pub tasks: Vec<PreflightTask>,
     /// The document the group was authored in.
     pub origin_path: PathBuf,
+    /// The group's `loop:` controls, when it repeats. Its gate is
+    /// [`Self::lifecycle`]'s `loop` stack. Boxed so a group stays the size
+    /// of the other task actions.
+    pub loop_config: Option<Box<PreflightLoop>>,
+}
+
+/// A container's `loop:` controls, frozen at preflight for the invocation,
+/// and where they were authored.
+#[derive(Debug, Clone)]
+pub struct PreflightLoop {
+    /// The iteration controls; a templated `max` is still unresolved.
+    pub config: crate::composition::LoopConfig,
+    /// The authored `loop:` block, for diagnostics.
+    pub location: crate::composition::LoopLocation,
 }
 
 /// How a group's tasks are scheduled.

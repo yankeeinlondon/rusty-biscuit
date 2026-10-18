@@ -93,7 +93,9 @@ impl<'a> SequenceSourceOptions<'a> {
 ///
 /// Returns `Err` for invalid sequence definitions: wrong types, missing `name`
 /// on object steps, more than one executable field, reserved-key
-/// collisions, or external file load failures.
+/// collisions, a root `when:`, an invalid root `loop:`, or external file load
+/// failures. A valid root `loop:` or task `when:` is refused with its
+/// not-yet-supported error.
 pub fn resolve_sequence_plan(
     source: &ResolvedCompositionSource,
     file_resolution_context: &biscuit_file::FileResolutionContext,
@@ -132,6 +134,9 @@ pub fn resolve_sequence_plan_with(
         .iter()
         .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
         .collect();
+    // The root's `when` and `loop` are judged before the source is expanded,
+    // so a refused root runs no `$( … )` source either.
+    grammar::validate_sequence_root(&frontmatter, &source.resolved_path)?;
     let mut plan = match grammar::classify_source(&sequence_value)? {
         // A directly invoked YAML document is itself the formal document, so it
         // takes the same template/`$schema` pipeline a referenced one does; a

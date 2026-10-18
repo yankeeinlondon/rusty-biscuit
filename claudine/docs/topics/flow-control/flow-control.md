@@ -37,14 +37,14 @@ The pieces:
 | [`resume`](#resume) | Sends a follow-up message to the same agent session. |
 | [`proxy`](#proxy) | Hands the run to a different prompt document as _proxy_ for itself. |
 | [`defer`](#defer) | **Planned:** suspends the whole run and schedules it to resume later, typically after a rate-limit window passes. |
-| [`break`](#break) | **Planned:** leaves the innermost enclosing loop. |
-| [`prep`](#prep) | **Planned:** runs another executable primitive to prepare the environment, then returns control to the caller. |
+| [`break`](#break) | Leaves the nearest enclosing loop, optionally with an exit code. |
+| [`prep`](#prep) | Runs another executable primitive to prepare the environment, then returns control to the caller. |
 
-Directives marked **planned** are part of the documented design and are not yet implemented; `defer` additionally waits on scheduling in the `rendezvous` daemon.
+Directives marked **planned** are part of the documented design and do not run yet. `defer` waits on scheduling in the `rendezvous` daemon; it is already parsed and validated like every other directive, so a malformed one is reported before anything runs, and reaching a valid one fails the event with a typed `LifecycleDeferNotImplemented` error, never a silent skip or a `stop`.
 
 ## Rules that apply to every directive
 
-**A directive ends the whole event.** When a directive runs, nothing after it runs, in its own list or in any list that encloses it: a `retry` inside a nested `else` ends the event just as a `retry` at the top does. That is why an unconditional directive must be the **last** item in its list (a `when` item never counts as unconditional), and why a dictionary of verbs can hold at most one directive. Put any messages you want to show *before* the directive:
+**A directive ends the whole event, except `prep`.** When a directive runs, nothing after it runs, in its own list or in any list that encloses it: a `retry` inside a nested `else` ends the event just as a `retry` at the top does. That is why an unconditional directive must be the **last** item in its list (a `when` item never counts as unconditional), and why a dictionary of verbs can hold at most one directive. `prep` is a call that returns, so items may follow it, even unconditionally; in a dictionary it still counts as the one directive and runs after the dictionary's other verbs. Put any messages you want to show *before* an ending directive:
 
 ```yaml
 failure:
@@ -60,7 +60,7 @@ failure:
 
 **Some directives need something that may not exist yet.** An event can accept a directive and still be unable to carry it out. `resume` needs a live agent session, so it fails in `initialize`, where no agent has started. `break` needs an enclosing loop, which a document cannot know about until it runs, since the loop may belong to the group or sequence that placed it. `defer` needs the scheduler. The [Flow Control Reference](flow-control-reference.md#what-each-event-can-do-at-runtime) lists these cases. When they happen you get a clear, typed error at the moment the directive fires instead of a silent no-op.
 
-**`--dry-run` fires no lifecycle events.** A dry run never runs an event, so it never exercises a directive. It does parse and validate every event, so a malformed directive is still reported. Composition shell expansions and sequence `shell:` tasks still run with real effects; dry-run is not a filesystem sandbox.
+**`--dry-run` fires no lifecycle events.** A dry run never runs an event, so it never exercises a directive and never runs a `prep` target. It does parse and validate every event, so a malformed directive is still reported. Composition `$( … )` expansions still run with real effects, and so do sequence `shell:` tasks under `--dry-run-shell`; dry-run is not a filesystem sandbox. See [Sequences — Dry run](sequences.md#dry-run).
 
 ## Writing a directive
 
@@ -110,7 +110,7 @@ initialize:
 
 `skip` is also how you make a [loop](looping.md) run zero times, because a loop always runs its body at least once.
 
-> **Planned:** a `when:` condition on the primitive itself (a document, group, or sequence step) will decide whether that primitive runs at all, including whether its loop runs even once. `skip` then stays for decisions a document makes about itself after it has been selected to run.
+A `when:` guard on the sequence step or group leg that names a primitive decides whether that primitive runs at all, including whether its loop runs even once; see [Sequences — Task guards](sequences.md#task-guards-when). `skip` stays for decisions a document makes about itself after it has been selected to run.
 
 ## `error`
 
@@ -130,7 +130,7 @@ If neither `failure` nor `finalize` recovers the run with `retry`, `resume`, or 
 |-------------------------|---------|
 | `compose` / `inline-compose` | Exits `1` and prints `Error: <reason>` once. |
 | A `sequence` step | The failure reaches the enclosing container. Without recovery the sequence stops. |
-| A `loop:` iteration | The iteration fails; `fail_fast` decides whether the loop continues. |
+| A `loop:` iteration | The iteration fails, and the loop stops unless a `failure` event handles it. |
 
 A recovery that works reports the recovered attempt's outcome, so a `retry` that succeeds exits `0` with no error left over from the earlier attempt. Messages that already fired, such as a `success` `info:` line, are kept. Without a reason, the error reads `lifecycle success error`.
 
@@ -270,9 +270,7 @@ Nothing else in the run happens while it is suspended: no later events fire, no 
 
 ## `break`
 
-> **Planned.** Not yet a lifecycle verb: until it is built, a `break` in an event is rejected as an unknown verb.
-
-Leaves the innermost enclosing [loop](looping.md). The loop may belong to a different primitive than the one raising `break`: a document that is one task of a looped group ends the group's loop, and a group that is one step of a looped sequence ends the sequence's loop. With nested loops, only the innermost one ends; an outer loop continues and checks its own condition as usual.
+Leaves the nearest enclosing [loop](looping.md). `break` is accepted in every event except `cancelled`, and in the loop gate. The loop may belong to a different primitive than the one raising `break`: a document's own `loop:`, or a looping group or sequence around the document. A document that is one task of a looped group ends the group's loop, and a group that is one step of a looped sequence ends the sequence's loop. With nested loops, only the nearest one ends; an outer loop continues and checks its own condition as usual.
 
 ```yaml
 success:
@@ -282,22 +280,49 @@ success:
       - break: "ready"
 ```
 
-Like every directive, `break` ends the current event. The rest of the current iteration still completes, so `finalize` fires as usual, and then the loop stops instead of evaluating its condition or applying its per-iteration `action`.
+**What a `break` skips, and what still runs.** Like every directive, `break` ends the current event: the rest of that event is skipped, while its earlier actions and mutations stand. Between the `break` and its loop:
 
-A loop that ended through `break` is a distinct outcome from "condition met" and from "`max` reached". Sequence summaries report it with the `reason`, and it can drive the process exit code, which is how a run says "stopped early for a human to look" rather than "finished".
+- no further event fires on any primitive, except `finalize`, which runs once on each primitive where it has not already run;
+- no later sibling task starts, at any level up to the loop's owner;
+- the loop ends without its gate, its condition, or its per-iteration `action`.
 
-`break` fired with no enclosing loop is a runtime error, in the same class as `resume` with no session: a document cannot know at parse time whether it will be placed inside a looped group or sequence.
+A `break` fired from `finalize` or from the loop gate never re-runs cleanup.
+
+```mermaid
+flowchart TD
+    B[Child fires break] --> F[Child runs finalize once]
+    F --> G{Concurrent group on the path?}
+    G -->|yes| W[Wait for every leg to settle]
+    G -->|no| Q
+    W --> Q{Unhandled failure or cancellation?}
+    Q -->|yes| P[Propagate the failure or cancellation]
+    Q -->|no| C[Each enclosing container runs finalize once]
+    C --> L[Nearest loop ends]
+    L --> N[Loop owner's parent continues]
+```
+
+**From `initialize`.** Nothing composes or launches, nothing is appended to `seq.outputs`, and the document's `finalize` runs. It is not a failure. This is the difference from `skip`, which also suppresses cleanup.
+
+**Inside a concurrent group.** A `break` whose loop lies outside the leg is *pending*: sibling legs, including ones still queued behind `max_parallel`, run as usual, and admission does not stop. Once every leg has settled, the group carries the first breaking leg in declaration order, not in completion order. Each leg records its own break.
+
+**A failure always beats a pending break.** An unhandled sibling failure, a failing `finalize`, or a `break` fired from `failure` all fail the run instead. A leg failure that `fail_fast: false` handles does not defeat the break. Ctrl-C overrides it (exit `130`), and a `retry` discards it.
+
+**Exit code.** When the broken loop is the root invocation's — `claudine compose` of a looping document, or a looping root sequence — the process exits with `code`. An inner loop's `code` appears only in the summary line, and the run continues. A broken loop prints an info line `loop broken: <reason> (code N)`, or `loop broken (code N)` without a reason.
+
+**Partial results.** Each container between the `break` and its loop publishes the work it completed, once, after its own cleanup. There is no placeholder for children that never ran and no synthetic break entry. A document broken before it launched publishes nothing. In `group.legs`, a leg that broke before doing any work is `skipped` with a null output.
+
+**No enclosing loop.** A `break` fired outside any loop fails that event with a typed `LifecycleBreakWithoutLoop` error ("… fired outside any loop"), in the same class as `resume` with no session: a document cannot know at parse time whether it will be placed inside a looped group or sequence. `no_error` does not suppress it.
 
 | Parameter | Required | Meaning |
 |-----------|----------|---------|
-| `reason` | no | Human-readable explanation, recorded as the loop's outcome. This is the short-form value. |
-| `code` | no | Process exit code, an integer from `0` to `255`, for a loop that ends through this `break`. |
+| `reason` | no | Human-readable explanation, recorded as the loop's outcome. This is the short-form value. `""` is an explicit empty reason. |
+| `code` | no | Process exit code, an integer from `0` to `255`, for a loop that ends through this `break`. Default `0`. |
+
+The accepted spellings are a bare `- break`, `break: null` or `break: []` (no reason), `break: "reason"`, and the long form `break: { reason, code, no_error }`. A reason must be text: a number, a list, or a mapping is an error, and so is `break: [reason]`. `code` must be a YAML integer in range; `256`, `-1`, `1.5`, `"2"`, and `null` are errors, as is any other parameter. An unconditional `break` must be the last item in its list.
 
 ## `prep`
 
-> **Planned.** Not yet a lifecycle verb: until it is built, a `prep` in an event is rejected as an unknown verb.
-
-Runs another executable primitive to _prepare_ the environment, then returns control to the caller. Where `proxy` is a hand-off, `prep` is a call: the target runs to completion, and the caller's event continues with the item after the directive as if nothing had intervened.
+Runs another executable primitive to _prepare_ the environment, then returns control to the caller. `prep` is accepted in every event except `cancelled`, and in the loop gate. Where `proxy` is a hand-off, `prep` is a call: the target runs to completion, and the caller's event continues with the next item, including the items after the conditional branch that made the call.
 
 ```yaml
 # commit.md — stage the tree first when the caller asks for it
@@ -310,16 +335,28 @@ initialize:
       - skip
 ```
 
-What comes back: only what the target wrote to disk. `prep` does not merge the target's frontmatter or runtime state into the caller; the caller reads any result the same way it reads any file. Inside a sequence the target's final output is appended to `seq.outputs`, so `{{ last(seq.outputs) }}` also works.
+**The target runs as an invocation of its own**, in the same process (never a spawned `claudine`): its own `initialize`, schema check, shell approval, runtime layer, output accumulator, and output. A document target runs like `compose`, or like `inline-compose` when its frontmatter `prompt:` is a string; a sequence document or YAML sequence file runs like `claudine sequence`. Running a `kind: group` file as a target is **planned**; today the call fails with the sequence command's "not directly executable" error. The target path resolves relative to the document that authored the directive.
 
-The target is prepared exactly as a `proxy` target is: its own `initialize`, its own validation, its own shell approval. Inside a sequence that approval happens at the sequence's preflight along with every other referenced document. A `prep` from `initialize` is allowed even though `initialize` itself is shell-free, because any shell runs inside the target under the target's approval.
+**What goes in.** The caller's setters and its `loop`, `seq`, and `group` roots do not reach the target. The `with:` overlay becomes the target's only caller values, as data: a `{{ … }}` the caller produced is never evaluated again.
 
-A target that fails fails the caller's current event, and the run proceeds through `failure` and `finalize` as for any other failure. `prep` targets obey the same cycle rule and hop limit as `proxy`, so a target cannot `prep` its caller.
+**What comes back:** only what the target wrote to disk. The caller sees it through fresh file reads or its next preparation. The target's frontmatter, loop frames, and `set` writes never merge back, and its output is reported under the target, not appended to the caller's `seq.outputs`.
+
+**From `initialize`.** The target is prepared and approved on its own, while the caller's `initialize` stays shell-free: a `shell` beside the `prep` is still refused. The caller's own preflight and composition run after the target returns, against the files as they are then.
+
+**Approval.** The target is approved as its own invocation when it runs, under the caller's approval flags (`--yolo`, policy). Listing `prep` targets in a sequence's front-loaded approval is **planned**.
+
+**Success and failure.** A target that exits `0` returns, including one whose `initialize` skipped and one whose own root loop ended by `break` with code `0`. Any other status — a failure, a non-zero root `break` code, an interrupt — fails the call. A failed call is an action failure of the caller's current event (`LifecyclePrepFailed`: "`prep` of `<target>` failed: <cause>"): it takes the event's ordinary error route, and `no_error: true` on the `prep` tolerates it like a failed `shell` action. In `failure` or `finalize` the event is not re-entered and the original error stays primary. Ctrl-C during a target cancels the whole run (exit `130`).
+
+**Cycles.** Calls and handoffs share one cycle domain and `proxy`'s hop limit of 16 over the active chain, so a target cannot `prep` or `proxy` a document with an active call (`LifecyclePrepCycle`: "would re-enter an active call or exceed the hop limit"). Returning releases the call, so calling the same helper again, or on every pass of a loop, is legal. Concurrent group legs keep separate chains.
+
+**Inside the target.** A target may `proxy`; the document it hands to owns the rest of the target's run, and control returns to the caller when that run ends. A `break` in the target cannot reach the caller's loop: without a loop of its own it is the "outside any loop" error, which fails the call. `timeout` and `step_timeout` apply per provider child, and a target inherits the caller's flags, so its children get the same limits; there is no invocation-wide deadline to reset.
 
 | Parameter | Required | Meaning |
 |-----------|----------|---------|
-| `target` | **yes** | The document, group, or sequence to run first. This is the short-form value. |
+| `target` | **yes** | The document or sequence to run first. This is the short-form value. |
 | `with` | no | Frontmatter values for the target, as for `proxy`. Long form only. |
+
+The accepted spellings are `prep: "@target.md"` and the long form `prep: { target, with, no_error }`. The target must be a non-empty string (a file reference or a whole-value `{{ … }}`); a missing, empty, numeric, or list target is an error. `with` follows `proxy.with` exactly: omitted means no overlay, `with: {}` is an explicit empty overlay, and `null`, a string, or a list is an error. A `prep` in `initialize` is not a shell, so it passes the shell-free check while a `shell` beside it is still refused. An unconditional `prep` may be followed by other items.
 
 ## Choosing a directive
 
@@ -332,8 +369,8 @@ A target that fails fails the caller's current event, and the run proceeds throu
 | The document has nothing to do on this run | `skip` (from `initialize`) |
 | The rest of the event should not run | `stop` |
 | The agent hit a rate limit and the run should wait it out | `defer` (planned) |
-| The loop has done its job early, or should stop for a human to look | `break` (planned) |
-| Another prompt must run first, and control should come back | `prep` (planned) |
+| The loop has done its job early, or should stop for a human to look | `break` |
+| Another prompt must run first, and control should come back | `prep` |
 
 These combine well across events. For example, `success` can raise `error` when an artifact is missing, and `finalize` can then `retry` once. The [verify-then-retry example](lifecycle.md#verify-an-artifact-on-success-then-retry-once-from-finalize) shows the full document.
 

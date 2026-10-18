@@ -42,6 +42,7 @@ pub mod cancellation;
 pub mod context;
 pub mod control;
 pub mod executor;
+pub mod prep;
 pub mod runtime;
 mod parse;
 pub mod shell_template;
@@ -51,7 +52,7 @@ mod source_map;
 mod validate;
 
 use action_shape::*;
-pub(crate) use action_shape::action_value_to_expr;
+pub(crate) use action_shape::{action_value_to_expr, closest_spelling};
 pub(crate) use audio::*;
 pub use parse::{LifecycleParseOptions, scan_removed_validation_keys};
 pub(crate) use parse::LOOP_ITERATION_KEYS;
@@ -109,6 +110,31 @@ pub(crate) fn parse_lifecycle_config_with_orders(
         &LifecycleParseOptions {
             is_known_effect: &is_known_effect,
             authored,
+        },
+    )
+}
+
+/// Parse the lifecycle concerns of a `loop:` block authored at `property`
+/// (`loop`, `tasks[2].loop`): its loose verb keys or its `gate:` stack, by the
+/// grammar a document's `loop:` uses. Iteration controls are skipped.
+///
+/// ## Errors
+///
+/// The same [`CompositionError`] family [`parse_lifecycle_config`] raises.
+pub(crate) fn parse_loop_gate(
+    loop_obj: &serde_json::Map<String, serde_json::Value>,
+    source_file: &Path,
+    property: &str,
+    authored: &super::authored_order::AuthoredOrder,
+) -> Result<Vec<LifecycleNode>, CompositionError> {
+    parse::parse_loop_concerns_with(
+        loop_obj,
+        source_file,
+        property,
+        authored,
+        &LifecycleParseOptions {
+            is_known_effect: &is_known_effect,
+            authored: None,
         },
     )
 }
@@ -204,7 +230,7 @@ pub(crate) fn parse_single_action_with_order(
 /// passes (via `ComposeOptions::with_exclude_keys`) so their authored
 /// `{{ }}` spans survive raw in `effective_frontmatter` for event-time
 /// interpolation. Non-lifecycle keys compose as today; the iteration
-/// controls inside `loop:` (`while`/`until`/`actions`/`max`/`fail_fast`)
+/// controls inside `loop:` (`while`/`until`/`actions`/`max`)
 /// are unaffected because they are parsed from raw frontmatter by
 /// [`super::looping::resolve_loop_config`] and evaluated by the loop
 /// engine, not by compose-time interpolation.
@@ -1012,6 +1038,27 @@ impl LifecycleConfig {
             LifecycleSignal::Loop => &self.stacks.loop_gate,
             LifecycleSignal::Cancelled => &self.stacks.cancelled,
         }
+    }
+
+    /// Every `prep` target written as a literal, in event and stack order:
+    /// the targets a dry run lists without running. A target written as an
+    /// interpolation is known only when its event fires.
+    pub fn literal_prep_targets(&self) -> Vec<String> {
+        let mut targets = Vec::new();
+        for signal in LifecycleSignal::ALL {
+            actions::for_each_action(self.stack(signal), &mut |action| {
+                if let LifecycleActionKind::LifecycleControl(actions::LifecycleControlAction::Prep {
+                    target: Expr::StringLiteral(target),
+                    ..
+                }) = &action.kind
+                    && ExpressionFinder::find_all_plain(target).is_empty()
+                    && !targets.contains(target)
+                {
+                    targets.push(target.clone());
+                }
+            });
+        }
+        targets
     }
 
     /// Mutable access to the typed stack for a given signal.

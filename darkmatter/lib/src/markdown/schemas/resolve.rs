@@ -891,16 +891,17 @@ pub(crate) fn prepare_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
 ) -> Result<ResolvedSchema, SchemaError> {
-    prepare_embedded_schema_in(path, documents, "")
+    prepare_embedded_schema_in(path, documents, "").map(|(resolved, _)| resolved)
 }
 
 /// [`prepare_embedded_schema`] with every import confined to `{bundle}/`
-/// (no confinement when `bundle` is empty).
+/// (no confinement when `bundle` is empty), alongside the virtual paths of
+/// every document it read (`path` and its transitive imports).
 pub(crate) fn prepare_embedded_schema_in(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
-) -> Result<ResolvedSchema, SchemaError> {
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let unsupported = |message: &str| SchemaError::SchemaDocument {
         path: PathBuf::from(path),
         message: message.to_string(),
@@ -937,7 +938,7 @@ pub(crate) fn prepare_embedded_inline_schema(
     importer: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
-) -> Result<ResolvedSchema, SchemaError> {
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let schema = parse_yaml_schema(value)?;
     if matches!(schema, SimplifiedSchema::Union(_)) {
         return Err(SchemaError::SchemaDocument {
@@ -948,14 +949,15 @@ pub(crate) fn prepare_embedded_inline_schema(
     lower_embedded_schema(schema, importer, documents, bundle)
 }
 
-/// Expands a single-object embedded schema authored at `path` and lowers it.
+/// Expands a single-object embedded schema authored at `path` and lowers it,
+/// alongside the virtual paths of `path` and every document it imported.
 fn lower_embedded_schema(
     schema: SimplifiedSchema,
     path: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
-) -> Result<ResolvedSchema, SchemaError> {
-    let (schema, _) = expand_imports(
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    let (schema, mut reads) = expand_imports(
         schema,
         Path::new(""),
         NamespaceKey::Embedded(path.to_string()),
@@ -969,7 +971,8 @@ fn lower_embedded_schema(
             message: "an embedded schema cannot reference `example(...)` artifacts".into(),
         });
     }
-    Ok(ResolvedSchema {
+    reads.push(PathBuf::from(path));
+    let resolved = ResolvedSchema {
         simplified: Some(schema),
         json_schema,
         origin: SchemaOrigin::document(),
@@ -977,7 +980,8 @@ fn lower_embedded_schema(
         examples: Vec::new(),
         referenced_files: Vec::new(),
         advisories: Vec::new(),
-    })
+    };
+    Ok((resolved, reads))
 }
 
 /// Whether a lowered schema carries an unresolved `example(...)` reference.
@@ -1790,8 +1794,9 @@ impl ImportEngine<'_> {
     }
 
     /// Resolves `reference`, written in the embedded document `importer`,
-    /// against the embedded table only. The target contributes no dependency
-    /// edge: embedded documents are immutable build inputs.
+    /// against the embedded table only. The target is recorded as a virtual
+    /// path, the embedded expansion's read set; it is never a file
+    /// dependency edge, since embedded documents are immutable build inputs.
     fn resolve_embedded_namespace(
         &mut self,
         documents: &[EmbeddedDocument<'_>],
@@ -1809,6 +1814,7 @@ impl ImportEngine<'_> {
             embedded::resolve_bundle_path(bundle, importer, reference)
         }
         .map_err(invalid)?;
+        self.dependencies.insert(PathBuf::from(&target));
         let named_types = match self.embedded_cache.get(&target) {
             Some(cached) => Arc::clone(cached),
             None => {

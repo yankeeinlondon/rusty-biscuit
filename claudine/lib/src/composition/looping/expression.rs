@@ -13,21 +13,42 @@ use serde_json::{Map, Value};
 use super::super::error::{CompositionError, LoopExpressionCause};
 use super::super::lifecycle::bindings::{removed_loop_grammar, removed_loop_read};
 use super::super::types::{AmbientVariable, LoopCondition};
+use super::frame::LoopBreakSlot;
 
 /// The values of the `loop` global for one iteration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Two ambients are equal when their values are: the [`LoopBreakSlot`] is the
+/// loop's identity, not data.
+#[derive(Debug, Clone)]
 pub struct LoopAmbient {
     /// 1-based iteration index.
     pub iteration: usize,
     /// Whether this is the first iteration.
     pub is_first: bool,
-    /// Whether this iteration is expected to be the last.
+    /// Whether this is the final pass the cap permits (`count == max`).
     pub is_last: bool,
-    /// Captured output from the previous iteration.
-    pub last_output: String,
+    /// The result of the previous pass, or of the pass that just finished
+    /// once it reports: text for a document, an array for a sequence, a
+    /// dictionary for a group.
+    pub last_output: Value,
     /// Exit code from the previous iteration.
     pub last_exit_code: i32,
+    /// Where a `break` that ends this loop is recorded. Every page whose
+    /// innermost loop this is shares it.
+    pub breaks: LoopBreakSlot,
 }
+
+impl PartialEq for LoopAmbient {
+    fn eq(&self, other: &Self) -> bool {
+        self.iteration == other.iteration
+            && self.is_first == other.is_first
+            && self.is_last == other.is_last
+            && self.last_output == other.last_output
+            && self.last_exit_code == other.last_exit_code
+    }
+}
+
+impl Eq for LoopAmbient {}
 
 impl LoopAmbient {
     /// Construct ambient values for an iteration.
@@ -35,7 +56,7 @@ impl LoopAmbient {
         iteration: usize,
         is_first: bool,
         is_last: bool,
-        last_output: impl Into<String>,
+        last_output: impl Into<Value>,
         last_exit_code: i32,
     ) -> Self {
         Self {
@@ -44,7 +65,16 @@ impl LoopAmbient {
             is_last,
             last_output: last_output.into(),
             last_exit_code,
+            breaks: LoopBreakSlot::default(),
         }
+    }
+
+    /// The same values with a break slot of their own: a concurrent group
+    /// leg records its `break` there, so the group can choose the first
+    /// breaking leg in declaration order once every leg has settled.
+    #[must_use]
+    pub fn with_isolated_breaks(&self) -> Self {
+        Self { breaks: LoopBreakSlot::default(), ..self.clone() }
     }
 
     /// The `loop` global's runtime value:
@@ -62,7 +92,7 @@ impl LoopAmbient {
             AmbientVariable::Iteration => Value::Number(self.iteration.into()),
             AmbientVariable::IsFirst => Value::Bool(self.is_first),
             AmbientVariable::IsLast => Value::Bool(self.is_last),
-            AmbientVariable::LastOutput => Value::String(self.last_output.clone()),
+            AmbientVariable::LastOutput => self.last_output.clone(),
             AmbientVariable::LastExitCode => Value::Number(self.last_exit_code.into()),
         }
     }

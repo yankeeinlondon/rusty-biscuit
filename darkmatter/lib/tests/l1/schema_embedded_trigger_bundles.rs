@@ -459,6 +459,36 @@ fn a_failing_bundle_fails_on_every_registration() {
     }
 }
 
+/// A payload is reused across bundles whose documents it reads hold the same
+/// text, even when the copies are separate and a document it does not read
+/// differs; a bundle where a read document differs resolves it again.
+#[test]
+fn a_payload_is_shared_while_the_documents_it_reads_are_unchanged() {
+    let fixture = Fixture::new();
+    let with = |other: &str, action: &str| {
+        bundle(
+            "read-set",
+            vec![
+                ("host.yaml", HOST_TRIGGER.into()),
+                ("lifecycle.yaml", LIFECYCLE.into()),
+                ("action.yaml", action.into()),
+                ("other.yaml", other.into()),
+            ],
+        )
+    };
+    let payload = |bundle: EmbeddedSchemaBundle| {
+        let api = fixture.schemas(&[bundle]).expect("bundle loads");
+        api.effective_for(&document("prompt: x\n")).expect("effective").expect("trigger applies").json_schema
+    };
+
+    let first = payload(with("kind: schema\ntypes:\n  a: string\n", ACTION));
+    let unread_edit = payload(with("kind: schema\ntypes:\n  b: number\n", ACTION));
+    let read_edit = payload(with("kind: schema\ntypes:\n  b: number\n", "kind: schema\ntypes:\n  verb: enum(stop)\n"));
+
+    assert!(std::sync::Arc::ptr_eq(&first, &unread_edit), "an unread document does not invalidate the payload");
+    assert!(!std::sync::Arc::ptr_eq(&first, &read_edit), "an imported document does");
+}
+
 #[test]
 fn the_trigger_trace_lists_an_embedded_trigger_distinctly() {
     let fixture = Fixture::new();

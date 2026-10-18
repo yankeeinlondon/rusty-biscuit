@@ -67,6 +67,9 @@ pub(super) struct StepComposeContext<'a> {
     pub(super) document_shell_values: Option<darkmatter::markdown::compose::shell_expansion::template::DocumentShellValues>,
     /// Approval-time position and inputs preserved at each execution.
     pub(super) deferred_shell_roots: darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots,
+    /// The `loop` values of the innermost looping container around the
+    /// document; `None` outside every loop.
+    pub(super) loop_values: Option<claudine::composition::LoopAmbient>,
 }
 
 impl<'ctx> StepComposeContext<'ctx> {
@@ -298,6 +301,7 @@ pub(super) fn step_prepare_options(
         defer_schema_verdict: false,
         invocation_context: Some(ctx.invocation.clone()),
         document_epoch: Some(document_epoch),
+        loop_values: ctx.loop_values.clone(),
         ..PrepareOptions::new(ctx.file_resolution_context.clone())
     }
     .with_layered_overrides(overrides)

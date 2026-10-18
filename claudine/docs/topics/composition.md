@@ -934,7 +934,7 @@ The seam sits in `wrap::composition::pipeline::execute_composition_request_inner
 
 **Dry run fires no lifecycle events.** Because the seam is ahead of lifecycle dispatch, `initialize`/`blocked`/`finalize` never fire, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a run the user asked to be a rehearsal, and no dynamic `proxy` route can be traversed. For `inline-compose` the source file is likewise **never mutated** (`last_updated` is untouched).
 
-Turning dry run into lifecycle simulation is an explicit non-goal. **Shell work runs for real:** `::shell` directives, `$( … )` expansions, and sequence `shell:` tasks can edit files, send messages, or perform other external work. For example, a sequence dry-run containing `shell: just commit` can commit. Use a disposable directory and commands safe to execute when inspecting a sequence.
+Turning dry run into lifecycle simulation is an explicit non-goal. **Composition shell work runs for real:** `::shell` directives and `$( … )` expansions can edit files, send messages, or perform other external work. Sequence `shell:` tasks are rendered, not run, unless `--dry-run-shell` is also given (see [Sequence Dry Run](#sequence-dry-run)). Use a disposable directory and commands safe to execute when inspecting a document.
 
 ### Output Split
 
@@ -960,6 +960,16 @@ This is the gate working correctly — if production would prompt, the dry-run f
 ### Sequence Dry Run
 
 `sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a `=== Document N of M ===` divider before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately (fail-fast), exiting non-zero without launching any provider.
+
+A sequence dry run never executes its tasks or its control flow:
+
+- `shell:` tasks report `` rendered (dry-run): would run `<command>` `` with the approved bytes, or the template of a template-mode command, and publish nothing. `side_effect:` tasks are rendered with their authored action and arguments, templates unresolved, and never write a file or apply a runtime `set`.
+- Each loop body is visited once, with pass 1's `loop.*` values; no gate, condition, or action is evaluated.
+- Task `when:` guards are shown, not evaluated, and the task is rendered.
+- No lifecycle event fires and no `prep` target runs; a literal target is listed as `prep target @helper.md (not run in a dry run)`.
+- The run ends with `Sequence previewed (dry-run): N step(s) rendered, none run`.
+
+`--dry-run-shell` (only with `--dry-run`; alone it is a usage error, exit `2`) runs each `shell:` task once during that single preview pass. Its commands have real effects (a `git add` stages), but no provider launches, no `side_effect:` task runs, and no loop repetition or lifecycle event is turned back on. [Sequences — Dry run](flow-control/sequences.md#dry-run) shows each rendered line.
 
 Any composition error (schema validation failure, missing file, denied shell command, writability failure) is rendered to **stderr** and exits the process non-zero, leaving stdout clean.
 
@@ -1517,7 +1527,7 @@ State is owned in four layers, which is what makes "what survives a handoff" ans
 
 A failed handoff never half-activates the target: the source stays active for diagnostic attribution, the failure follows the normal event-aware routing, and no duplicate terminal or `finalize` event is synthesized.
 
-**The chain records handoffs, not requests.** A request refused because its target does not resolve, its `with:` overlay fails to evaluate, it would revisit a document already in the chain, or it would exceed the hop limit adds nothing to the chain, so a later legitimate request is never refused against it. A committed handoff adds exactly one entry, and every owner adopts what it commits. Adoption does not depend on the target succeeding: a target that then fails its `initialize` or validation stays in the chain. For example, a looping source whose iteration 1 proxies to itself is refused as a cycle; under `loop.fail_fast: false`, iteration 2 can still proxy to `target.md`, and the chain reads `loop.md -> target.md`.
+**The chain records handoffs, not requests.** A request refused because its target does not resolve, its `with:` overlay fails to evaluate, it would revisit a document already in the chain, or it would exceed the hop limit adds nothing to the chain, so a later legitimate request is never refused against it. A committed handoff adds exactly one entry, and every owner adopts what it commits. Adoption does not depend on the target succeeding: a target that then fails its `initialize` or validation stays in the chain. For example, a document whose first attempt proxies to itself is refused as a cycle and fails that attempt; a later request in the same chain, such as one made after a `retry` from `failure`, can still proxy to `target.md`, and the chain reads `loop.md -> target.md`.
 
 ### Entry reasons and the stage matrix
 
@@ -1808,7 +1818,7 @@ Execution has two phases:
 1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is audited. First-position commands with known values can be approved byte-for-byte; later tasks, late values, and container terminal-event placeholders require typed shape approval. Retries and newly prepared sources must stay within the invocation’s original approval set.
 2. **Just-in-time execution** captures each step's (or group leg's) own environment, then re-reads and composes each task when its turn begins, so prior inline writes and runtime mutations are visible. A task whose approved command resolves to different text under its own environment is refused before it runs (see [One Environment per Document](#one-environment-per-document)).
 
-`seq.outputs` holds committed native child results: strings for primitive tasks, arrays for nested sequences, and dictionaries keyed by group leg name. Groups run concurrently with optional `max_parallel`; ordered work uses `sequence:`. Each leg has a private in-memory snapshot and mutations merge in declaration order. Default group `fail_fast: true` withholds leg results and mutations on failure; `false` handles leg failures and publishes after successful finalization. **This is not a filesystem transaction:** siblings share files, and performed shell/provider work is never rolled back. Groups reject inline write-back collisions during preflight. Group loops and persisted checkpoint/resume remain planned.
+`seq.outputs` holds committed native child results: strings for primitive tasks, arrays for nested sequences, and dictionaries keyed by group leg name. Groups run concurrently with optional `max_parallel`; ordered work uses `sequence:`. Each leg has a private in-memory snapshot and mutations merge in declaration order. Default group `fail_fast: true` withholds leg results and mutations on failure; `false` handles leg failures and publishes after successful finalization. **This is not a filesystem transaction:** siblings share files, and performed shell/provider work is never rolled back. Groups reject inline write-back collisions during preflight. Groups and sequences loop like documents ([Composition Looping](flow-control/looping.md)); persisted checkpoint/resume remains planned.
 
 A root `prompt` property selects inline closure behavior for the final active target. Step/task `prompt` values are file references; the two meanings occur at different levels. External YAML uses `sequence:` directly or kinded `task`/`group` documents. The retired external `kind: sequence` plus `list:` form is not accepted.
 

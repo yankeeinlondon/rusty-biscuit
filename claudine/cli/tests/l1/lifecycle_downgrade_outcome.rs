@@ -393,16 +393,16 @@ fn sequence_step_downgrade_halts_on_unhandled_failure() {
     assert_eq!(run.reason_count(), 1, "{}", run.output);
 }
 
-fn looping_doc(fail_fast: bool) -> String {
+fn looping_doc() -> String {
     format!(
-        "---\ncounter: 0\nloop:\n    while: \"counter < 2\"\n    action: \"increment(counter)\"\n    fail_fast: {fail_fast}\nsuccess:\n    - append_line: [\"events.log\", \"iteration {{{{ loop.count }}}}\"]\n    - error: \"{REASON}\"\n---\nbody\n"
+        "---\ncounter: 0\nloop:\n    while: \"counter < 2\"\n    action: \"increment(counter)\"\nsuccess:\n    - append_line: [\"events.log\", \"iteration {{{{ loop.count }}}}\"]\n    - error: \"{REASON}\"\n---\nbody\n"
     )
 }
 
 #[test]
-fn loop_iteration_downgrade_halts_under_fail_fast_true() {
+fn loop_iteration_downgrade_halts_by_default() {
     let fixture = fixture("downgrade-loop-fail-fast");
-    let doc = write_doc(&fixture, "loop.md", &looping_doc(true));
+    let doc = write_doc(&fixture, "loop.md", &looping_doc());
 
     let run = compose(&fixture, &doc);
 
@@ -417,31 +417,6 @@ fn loop_iteration_downgrade_halts_under_fail_fast_true() {
     assert_eq!(run.count("iteration failed"), 1, "{}", run.output);
     assert_eq!(run.error_line_count(), 0, "{}", run.output);
     assert_eq!(run.reason_count(), 1, "{}", run.output);
-}
-
-#[test]
-fn loop_iteration_downgrade_reaches_gate_under_fail_fast_false() {
-    let fixture = fixture("downgrade-loop-continue");
-    let doc = write_doc(&fixture, "loop.md", &looping_doc(false));
-
-    let run = compose(&fixture, &doc);
-
-    // Each failed iteration still reaches the gate, whose action advances the
-    // counter, so the condition ends the loop after the counter-2 iteration.
-    assert_eq!(
-        lines_of(&fixture.cwd().join("events.log")),
-        ["iteration 1", "iteration 2", "iteration 3"],
-        "{}",
-        run.output
-    );
-    assert_eq!(run.code, Some(1), "{}", run.output);
-    assert_eq!(
-        run.reason_count(),
-        3,
-        "each failed iteration reports its error once: {}",
-        run.output
-    );
-    assert_eq!(run.error_line_count(), 0, "{}", run.output);
 }
 
 #[cfg(unix)]

@@ -598,7 +598,8 @@ fn assert_referenced_lifecycle_mode(event: &str, form: &str, policy: &str) {
         assert!(sequence.runs().is_empty(), "exact-only refusal precedes the sequence");
     } else {
         assert!(outcome.success, "{}", outcome.stderr);
-        let expected = if matches!(event, "start" | "success" | "finalize") {
+        // A looping prompt document runs its loop gate as a sequence step.
+        let expected = if matches!(event, "start" | "success" | "finalize" | "loop") {
             vec![argv(&["prior"]), argv(&["probe", "a b"])]
         } else { vec![argv(&["prior"])] };
         assert_eq!(sequence.runs(), expected);
@@ -935,7 +936,8 @@ fn assert_byte_grammar(event: &str, form: &str, position: &str) {
         assert!(sequence.runs().is_empty(), "refusal must precede all sequence effects");
     } else {
         assert!(outcome.success, "{}", outcome.stderr);
-        let expected = if matches!(event, "start" | "success" | "finalize") || (event == "loop" && position == "standalone") { vec![argv(&["probe"])] } else { vec![] };
+        // A looping prompt document runs its loop gate wherever it runs.
+        let expected = if matches!(event, "start" | "success" | "finalize" | "loop") { vec![argv(&["probe"])] } else { vec![] };
         assert_eq!(sequence.runs(), expected, "inactive stacks are audited without execution");
     }
 }

@@ -513,22 +513,6 @@ fn a_reference_cycle_reports_every_hop() {
 }
 
 #[test]
-fn a_group_carrying_loop_is_rejected() {
-    let workspace = CliProcessFixture::named("sequence-errors-cli");
-    let doc = write(
-        &workspace,
-        "seq.md",
-        "---\nsequence:\n  - name: one\n    group:\n      name: looper\n      loop:\n        while: \"true\"\n      tasks:\n        - name: member\n          shell: echo x\n---\nBody.\n",
-    );
-
-    let stderr = run_and_flatten(&workspace, &doc, &[]);
-    assert!(
-        stderr.contains("group `loop`"),
-        "commit semantics are unratified, so this is blocked rather than invented; stderr:\n{stderr}"
-    );
-}
-
-#[test]
 fn a_shell_command_depending_on_outputs_needs_a_template_approval() {
     let workspace = CliProcessFixture::named("sequence-errors-cli");
     // `outputs` does not exist at preflight, so the command can be approved

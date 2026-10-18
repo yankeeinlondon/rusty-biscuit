@@ -6,6 +6,7 @@ use claudine::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContex
 use claudine::composition::lifecycle::context::LifecycleErrorInfo;
 use claudine::composition::lifecycle::executor::StackExecutionContext;
 use claudine::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};
+use claudine::composition::looping::{ContainerPassEnd, LoopFrame, PassCheckpoint, container_state, finish_container_pass};
 use color_eyre::eyre::Result;
 
 pub(super) struct RootRun<'a> {
@@ -14,9 +15,16 @@ pub(super) struct RootRun<'a> {
     pub(super) runtime: Arc<RuntimeState>,
     pub(super) started: bool,
     pub(super) approved: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
+    /// The task graph the first attempt discovered, which every retry runs.
+    pub(super) graph: Option<claudine::composition::PreflightGraph>,
     pub(super) pending: Option<ContainerEventDecision>,
     pub(super) child_error: Option<LifecycleErrorInfo>,
     pub(super) proxy_location: Option<claudine::composition::ActionLocation>,
+    /// The root's loop, when it repeats; allocated before `initialize`.
+    pub(super) frame: Option<LoopFrame>,
+    /// The runtime state the current pass entered `start` with; `None`
+    /// until a pass enters. A retry of the pass returns to it.
+    pub(super) checkpoint: Option<PassCheckpoint>,
 }
 
 impl<'a> RootRun<'a> {
@@ -25,9 +33,75 @@ impl<'a> RootRun<'a> {
         context: &'a LifecycleRuntimeContext<'a>,
         stack: StackExecutionContext<'a>,
         runtime: Arc<RuntimeState>,
+        frame: Option<LoopFrame>,
     ) -> Self {
         Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)),
-            stack, runtime, started: false, approved: None, pending: None, child_error: None, proxy_location: None }
+            stack, runtime, started: false, approved: None, graph: None, pending: None, child_error: None, proxy_location: None,
+            frame, checkpoint: None }
+    }
+
+    /// The `loop` values of the pass being run, when the root loops.
+    pub(super) fn loop_values(&self) -> Option<claudine::composition::LoopAmbient> {
+        self.frame.as_ref().map(LoopFrame::ambient)
+    }
+
+    /// Report a looping root's pass result, its own slice of the cumulative
+    /// outputs, before the pass's terminal event reads it.
+    pub(super) fn record_pass(&mut self, exit_code: i32) {
+        let Some(frame) = self.frame.as_mut() else { return };
+        let outputs = self.runtime.snapshot().outputs;
+        let start = self.checkpoint.as_ref().map_or(0, PassCheckpoint::outputs).min(outputs.len());
+        frame.record_pass(serde_json::Value::Array(outputs[start..].to_vec()), exit_code);
+    }
+
+    /// The process exit code of a root loop a `break` ended, with its
+    /// summary line printed; `None` when no break is pending.
+    pub(super) fn broken_exit_code(&self) -> Option<i32> {
+        let broken = self.frame.as_ref()?.pending_break()?;
+        self.stack.emitter.emit_info(&broken.summary(), self.stack.term);
+        Some(i32::from(broken.code))
+    }
+
+    /// Settle a looping root's successful pass: its `success` event and
+    /// `finalize`, or `finalize` alone when a `break` is pending.
+    pub(super) fn settle_pass(&mut self) -> Result<ContainerEventDecision> {
+        if self.frame.as_ref().is_some_and(|frame| frame.pending_break().is_some()) {
+            self.runner.guard_mut().defuse();
+            return self.event(LifecycleSignal::Finalize, None);
+        }
+        self.event(LifecycleSignal::Success, None)
+    }
+
+    /// Record the runtime state a new pass enters `start` with. A retried
+    /// pass keeps the checkpoint it entered with.
+    pub(super) fn enter_pass(&mut self) {
+        if self.frame.is_some() && self.checkpoint.is_none() {
+            self.checkpoint = Some(PassCheckpoint::take(&self.runtime));
+        }
+    }
+
+    /// After a looping root's pass settled through `finalize`: run its gate,
+    /// condition, cap, and action, and prepare the next pass's `start`.
+    ///
+    /// ## Errors
+    ///
+    /// The loop owner's failure; nothing more runs for the pass.
+    #[allow(clippy::result_large_err)]
+    pub(super) fn finish_pass(&mut self) -> std::result::Result<ContainerPassEnd, CompositionError> {
+        let Self { frame, runner, stack, runtime, checkpoint, .. } = self;
+        let frame = frame.as_mut().expect("only a looping root finishes passes");
+        let ambient = frame.ambient();
+        let state = container_state(stack.frontmatter, runtime);
+        let gate = StackExecutionContext {
+            err: None, frontmatter: &state, loop_values: Some(&ambient),
+            ..stack.with_signal(LifecycleSignal::Loop)
+        };
+        let end = finish_container_pass(frame, runner.guard_mut(), &gate, runtime)?;
+        if matches!(end, ContainerPassEnd::Continue) {
+            runner.begin_next_pass();
+            *checkpoint = None;
+        }
+        Ok(end)
     }
 
     pub(super) fn event(&mut self, mut signal: LifecycleSignal, mut error: Option<LifecycleErrorInfo>) -> Result<ContainerEventDecision> {
@@ -46,7 +120,9 @@ impl<'a> RootRun<'a> {
                 live.extend(self.runtime.snapshot().mutations);
             }
             let disabled = claudine::composition::lifecycle::executor::DisabledShellRunner;
-            let stack = StackExecutionContext { signal, err: error.as_ref(), shell_runner: if self.started { self.stack.shell_runner } else { &disabled }, ..self.stack.with_signal(signal) };
+            let ambient = self.loop_values();
+            let stack = StackExecutionContext { signal, err: error.as_ref(), shell_runner: if self.started { self.stack.shell_runner } else { &disabled },
+                loop_values: ambient.as_ref().or(self.stack.loop_values), ..self.stack.with_signal(signal) };
             let result = self.runner.execute_event(signal, &stack);
             if let Some(claudine::composition::lifecycle::executor::StackControl::Proxy { location, .. }) = &result.outcome.control {
                 self.proxy_location = Some(location.clone());
@@ -96,7 +172,18 @@ impl<'a> RootRun<'a> {
 
     pub(super) fn retry(&mut self, delay: std::time::Duration, overlay: &indexmap::IndexMap<String, serde_json::Value>) -> Result<()> {
         self.started = false;
-        self.runtime.clear_outputs();
+        // The failure being retried beat any `break` its pass fired.
+        if let Some(frame) = &self.frame { frame.discard_break(); }
+        // A looping root replaces only the failed attempt of this pass: its
+        // outputs and runtime writes return to the pass's entry. Without a
+        // loop the attempt's results reset and its writes survive.
+        match (&self.checkpoint, self.frame.as_mut()) {
+            (Some(checkpoint), Some(frame)) => {
+                frame.retry_pass();
+                checkpoint.restore(&self.runtime);
+            }
+            _ => self.runtime.clear_outputs(),
+        }
         if let Err(error) = self.runtime.set_batch(self.stack.effect_engine, overlay, self.stack.frontmatter) {
             let info = LifecycleErrorInfo::from_error_or_action("retry", &error);
             self.event(LifecycleSignal::Blocked, Some(info))?;

@@ -67,7 +67,10 @@ and every node carries its authored `LifecyclePath`
 bundle expands in a fixed canonical order at parse time. Every retired spelling
 (the old stack/aggregator keys, the speech-ordering flag, communication
 `message`/`sound`/`route` parameters, and the retired loop-value names) is
-`CompositionError::RemovedGrammar` with a replacement hint. The parser
+`CompositionError::RemovedGrammar` with a replacement hint. The directive
+verbs live in one list (`signatures.rs::LIFECYCLE_CONTROL_VERBS`); `prep` is
+the one directive that returns (`LifecycleControlAction::returns`), so it is
+exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser
 slice (`lifecycle/{parse,action_shape,actions,validate,signatures,source_map}.rs`)
 is lift-ready: `lib/tests/l1/lifecycle_lift_ready_guard.rs` fails if it names a
 Claudine runtime type, so the caller injects the effect catalog
@@ -81,6 +84,67 @@ it over the retained proxy overlay (retry wins a shared key). The retried
 attempt's preflight read only looks at it and `materialize_harness_prompt`
 consumes it, so it applies to exactly one transition; resume and proxy
 adoption clear it.
+
+**One loop for every primitive.** `looping/frame.rs::LoopFrame` is the
+nearest-loop frame, allocated before `initialize` (which reads pass 1's
+values): cap precedence override > authored > 100, `is_last` is `count ==
+max` only, and `decide` reads the condition before classifying the cap
+(`LoopDecision::{Complete, Continue, Exhausted}`); actions stage only on
+`Continue`. `record_pass` runs before a pass's terminal event (that event,
+`finalize`, the gate, and the condition read the pass's own typed result:
+text, sequence slice array, group dictionary), and `retry_pass` restores the
+previous result for a retried attempt. The document engine
+(`execute_loop_with_lifecycle`) and the containers (`sequence/task/sequence.rs`,
+`group.rs`, CLI `wrap/sequence/container.rs::RootRun`) share it; containers
+run `looping/container.rs::finish_container_pass` after `Finished { failed:
+false }` and `ContainerRunner::begin_next_pass`. A looping container's retry
+restores `PassCheckpoint` (mutations and outputs at pass entry); a
+non-looping one keeps its old rule. Loop-level fail-fast is gone (no
+`CLAUDINE_FAIL_FAST` read): a failed pass ends the loop before its gate.
+Gate/condition/action failures are `LifecycleLoopGateFailed`/
+`LoopEvaluationFailed`/`LoopActionWriteRefused` with the pass. A `prompt:`
+task whose document declares `loop:` runs through
+`prepare_and_run_active_document` (`task_run.rs::run_looping_document`), and
+`PromptTaskRequest.loop_values`/`StepComposeContext.loop_values` carry an
+enclosing container's `loop.*` into non-looping documents.
+
+**`break`, `prep`, dry run.** A `break` records `LoopBreak { reason, code }`
+in its nearest loop's `LoopBreakSlot` (`LoopAmbient.breaks`, shared by every
+page whose innermost loop it is; `LoopFrame::pending_break`) and ends its
+event like `stop`; outside every loop it is `LifecycleBreakWithoutLoop`.
+Containers stop starting children while the slot is pending, `defuse()` the
+guard, run `finalize` once, publish partial results; the owner ends with
+`ContainerPassEnd::Broken`/`LoopExecutionResult::broken`. Group legs get
+`with_isolated_breaks()` and the fold forwards the first succeeded leg's
+break in declaration order; a failure or retry `discard()`s it. The code is
+the exit status only for the root loop (`RootRun::broken_exit_code`;
+`prep.rs` when `step_scope` is `None`). `PromptRunOutcome.withheld` keeps an
+unlaunched document out of `seq.outputs`. `prep` is a returning action
+(`executor.rs::run_prep`) through the thread-installed
+`lifecycle::prep::PrepRunner` (`install`, `inherit` for group workers, call
+chain `enter_call`, one cycle domain with proxies); the CLI runner
+(`commands/prep_target.rs`, installed by compose/inline-compose/sequence)
+re-enters `run_composition_inner`/`run_sequence_target` in process with the
+overlay as data setters. A failed call is `LifecyclePrepFailed` (a dispatch
+failure `no_error` tolerates). Not built: `kind: group` targets and static
+approval inventory of `prep` targets. `--dry-run` renders `shell:` and
+`side_effect:` tasks (`PrimaryOutcome::withheld`), shows guards unevaluated,
+previews one pass with a frame for `loop.*` (`dry_run_loop_note`), and lists
+literal `prep` targets (`LifecycleConfig::literal_prep_targets`);
+`--dry-run-shell` (clap `requires = "dry_run"`) runs the shells once.
+
+**Loop configuration.** Every owner's `loop:` parses through
+`looping/config.rs`: `resolve_loop_config` for a document,
+`parse_loop_block(value, LoopOwner, &LoopLocation)` for a group or sequence
+(controls plus the gate, via `lifecycle::parse_loop_gate`). Errors are located
+`LoopInvalid { source_path, property, message }` with `property` rooted at the
+block (`tasks[2].loop.max`); `loop.fail_fast` is `RemovedGrammar`;
+`on_rate_limit` is document-only (`LoopRateLimitPolicyNotAccepted`). A
+templated `max` stays in `LoopConfig::max_template` until
+`resolve_templated_loop_max` resolves it once (the engine refuses an
+unresolved one). `check_loop_config_keys` runs before the launch's schema
+verdict so key typos get the loop parser's did-you-mean.
+
 The `claudine` executable intercepts Playa scheduler/delegate modes and the
 biscuit-speaks preparation-helper mode before normal CLI bootstrap, so queued
 audio is serialized and survives the requesting Claudine process.
@@ -214,7 +278,10 @@ primitive tasks; terminal event placeholders require templates. The graph's
 `root_lifecycle` is installed on the root guard after the audit. Lifecycle
 clones share settled authorization; a reread graph is settled only against the
 original invocation's approval, never by prompting. Root retries pass the same
-closed membership into graph approval; rebuilding the graph cannot reopen approval. Preserve normalized exact
+closed membership into graph approval; rebuilding the graph cannot reopen approval,
+and the retry runs the first attempt's graph (`RootRun::graph`). Nested preparation
+(`prepare_nested_sequence`/`prepare_nested_group`) rereads container events and
+`variables` but keeps the frozen node's children and order. Preserve normalized exact
 command keys, including multiple shell-value commands. Catalog cycle identity
 includes the selected group name, so distinct entries in one catalog are legal;
 diagnostics retain each entry as `catalog#name`. First position propagates to
@@ -229,7 +296,21 @@ may themselves be containers. Groups reject `execution:` (concurrency is implici
 unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
 Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
-grammar. The CLI rejects `--fail-fast` before source loading, keeps explicit
+grammar. Container `loop:` (group object, sequence-document root, inline
+nested sequence task) is validated by `sequence/grammar.rs::container_loop`
+and frozen on `PreflightSequence`/`PreflightGroup.loop_config`
+(`PreflightLoop`, config plus location; the gate goes into the container's
+`loop` stack so preflight approves its shells); the root's is parsed by the
+CLI (`root_loop_frame`). Task `when:` (beside an executable only; a body
+step's is `WhenMisplaced`) is evaluated at the task's turn by
+`sequence::task::evaluate_task_guard` (read-only, task-setup scope): nested
+children and legs in `TaskExecution::run_guarded` (a leg in its worker,
+against the group-start member state), a root step in
+`iterate.rs::run_one_step` before it composes (`task_run.rs::root_step_guard`,
+then `run_admitted`). False is `TaskOutcome.skipped` (null result, nothing
+published); a raising guard is `TaskWhenEvaluationFailed`. Sequence-root
+`when:` and `loop` on any other task are permanent errors. JSON-family sources reject duplicate keys in
+`sequence/data.rs` (`DuplicateScan`) before the `serde_json::Value` conversion. The CLI rejects `--fail-fast` before source loading, keeps explicit
 provider `--` tails opaque, and no longer injects `CLAUDINE_FAIL_FAST`.
 `cancelled` is a cleanup-only lifecycle event. Presence, including `[]` or
 `{}`, opts running group legs into sibling-failure cancellation; null is
@@ -242,8 +323,7 @@ never `failure` recovery. `stop` ends only the cancellation stack. Recovery in
 the following finalize raises the typed cancellation-recovery error without
 launching work; cleanup errors stay secondary and preserve cancellation/130.
 Loop initialization checks cancellation before catch controls, and cancelled
-iterations terminate before handoffs, loop gates, or mutations regardless of
-`fail_fast`. Timeouts remain failures; cleanup timeouts remain cleanup errors. Root sequence
+iterations terminate before handoffs, loop gates, or mutations. Timeouts remain failures; cleanup timeouts remain cleanup errors. Root sequence
 Ctrl-C exits 130 on every OS; native Windows provider status `0xC000013A` is
 normalized to 130. See [Sequences → Cancellation](topics/flow-control/sequences.md#cancellation).
 Sibling cancellation uses `composition.cancelled` with `err.detail.group`,
@@ -264,6 +344,17 @@ through data overrides so canonical rereads do not fire container events again. 
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
 Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
+SimplifiedSchema inlines named types (no recursion), so `lifecycle.yaml`
+types two container levels (`task`/`group`, then `step-2`/`task-2`/`group-2`),
+each with `cancelled: cancelled-stack`; other container events stay
+shape-only, because every inlined full `stack` slows each validation
+(see [Schemas](topics/schemas.md#sequence-containers)). The
+`cancelled-*` family is unrolled to the parser's `MAX_CONDITIONAL_DEPTH` (5)
+with no conditional at level 6; its conditionals use one
+`<pattern::^(?:then|else)$>` key, since literal `then`+`else` inline each body
+twice and grow the schema 2^n (measured 10x per validation at five levels).
+DMLS neither completes pattern keys nor resolves values below them, which is
+why `initialize-*` keeps literal keys and three typed levels.
 
 ## Lexical sequence bindings
 

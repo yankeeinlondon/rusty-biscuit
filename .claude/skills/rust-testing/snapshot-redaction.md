@@ -1,59 +1,36 @@
 # Snapshot Redaction
 
-Snapshots become noisy when they include host-specific or time-varying values. Redact those inputs before snapshotting.
+Part of the `rust-testing` skill; [SKILL.md](SKILL.md) is the index.
 
-## Common Redaction Targets
+A snapshot must hold on every OS and in a CI archive cell, so redact
+host-specific and time-varying values before snapshotting: temp directories,
+`$HOME`-derived paths, timestamps, UUIDs and session IDs, process IDs, ANSI
+sequences, and generated filenames. Use string helpers for text and insta
+redaction selectors for structured output.
 
-- temp directories
-- `$HOME`-derived paths
-- timestamps
-- UUIDs and session IDs
-- ANSI escape sequences
-- generated filenames
+## Path redaction traps
 
-## String Redaction
+- **Replace both the given and the canonicalized path, longest first.** macOS
+  hands out `/var/folders/…` temp dirs and reports them back as
+  `/private/var/folders/…`; replacing only one form, or the shorter one first,
+  leaves a stray absolute prefix.
+- **Recognize native and portable spellings** so Windows separators and
+  verbatim-path simplification cannot leave an absolute fixture path behind.
+- **Normalize the binary name in help output.** Clap derives the usage line
+  from `argv[0]`, which carries `.exe` on Windows.
 
-If the snapshot target is plain text, pre-process it first:
+Reference helpers: `redact_workspace_paths`, `redact_temp_home`, and
+`redact_session_id` in `claudine/cli/tests/common/wrap.rs`; `redact_base_paths`
+and `normalize_help_output` in `sniff/cli/tests/l1/snapshots.rs`.
 
-```rust
-fn redact_temp_home(input: &str) -> String {
-    input.replace("/var/folders/xyz/tmp", "<temp>")
-}
+## TUI buffer snapshots
 
-assert_snapshot!(redact_temp_home(&output));
-```
+Use a fixed terminal size, disable color unless the snapshot needs style data,
+and snapshot a cloned `Buffer`, not the terminal handle
+([tui-testing.md](tui-testing.md)).
 
-## JSON Redaction
+## Reviewing changes
 
-Use Insta redaction selectors for structured output:
-
-```rust
-use insta::assert_json_snapshot;
-
-assert_json_snapshot!(value, {
-    ".id" => "[id]",
-    ".session_id" => "[session]",
-    ".timestamp" => "[timestamp]",
-    ".paths[].home" => "[home]",
-});
-```
-
-## TUI Buffer Snapshots
-
-For Ratatui `Buffer` snapshots:
-
-- prefer deterministic terminal sizes
-- disable color when the snapshot does not need style data
-- snapshot cloned buffers, not terminal handles
-
-## Review Workflow
-
-Use:
-
-```bash
-cargo insta pending-snapshots
-cargo insta review
-cargo insta accept
-```
-
-Do not accept snapshots blindly. First confirm the change is a real output improvement rather than a temp-path or timestamp regression.
+Never accept a changed snapshot to go green. Confirm the diff is a real output
+change rather than a leaked temp path or timestamp, and run moved snapshots
+with `INSTA_UPDATE=no` ([consolidated-binaries.md](consolidated-binaries.md)).

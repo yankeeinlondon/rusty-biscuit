@@ -1220,12 +1220,10 @@ fn item_fields_shadow_document_globals() {
 // -- Sequence Plus: characterization + clean-break guardrails --------------
 //
 // These pin the deliberate removals of the Sequence Plus clean break: the
-// retired root overlay names, the external `list:` shape, and group `loop`.
-// Each was authored `#[ignore]`d in Phase 1 against behavior that did not yet
-// exist, then un-ignored by the phase that implemented the removal — overlay
-// names and `list:` in Phase 3, group `loop` in Phase 5. All now run in the
-// default suite, so a regression that reinstates any retired name or shape
-// fails `just test` rather than passing silently.
+// retired root overlay names and the external `list:` shape, plus the refusal
+// of a group `loop` until container loops run. A regression that reinstates
+// a retired name or shape, or runs a group loop once, fails `just test`
+// rather than passing silently.
 
 mod clean_break {
     use super::*;
@@ -1297,14 +1295,9 @@ mod clean_break {
         );
     }
 
-    /// Group execution without `loop` is in scope, but group-loop commit
-    /// semantics remain unratified (spec Open Questions), so a group carrying
-    /// `loop` must be rejected with a typed, actionable error rather than
-    /// executed. Groups are parsed by the Phase 5 preflight walk, which is
-    /// where the rejection lands — plan resolution stays shape-agnostic about
-    /// a step's executable value.
+    /// A valid group `loop` passes plan resolution: the group repeats.
     #[test]
-    fn group_loop_rejected() {
+    fn group_loop_is_accepted() {
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -1322,19 +1315,8 @@ mod clean_break {
             )],
             "Prompt",
         );
-        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
-            .expect("the plan itself is well-formed")
-            .expect("the fixture declares a sequence");
-        let error = super::preflight::build_preflight_graph(&plan, &source, &crate::test_support::context_for(&source.resolved_path))
-            .expect_err("a group carrying `loop` must be rejected");
-        assert!(
-            matches!(
-                &error,
-                CompositionError::SequenceUnsupportedConstruct { construct, .. }
-                    if construct.contains("group `loop`")
-            ),
-            "the rejection must be typed and name the construct, got: {error}",
-        );
+        resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
+            .expect("a group carrying a valid `loop` resolves");
     }
 }
 
@@ -2283,6 +2265,95 @@ mod container_grammar {
         assert!(plan.steps[0].state.extra.is_empty());
     }
 
+    /// The well-formed spelling of every action `cancelled` forbids.
+    fn forbidden_in_cancelled() -> [(&'static str, Value); 8] {
+        [
+            ("retry", json!({"retry": 2})),
+            ("resume", json!({"resume": "continue"})),
+            ("proxy", json!({"proxy": "@prompts/next.md"})),
+            ("prep", json!({"prep": "@prompts/next.md"})),
+            ("skip", json!({"skip": null})),
+            ("error", json!({"error": "stopped"})),
+            ("break", json!({"break": "done"})),
+            ("defer", json!({"defer": "5m"})),
+        ]
+    }
+
+    #[derive(Clone, Copy)]
+    enum Container {
+        Sequence,
+        Group,
+    }
+
+    /// One sequence item whose containers nest in `chain` order, outermost
+    /// first; the innermost owns `cancelled`.
+    fn nested_item(chain: &[Container], cancelled: Value) -> Value {
+        let (innermost, outer) = chain.split_last().expect("at least one container");
+        let depth = chain.len();
+        let wrap = |container: Container, level: usize, child: Option<Value>, cancelled: Option<Value>| {
+            let name = format!("level-{level}");
+            let children = json!([child.unwrap_or_else(|| json!({"name": "leaf", "sequence": []}))]);
+            let mut body = match container {
+                Container::Sequence => json!({"name": name, "sequence": children}),
+                Container::Group => json!({"name": name, "group": {"name": format!("group-{level}"), "tasks": children}}),
+            };
+            if let Some(cancelled) = cancelled {
+                match container {
+                    Container::Sequence => body["cancelled"] = cancelled,
+                    Container::Group => body["group"]["cancelled"] = cancelled,
+                }
+            }
+            body
+        };
+        outer.iter().enumerate().rev().fold(wrap(*innermost, depth, None, Some(cancelled)), |child, (index, container)| {
+            wrap(*container, index + 1, Some(child), None)
+        })
+    }
+
+    /// Every forbidden verb in the innermost `cancelled` of `chain` fails plan
+    /// normalization, which runs before the root `initialize` and every task;
+    /// `[stop]` and a permitted action are accepted at the same site.
+    fn assert_innermost_cancelled_checked(chain: &[Container]) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sequence.md");
+        for (verb, action) in forbidden_in_cancelled() {
+            let item = nested_item(chain, json!([action]));
+            let error = normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true)
+                .expect_err(verb);
+            let message = error.to_string();
+            assert!(message.contains("cancelled") && message.contains(&format!("`{verb}`")), "{verb}: {message}");
+        }
+        for permitted in [json!(["stop"]), json!([{"warn": "x"}])] {
+            let item = nested_item(chain, permitted.clone());
+            normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true)
+                .unwrap_or_else(|error| panic!("{permitted}: {error}"));
+        }
+    }
+
+    /// The shipped schema types two container levels; the parser judges the
+    /// `cancelled` stack of a container at the third level and below.
+    macro_rules! deep_cancelled_is_checked {
+        ($($name:ident: [$($container:ident),+];)+) => {$(
+            #[test]
+            fn $name() {
+                assert_innermost_cancelled_checked(&[$(Container::$container),+]);
+            }
+        )+};
+    }
+
+    deep_cancelled_is_checked! {
+        deep_cancelled_seq_seq_seq: [Sequence, Sequence, Sequence];
+        deep_cancelled_seq_seq_group: [Sequence, Sequence, Group];
+        deep_cancelled_seq_group_seq: [Sequence, Group, Sequence];
+        deep_cancelled_seq_group_group: [Sequence, Group, Group];
+        deep_cancelled_group_seq_seq: [Group, Sequence, Sequence];
+        deep_cancelled_group_seq_group: [Group, Sequence, Group];
+        deep_cancelled_group_group_seq: [Group, Group, Sequence];
+        deep_cancelled_group_group_group: [Group, Group, Group];
+        deep_cancelled_fourth_level_seq: [Sequence, Sequence, Sequence, Sequence];
+        deep_cancelled_fourth_level_mixed: [Group, Sequence, Group, Sequence];
+    }
+
     #[test]
     fn sequence_task_shape_matrix_and_exclusivity() {
         let dir = TempDir::new().unwrap();
@@ -2402,5 +2473,199 @@ mod container_yaml_matrix {
                 }
             }
         }
+    }
+}
+
+// -- task `when`, container `loop`, and JSON-family duplicate keys ---------
+//
+// Grammar ahead of behavior: each construct is fully validated, and a valid
+// one is refused with its not-yet-supported error rather than ignored.
+
+mod task_guards_and_container_loops {
+    use super::*;
+    use crate::composition::LoopOwner;
+
+    fn origin() -> std::path::PathBuf {
+        std::path::PathBuf::from("/work/seq.md")
+    }
+
+    fn validate(task: Value) -> Result<(), CompositionError> {
+        grammar::validate_task_grammar(task.as_object().unwrap(), &origin(), "sequence[1]")
+    }
+
+    #[test]
+    fn a_valid_task_guard_is_accepted() {
+        validate(json!({"name": "a", "shell": "x", "when": "ready && n > 1"})).unwrap();
+    }
+
+    #[test]
+    fn an_invalid_task_guard_is_a_typed_error_for_every_shape() {
+        for (value, says) in [
+            (Value::Null, "must be an expression string, got null"),
+            (json!(true), "must be an expression string"),
+            (json!(3), "must be an expression string"),
+            (json!(["x"]), "must be an expression string"),
+            (json!({"x": 1}), "must be an expression string"),
+            (json!(""), "must not be an empty expression"),
+            (json!("   "), "must not be an empty expression"),
+            (json!("n >="), "is not a valid expression"),
+        ] {
+            let error = validate(json!({"name": "a", "shell": "x", "when": value})).unwrap_err();
+            assert!(
+                matches!(&error, CompositionError::TaskWhenInvalid { property, message, .. }
+                    if property == "sequence[1].when" && message.contains(says)),
+                "{value}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_misplaced_task_loop_names_where_the_loop_belongs() {
+        for (task, hint) in [
+            (json!({"name": "a", "shell": "x"}), "shell and side-effect tasks"),
+            (json!({"name": "a", "side_effect": {"append_line": ["f", "x"]}}), "shell and side-effect tasks"),
+            (json!({"name": "a", "prompt": "p.md"}), "frontmatter `loop:`"),
+            (json!({"name": "a", "task": "t.yaml"}), "references a task file"),
+            (json!({"name": "a", "group": "g.yaml"}), "that group file's object"),
+            (json!({"name": "a", "group": {"name": "g", "tasks": [{"name": "l", "shell": "x"}]}}), "on its group object"),
+            (json!({"name": "a", "sequence": "s.yaml"}), "at that document's root"),
+            (json!({"name": "a"}), "runs the document body"),
+        ] {
+            let mut task = task;
+            task["loop"] = json!({"until": "true"});
+            let error = validate(task.clone()).unwrap_err();
+            assert!(
+                matches!(&error, CompositionError::TaskLoopMisplaced { property, hint: said, .. }
+                    if property == "sequence[1].loop" && said.contains(hint)),
+                "{task}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_inline_sequence_loop_is_validated_and_accepted() {
+        let nested = |loop_value: Value| json!({"name": "a", "sequence": [{"name": "b", "shell": "x"}], "loop": loop_value});
+        validate(nested(json!({"until": "true"}))).unwrap();
+        let error = validate(nested(json!({}))).unwrap_err();
+        assert!(matches!(&error, CompositionError::LoopInvalid { property, .. } if property == "sequence[1].loop"), "{error}");
+        let error = validate(nested(json!({"until": "true", "on_rate_limit": "pause"}))).unwrap_err();
+        assert!(matches!(error, CompositionError::LoopRateLimitPolicyNotAccepted { owner: LoopOwner::Sequence, .. }), "{error}");
+    }
+
+    #[test]
+    fn a_group_object_loop_is_accepted_and_its_when_is_misplaced() {
+        let group = |key: &str, value: Value| {
+            let mut group = json!({"name": "g", "tasks": [{"name": "l", "shell": "x"}]});
+            group[key] = value;
+            json!({"name": "a", "group": group})
+        };
+        validate(group("loop", json!({"while": "true"}))).unwrap();
+        let error = validate(group("loop", json!({"while": "true", "fail_fast": true}))).unwrap_err();
+        assert!(matches!(error, CompositionError::RemovedGrammar { .. }), "{error}");
+        let error = validate(group("when", json!("true"))).unwrap_err();
+        assert!(matches!(&error, CompositionError::WhenMisplaced { property, .. } if property == "sequence[1].group.when"), "{error}");
+    }
+
+    #[test]
+    fn a_leg_guard_and_a_non_object_leg_are_located_inside_the_group() {
+        validate(json!({"name": "a", "group": {"name": "g", "tasks": [{"name": "l", "shell": "x", "when": "true"}]}})).unwrap();
+        let error = validate(json!({"name": "a", "group": {"name": "g", "tasks": [{"name": "l", "shell": "x", "when": 1}]}})).unwrap_err();
+        assert!(matches!(&error, CompositionError::TaskWhenInvalid { property, .. } if property == "sequence[1].group.tasks[0].when"), "{error}");
+        let error = validate(json!({"name": "a", "group": {"name": "g", "tasks": ["l"]}})).unwrap_err();
+        assert!(matches!(&error, CompositionError::SequenceGroupInvalid { problem, .. } if problem.contains("task 1 must be an object")), "{error}");
+    }
+
+    #[test]
+    fn a_sequence_root_rejects_when_and_accepts_a_valid_loop() {
+        let root = |key: &str, value: Value| json!({"sequence": [], key: value});
+        let error = grammar::validate_sequence_root(root("when", json!("true")).as_object().unwrap(), &origin()).unwrap_err();
+        assert!(matches!(&error, CompositionError::WhenMisplaced { property, .. } if property == "when"), "{error}");
+        grammar::validate_sequence_root(root("loop", json!({"until": "true"})).as_object().unwrap(), &origin()).unwrap();
+        let error = grammar::validate_sequence_root(root("loop", json!({"until": "true", "max": 0})).as_object().unwrap(), &origin()).unwrap_err();
+        assert!(matches!(&error, CompositionError::LoopInvalid { property, .. } if property == "loop.max"), "{error}");
+        grammar::validate_sequence_root(json!({"sequence": []}).as_object().unwrap(), &origin()).unwrap();
+    }
+
+    #[test]
+    fn when_is_a_task_option_not_step_state() {
+        // A step that runs the document body has no task to guard, so its
+        // `when` is never read as step data.
+        let error = normalize::normalize_plan(&[json!({"name": "a", "when": "true"})], SequenceSource::Inline, &origin(), true).unwrap_err();
+        assert!(matches!(&error, CompositionError::WhenMisplaced { property, .. } if property == "[0].when" || property.ends_with(".when")), "{error}");
+        for field in [ExecutableField::Prompt, ExecutableField::Shell, ExecutableField::SideEffect, ExecutableField::Group, ExecutableField::Task, ExecutableField::Sequence] {
+            assert!(reserved::allowed_task_options(field).contains(&"when"), "{field:?}");
+        }
+        assert_eq!(
+            [ExecutableField::Prompt, ExecutableField::Shell, ExecutableField::SideEffect, ExecutableField::Group, ExecutableField::Task, ExecutableField::Sequence]
+                .into_iter().filter(|field| reserved::allowed_task_options(*field).contains(&"loop")).collect::<Vec<_>>(),
+            vec![ExecutableField::Sequence],
+        );
+    }
+
+    #[test]
+    fn a_referenced_list_locates_task_errors_in_its_own_file() {
+        let data = std::path::PathBuf::from("/work/tasks.jsonl");
+        let error = normalize::normalize_plan_at(
+            &[json!({"name": "a", "shell": "x", "when": ""})],
+            SequenceSource::DataFile { path: data.clone() }, &origin(), true, "",
+        ).unwrap_err();
+        assert!(
+            matches!(&error, CompositionError::TaskWhenInvalid { source_path, property, .. } if source_path == &data && property == "[0].when"),
+            "{error}"
+        );
+    }
+}
+
+mod json_duplicate_keys {
+    use super::*;
+
+    fn load(file: &str, contents: &str) -> Result<data::LoadedDocument, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(file);
+        fs::write(&path, contents).unwrap();
+        data::load_document(&path)
+    }
+
+    fn duplicate(error: CompositionError) -> (String, String, Option<usize>) {
+        match error {
+            CompositionError::SequenceExternalLoad { source: SequenceLoadCause::DuplicateKey { key, path, line }, .. } => (key, path, line),
+            other => panic!("expected a duplicate-key load error, got {other}"),
+        }
+    }
+
+    #[test]
+    fn json_and_json5_reject_a_repeated_key_at_any_depth() {
+        for file in ["d.json", "d.json5"] {
+            let (key, path, line) = duplicate(load(file, r#"{"a": 1, "a": 2}"#).unwrap_err());
+            assert_eq!((key.as_str(), path.as_str(), line), ("a", "<root>", None), "{file}");
+            let (key, path, _) = duplicate(load(file, r#"{"sequence": [{"name": "x"}, {"group": {"name": "g", "name": "h"}}]}"#).unwrap_err());
+            assert_eq!((key.as_str(), path.as_str()), ("name", "sequence[1].group"), "{file}");
+        }
+    }
+
+    #[test]
+    fn equal_keys_in_sibling_objects_and_json5_comments_are_content() {
+        load("d.json", r#"{"a": {"name": 1}, "b": {"name": 2}, "c": [{"name": 3}, {"name": 4}]}"#).unwrap();
+        let loaded = load("d.json5", "// lead\n{ a: 1, /* inline */ b: { a: 2 }, }\n").unwrap();
+        assert_eq!(loaded.value, json!({"a": 1, "b": {"a": 2}}));
+    }
+
+    #[test]
+    fn line_delimited_formats_name_the_record_line() {
+        for file in ["d.jsonl", "d.ndjson"] {
+            let (key, path, line) = duplicate(load(file, "{\"name\": \"ok\"}\n\n{\"name\": \"x\", \"v\": {\"k\": 1, \"k\": 2}}\n").unwrap_err());
+            assert_eq!((key.as_str(), path.as_str(), line), ("k", "v", Some(3)), "{file}");
+            let loaded = load(file, "{\"name\": \"a\"}\n{\"name\": \"b\"}\n").unwrap();
+            assert_eq!(loaded.value, json!([{"name": "a"}, {"name": "b"}]), "{file}");
+        }
+    }
+
+    #[test]
+    fn the_rendered_error_names_the_file_key_and_line() {
+        let error = load("d.jsonl", "{\"a\": 1, \"a\": 2}\n").unwrap_err();
+        let text = error.to_string();
+        let cause = std::error::Error::source(&error).map(ToString::to_string).unwrap_or_default();
+        assert!(text.contains("d.jsonl"), "{text}");
+        assert_eq!(cause, "line 1: duplicate key `a` at `<root>`; each key may appear once per object");
     }
 }

@@ -20,6 +20,7 @@ use serde_json::Value;
 
 use super::super::error::CompositionError;
 use super::super::json_util::json_type_name;
+use super::super::types::{LoopLocation, LoopOwner};
 
 /// A classified `sequence:` frontmatter value, before any I/O or evaluation.
 #[derive(Debug, Clone, PartialEq)]
@@ -390,30 +391,52 @@ impl SpanScanner {
 pub const CONTAINER_EVENT_KEYS: &[&str] = &["initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"];
 
 /// Validate task grammar before preparation can execute any work.
-pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
+///
+/// Inline containers are validated transitively, an inline group's events and
+/// legs included, so a nested container's events fail here, before the root
+/// `initialize` runs, at any depth. Referenced containers are judged when
+/// static preflight loads them. `property` is the task's authored path in
+/// `origin` (`sequence[1]`, or empty for a file whose root is the task); it
+/// locates the task `when`/`loop` diagnostics.
+pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
     for key in ["setup", "teardown", "execution", "fail_fast"] {
         if let Some(value) = map.get(key) {
             return Err(removed_task_key(key, value, origin));
         }
     }
     let inline = matches!(map.get("sequence"), Some(Value::Array(_)));
-    for key in CONTAINER_EVENT_KEYS {
-        if let Some(value) = map.get(*key) {
-            if !inline {
-                return Err(CompositionError::RemovedGrammar {
-                    source_path: origin.to_path_buf(), path: (*key).into(), removed: (*key).into(),
-                    replacement: "container events belong on an inline `sequence:` list or inside a `group:` object; put referenced sequence events in its target document".into(),
+    if !inline && let Some(key) = CONTAINER_EVENT_KEYS.iter().find(|key| map.contains_key(**key)) {
+        return Err(CompositionError::RemovedGrammar {
+            source_path: origin.to_path_buf(), path: (*key).into(), removed: (*key).into(),
+            replacement: "container events belong on an inline `sequence:` list or inside a `group:` object; put referenced sequence events in its target document".into(),
+        });
+    }
+    validate_container_events(map, origin)?;
+    task_when(map, origin, property)?;
+    task_loop(map, origin, property)?;
+    if let Some(Value::Object(group)) = map.get("group") {
+        let group_property = child_property(property, "group");
+        validate_container_events(group, origin)?;
+        group_object_grammar(group, origin, &group_property)?;
+        for (index, leg) in group.get("tasks").and_then(Value::as_array).into_iter().flatten().enumerate() {
+            let Value::Object(leg) = leg else {
+                // Same wording as `build_group`, which judges a group file's
+                // legs; here the file is the one declaring the inline group.
+                return Err(CompositionError::SequenceGroupInvalid {
+                    group: group.get("name").and_then(Value::as_str).unwrap_or("<inline>").to_string(),
+                    origin: origin.to_path_buf(),
+                    problem: format!("task {} must be an object, got {}", index + 1, json_type_name(leg)),
                 });
-            }
-            let mut root = serde_json::Map::new();
-            root.insert((*key).into(), value.clone());
-            super::super::lifecycle::parse_lifecycle_config(&Value::Object(root), origin)?;
+            };
+            validate_task_grammar(leg, origin, &format!("{group_property}.tasks[{index}]"))?;
         }
     }
     if let Some(value) = map.get("sequence") {
         match value {
             Value::Array(items) => {
-                super::normalize::normalize_plan(items, super::model::SequenceSource::Inline, origin, true)?;
+                super::normalize::normalize_plan_at(
+                    items, super::model::SequenceSource::Inline, origin, true, &child_property(property, "sequence"),
+                )?;
             }
             Value::String(_) => {
                 if !matches!(classify_source(value)?, SequenceSourceSpec::Reference(_)) {
@@ -421,6 +444,134 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
                 }
             }
             other => return Err(CompositionError::SequenceInvalid(format!("task `sequence` must be a list or file reference, got {}", json_type_name(other)))),
+        }
+    }
+    Ok(())
+}
+
+/// Join an authored property path and a child key; an empty parent is the
+/// document root.
+pub(crate) fn child_property(parent: &str, child: &str) -> String {
+    if parent.is_empty() { child.to_string() } else { format!("{parent}.{child}") }
+}
+
+/// Validate a task's `when:` guard.
+///
+/// The guard must be a non-empty string that parses with the same condition
+/// grammar as a lifecycle `when`. It is evaluated at the task's turn.
+///
+/// ## Errors
+///
+/// [`CompositionError::WhenMisplaced`] on a step without an executable, and
+/// [`CompositionError::TaskWhenInvalid`] for a non-string, empty, or
+/// unparsable guard.
+fn task_when(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    let Some(value) = map.get("when") else { return Ok(()) };
+    let property = child_property(property, "when");
+    if !super::reserved::EXECUTABLE_KEYS.iter().any(|key| map.contains_key(*key)) {
+        return Err(CompositionError::WhenMisplaced {
+            source_path: origin.to_path_buf(), property,
+            hint: "`when` guards a task and goes beside its executable; a step that runs the document body takes no guard".into(),
+        });
+    }
+    let invalid = |message: String, source| CompositionError::TaskWhenInvalid {
+        source_path: origin.to_path_buf(), property: property.clone(), message, source,
+    };
+    match value {
+        Value::String(text) if text.trim().is_empty() => {
+            return Err(invalid("`when` must not be an empty expression; remove the key to run the task unconditionally".into(), None));
+        }
+        Value::String(text) => {
+            darkmatter::markdown::compose::expression::parse_condition(text).map_err(|source| {
+                invalid(format!("`when` is not a valid expression: {source}"), Some(source))
+            })?;
+        }
+        other => return Err(invalid(format!("`when` must be an expression string, got {}", json_type_name(other)), None)),
+    }
+    Ok(())
+}
+
+/// Place a task-level `loop:`: an inline nested sequence's loop is a sequence
+/// loop and goes to [`container_loop`]; on any other task it is misplaced, and
+/// the error names where that task's loop belongs.
+fn task_loop(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    if !map.contains_key("loop") {
+        return Ok(());
+    }
+    if matches!(map.get("sequence"), Some(Value::Array(_))) {
+        return container_loop(map, LoopOwner::Sequence, &LoopLocation { source_path: origin.to_path_buf(), property: child_property(property, "loop") }).map(drop);
+    }
+    let executable = super::reserved::EXECUTABLE_KEYS.iter().copied().find(|key| map.contains_key(*key));
+    let hint = match executable {
+        Some("group") if map.get("group").is_some_and(Value::is_object) => {
+            "a group's loop goes on its group object, beside `tasks:` (`group: { loop: …, tasks: […] }`)"
+        }
+        Some("group") => "this task references a group; put `loop:` in that group file's object, beside its `tasks:`",
+        Some("sequence") => "this task references a sequence document; put `loop:` at that document's root, beside its `sequence:`",
+        Some("prompt") => "a prompt task repeats through its document's own frontmatter `loop:`; or wrap the task in an inline `sequence:` and put `loop:` beside that",
+        Some("task") => "this task references a task file; wrap it in an inline `sequence:` and put `loop:` beside that",
+        Some(_) => "shell and side-effect tasks repeat only inside a looping container; wrap the task in an inline `sequence:` and put `loop:` beside that",
+        None => "a step that runs the document body has no loop of its own; put `loop:` at the sequence document's root, or on an inline `sequence:` or a `group:` object",
+    };
+    Err(CompositionError::TaskLoopMisplaced { source_path: origin.to_path_buf(), property: child_property(property, "loop"), hint: hint.into() })
+}
+
+/// Check a group object's own keys: `loop:` goes to [`container_loop`], and
+/// `when:` is a task key, not a group key.
+///
+/// ## Errors
+///
+/// [`CompositionError::WhenMisplaced`] for `when`, and the loop parser's
+/// errors for `loop`.
+pub(crate) fn group_object_grammar(group: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    if group.contains_key("when") {
+        return Err(CompositionError::WhenMisplaced {
+            source_path: origin.to_path_buf(), property: child_property(property, "when"),
+            hint: "`when` is a task key; put it beside `group:` on the task that runs the group".into(),
+        });
+    }
+    container_loop(group, LoopOwner::Group, &LoopLocation { source_path: origin.to_path_buf(), property: child_property(property, "loop") }).map(drop)
+}
+
+/// Check the root keys of a sequence document (Markdown frontmatter, a
+/// standalone YAML file, or a referenced formal document) that belong to this
+/// grammar rather than to the lifecycle parser.
+///
+/// `when:` is rejected: the document body is not a step, so it has nothing to
+/// guard. `loop:` is a sequence loop, validated by the loop parser
+/// (`container_loop`). Run this before the root's lifecycle events are
+/// parsed, so a malformed root loop gets the loop parser's diagnostic rather
+/// than a lifecycle one.
+///
+/// ## Errors
+///
+/// [`CompositionError::WhenMisplaced`] for a root `when`, and the loop
+/// parser's errors for a root `loop`.
+pub fn validate_sequence_root(root: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
+    if root.contains_key("when") {
+        return Err(CompositionError::WhenMisplaced {
+            source_path: origin.to_path_buf(), property: "when".into(),
+            hint: "a sequence document's body is not a step, so its root takes no guard; `when` is a task key, written beside a step's executable".into(),
+        });
+    }
+    container_loop(root, LoopOwner::Sequence, &LoopLocation::document_root(origin)).map(drop)
+}
+
+/// Parse the container `loop:` in `map`, if any, with `owner`'s grammar, so
+/// an invalid loop is its own located error.
+pub(crate) fn container_loop(
+    map: &serde_json::Map<String, Value>, owner: LoopOwner, location: &LoopLocation,
+) -> Result<Option<super::super::looping::LoopBlock>, CompositionError> {
+    map.get("loop").map(|value| super::super::looping::parse_loop_block(value, owner, location)).transpose()
+}
+
+/// Parse each container event `map` carries, one at a time.
+fn validate_container_events(map: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
+    for key in CONTAINER_EVENT_KEYS {
+        if let Some(value) = map.get(*key) {
+            let mut root = serde_json::Map::new();
+            root.insert((*key).into(), value.clone());
+            super::super::lifecycle::parse_lifecycle_config(&Value::Object(root), origin)?;
         }
     }
     Ok(())

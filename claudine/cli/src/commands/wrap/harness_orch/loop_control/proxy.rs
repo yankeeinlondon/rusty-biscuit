@@ -73,7 +73,7 @@ pub(super) fn run_target_initialize(
         let reason = if matches!(catch_result.control, Some(StackControl::Error { .. })) {
             setup_error.msg.clone()
         } else {
-            "lifecycle initialize failed".to_string()
+            format!("lifecycle initialize failed: {}", setup_error.msg)
         };
         return TargetInitializeAction::Abort(
             CompositionError::LifecycleInitializeFailed {
@@ -99,6 +99,7 @@ pub(super) fn run_target_initialize(
                 ProxyProvenance::new(source_path.to_path_buf(), location.clone(), chain.to_vec()),
             )),
             StackControl::Stop => TargetInitializeAction::Proceed,
+            StackControl::Break { .. } => TargetInitializeAction::Break,
             // Authored placement is legal — `is_valid_for` makes every control
             // except `skip` universally placeable — but there is no provider
             // attempt at `initialize` for these to act on. So the diagnostic
@@ -141,6 +142,9 @@ pub(super) enum TargetInitializeAction {
     Proceed,
     /// Target's `initialize` opted out via `skip`; exit the run cleanly.
     ExitCleanly,
+    /// Target's `initialize` fired `break`: run its `finalize` once, launch
+    /// nothing, and publish nothing; its loop reads the break.
+    Break,
     /// Target's `initialize` could not be honored; abort with this error.
     Abort(color_eyre::eyre::Report),
     /// Target's `initialize` proxied on; hand the request to the coordinator.

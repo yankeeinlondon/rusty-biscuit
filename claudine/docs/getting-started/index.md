@@ -821,12 +821,13 @@ handler can use `retry` or `proxy` for recovery.
 Use `seq.outputs` to read completed results and `seq.name` for the current
 step. Nested sequences have their own accumulators; group results are keyed
 by leg name. Lifecycle events surround each container, with cleanup from
-children to parents. Group loops and uniform loops on nested containers are
-planned; document loops are described in [Looping](../topics/flow-control/looping.md).
+children to parents. Documents, groups, and sequences all loop the same
+way; see [Looping](../topics/flow-control/looping.md).
 
 A group's isolation applies to in-memory values. Filesystem edits and shell
-side effects are shared and never rolled back. `--dry-run` still executes
-shell tasks and composition shell expansions with real effects. See
+side effects are shared and never rolled back. `--dry-run` renders `shell:`
+and `side_effect:` tasks without running them, but composition shell
+expansions still run with real effects. See
 [Sequences](../topics/flow-control/sequences.md) for the complete grammar and
 [the executable example](../examples/sequence-containers.md) for nesting.
 

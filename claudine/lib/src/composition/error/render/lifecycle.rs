@@ -116,27 +116,30 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 Some(property) => format!("<cyan>{}</cyan>", code_span(property)),
                 None => lifecycle_evaluation_surface_label(surface),
             };
-            let reason_text = match reason {
-                LifecycleEvaluationReason::Expression => escape_prose_path(message),
-            };
-            let body = format!(
-                "A late-binding expression raised while the <cyan>`{event}`</cyan> \
-                 lifecycle event was firing, in {surface_label} ({file_link}).\n\n\
-                 <b>Reason:</b> {reason_text}"
-            );
-            let hint = match reason {
-                LifecycleEvaluationReason::Expression => {
+            let reason_text = escape_prose_path(message);
+            let (title, opening, hint) = match reason {
+                LifecycleEvaluationReason::Expression => (
+                    "lifecycle evaluation error",
+                    "A late-binding expression raised",
                     "This is a crashed expression, not a clean `false` guard: the run \
                      halts and exits non-zero. Fix the expression (resolve the missing \
                      path or variable, correct the function call) or guard it with a \
-                     fallback so it evaluates instead of raising."
-                }
+                     fallback so it evaluates instead of raising.",
+                ),
+                LifecycleEvaluationReason::BreakWithoutLoop => (
+                    "lifecycle `break` outside a loop",
+                    "A `break` fired with no enclosing loop",
+                    "`break` ends the nearest loop around the page that fires it: a \
+                     document's own `loop:`, or a looping group or sequence that contains \
+                     it. Add a `loop:` there, or remove the `break`.",
+                ),
             };
+            let body = format!(
+                "{opening} while the <cyan>`{event}`</cyan> lifecycle event was firing, \
+                 in {surface_label} ({file_link}).\n\n<b>Reason:</b> {reason_text}"
+            );
             StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "CompositionError",
-                    "lifecycle evaluation error",
-                ))
+                .error_header(ErrorHeader::new("CompositionError", title))
                 .body(body)
                 .hint(hint)
         }

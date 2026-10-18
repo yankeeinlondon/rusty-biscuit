@@ -1,16 +1,32 @@
-# Claudine's lifecycle stack types and the `loop:` block type, unrolled to
-# three typed conditional levels. Hand-maintained; see README.md.
+# Claudine's lifecycle stack types and the `loop:` block type. Named types are
+# inlined, so a conditional's nesting is unrolled one type per level.
+# Hand-maintained; see README.md.
 #
-# A `then`/`else` body inside a level-3 conditional is accepted loosely; the
-# lifecycle parser still checks it (and refuses a sixth level). The
-# `initialize-*` family excludes shells; `cancelled-*` permits only stop
-# among flow directives. Container task/group types leave deeper lists to
-# the task parser rather than recursively expanding schemas. Container event
-# bodies retain their list/dictionary shape here; semantic action validation
-# belongs to the lifecycle parser, avoiding repeated full action catalogs.
+# The `stack` and `initialize-*` families are typed three conditional levels
+# deep: a `then`/`else` body inside a level-3 conditional is accepted loosely,
+# and the lifecycle parser still checks it. `initialize-*` excludes shells.
+#
+# The `cancelled-*` family permits only stop among flow directives, and is
+# unrolled to the parser's five-level limit, so the restriction holds at every
+# depth the parser accepts and a sixth-level `when`/`then` conditional is a
+# schema error (a guarded bundle there is left to the parser).
+# Its conditionals type `then` and `else` with one pattern key: two literal
+# keys would inline each body twice per level, and five such levels make
+# every validation about ten times slower. The cost of the pattern key is
+# that the parser alone requires `then` beside `else`, and the editor does not
+# complete `then`/`else` or resolve values below them.
+#
+# Named types are inlined, never referenced, so containers cannot recurse:
+# `task`/`group` and their direct children (`step-2`, `task-2`, `group-2`) are
+# typed, and a grandchild list is left to the task parser. Every typed
+# container types `cancelled` with `cancelled-stack`. Its other events keep
+# the list/dictionary shape only: a full `stack` per event on every inlined
+# container multiplies the compiled schema (see docs/topics/schemas.md). For
+# the same reason a container `loop` is typed as an object only, not with the
+# `loop` type and its gate `stack`.
 kind: schema
 types:
-    bare-verb: "enum(stop, skip, error, retry, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor) -> a zero-argument verb written as a bare list item"
+    bare-verb: "enum(stop, skip, error, retry, break, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor) -> a zero-argument verb written as a bare list item"
     loose-body:
         - "unknown[] -> a list of actions, checked only by the lifecycle parser"
         - "{ <string>: unknown } -> a dictionary of verbs, checked only by the lifecycle parser"
@@ -116,9 +132,10 @@ types:
             - "string -> an iteration action such as increment(iteration)"
             - loop-action
             - "loop-action-entry[]"
-        max: "number(integer; min(1)) -> the most iterations to run"
-        fail_fast: "boolean -> stop the loop at the first failed iteration"
-        on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit"
+        max:
+            - "number(integer; min(1)) -> the most iterations to run"
+            - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
+        on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
         gate: "stack -> the lifecycle stack run after each iteration; never beside loose verb keys"
         no_error: "boolean -> keep the loop running when one of the loose actions fails"
         say: "string -> speak the text aloud through text-to-speech"
@@ -151,8 +168,8 @@ types:
         break:
             - null
             - "unknown[](max(0))"
-            - "string -> planned: leave the loop or sequence with this reason; not yet accepted by the parser"
-        prep: "string -> planned: prepare the target prompt (a file reference such as @prompts/next.md or a whole-value interpolation); not yet accepted by the parser"
+            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
         shell: "shell -> run a shell command (never in initialize)"
         set: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
         append_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
@@ -292,8 +309,9 @@ types:
         - "enum(stop)"
     cancelled-conditional-1:
         when: "expression(required)"
-        then: "cancelled-stack-2(required)"
-        else: cancelled-stack-2
+        "<pattern::^(?:then|else)$>": cancelled-stack-2
+        $constraints:
+            min-keys: 2
     cancelled-stack-2:
         - cancelled-item-2[]
         - cancelled-bundle@./action.yaml
@@ -307,8 +325,9 @@ types:
         - "enum(stop)"
     cancelled-conditional-2:
         when: "expression(required)"
-        then: "cancelled-stack-3(required)"
-        else: cancelled-stack-3
+        "<pattern::^(?:then|else)$>": cancelled-stack-3
+        $constraints:
+            min-keys: 2
     cancelled-stack-3:
         - cancelled-item-3[]
         - cancelled-bundle@./action.yaml
@@ -322,8 +341,51 @@ types:
         - "enum(stop)"
     cancelled-conditional-3:
         when: "expression(required)"
-        then: "loose-body(required)"
-        else: loose-body
+        "<pattern::^(?:then|else)$>": cancelled-stack-4
+        $constraints:
+            min-keys: 2
+    cancelled-stack-4:
+        - cancelled-item-4[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-4:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-4
+        - "enum(stop)"
+    cancelled-conditional-4:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-5
+        $constraints:
+            min-keys: 2
+    cancelled-stack-5:
+        - cancelled-item-5[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-5:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-5
+        - "enum(stop)"
+    cancelled-conditional-5:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-6
+        $constraints:
+            min-keys: 2
+    cancelled-stack-6:
+        - cancelled-item-6[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-6:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - "enum(stop)"
     step:
         - string
         - number
@@ -336,7 +398,7 @@ types:
         side_effect: "unknown -> a side effect; the task parser checks its arguments"
         task: "unknown -> a referenced task; the task parser checks its form"
         sequence:
-            - "unknown[] -> inline nested tasks; the task parser validates every nesting level"
+            - "step-2[] -> inline nested tasks"
             - "string -> a sequence file reference, optionally with an offset and operator"
         group:
             - group
@@ -345,27 +407,78 @@ types:
         operation: "string -> the task operation"
         flow: "string -> the task flow"
         timeout: "string -> the per-command timeout"
+        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
+        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it"
         "<string>": "unknown -> authored step state; the task parser rejects reserved keys"
         initialize: loose-body
         start: loose-body
         blocked: loose-body
         success: loose-body
         failure: loose-body
-        cancelled: loose-body
+        cancelled: cancelled-stack
         finalize: loose-body
     group:
         name: "string(not-empty) -> the container name"
-        tasks: "unknown[](required; min(1)) -> named legs; the task parser checks each leg and unique names"
+        tasks: "task-2[](required; min(1)) -> named legs; the task parser checks unique names"
         variables: "object -> bindings scoped to this group"
         description: "string -> the container summary"
         operation: "string -> default operation for prompt legs"
         flow: "string -> default flow for prompt legs"
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
+        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it"
         initialize: loose-body
         start: loose-body
         blocked: loose-body
         success: loose-body
         failure: loose-body
-        cancelled: loose-body
+        cancelled: cancelled-stack
+        finalize: loose-body
+    step-2:
+        - string
+        - number
+        - boolean
+        - task-2
+    task-2:
+        name: "string(not-empty) -> the step or leg name"
+        prompt: "string -> the prompt file reference"
+        shell: "unknown -> a shell command; the task parser checks its form"
+        side_effect: "unknown -> a side effect; the task parser checks its arguments"
+        task: "unknown -> a referenced task; the task parser checks its form"
+        sequence:
+            - "unknown[] -> inline nested tasks below the typed levels; the task parser validates them"
+            - "string -> a sequence file reference, optionally with an offset and operator"
+        group:
+            - group-2
+            - "string -> a group file reference"
+        params: "object -> parameters passed to the executable"
+        operation: "string -> the task operation"
+        flow: "string -> the task flow"
+        timeout: "string -> the per-command timeout"
+        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
+        loop: "object -> an inline sequence's loop, beside `sequence:`; the loop parser checks it"
+        "<string>": "unknown -> authored step state; the task parser rejects reserved keys"
+        initialize: loose-body
+        start: loose-body
+        blocked: loose-body
+        success: loose-body
+        failure: loose-body
+        cancelled: cancelled-stack
+        finalize: loose-body
+    group-2:
+        name: "string(not-empty) -> the container name"
+        tasks: "unknown[](required; min(1)) -> named legs below the typed levels; the task parser checks them"
+        variables: "object -> bindings scoped to this group"
+        description: "string -> the container summary"
+        operation: "string -> default operation for prompt legs"
+        flow: "string -> default flow for prompt legs"
+        fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
+        max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
+        loop: "object -> the group's loop, beside `tasks:`; the loop parser checks it"
+        initialize: loose-body
+        start: loose-body
+        blocked: loose-body
+        success: loose-body
+        failure: loose-body
+        cancelled: cancelled-stack
         finalize: loose-body

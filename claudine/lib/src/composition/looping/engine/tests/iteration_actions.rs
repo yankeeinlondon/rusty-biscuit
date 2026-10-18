@@ -176,11 +176,11 @@ fn injects_ambient_values_and_current_frontmatter() {
     assert_eq!(ambient["last_output"], json!("run 1"));
 }
 
-/// `loop.is_last` is predicted by reading the condition against the state an
-/// iteration is about to run with. `counter < 3` from 0 runs four times; only
-/// the counter-3 iteration fails the condition, so only it is last.
+/// `loop.is_last` names only the final pass the cap permits; it never reads
+/// the condition ahead of the pass. `counter < 3` from 0 runs four passes
+/// under the default cap, and none of them is the last permitted one.
 #[test]
-fn computes_is_last_from_condition_on_iteration_state() {
+fn is_last_never_predicts_the_condition() {
     let config = counter_loop(3);
     let seen = RefCell::new(Vec::new());
     run_loop(
@@ -195,7 +195,7 @@ fn computes_is_last_from_condition_on_iteration_state() {
     )
     .unwrap();
 
-    assert_eq!(&*seen.borrow(), &[false, false, false, true]);
+    assert_eq!(&*seen.borrow(), &[false, false, false, false]);
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn computes_is_last_when_max_iterations_is_stopping_condition() {
         condition: LoopCondition::While("true".into()),
         actions: vec![],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let seen = RefCell::new(Vec::new());
@@ -214,7 +214,6 @@ fn computes_is_last_when_max_iterations_is_stopping_condition() {
         Map::new(),
         LoopExecutionOptions {
             max_iterations: Some(2),
-            fail_fast: None,
             on_rate_limit: None,
             interrupt_check: None,
             pause_reset_margin: None,
@@ -238,48 +237,7 @@ fn computes_is_last_when_max_iterations_is_stopping_condition() {
 }
 
 #[test]
-fn fail_fast_false_continues_after_iteration_failure() {
-    let config = LoopConfig {
-        condition: LoopCondition::While("loop.count < 4".into()),
-        actions: vec![LoopAction::Increment("counter".into())],
-        max_iterations: None,
-        fail_fast: Some(false),
-        on_rate_limit: None,
-    };
-    let seen_exit_codes = RefCell::new(Vec::new());
-    let result = run_loop(
-        Path::new("loop.md"),
-        &config,
-        object(json!({"counter": 0})),
-        LoopExecutionOptions::default(),
-        |ctx| {
-            seen_exit_codes
-                .borrow_mut()
-                .push(ctx.ambient.last_exit_code);
-            if ctx.iteration == 1 {
-                Ok(LoopIterationOutput::failure(
-                    "failed",
-                    42,
-                    CompositionError::LoopInvalid("iteration failed".into()),
-                ))
-            } else {
-                Ok(LoopIterationOutput::success("ok"))
-            }
-        },
-    )
-    .unwrap();
-
-    assert!(result.error.is_none());
-    // `loop.count < 4` stops at the gate after iteration 4. Under
-    // `fail_fast: false` the failed iteration 1 still reaches the gate, so its
-    // action applies like any other continuing pass: gates 1-3 increment.
-    assert_eq!(&*seen_exit_codes.borrow(), &[0, 42, 0, 0]);
-    assert_eq!(result.iteration_count, 4);
-    assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(3)));
-}
-
-#[test]
-fn fail_fast_true_stops_after_iteration_failure() {
+fn a_failed_pass_ends_the_loop_before_its_gate_and_action() {
     let config = counter_loop(3);
     let result = run_loop(
         Path::new("loop.md"),
@@ -290,7 +248,11 @@ fn fail_fast_true_stops_after_iteration_failure() {
             Ok(LoopIterationOutput::failure(
                 "failed",
                 9,
-                CompositionError::LoopInvalid("iteration failed".into()),
+                CompositionError::LoopInvalid {
+                        source_path: "loop.md".into(),
+                        property: "loop".into(),
+                        message: "iteration failed".into(),
+                    },
             ))
         },
     )
@@ -300,13 +262,13 @@ fn fail_fast_true_stops_after_iteration_failure() {
     assert_eq!(result.final_exit_code, 9);
     assert!(matches!(
         result.error,
-        Some(CompositionError::LoopInvalid(_))
+        Some(CompositionError::LoopInvalid { .. })
     ));
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(0)));
 }
 
 #[test]
-fn fail_fast_false_discards_failed_action_stage() {
+fn a_failed_action_stage_commits_nothing_and_fails_the_loop() {
     let config = LoopConfig {
         condition: LoopCondition::While("loop.count < 3".into()),
         actions: vec![
@@ -314,7 +276,7 @@ fn fail_fast_false_discards_failed_action_stage() {
             LoopAction::Increment("bad".into()),
         ],
         max_iterations: None,
-        fail_fast: Some(false),
+        max_template: None,
         on_rate_limit: None,
     };
     let result = run_loop(
@@ -326,11 +288,15 @@ fn fail_fast_false_discards_failed_action_stage() {
     )
     .unwrap();
 
-    assert!(result.error.is_none());
-    // `loop.count < 3` stops at the gate after iteration 3. Each continuing
-    // gate's action list fails on `bad`, and the whole stage is discarded, so
-    // `counter` never moves even though its own increment succeeded.
-    assert_eq!(result.iteration_count, 3);
+    // The first continuing gate's action list fails on `bad`: the whole stage
+    // is discarded, so `counter` never moves even though its own increment
+    // succeeded, and the loop fails at that pass.
+    assert_eq!(result.iteration_count, 1);
+    assert!(
+        matches!(&result.error, Some(CompositionError::LoopEvaluationFailed { property, iteration: 1, .. }) if property == "loop.action"),
+        "{:?}",
+        result.error
+    );
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(0)));
     assert_eq!(result.final_frontmatter.get("bad"), Some(&json!("abc")));
 }
@@ -354,7 +320,7 @@ fn set_template_renders_against_post_executor_iteration_state() {
             },
         ],
         max_iterations: Some(2),
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let result = run_loop(
@@ -371,12 +337,17 @@ fn set_template_renders_against_post_executor_iteration_state() {
     )
     .unwrap();
 
-    assert!(result.error.is_none());
-    // After iteration 2 runs and its actions apply, `stamp` should be
-    // the JSON number 2 (typed), and `echo` should be the string output
-    // captured from iteration 2's executor.
-    assert_eq!(result.final_frontmatter.get("stamp"), Some(&json!(2)));
-    assert_eq!(result.final_frontmatter.get("echo"), Some(&json!("ran-2")));
+    // Pass 1's actions render against the pass that just ran: a typed JSON
+    // number and its captured output. Pass 2 is the last permitted and still
+    // asks for another, so the loop is exhausted and no action follows it.
+    assert!(
+        matches!(result.error, Some(CompositionError::LoopLimitExceeded { cap: 2, iteration: 2, .. })),
+        "{:?}",
+        result.error
+    );
+    assert_eq!(result.outcome, Some(LoopOutcome::Exhausted));
+    assert_eq!(result.final_frontmatter.get("stamp"), Some(&json!(1)));
+    assert_eq!(result.final_frontmatter.get("echo"), Some(&json!("ran-1")));
 }
 
 #[test]
@@ -385,7 +356,7 @@ fn counter_below_five_runs_six_iterations() {
         condition: LoopCondition::While("counter < 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let result = run_loop(
@@ -412,7 +383,7 @@ fn until_loop_runs_until_condition_met() {
         condition: LoopCondition::Until("counter >= 2".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let result = run_loop(
@@ -439,7 +410,7 @@ fn until_loop_with_counter_reaches_target() {
         condition: LoopCondition::Until("counter >= 3".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let result = run_loop(
@@ -467,7 +438,7 @@ fn append_accumulates_log_across_iterations() {
             value: json!({"event": "tick"}),
         }],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let result = run_loop(
@@ -497,7 +468,7 @@ fn last_output_and_last_exit_code_propagate() {
         condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let outputs = RefCell::new(Vec::new());
@@ -524,19 +495,21 @@ fn last_output_and_last_exit_code_propagate() {
     assert_eq!(result.last_output, "run-4");
 
     let seen = outputs.borrow();
-    assert_eq!(seen[0], (1, String::new(), 0));
-    assert_eq!(seen[1], (2, "run-1".into(), 0));
-    assert_eq!(seen[2], (3, "run-2".into(), 0));
-    assert_eq!(seen[3], (4, "run-3".into(), 0));
+    assert_eq!(seen[0], (1, json!(""), 0));
+    assert_eq!(seen[1], (2, json!("run-1"), 0));
+    assert_eq!(seen[2], (3, json!("run-2"), 0));
+    assert_eq!(seen[3], (4, json!("run-3"), 0));
 }
 
+/// A pass whose own lifecycle settled it as `success` keeps its non-zero
+/// exit status in `loop.last_exit_code`; only a failed pass ends the loop.
 #[test]
-fn last_exit_code_reflects_failure_in_next_iteration() {
+fn last_exit_code_reports_a_succeeded_pass_with_a_non_zero_status() {
     let config = LoopConfig {
         condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![],
         max_iterations: None,
-        fail_fast: Some(false),
+        max_template: None,
         on_rate_limit: None,
     };
     let exit_codes = RefCell::new(Vec::new());
@@ -548,11 +521,7 @@ fn last_exit_code_reflects_failure_in_next_iteration() {
         |ctx| {
             exit_codes.borrow_mut().push(ctx.ambient.last_exit_code);
             if ctx.iteration == 2 {
-                Ok(LoopIterationOutput::failure(
-                    "bad",
-                    7,
-                    CompositionError::LoopInvalid("boom".into()),
-                ))
+                Ok(LoopIterationOutput { exit_code: 7, ..LoopIterationOutput::success("bad") })
             } else {
                 Ok(LoopIterationOutput::success("ok"))
             }
@@ -584,7 +553,7 @@ fn until_file_exists_resolves_against_prompt_parent() {
         condition: LoopCondition::Until("file_exists('artifact')".into()),
         actions: vec![],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
 
@@ -609,3 +578,32 @@ fn until_file_exists_resolves_against_prompt_parent() {
 }
 
 // ── Rate-limit policy tests ──────────────────────────────────────────
+
+#[test]
+fn an_unresolved_cap_template_is_refused_before_any_iteration() {
+    let config = LoopConfig {
+        condition: LoopCondition::While("true".into()),
+        actions: vec![],
+        max_iterations: None,
+        max_template: Some("{{ cap }}".into()),
+        on_rate_limit: None,
+    };
+    let launches = RefCell::new(0);
+    let err = run_loop(
+        Path::new("loop.md"),
+        &config,
+        Map::new(),
+        LoopExecutionOptions::default(),
+        |_| {
+            *launches.borrow_mut() += 1;
+            Ok(LoopIterationOutput::success("ok"))
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(*launches.borrow(), 0, "the default cap is never used in its place");
+    assert!(
+        matches!(&err, CompositionError::LoopInvalid { property, .. } if property == "loop.max"),
+        "got {err:?}"
+    );
+}

@@ -125,7 +125,7 @@ pub(super) fn run_step_task(
         timing: None,
         current: Some(run.prep_context.invocation.current_authority().memoized()),
         group: None,
-        loop_values: None,
+        loop_values: run.loop_values.as_ref(),
         base_dir: Some(task_source_context.base_dir()),
         ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(&task_context),
@@ -182,7 +182,7 @@ pub(super) fn run_step_task(
         // against and its prompt document composes under.
         document: Some(&run.prep_context.invocation),
     }
-    .run();
+    .run_admitted();
 
     let agent_perf = prompt_runner.take_perf();
     let tasks = group_task_results(&outcome);
@@ -214,6 +214,72 @@ pub(super) fn run_step_task(
             tasks,
         },
     }
+}
+
+/// Evaluate a root step's `when:` guard at its turn, before the step composes.
+///
+/// The guard reads the document's authored frontmatter under the step's
+/// override layers (caller setters, runtime writes, the reserved overlay),
+/// the runtime cell's `seq`, and the enclosing loop's `loop` values.
+#[allow(clippy::result_large_err)]
+pub(super) fn root_step_guard(
+    run: &SequenceRunContext<'_>,
+    step_name: &str,
+    task: &PreflightTask,
+    authored: &darkmatter::markdown::FrontmatterMap,
+    overrides: &composition::LayeredOverrides,
+    runtime_state: &std::sync::Arc<RuntimeState>,
+) -> Result<bool, CompositionError> {
+    let Some(condition) = &task.when else {
+        return Ok(true);
+    };
+    // A preview shows the guard instead of predicting it.
+    if run.shared.dry_run {
+        use claudine::composition::lifecycle::LifecycleEmitter as _;
+        DefaultLifecycleEmitter.emit_info(
+            &format!("`{step_name}` runs when `{condition}` (not evaluated in a dry run)"),
+            &crate::log::terminal(),
+        );
+        return Ok(true);
+    }
+    let frontmatter = claudine::composition::sequence::task::step_guard_frontmatter(authored, overrides.values());
+    let source_context = run
+        .prep_context
+        .invocation
+        .derive_source(&task.origin_path)
+        .expect("resolved task document always has a parent directory");
+    let engine = EffectEngine::builder().mutation_root(&task.origin_dir).build();
+    let emitter = DefaultLifecycleEmitter;
+    let settings = claudine::composition::sequence::task::task_playback_settings();
+    let messaging = claudine::messaging::RuntimeMessagingSettings { user: None, repo: None };
+    let term = crate::log::terminal();
+    let shell = claudine::composition::lifecycle_executor::DisabledShellRunner;
+    let stack = StackExecutionContext {
+        seq: None,
+        signal: claudine::composition::LifecycleSignal::Start,
+        scope: None,
+        frontmatter: &frontmatter,
+        live_frontmatter: None,
+        runtime_state: Some(runtime_state),
+        err: None,
+        timing: None,
+        current: Some(run.prep_context.invocation.current_authority().memoized()),
+        group: None,
+        loop_values: run.loop_values.as_ref(),
+        base_dir: Some(source_context.base_dir()),
+        ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
+        prepared_context: None,
+        file_resolution_context: source_context.file_resolution_context(),
+        effect_engine: &engine,
+        shell_runner: &shell,
+        emitter: &emitter,
+        term: &term,
+        source_path: &task.origin_path,
+        repo_root: source_context.repository_root(),
+        messaging: &messaging,
+        settings: &settings,
+    };
+    claudine::composition::sequence::task::evaluate_task_guard(task, &stack)
 }
 
 fn prepare_task_context(
@@ -269,6 +335,7 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         action,
         params,
         timeout,
+        when,
         operation,
         flow,
         setup,
@@ -290,7 +357,7 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         approved_set_values: _,
     } = task;
     push_json_scan(
-        &(name, label, params, timeout, operation, flow, setup, teardown),
+        &(name, label, params, timeout, when, operation, flow, setup, teardown),
         scan,
     );
     push_action_scan(action, scan);
@@ -323,8 +390,15 @@ fn push_action_scan(action: &PreflightAction, scan: &mut String) {
                 variables,
                 tasks,
                 origin_path: _,
+                loop_config,
             } = group;
             push_scan(name, scan);
+            // The loop condition reads `ctx.*` against the group's run.
+            if let Some(looping) = loop_config {
+                let (claudine::composition::LoopCondition::While(condition)
+                | claudine::composition::LoopCondition::Until(condition)) = &looping.config.condition;
+                push_scan(condition, scan);
+            }
             push_json_scan(variables, scan);
             for task in tasks {
                 push_task_scan(task, scan);
@@ -404,6 +478,7 @@ fn group_task_results(outcome: &TaskOutcome) -> Vec<SequenceTaskResult> {
             name: task.name.clone(),
             success: task.status == TaskStatus::Succeeded,
             interrupted: task.status == TaskStatus::Interrupted,
+            skipped: task.skipped,
             duration: task.duration,
         })
         .collect()
@@ -445,6 +520,62 @@ struct PromptRunRecord {
 }
 
 impl<'a> WrapperPromptRunner<'a> {
+    /// Run a prompt task whose document declares `loop:` through the
+    /// document loop, inside the task's scope: its inputs, runtime cell,
+    /// output policy, and bar. The task's result is the final pass's output.
+    #[allow(clippy::result_large_err)]
+    fn run_looping_document(
+        &self,
+        request: &PromptTaskRequest,
+        document: claudine::invocation_context::InvocationContext,
+        source: claudine::composition::ResolvedCompositionSource,
+        source_context: claudine::invocation_context::SourceContext,
+        caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
+    ) -> Result<PromptRunOutcome, CompositionError> {
+        let kind = if request.inline_compose { CompositionKind::Inline } else { CompositionKind::Direct };
+        let mut env_overrides = super::jit::step_owned_env(self.run.effective_fail_fast);
+        if let Some(operation) = &request.operation {
+            env_overrides.insert("OPERATION".to_string(), operation.clone());
+        }
+        let task_scope = StepScope {
+            shell_approvals: Some(self.run.approved.clone()),
+            lifecycle_group: request.lifecycle_group.clone(),
+            caller_overrides: request.set_overrides.clone(),
+            runtime_state: request.runtime.clone().unwrap_or_else(|| std::sync::Arc::clone(self.runtime_state)),
+            suppress_output_commit: true,
+            task_frame_writer: request.frame_writer.clone(),
+            env_overrides,
+            operation: request.operation.clone(),
+        };
+        let task_ledger: SharedRunLedger = Arc::new(Mutex::new(RunLedger::new(
+            source.resolved_path.clone(),
+            Arc::clone(&self.run.compose.approval_cache),
+        )));
+        let (exit_code, final_output) = super::iterate::run_step_document(
+            source,
+            &request.reference,
+            &task_ledger,
+            self.run,
+            kind,
+            &task_scope,
+            caller_input_records,
+            document,
+            source_context,
+        )
+        .map_err(|error| CompositionError::SequenceTaskPromptLaunch {
+            task: request.reference.clone(),
+            path: request.path.clone(),
+            message: error.to_string(),
+            snapshot: DiagnosticSnapshot::select(error.as_ref()).map(Box::new),
+        })?;
+        Ok(PromptRunOutcome {
+            withheld: final_output.is_none(),
+            stdout: final_output.unwrap_or_default(),
+            exit_code,
+            interrupted: super::run_was_interrupted(exit_code, self.run.interrupted),
+        })
+    }
+
     fn new(
         run: &'a SequenceRunContext<'a>,
         env_overrides: &'a BTreeMap<String, String>,
@@ -503,6 +634,18 @@ impl<'a> WrapperPromptRunner<'a> {
 
 impl PromptTaskRunner for WrapperPromptRunner<'_> {
     fn is_dry_run(&self) -> bool { self.run.shared.dry_run }
+    fn dry_run_shell(&self) -> bool { self.run.shared.dry_run_shell }
+    fn loop_cap_override(&self, source: &std::path::Path) -> Result<Option<usize>, CompositionError> {
+        // The flag outranks the variable, which is read only when the flag is
+        // absent, so a malformed value fails only a loop that would use it.
+        match self.run.shared.max_iterations {
+            Some(cap) => Ok(Some(cap)),
+            None => claudine::composition::resolve_max_iterations_from_env(
+                self.run.prep_context.invocation.document_environment(),
+                source,
+            ),
+        }
+    }
     fn validate(&self, request: &PromptTaskRequest) -> Result<(), CompositionError> {
         let document = request.document.as_ref().unwrap_or(&self.run.prep_context.invocation);
         let source = composition::resolve_composition_source_in_context(
@@ -517,6 +660,9 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         context.run_evidence = request.run_evidence.as_ref();
         context.deferred_shell_roots = request.deferred_shell_roots.clone();
         context.document_shell_values = Some(request.document_shell_values.clone());
+        // The barrier composes the document as its run will: inside the
+        // enclosing container's loop.
+        context.loop_values = request.loop_values.clone();
         let (_, env) = self.document_target(document);
         let mut overrides = request.set_overrides.clone();
         if request.body_only { super::container::mask_body_events(&mut overrides); }
@@ -657,6 +803,12 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         for key in claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS {
             caller_input_records.remove(*key);
         }
+        // A document with its own `loop:` repeats here exactly as `compose`
+        // repeats it. The body of a container's own document is not that: its
+        // loop is the container's.
+        if !request.body_only && source.markdown.frontmatter().as_map().contains_key("loop") {
+            return self.run_looping_document(request, document, source, prompt_source_context, caller_input_records);
+        }
         let mut prompt_compose_context = self
             .run
             .compose
@@ -669,6 +821,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         prompt_compose_context.invocation = &document;
         prompt_compose_context.deferred_shell_roots = request.deferred_shell_roots.clone();
         prompt_compose_context.document_shell_values = Some(request.document_shell_values.clone());
+        prompt_compose_context.loop_values = request.loop_values.clone();
         let (document_target, document_env_overrides) = self.document_target(&document);
         let mut overrides = request.set_overrides.clone();
         if request.body_only { super::container::mask_body_events(&mut overrides); }
@@ -823,6 +976,9 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         };
 
         Ok(PromptRunOutcome {
+            // Nothing launched and nothing was captured: an `initialize`
+            // `skip`, or a `break` before launch.
+            withheld: outcome.final_output.is_none() && outcome.terminal_signal.is_none(),
             stdout: outcome.final_output.unwrap_or_default(),
             exit_code: outcome.exit_code,
             interrupted: super::run_was_interrupted(outcome.exit_code, self.run.interrupted),

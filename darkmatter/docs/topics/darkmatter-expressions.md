@@ -594,9 +594,9 @@ refresh it after changing the catalog.
 | Collection | `length(x)` | Returns the length of a string, array, or object. | `length("hello")` ⇒ `5` |
 | Type Conversion | `number(x, [default])` | Converts a value to a number, with an optional default. | `number("42")` ⇒ `42` |
 | Math | `round(x, [default])` | Rounds a value to the nearest integer, with an optional default. | `round(3.7)` ⇒ `4` |
-| Filesystem | `absolute(file)` | Resolves a file path to an absolute path. |  |
+| Filesystem | `absolute(file)` | Returns the absolute path a file reference names, in native spelling; a missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs. |  |
 | Filesystem | `relative(file)` | Returns a best-effort relative path from the document base directory. | `relative("fixture.md")` ⇒ `fixture.md` |
-| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL). | `file_exists("fixture.md")` ⇒ `true` |
+| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL) and false when it is absent or the argument is null; a non-string argument, an invalid reference, missing context, probe failure, or failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
 | Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
 | Filesystem | `frontmatter(file, prop)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
 | Filesystem | `try_frontmatter(file)` | Reads the frontmatter of a Markdown file as `{ok, value, error}`; a missing, unreadable, or unparsable file gives `ok` false and its reason instead of failing. | `try_frontmatter("fixture.md").value.title` ⇒ `Fixture Title` |
@@ -607,11 +607,11 @@ refresh it after changing the catalog.
 | Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`), as absolute paths merged across every root of its prefix in native order (most local root first, then shallowest, then by path component). A bare pattern searches the document's folder, then the repository root. A file symlink a bare, `./`, or `../` pattern matches whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning. A directory the search must enter but cannot read fails the expression with an I/O failure instead of shortening the list. | `length(find_files("**/note.md"))` ⇒ `2` |
 | Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
-| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
-| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width, in the resolved file's directory; an absolute input returns an absolute path. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
+| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0, in the resolved file's directory; an absolute input returns an absolute path. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
 | Filesystem | `basename(file)` | Returns the final path component including extension. | `basename("sub/note.md")` ⇒ `note.md` |
 | Filesystem | `basename_without_index(file)` | Returns the basename with any indexed suffix removed from the stem. | `basename_without_index("review-1.md")` ⇒ `review.md` |
-| Filesystem | `dirname(file)` | Returns the directory portion of the display path. | `dirname("sub/note.md")` ⇒ `sub` |
+| Filesystem | `dirname(file)` | Returns the directory portion of the display path; an absolute input returns its absolute parent directory. | `dirname("sub/note.md")` ⇒ `sub` |
 | Filesystem | `ext(file)` | Returns the final extension without the leading dot. | `ext("sub/note.md")` ⇒ `md` |
 | Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename. | `parent_dir("sub/note.md")` ⇒ `sub` |
 | Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename. | `file_trailing("sub/note.md")` ⇒ `sub/note.md` |
@@ -630,8 +630,8 @@ refresh it after changing the catalog.
 | List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
 | List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
 | List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
-| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member. | `find_first_index("review-2.md")` ⇒ `review-1.md` |
-| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member. | `find_last_index("review-1.md")` ⇒ `review-2.md` |
+| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member. An absolute input returns an absolute path. | `find_first_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member. An absolute input returns an absolute path. | `find_last_index("review-1.md")` ⇒ `review-2.md` |
 | Git | `predict_conflicts(branch)` | Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch. |  |
 | Git | `branch_exists_on_remote()` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
 | Git | `branch_exists_on_remote(branch)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
@@ -700,15 +700,59 @@ whether a local path exists; they operate on the resolved path shape.
   bare implicit paths from the source directory first and then the repository
   root, plus magic (`@`), repository-root (`&`), and repository-scoped (`^`)
   forms.
-- Output paths use `/` as the separator, regardless of platform.
+- Output paths use `/` as the separator, regardless of platform. `absolute`
+  is the exception: it returns the platform's native spelling.
 - Missing local files are generally **not** an error for path helpers; existence
-  is checked only when the operation genuinely needs it.
+  is checked only when the operation genuinely needs it. A missing target takes
+  the first location the reference would be resolved at, so a path helper and
+  a later read or write agree on where the file is.
 - HTTP(S) URL strings are rejected by the path helpers. URL support for the
   document-reading functions (`file_exists`, `frontmatter`, `markdown_title`,
   `markdown_body_empty`, `validate_schema`) is available only in **body
   interpolation**, where a remote runtime exists.
 - `absolute` and `relative` are local-only path transforms; they never perform
   remote egress.
+
+#### Building Paths That Stay Anchored
+
+`absolute(file)` builds a path; it does not prove the file exists. With the
+document in `/r/prompts` inside repository `/r`:
+
+| Expression | Files on disk | Result |
+| --- | --- | --- |
+| `absolute("notes.md")` | `/r/prompts/notes.md` and `/r/notes.md` | `/r/prompts/notes.md` (document first) |
+| `absolute("sub/x.md")` | only `/r/sub/x.md` | `/r/sub/x.md` |
+| `absolute("./sub/new.md")` | none | `/r/prompts/sub/new.md` |
+| `absolute("https://example.com/x.md")` | — | error: `absolute() does not accept HTTP(S) URLs` |
+| `absolute("%x.md")` | none | error: a recursive search found nothing |
+
+Use `file_exists(file)` to ask whether the file is there.
+
+`dirname`, `increment_file_index`, `decrement_file_index`, `find_first_index`,
+and `find_last_index` resolve their input first and change only the filename,
+so the result stays in the resolved directory. When the input is **absolute**
+the result is absolute too, even inside the repository, because a
+repository-relative result would be looked up from the document's directory
+first by whoever reads it next:
+
+```md
+---
+review: "{{ dirname(absolute(spec)) + '/review-1.md' }}"
+---
+```
+
+With `spec` = `/r/claudine/features/x/spec.md` and the document in
+`/r/prompts`, `review` is `/r/claudine/features/x/review-1.md` whether or not
+that file exists yet, and `increment_file_index(review)` is
+`/r/claudine/features/x/review-2.md`. A relative input keeps the relative
+display form: `dirname("sub/x.md")` is `sub`.
+
+`file_exists(file)` is `false` only when the file is genuinely absent (a
+directory also reads `false`). It fails, rather than answering `false`, when
+it cannot tell: an invalid reference, a relative path that leaves the file
+tree, a `~`, `&`, `^`, or `vault:` reference whose home, repository, or vault
+is not available, a permission error while probing a candidate, or a remote
+URL whose fetch was denied or failed.
 
 #### Filesystem Helpers
 
@@ -721,7 +765,7 @@ whether a local path exists; they operate on the resolved path shape.
 | `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
 | `validate_schema(path)` | a file against its declared `$schema` | yes (body only) |
 | `validate_schema(path, obj)` | accepted for forward compatibility | yes (body only) |
-| `absolute(path)` | the absolute form of a path | **no** |
+| `absolute(path)` | the absolute path a reference names, existing or not | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
 | `find_files(pattern)` | every file a glob reference matches | **no** |
@@ -825,11 +869,11 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | --- | --- |
 | `is_indexed_file(file)` | `true` when the filename stem matches `base-NNN` |
 | `file_index(file)` | the parsed index suffix, or `-1` when non-indexed |
-| `increment_file_index(file)` | bumps the index; non-indexed files start at `2`; preserves zero-padding width |
-| `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0` |
+| `increment_file_index(file)` | bumps the index; non-indexed files start at `2`; preserves zero-padding width; stays in the resolved directory |
+| `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0`; stays in the resolved directory |
 | `basename(file)` | final component including extension |
 | `basename_without_index(file)` | basename with any indexed suffix removed from the stem |
-| `dirname(file)` | directory portion of the display path |
+| `dirname(file)` | directory portion of the display path; the absolute parent for an absolute input |
 | `ext(file)` | final extension without the leading dot; `""` when none |
 | `parent_dir(file)` | directory segment immediately above the basename |
 | `file_trailing(file)` | last directory segment plus basename |

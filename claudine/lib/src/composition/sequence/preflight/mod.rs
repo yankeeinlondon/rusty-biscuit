@@ -59,7 +59,7 @@ mod containers;
 pub use reapproval::PreflightApproval;
 pub use shape::{
     ApprovedCommand, ApprovedSetValue, CommandSiteId, GroupExecution, PreflightAction,
-    PreflightGroup, PreflightSequence, PreflightStep, PreflightTask, PreparedShellSite, ShellSiteKind, SiteMode,
+    PreflightGroup, PreflightLoop, PreflightSequence, PreflightStep, PreflightTask, PreparedShellSite, ShellSiteKind, SiteMode,
     TaskDiagnosticProvenance, TaskPosition,
 };
 
@@ -485,9 +485,20 @@ fn load_preparation_source(path: &Path) -> Result<ResolvedCompositionSource, Com
 
 /// Re-read a nested container at its preparation boundary while retaining the
 /// original approval graph as the authority for every executable command.
+///
+/// The returned container takes its own events from the reread source but
+/// keeps `frozen`'s children and their order: the discovered task graph is
+/// fixed for the invocation, so a child an earlier task added to the source
+/// never runs, even when its command is already approved. The returned graph
+/// is the reread's, for refusing commands approval never saw.
+///
+/// `supplied` holds the invocation setters and runtime mutations: a
+/// referenced document's events and children read them above its own
+/// authored properties, where an inline list reads `state`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_nested_sequence(
-    task: &PreflightTask, state: &EffectiveState, context: ComposeContext,
-    resolution: &biscuit_file::FileResolutionContext, in_group: bool,
+    task: &PreflightTask, frozen: &PreflightSequence, state: &EffectiveState, supplied: Map<String, Value>,
+    context: ComposeContext, resolution: &biscuit_file::FileResolutionContext, in_group: bool,
 ) -> Result<(PreflightSequence, PreflightGraph), CompositionError> {
     let source = load_preparation_source(&task.origin_path)?;
     let document = super::data::load_document(&task.origin_path)?.value;
@@ -498,18 +509,27 @@ pub(crate) fn prepare_nested_sequence(
     ))?;
     let mut loader = Loader::new(&source, context, resolution.clone());
     loader.step_frontmatter = Arc::new(state.data().clone());
+    loader.caller_setters = supplied;
     loader.ancestry.push((canonical(&task.origin_path), None));
-    let sequence = loader.load_sequence(
+    let mut sequence = loader.load_sequence(
         value, raw_task, &task.origin_path, &task.label, &task.diagnostic.task_property,
         &task.authored, state,
         Placement { position: task.position, in_group },
     )?;
+    sequence.plan = frozen.plan.clone();
+    sequence.steps = frozen.steps.clone();
+    // The loop's controls are frozen for the invocation; its gate is an
+    // event and rereads with the others.
+    sequence.loop_config = frozen.loop_config.clone();
     Ok((sequence, loader.graph))
 }
 
 /// Re-read a group's authored executable, including external and catalog references.
+///
+/// As [`prepare_nested_sequence`]: the legs and their order stay `frozen`'s;
+/// everything else, including events and `variables`, comes from the reread.
 pub(crate) fn prepare_nested_group(
-    task: &PreflightTask, state: &EffectiveState, context: ComposeContext,
+    task: &PreflightTask, frozen: &PreflightGroup, state: &EffectiveState, context: ComposeContext,
     resolution: &biscuit_file::FileResolutionContext,
 ) -> Result<(PreflightGroup, PreflightGraph), CompositionError> {
     let source = load_preparation_source(&task.origin_path)?;
@@ -522,10 +542,12 @@ pub(crate) fn prepare_nested_group(
     let mut loader = Loader::new(&source, context, resolution.clone());
     loader.step_frontmatter = Arc::new(state.data().clone());
     loader.ancestry.push((canonical(&task.origin_path), None));
-    let group = loader.load_group(
+    let mut group = loader.load_group(
         value, &task.origin_path, &task.label, &property_child(&task.diagnostic.task_property, "group"),
         &task.authored.child("group"), state, task.position,
     )?;
+    group.tasks = frozen.tasks.clone();
+    group.loop_config = frozen.loop_config.clone();
     Ok((group, loader.graph))
 }
 
@@ -559,7 +581,9 @@ struct Loader<'a> {
     /// of tasks it authors. Loaded on first use.
     source_schema: Option<Option<darkmatter::markdown::schemas::SimplifiedSchema>>,
     /// The invocation's caller values, above the document and below the
-    /// step's reserved overlay.
+    /// step's reserved overlay. A nested preparation also carries the runtime
+    /// writes so far, which a referenced sequence document reads above its
+    /// own properties.
     caller_setters: Map<String, Value>,
 }
 
@@ -819,14 +843,20 @@ impl<'a> Loader<'a> {
             }
             ExecutableField::Task => {
                 let reference = expect_reference(value, "task", label)?;
-                return self.load_external_task(
+                let mut task = self.load_external_task(
                     &reference,
                     origin,
                     label,
                     state,
                     group_defaults,
                     placement,
-                );
+                )?;
+                // The referencing site's guard decides whether the reference
+                // runs at all, so it stands above one the task file declares.
+                if let Some(when) = option_string(options, "when") {
+                    task.when = Some(when);
+                }
+                return Ok(task);
             }
         };
 
@@ -846,6 +876,7 @@ impl<'a> Loader<'a> {
             action,
             params: option_map(options, "params"),
             timeout: options.get("timeout").cloned(),
+            when: option_string(options, "when"),
             operation,
             flow,
             setup: options.get("setup").cloned(),
@@ -883,13 +914,14 @@ impl<'a> Loader<'a> {
         state: &EffectiveState, placement: Placement,
     ) -> Result<PreflightSequence, CompositionError> {
         use super::grammar::{SequenceSourceSpec, classify_source};
-        let (plan, child_origin, child_authored, events, entered) = match classify_source(value)? {
+        let (plan, child_origin, child_authored, events, entered, frontmatter) = match classify_source(value)? {
             SequenceSourceSpec::Inline(items) => {
-                let mut plan = super::normalize::normalize_plan(
+                let mut plan = super::normalize::normalize_plan_at(
                     &items, super::model::SequenceSource::Inline, origin, true,
+                    &property_child(property, "sequence"),
                 )?;
                 plan.authored = authored.child("sequence");
-                (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false)
+                (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false, None)
             }
             SequenceSourceSpec::Reference(reference) => {
                 let path = self.resolve_reference(&reference.reference, origin)?;
@@ -902,13 +934,16 @@ impl<'a> Loader<'a> {
                 let plan = source_resolution::load_referenced_sequence(
                     &reference, &path, origin, &globals, true, resolution,
                 )?;
-                let events = if reference.offset.is_none() && reference.operator.is_none() {
-                    document.as_object().cloned().unwrap_or_default()
-                } else { Map::new() };
+                // A reference to a whole sequence document brings the
+                // document's events and its authored properties; an offset or
+                // operator selects a list of steps, which has neither.
+                let frontmatter = (reference.offset.is_none() && reference.operator.is_none())
+                    .then(|| document.as_object().cloned()).flatten();
+                let events = frontmatter.clone().unwrap_or_default();
                 let child_authored = if let Some(offset) = &reference.offset {
                     offset.split('.').fold(order, |cursor, segment| cursor.child(segment))
                 } else if document.is_array() { order } else { order.child("sequence") };
-                (plan, path, child_authored, events, true)
+                (plan, path, child_authored, events, true, frontmatter)
             }
             _ => return Err(CompositionError::SequenceInvalid(
                 "a nested `sequence:` must be a list or file reference".into(),
@@ -919,21 +954,70 @@ impl<'a> Loader<'a> {
             if let Some(value) = events.get(*key) { event_root.insert((*key).into(), value.clone()); }
         }
         let mut lifecycle = parse_lifecycle_config(&Value::Object(event_root), &child_origin)?;
-        self.prepare_container_events(&mut lifecycle, &child_origin, label, state, placement)?;
+        // An inline list's loop sits on its task entry; a whole referenced
+        // document's at its root. A selection of steps has no loop.
+        let loop_location = if entered {
+            crate::composition::LoopLocation::document_root(&child_origin)
+        } else {
+            crate::composition::LoopLocation { source_path: origin.to_path_buf(), property: property_child(property, "loop") }
+        };
+        let loop_config = super::grammar::container_loop(&events, crate::composition::LoopOwner::Sequence, &loop_location)?
+            .map(|block| {
+                lifecycle.stacks.loop_gate = block.gate;
+                PreflightLoop { config: block.config, location: loop_location }
+            });
+        // A referenced document's events and children read its own authored
+        // properties under the invocation's supplied values, exactly what
+        // they read when it runs; the caller's frontmatter is not their base.
+        let enclosing = frontmatter.as_ref().map(|authored| {
+            let mut values: HashMap<String, Value> = authored.iter()
+                .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
+            values.extend(self.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
+            let derived = derived_deferred_keys(values.iter(), &sequence_deferred_roots(), &HashSet::new());
+            (std::mem::replace(&mut self.step_frontmatter, Arc::new(values)),
+             std::mem::replace(&mut self.step_derived, derived))
+        });
+        let result = self.load_sequence_children(
+            &plan, &mut lifecycle, &child_origin, &child_authored, label, property, entered,
+            state, enclosing.is_some(), placement,
+        );
+        if let Some((step_frontmatter, step_derived)) = enclosing {
+            self.step_frontmatter = step_frontmatter;
+            self.step_derived = step_derived;
+        }
+        if entered { self.leave(); }
+        Ok(PreflightSequence { steps: result?, plan, lifecycle: Box::new(lifecycle), origin_path: child_origin, frontmatter, loop_config })
+    }
+
+    /// Prepare a nested sequence's events and children. With `own_state`
+    /// they read the referenced document's state that
+    /// [`Self::load_sequence`] installed as the step frontmatter; otherwise
+    /// the enclosing scope's `state`.
+    #[allow(clippy::too_many_arguments)]
+    fn load_sequence_children(
+        &mut self, plan: &SequencePlan, lifecycle: &mut crate::composition::LifecycleConfig, child_origin: &Path,
+        child_authored: &AuthoredOrder, label: &str, property: &str, entered: bool,
+        state: &EffectiveState, own_state: bool, placement: Placement,
+    ) -> Result<Vec<PreflightStep>, CompositionError> {
+        let referenced_state;
+        let state = if own_state {
+            referenced_state = reapproval::early_binding_state(&self.step_frontmatter, state.context().clone())?;
+            &referenced_state
+        } else { state };
+        self.prepare_container_events(lifecycle, child_origin, label, state, placement)?;
         let mut steps = Vec::with_capacity(plan.steps.len());
         for (index, step) in plan.steps.iter().enumerate() {
             let child_label = format!("{label} → step {} (`{}`)", index + 1, step.state.id);
             let child_property = if entered { format!("sequence[{index}]") }
                 else { property_child(property, &format!("sequence[{index}]")) };
             let task = step.executable.as_ref().map(|executable| self.load_step_task(
-                executable, &child_origin, &child_label, &child_property,
+                executable, child_origin, &child_label, &child_property,
                 &child_authored.at(index), state, None,
                 Placement { position: placement.position.child(index), in_group: placement.in_group },
             )).transpose()?;
             steps.push(PreflightStep { index, id: step.state.id.clone(), name: step.name.clone(), task });
         }
-        if entered { self.leave(); }
-        Ok(PreflightSequence { plan, steps, lifecycle: Box::new(lifecycle), origin_path: child_origin })
+        Ok(steps)
     }
 
     /// Expand a `task: <file-ref>` reference into the task it names.
@@ -955,7 +1039,7 @@ impl<'a> Loader<'a> {
         let root = expect_object(&document, "task file", &path)?;
 
         expect_kind(&root, "task", &path)?;
-        let (field, value, options) = parse_task_object(&root, &path)?;
+        let (field, value, options) = parse_task_object(&root, &path, "")?;
 
         let nested_label = format!(
             "{label} → task `{}`",
@@ -1003,14 +1087,14 @@ impl<'a> Loader<'a> {
                 // A catalog selects one named entry, so the group's authored
                 // root is that entry's pointer, not the file root.
                 let selected_entry = name.clone();
-                let (group_map, group_authored) = match name {
+                let (group_map, group_authored, group_property) = match name {
                     Some(name) => {
                         let (index, map) = select_catalog_group(&root, &name, &path)?;
-                        (map, document_authored.child("groups").at(index))
+                        (map, document_authored.child("groups").at(index), format!("groups[{index}]"))
                     }
                     None => {
                         expect_kind(&root, "group", &path)?;
-                        (root.clone(), document_authored)
+                        (root.clone(), document_authored, String::new())
                     }
                 };
 
@@ -1023,7 +1107,7 @@ impl<'a> Loader<'a> {
                     &group_map,
                     &path,
                     &nested_label,
-                    "",
+                    &group_property,
                     &group_authored,
                     state,
                     position,
@@ -1064,15 +1148,9 @@ impl<'a> Loader<'a> {
             problem,
         };
 
-        // Container loops belong to the later loops-and-flow-control feature.
-        if map.contains_key("loop") {
-            return Err(CompositionError::SequenceUnsupportedConstruct {
-                construct: format!("group `loop` (in group `{name}`)"),
-                detail: "iteration commit semantics for group loops are not ratified yet; \
-                         remove `loop:` or express the repetition as separate sequence steps"
-                    .to_string(),
-            });
-        }
+        // A group file or catalog entry reaches the group grammar only here;
+        // an inline group was already checked with its task.
+        super::grammar::group_object_grammar(map, origin, property)?;
 
         if let Some(value) = map.get("execution") {
             return Err(super::grammar::removed_task_key("execution", value, origin));
@@ -1088,6 +1166,12 @@ impl<'a> Loader<'a> {
             if let Some(value) = map.get(*key) { event_root.insert((*key).into(), value.clone()); }
         }
         let mut lifecycle = parse_lifecycle_config(&Value::Object(event_root), origin)?;
+        let loop_location = crate::composition::LoopLocation { source_path: origin.to_path_buf(), property: property_child(property, "loop") };
+        let loop_config = super::grammar::container_loop(map, crate::composition::LoopOwner::Group, &loop_location)?
+            .map(|block| {
+                lifecycle.stacks.loop_gate = block.gate;
+                Box::new(PreflightLoop { config: block.config, location: loop_location })
+            });
         self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
         let owner = self.documents.get(origin).map(|(value, _)| value.clone())
             .unwrap_or_else(|| crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()));
@@ -1150,9 +1234,9 @@ impl<'a> Loader<'a> {
                 .filter(|name| !name.trim().is_empty())
                 .ok_or_else(|| invalid(format!("tasks[{index}].name must be a non-empty string; every leg needs a name")))?;
             if !leg_names.insert(leg_name) { return Err(invalid(format!("duplicate leg name `{leg_name}` at tasks[{index}]; use unique names"))); }
-            let (field, value, options) = parse_task_object(task_map, origin)?;
-            let task_label = format!("{label} → task {} of group `{name}`", index + 1);
             let task_property = property_child(property, &format!("tasks[{index}]"));
+            let (field, value, options) = parse_task_object(task_map, origin, &task_property)?;
+            let task_label = format!("{label} → task {} of group `{name}`", index + 1);
             let mut leg = self.load_task(
                 field,
                 &value,
@@ -1182,6 +1266,7 @@ impl<'a> Loader<'a> {
             variables,
             tasks,
             origin_path: origin.to_path_buf(),
+            loop_config,
         };
 
         if group.execution == GroupExecution::Parallel {
@@ -2101,6 +2186,7 @@ fn select_catalog_group(
 fn parse_task_object(
     map: &Map<String, Value>,
     origin: &Path,
+    property: &str,
 ) -> Result<(ExecutableField, Value, Map<String, Value>), CompositionError> {
     let invalid = |problem: String| CompositionError::SequenceReferenceInvalid {
         context: "task".to_string(),
@@ -2108,7 +2194,7 @@ fn parse_task_object(
         problem,
     };
 
-    super::grammar::validate_task_grammar(map, origin)?;
+    super::grammar::validate_task_grammar(map, origin, property)?;
     let executables: Vec<&str> = map
         .keys()
         .map(String::as_str)

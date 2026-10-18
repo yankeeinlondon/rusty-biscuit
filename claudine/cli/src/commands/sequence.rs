@@ -39,10 +39,23 @@ pub fn run_sequence(
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let _prep = super::prep_target::install_for(&args.shared, verbose);
     run_sequence_inner(
         args,
         verbose,
         startup_timings,
+        crate::request::snapshot(),
+        crate::request::document_environment_source(),
+    )
+}
+
+/// Run `file` as a sequence invocation of its own, in this process: a
+/// lifecycle `prep` target.
+pub(crate) fn run_sequence_target(shared: SharedComposeArgs, file: String, verbose: u8) -> Result<i32> {
+    run_sequence_inner(
+        SequenceArgs { shared, args: vec![file] },
+        verbose,
+        None,
         crate::request::snapshot(),
         crate::request::document_environment_source(),
     )
@@ -328,6 +341,11 @@ fn run_sequence_inner(
     let mut authored_values: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter()
         .map(|(key, value)| (key.clone(), value.clone())).collect();
     if let Some(serde_json::Value::Object(values)) = &set_overrides { authored_values.extend(values.clone()); }
+    // The root `loop:` reads as lifecycle verbs below; the sequence grammar
+    // judges it (and a root `when:`) first, with the loop parser's messages.
+    let document_root: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter()
+        .map(|(key, value)| (key.clone(), value.clone())).collect();
+    composition::sequence::grammar::validate_sequence_root(&document_root, &source.resolved_path)?;
     let authored = serde_json::Value::Object(authored_values);
     let lifecycle = composition::lifecycle::parse_lifecycle_config(&authored, &source.resolved_path)?;
     composition::lifecycle::bindings::reject_removed_sequence_reads(
@@ -452,6 +470,7 @@ mod tests {
             sandbox: false,
             repo: false,
             dry_run: false,
+            dry_run_shell: false,
             quiet: false,
             silent: true,
             set: None,

@@ -893,6 +893,7 @@ impl FakePrompt {
             stdout: stdout.to_string(),
             exit_code: 0,
             interrupted: false,
+            withheld: false,
         })
     }
     fn with(outcome: PromptRunOutcome) -> Self {
@@ -3541,6 +3542,7 @@ mod prompt_tasks {
             stdout: "partial".to_string(),
             exit_code: 4,
             interrupted: false,
+            withheld: false,
         });
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -3568,6 +3570,7 @@ mod prompt_tasks {
             stdout: "partial".to_string(),
             exit_code: 130,
             interrupted: true,
+            withheld: false,
         });
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -3600,6 +3603,7 @@ mod prompt_tasks {
                 stdout: "partial".to_string(),
                 exit_code,
                 interrupted: true,
+                withheld: false,
             });
             let runtime = Arc::new(RuntimeState::new());
             let mut wiring = Wiring::new(&recorder, &shell);
@@ -3637,6 +3641,7 @@ mod prompt_tasks {
             stdout: "partial".to_string(),
             exit_code: 130,
             interrupted: false,
+            withheld: false,
         });
         let runtime = Arc::new(RuntimeState::new());
         let mut wiring = Wiring::new(&recorder, &shell);
@@ -5865,7 +5870,7 @@ mod document_environment {
             .iter()
             .find(|approval| approval.stage() == TaskStage::Primary)
             .expect("the primary command interpolates");
-        match primary.verify(document.document_environment()) {
+        match primary.verify(document.document_environment(), &Default::default()) {
             Err(CompositionError::SequenceShellApprovalChanged {
                 command,
                 approved,
@@ -6454,6 +6459,23 @@ mod nested_sequences {
         assert!(outcome.error.unwrap().message().contains("approval closed"));
         assert!(shell.commands().is_empty());
         assert_eq!(runtime.outputs_value(), json!([]));
+    }
+
+    #[test]
+    fn changed_nested_source_keeps_the_discovered_children() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "inner.yaml", &json!({"sequence":[{"name":"child","shell":"approved"}]}));
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":"inner.yaml"}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        write_yaml(fixture._dir.path(), "inner.yaml", &json!({"sequence":[
+            {"name":"added","shell":"approved"}, {"name":"child","shell":"approved"}
+        ]}));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default().stdout_for("approved", "ran");
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.commands(), ["approved"]);
+        assert_eq!(outcome.result, json!(["ran"]));
     }
 
     #[test]

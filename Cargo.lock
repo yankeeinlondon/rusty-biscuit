@@ -8095,6 +8095,7 @@ dependencies = [
  "serde_path_to_error",
  "serial_test",
  "sniff",
+ "sysinfo",
  "tempfile",
  "test-toolkit",
  "thiserror 2.0.18",

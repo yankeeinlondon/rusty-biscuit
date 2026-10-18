@@ -72,15 +72,23 @@ impl PreflightApproval {
         &self.approved
     }
 
-    /// Refuse the command when `environment` resolves it to text other than
-    /// the approved text.
+    /// Refuse the command when `environment` and the invocation's current
+    /// `runtime_writes` resolve it to text other than the approved text.
+    ///
+    /// The writes are layered over the values preflight resolved from, so a
+    /// command an earlier loop pass changed through a runtime `set` or a loop
+    /// action is refused rather than run with its first pass's bytes.
     ///
     /// ## Errors
     ///
     /// [`CompositionError::SequenceShellApprovalChanged`] when the text
     /// differs, or the resolution failure when the command no longer
     /// resolves under `environment`.
-    pub fn verify(&self, environment: &DocumentEnvironment) -> Result<(), CompositionError> {
+    pub fn verify(
+        &self,
+        environment: &DocumentEnvironment,
+        runtime_writes: &darkmatter::markdown::FrontmatterMap,
+    ) -> Result<(), CompositionError> {
         let basis = &self.basis;
         let mut state_context = basis.state_context.clone();
         *state_context.env_mut() = environment.vars().clone();
@@ -90,7 +98,14 @@ impl PreflightApproval {
             .file_resolution_context
             .clone()
             .with_env(environment.vars().clone());
-        let state = early_binding_state(&basis.frontmatter, state_context)?;
+        let frontmatter = if runtime_writes.is_empty() {
+            Arc::clone(&basis.frontmatter)
+        } else {
+            let mut current = (*basis.frontmatter).clone();
+            current.extend(runtime_writes.iter().map(|(key, value)| (key.clone(), value.clone())));
+            Arc::new(current)
+        };
+        let state = early_binding_state(&frontmatter, state_context)?;
         let resolved = compose_shell_text(
             &basis.authored,
             &basis.origin,
@@ -111,6 +126,9 @@ impl PreflightApproval {
                 &basis.authored,
                 basis.runtime_context.env(),
                 environment.vars(),
+                runtime_writes.iter()
+                    .filter(|(key, value)| basis.frontmatter.get(*key) != Some(*value))
+                    .map(|(key, _)| key.as_str()),
             ),
         })
     }
@@ -232,18 +250,20 @@ pub(super) fn compose_approval_value(
         .compose())
 }
 
-/// Name the variables the command mentions whose values differ between the
-/// approval's map and the document's.
-fn changed_variables(
+/// Name the environment variables and runtime values the command mentions
+/// whose values differ from what preflight resolved it with.
+fn changed_variables<'a>(
     authored: &str,
-    approved: &HashMap<String, String>,
-    document: &HashMap<String, String>,
+    approved: &'a HashMap<String, String>,
+    document: &'a HashMap<String, String>,
+    runtime: impl Iterator<Item = &'a str>,
 ) -> String {
     let mut changed: Vec<&str> = approved
         .keys()
         .chain(document.keys())
         .filter(|name| approved.get(*name) != document.get(*name))
         .map(String::as_str)
+        .chain(runtime)
         .filter(|name| authored.contains(name))
         .collect();
     changed.sort_unstable();

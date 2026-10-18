@@ -28,7 +28,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 4
+completed: true
 human_review: false
 pipeline_step: 14
 formerly: 2026-09-27-sequence-improvements
@@ -760,7 +761,19 @@ or reinterpret an old `exhausted` record as successful research.
    root; the old individual names are not newly reserved. Update existing
    group, task, and lifecycle schema partials and their editor-facing
    completions for the grammar landing here; do not defer validation of
-   nested containers to a later feature. The `sequence.yaml` trigger schema is written by
+   nested containers to a later feature. *(amended 2026-10-15, ruling
+   R1-HR1)*: the schema's `cancelled` guarantee is bounded by nesting
+   depth. Darkmatter's schema language inlines named types and cannot
+   recurse, so the schema types `cancelled` on a task or group and on its
+   direct child containers (two container levels), and through every
+   conditional level the parser accepts. A container nested three or more
+   levels deep has its `cancelled` stack checked by the task parser before
+   anything runs, not by the schema. A container's other events
+   (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`) are
+   checked by the schema for shape only, and by the parser in full. This
+   bound is **interim**: typing every container event at every depth is
+   2026-10-30-claudine-recursive-schemas, which removes this amendment.
+   The `sequence.yaml` trigger schema is written by
    2026-10-26-task-inputs-and-providers.
 6. **Migration sweep.** Every shipped prompt, fixture, test, doc page, and the
    `claudine` skill that reads `state`, `previous`, `next`, `outputs`,

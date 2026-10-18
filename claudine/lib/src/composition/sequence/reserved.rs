@@ -18,8 +18,14 @@ pub const EXECUTABLE_KEYS: &[&str] = &["prompt", "shell", "side_effect", "group"
 
 /// Optional task fields that live alongside an executable and are consumed as
 /// task configuration, never as authored state.
-pub const TASK_OPTION_KEYS: &[&str] =
-    &["name", "params", "timeout", "operation", "flow", "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"];
+///
+/// `when` is every task's guard. `loop` is an inline nested sequence's loop;
+/// [`super::grammar::validate_task_grammar`] rejects it on every other task
+/// before options are partitioned.
+pub const TASK_OPTION_KEYS: &[&str] = &[
+    "name", "params", "timeout", "operation", "flow", "when", "loop",
+    "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize",
+];
 
 /// Fields generated onto every `step_state`. Authors may declare them in a
 /// `$schema` with `generated`, but may never provide or override a value.
@@ -57,16 +63,17 @@ pub fn is_reserved_state_key(key: &str) -> bool {
 /// declaring an option outside this set is a typed authoring error rather than
 /// a silently-ignored field (spec → *Task Resolution and Lifecycle Semantics*).
 ///
-/// Lifecycle events apply only to inline sequence containers. External task
+/// Lifecycle events and `loop` apply only to inline sequence containers; every
+/// task may carry a `when` guard. External task
 /// references may carry a leg name; their target still supplies the executable
 /// and its options.
 pub fn allowed_task_options(field: ExecutableField) -> &'static [&'static str] {
     match field {
-        ExecutableField::Prompt => &["name", "params", "operation", "flow"],
-        ExecutableField::Shell => &["name", "timeout"],
-        ExecutableField::SideEffect => &["name"],
-        ExecutableField::Group => &["name"],
-        ExecutableField::Task => &["name"],
-        ExecutableField::Sequence => &["name", "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"],
+        ExecutableField::Prompt => &["name", "params", "operation", "flow", "when"],
+        ExecutableField::Shell => &["name", "timeout", "when"],
+        ExecutableField::SideEffect => &["name", "when"],
+        ExecutableField::Group => &["name", "when"],
+        ExecutableField::Task => &["name", "when"],
+        ExecutableField::Sequence => &["name", "when", "loop", "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"],
     }
 }

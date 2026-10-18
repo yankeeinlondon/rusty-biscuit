@@ -295,6 +295,9 @@ fn emit_dry_run_outcome(
     crate::log::message("");
     crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, term));
     crate::log::message(&dry_run::render_metadata_table(&render, term));
+    for target in attempt.request.prepared.lifecycle.literal_prep_targets() {
+        crate::log::message(&dry_run::render_prep_target(&target, term));
+    }
 
     if let Some(collector) = attempt.perf_collector.as_mut() {
         collector.set_dry_run();
@@ -1531,7 +1534,7 @@ pub(super) fn route_initialize(
             let message = if matches!(init_result.control, Some(StackControl::Error { .. })) {
                 setup_error.msg.clone()
             } else {
-                "lifecycle initialize failed".to_string()
+                format!("lifecycle initialize failed: {}", setup_error.msg)
             };
             return Err(eyre!(message));
         }
@@ -1591,6 +1594,36 @@ pub(super) fn route_initialize(
                     ));
                 }
                 (LifecycleTransitionDecision::Continue, StackControl::Stop) => {}
+                // The nearest loop's frame holds the break: nothing composes
+                // or launches, `finalize` runs once, and nothing is published.
+                (_, StackControl::Break { .. }) => {
+                    guard.defuse();
+                    let finalize = guard.execute_event(
+                        LifecycleSignal::Finalize,
+                        &init_ctx.with_signal(LifecycleSignal::Finalize),
+                    );
+                    if let Some(info) = finalize.evaluation_error.as_ref() {
+                        return Err(crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+                            source_path, "finalize", info, term,
+                        )
+                        .into());
+                    }
+                    if let Some(StackControl::Error { reason }) = finalize.control.as_ref() {
+                        return Err(eyre!(
+                            "{}",
+                            reason.as_deref().unwrap_or("lifecycle finalize marked the run as failed")
+                        ));
+                    }
+                    return Ok(CompositionPhaseResult::Completed(Box::new(SingleCompositionOutcome {
+                        exit_code: 0,
+                        provider,
+                        agent_perf: None,
+                        iteration_signals: None,
+                        terminal_signal: None,
+                        final_output: None,
+                        handoff: None,
+                    })));
+                }
                 (
                     LifecycleTransitionDecision::Abort(
                         LifecycleTransitionAbort::ResumeWithoutSession,
@@ -1801,7 +1834,9 @@ fn provider_run_handoff(
             .as_ref()
             .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
-        loop_values: None,
+        // A document inside a looping container reads that loop, and a
+        // `break` in its `initialize` ends it.
+        loop_values: request.prepared.input_layers.loop_values.as_ref(),
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),

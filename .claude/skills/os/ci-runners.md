@@ -1,178 +1,127 @@
 # Hosted CI Runners
 
-The four CI legs (`ubuntu-latest`, `windows-latest`, `macos-latest`, and the
-`wsl2-ubuntu` guest that rides on `windows-latest`) are not interchangeable
-machines. This file records what each one actually is, so concurrency caps,
-timing comparisons, and "why is this leg slow" questions start from facts
-rather than from the two-core folklore. Environment declarations live in
+Part of the `os` skill; [SKILL.md](SKILL.md) is the index.
+
+The four CI legs (`ubuntu-latest`, `macos-latest`, `windows-latest`, and the
+`wsl2-ubuntu` guest on a `windows-latest` host) are different machines. Start
+concurrency caps, timing comparisons, and "why is this leg slow" from the facts
+below. Environment declarations, capabilities, and gaps live in
 `.github/ci/environments.json`; the workflow contract is `.github/ci/README.md`.
 
 ## Runner sizes
 
-GitHub's standard free runners, as of 2026-09:
+GitHub's standard runners (GitHub's published runner specs):
 
 | Label | Cores | Memory |
 |---|---|---|
-| `ubuntu-latest`, public repository | 4 | 16 GB |
-| `windows-latest`, public repository | 4 | 16 GB |
-| `ubuntu-latest` / `windows-latest`, private repository | 2 | 7 GB |
+| `ubuntu-latest`, `windows-latest` (public repository) | 4 | 16 GB |
+| `ubuntu-latest`, `windows-latest` (private repository) | 2 | 7 GB |
 | `macos-latest` | 3 | 7 GB |
 | `macos-13` | 4 | 14 GB |
-| `macos-latest-xlarge` (paid larger runner) | 6 | 14 GB |
+| `macos-latest-xlarge` (paid) | 6 | 14 GB |
 
-This repository is public, so Linux and Windows get 4 cores and macOS gets 3.
-**macOS is the tightest standard runner, not the roomiest.** Any comment,
-thread cap, or override that assumes "two-core runners" predates GitHub's
-January 2024 upgrade for public repositories and should be re-measured, not
-trusted.
+This repository is public. **macOS is the tightest runner, not the roomiest.**
+A comment, cap, or override that assumes "two-core runners" is out of date;
+re-measure it rather than trust it.
 
 ## Per-leg profile
 
-The shapes below are stable across runs; the absolute seconds are not, so
-none are recorded here (see "Noise" below).
+Shapes are stable across runs; absolute times are not, so none are kept here.
 
 ### Linux (`ubuntu-latest`)
 
-- Fastest leg for Claudine and Darkmatter.
-- It is the **build owner** for both the native Linux cells and the WSL2 guest:
-  one archive per planned key, consumed by L1, L2, browser, and the guest alike
-  ([wsl.md](wsl.md)). Its own test legs compile nothing.
-- Anonymous GitHub API calls from a runner are rate-limited at 60 per hour
-  per IP, and the IPs are shared Azure addresses. Any shell-script installer
-  that resolves "latest" through the API fails sporadically. Use the setup
-  actions, which authenticate with the workflow token (5,000 per hour).
+- Fastest leg for the large suites (Claudine, Darkmatter).
+- The **build owner** for itself and the WSL2 guest: one archive per planned
+  key, consumed by L1, L2, browser, and the guest (`build.executes` in
+  `environments.json`; [wsl.md](wsl.md)). Its test legs compile nothing.
+- Shell installers that resolve "latest" through the GitHub API anonymously
+  fail sporadically (60 requests/hour per shared runner IP). Use the setup
+  actions, which authenticate with the workflow token.
 
 ### macOS (`macos-latest`)
 
-- Slowest leg for Claudine's CLI suite, taking more than twice the Linux
-  time on fewer cores. Any concurrency cap gets its most conservative
-  setting here, and a cap tuned on Linux is wrong here by default.
-- The only leg where Level 3 (focus-stealing) tests could run, and they are
-  not run on CI at all.
+- Slowest leg for Claudine's CLI suite, on the fewest cores. Give any
+  concurrency cap its most conservative setting here; a cap tuned on Linux is
+  wrong here by default.
+- `/usr/bin/python3` is CPython 3.9 (see Cross-cutting).
+- Level 3 (focus-stealing) tests never run on CI.
 
 ### Windows (`windows-latest`)
 
-- Slowest **build** phase of the four legs, noticeably behind both Unix
-  legs, while its test phase is not the bottleneck. That cost now lands in the
-  native-Windows owner leg rather than inside each tier, and it is never shared
-  with WSL2 — the two are structurally incompatible producers.
+- Slowest **build** phase of the four; its test phase is not the bottleneck.
+  The build is never shared with WSL2: the two are incompatible producers.
 - Runs fewer test identities because `#![cfg(unix)]` binaries are excluded.
-  Declare those as platform exclusions in the package's CI config rather than
-  treating them as lost coverage.
-- Handle inheritance, the batch-file argument rule, and the Unix-only Ctrl+C
-  and exit-130 contract all apply on this leg; each is recorded in
-  [windows.md](windows.md). The leg does not exercise Ctrl+C at all.
-- Sniff's host-network detections can fail-fast a test process when they
-  overlap, so its Windows L1 group runs one process at a time
-  (`.config/nextest.toml`).
-- Native Windows Level 2 (real terminal) legs do not exist yet. This is a
-  provisioning gap, not a design decision; acceptance criteria must not be
-  narrowed around it (see the standing rule in [SKILL.md](SKILL.md)).
+  Declare those as platform exclusions in the package's CI config, not as lost
+  coverage.
+- Process, console, and Ctrl+C traps for this leg are in
+  [windows.md](windows.md) and [windows-console.md](windows-console.md).
+- Sniff's host-network detections fail when they overlap, so its Windows L1
+  group runs one process at a time (`sniff-windows-l1` in
+  `.config/nextest.toml`).
+- No L2 or browser cells: no terminal backend or headless browser is
+  provisioned (`capabilities` in `environments.json`). This is a provisioning
+  gap, not a design decision; see the standing rule in [SKILL.md](SKILL.md).
 
 ### WSL2 (`wsl2-ubuntu`)
 
-- A separate VM behind a bash wrapper on a `windows-latest` host. GitHub
-  Actions cannot run inside the guest, so every tool there is installed by
-  script, which is exactly where the anonymous API limit bites
-  ([wsl.md](wsl.md), "Guest provisioning 403").
-- It runs the archive built on Linux, never its own build. A test red only
-  here is almost always an archive-mode failure; faithful local reproduction
-  requires hiding the builder's target directory ([wsl.md](wsl.md)).
-- Its build phase is only the archive download and extraction, so the
-  leg's wall clock is almost entirely slow test execution.
-- Follows **Linux** code paths. It is not evidence for native Windows
-  behavior, and the two must never be compared as one environment.
+- A VM behind a bash wrapper on a `windows-latest` host. Actions cannot run in
+  the guest, so every tool there is installed by script, which is where the
+  anonymous API limit bites ([wsl.md](wsl.md)).
+- Runs the Linux-built archive, L1 only, never its own build. A test red only
+  here is almost always an archive-mode failure; reproduce it with the
+  builder's target directory hidden ([wsl.md](wsl.md)).
+- Its wall clock is almost all test execution; the "build" is download and
+  extraction.
+- Follows **Linux** code paths. It is not evidence for native Windows, and the
+  two are never compared as one environment.
 
 ## Cross-cutting
 
-- **The Python floor is 3.9 for anything a workflow step runs, and 3.11 only
-  for the planner.** `scripts/ci/companion_suites.py` runs in `_package-ci.yml`
-  on all three native environments and `import`s `affected_scope`, so a
-  module-level import of a 3.11-only stdlib module in the planner would break
-  the companion step on a runner whose `python3` is older (macOS ships CPython
-  3.9 at `/usr/bin/python3`, and that interpreter has already broken a shipped
-  `time.monotonic` regression here). The *planner itself* runs only on the
-  scope job's `ubuntu-latest` and on developer hosts, and the thirteen
-  `scripts/ci/test_*.py` suites are all registered in `SUITE_REGISTRY` with
-  `environment: ubuntu-latest`. So: `affected_scope.py` imports `tomllib`
-  defensively (`except ModuleNotFoundError: tomllib = None`) and refuses by
-  name in `load_skip_policy` when a non-empty `.github/ci/ci-baseline.toml`
-  meets an interpreter that has none. Check a new import against
-  `ast.parse(source, feature_version=(3, 9))` over `scripts/ci/*.py` — it
-  catches grammar, not stdlib, so a new module import needs the same judgement
-  by hand (2026-09-20).
+- **Python floor: 3.9 for anything a workflow step runs, 3.11 only for the
+  planner.** `scripts/ci/companion_suites.py` runs on every native environment
+  and imports `affected_scope`, so the planner must stay importable on macOS's
+  3.9; it imports `tomllib` defensively and refuses by name only when it
+  actually needs it. The planner itself runs only on `ubuntu-latest` and
+  developer hosts. `ast.parse(source, feature_version=(3, 9))` catches new
+  grammar but not new stdlib imports; check those by hand.
+- **The working tree is LF on every OS** (`.gitattributes`: `* text=auto
+  eol=lf`, overriding `core.autocrlf`), so a tracked file hashes the same on
+  Windows and Linux. The plan's `skip_policy` hash relies on this.
+- **Test worker budgets** follow the shared policy in the `rust-devops` skill
+  ([ci-cd.md](../rust-devops/ci-cd.md)): on CI, all cores up to four. Per
+  runner that means L1 uses 4 on Linux/Windows and 3 on macOS; L2 uses 2 on
+  `ubuntu-latest` and 1 on `macos-latest`. Resource groups in
+  `.config/nextest.toml` still cap Claudine L1 at four and Sniff Windows L1 at
+  one; never add a package-wide Claudine CLI L1 cap, which would serialize
+  thousands of tests on every runner.
+- **Caches do not warm across runs.** The 10 GB repository cache quota cannot
+  hold per-package, per-environment caches, so only the build owner, `check`,
+  and `lint` cache; test tiers consume a verified archive and restore nothing.
+  A cold build is not a cache-key bug, and never add a cache to a consumer: a
+  restored cache can make a silent rebuild look fast.
+- **A push to `main` cancels the in-flight `main` run**
+  (`concurrency.group` in `.github/workflows/ci.yml` is keyed on the ref, and
+  `main`'s ref is constant). Pull requests use their own merge ref and the
+  nightly its own group, so they are unaffected; queue merges.
+- **Merge-gate bypass.** The `protect-your-bacon` ruleset requires `ci-gate`;
+  its bypass actors are recorded in `.github/ci/README.md`. Using or granting a
+  bypass (`gh pr merge --admin`) is Ken's decision, never an agent's.
 
-- **The working tree is LF on every OS**, so hashing a tracked file's bytes
-  gives the same digest on Windows as on Linux. `.gitattributes` sets
-  `* text=auto eol=lf`, overriding `core.autocrlf`. The plan's `skip_policy`
-  content hash relies on this.
+## Comparing legs and runs
 
-- **Test worker budgets follow the shared policy.** `_test_threads` in
-  `just/devops.just` uses `max(1, logical_cores - 2)` locally; CI uses all cores
-  through four and subtracts two above four. CI means `CI=true`,
-  `GITHUB_ACTIONS=true`, or nonempty `BISCUIT_CI_ENVIRONMENT`, not merely the
-  Nextest `ci` profile. Worker counts do not set CPU affinity, reserve cores,
-  or change Cargo build jobs. Explicit thread settings and narrower
-  resource-specific CI-profile groups remain effective: Claudine L1 is capped
-  at four and Sniff Windows L1 at one. Claudine CLI L1 deliberately has no
-  package-wide group cap; an old `max-threads = 1` override serialized all
-  2,500+ tests even on the 3–4-core public runners and overrode this policy.
-  L2 runs in parallel at `max(1, floor(logical_cores / 2))` workers on every
-  host (2 on `ubuntu-latest`, 1 on `macos-latest`) unless a package declares
-  `l2-serial` with a reason. See the
-  [central policy](../../../docs/topics/ci-cd.md#layer-1--local-pre-push-hook)
-  for override and direct Nextest behavior.
-
-- **A clean pre-push replaces individual cells, not a whole environment.** The
-  hook uses `sniff os --json` to distinguish macOS, Linux, native Windows, and
-  WSL2, then publishes a validation receipt under
-  `refs/notes/ci-local/<environment>` carrying one record per
-  `{package, gate}` cell with its outcome, counts, duration, backend proof, and
-  gate-input identity. CI reads **every** environment's ref reachable from the
-  outgoing head, so this host's receipt and a prior `cross-check` WSL receipt
-  omit their own cells in the same run. A cell from an older head is accepted
-  only when its gate-input identity — the `git ls-tree` entries of the tested
-  package's build closure plus that gate's global inputs — is unchanged, and
-  the comparison is recomputed over both trees rather than read out of the
-  receipt. `lint` and `check` stage no report and are always CI-origin; browser
-  and companion-suite work remains in CI.
-
-- **Caches do not warm across runs, and only the compiling legs have one.**
-  Per-package, per-environment caching cannot survive the 10 GB repository cache
-  quota: one full run saves more caches than the quota holds and evicts its own
-  predecessors. Since `fixes/2026-09-12-single-os-compile` the only cached legs
-  are the build owner, `check`, and `lint`; a test tier consumes a verified
-  archive and restores nothing. Do not diagnose a cold build as a cache-key bug,
-  and do not add a cache to a consumer — a restored cache is the one thing that
-  can make a silent rebuild look fast.
-- **A push to `main` cancels the in-flight `main` run.** The concurrency
-  group is `ci-${{ github.ref }}`, and for `main` that ref is constant. A
-  full-scope `main` run takes several hours. PR runs use
-  `refs/pull/N/merge`, a different group, and are unaffected; pushing
-  branches while waiting is free, merges must queue.
-- **The merge-gate ruleset has no admin bypass by default.** `gh pr merge
-  --admin` is refused with "Repository rule violations found" unless a
-  bypass actor has been granted explicitly; that grant is Ken's decision.
-- **Noise.** Run-to-run variation on an identical tree is 5 to 15% per leg,
-  so a delta inside that bracket is not a result. A single passing run is
-  sufficient evidence. Legs are never merged
-  or compared across OS.
-- **Compare matched test identities within one environment only.** Report
-  missing identities and platform exclusions separately from the timing
-  comparison, so an exclusion is never mistaken for a speed-up.
-- **Compare stages, not job totals.** Every cell reports seven windows
-  separately — producer queue, compile+archive, upload; consumer download,
-  verify, extract, execute — precisely so a comparison cannot credit a
-  compile-once change with time that actually moved into transfer or setup. A
-  post-cutover total that looks flat can still be a large compile saving paid
-  back in download, and only the stage split shows it. Report total runner
-  compute and end-to-end critical path separately as well: moving one compile
-  off three legs changes those two numbers in opposite directions.
-
-### Compiler-work probes (2026-09-15)
-
-Cargo on the Linux build host issues a stdin target-information query with
-`--crate-name ___` and `--print=...` even on some warm builds. Exclude that query
-from compiler-work counts, just like `rustc -vV`; retain invocations with
-`--emit` and real build-script feature-probe compilations. The CI counter's
-warm-rebuild fixture caught this distinction on Linux.
+- **Noise:** an identical tree varies 5 to 15% per leg run to run, so a delta
+  inside that band is not a result. A timing claim needs three consecutive
+  green runs per leg.
+- **One environment at a time:** compare matched test identities within one
+  environment only, never across OS. Report missing identities and platform
+  exclusions separately so an exclusion is not read as a speed-up.
+- **Stages, not job totals:** every cell reports seven windows (producer
+  queue, compile+archive, upload; consumer download, verify, extract, execute;
+  defined in [ci-cd.md](../rust-devops/ci-cd.md)). A flat total can hide a
+  compile saving paid back in transfer. Report total runner compute and
+  end-to-end critical path separately; moving a compile off several legs moves
+  them in opposite directions.
+- **Compiler-work counts** (`scripts/ci-build.rs`): exclude Cargo's stdin
+  target-information query (`--crate-name ___ --print=...`, issued even on
+  some warm builds) just like `rustc -vV`; keep invocations with `--emit` and
+  real build-script probe compilations.

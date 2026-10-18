@@ -8,24 +8,70 @@ The `loop` property can be attached to any of the three _executable primitives_ 
 - a **sequence** of steps
 - a **group** of tasks
 
-> **Planned.** Today only a document's loop runs. A group or sequence cannot declare one yet, and a looping document placed inside a sequence or group currently runs **one** iteration and reports success. Both are defects against this page. Everything here is written for the intended behavior; the loop block has the same shape and the same rules whichever primitive carries it.
-
 A primitive without a `loop` property runs once. When looping is wanted, the primitive you attach it to makes no difference to the rules, so the examples on this page mostly use a Markdown document.
 
-**The condition is checked at the end of each iteration, not before it.** A loop therefore always runs at least once, and the condition decides whether there is a *next* iteration. See [Iteration semantics](#iteration-semantics) for exactly how many times a given condition runs. Whether the primitive runs *at all* is a separate question, answered by a `when:` condition on the step or task (planned) or by `skip` from a document's `initialize`; see [Leaving a loop early](#leaving-a-loop-early).
+**The condition is checked at the end of each iteration, not before it.** A loop therefore always runs at least once, and the condition decides whether there is a *next* iteration. See [Iteration semantics](#iteration-semantics) for exactly how many times a given condition runs. Whether the primitive runs *at all* is a separate question, answered by a [`when:` guard](sequences.md#task-guards-when) on the step or task or by `skip` from a document's `initialize`; see [Leaving a loop early](#leaving-a-loop-early).
 
-For a pipeline of different documents, use a [sequence](./sequences.md).
-Uniform loops on groups and nested sequences are **planned**. A group with
-`loop:` is rejected, and a looping document inside a sequence currently runs
-one iteration and reports success. Until uniform container loops are built,
-use a standalone document loop when repeated execution is required.
+For a pipeline of different documents, use a [sequence](./sequences.md). A
+looping document repeats wherever it runs: under `compose` or
+`inline-compose`, as a sequence's `prompt:` step, and as a group leg.
+
+```yaml
+# count.md
+---
+n: 1
+loop:
+    until: "n >= 3"
+    action: "increment(n)"
+---
+Iteration {{ n }}
+```
+
+```yaml
+# seq.md
+---
+sequence:
+    - name: counting
+      prompt: "@count.md"
+---
+```
+
+`claudine compose @count.md` and `claudine sequence @seq.md` each send the
+provider `Iteration 1`, `Iteration 2`, and `Iteration 3`.
 
 ## Frontmatter shape
 
 A loop is declared as a `loop:` object. Where it lives depends on the primitive:
 
 - a **document** carries it at the root of its frontmatter;
-- loops on **groups and sequences** are planned; a group `loop:` is rejected.
+- a **group** carries it on the group object, beside `tasks:`;
+- a **sequence document** carries it at its root, beside `sequence:`;
+- an **inline nested sequence** carries it on its task entry, beside `sequence: [ … ]`.
+
+No other task takes `loop:`. One beside `prompt:`, `shell:`, `side_effect:`,
+`task:`, a group reference (`group: "@g.yaml"`, whose loop belongs in that
+file's group object), or a sequence reference (`sequence: "@s.yaml"`, whose
+loop belongs at that document's root) is an error naming where the loop goes.
+
+```yaml
+---
+loop:
+    until: "loop.count >= 3"
+sequence:
+    - name: lint
+      shell: "cargo clippy"
+    - name: batch
+      group:
+          loop:
+              until: "file_exists('ready.txt')"
+              max: 5
+          tasks:
+              - name: left
+                prompt: "@left.md"
+              - name: right
+                prompt: "@right.md"
+---
+```
 
 ```yaml
 ---
@@ -46,17 +92,24 @@ Recognized keys, identical on every primitive:
 | `until`     | string                  | one of `while` / `until` is required | Boolean expression, evaluated after each iteration. Another iteration runs **until** it is truthy.                                                            |
 | `action`    | string \| object \| array | optional                             | One or more frontmatter mutations, applied after an iteration **only when the loop is going to continue**.                                                    |
 | `actions`   | string \| object \| array | optional                             | Alias for `action`. Cannot be combined with `action`.                                                                                                         |
-| `max`       | positive integer        | optional                             | Iteration cap for this loop. Defaults to `100` when unset.                                                                                                    |
-| `fail_fast` | boolean                 | optional                             | When `true` (default), the loop halts on the first iteration failure. When `false`, the loop continues past failures until the condition or the cap stops it. |
-| `on_rate_limit` | `pause` \| `abort` \| `continue` | optional                     | What an iteration that hits a provider rate limit does: sleep until the reset (`pause`, the default), halt with an error (`abort`), or carry on without pausing (`continue`). |
+| `max`       | positive integer, or a `{{ … }}` template | optional           | Iteration cap for this loop. Defaults to `100` when unset. A template is resolved once, before the loop starts; see [Iteration cap](#iteration-cap).            |
+| `on_rate_limit` | `pause` \| `abort` \| `continue` | optional (documents only)    | What an iteration that hits a provider rate limit does: sleep until the reset (`pause`, the default), halt with an error (`abort`), or carry on without pausing (`continue`). Only a document's provider reports rate limits, so a group or sequence `loop:` with this key is an error. |
 
 The block may also carry **lifecycle concerns** that run at the loop gate: either loose lifecycle verb keys (`info:`, `stderr:`, `effect:`, …) or a `gate:` list, never both. See [Lifecycle — Loop Gate Concerns](lifecycle.md#loop-gate-concerns).
 
-Any other key under `loop:` is rejected with a parse error. Common typos like `max_iterations:` and `failfast:` produce a `did you mean …?` hint:
+Any other key under `loop:` is rejected before anything runs. A key close to a valid one, such as `untill:`, or a known alias such as `max_iterations:`, gets a `did you mean …?` hint:
 
 ```text
-unknown `loop.max_iterations` key (did you mean `max`?); valid keys are: while, until, action, actions, max, fail_fast, on_rate_limit
+invalid loop definition (prompts/count.md): unknown `loop.untill` key (did you mean `until`?); valid keys are: while, until, action, actions, max, on_rate_limit, `gate`, or lifecycle verbs
 ```
+
+Every loop configuration error names the file and the key, as above. These are errors, never silently ignored:
+
+- `null` for `loop` or any of its keys, and `loop: {}` (it has no condition);
+- an empty `while`/`until`, and an empty `action: ""` (`action: []` is the explicit "no action");
+- both `while` and `until`, or both `action` and `actions`.
+
+**A loop has no `fail_fast`.** A failed iteration is an unhandled failure unless a `failure` event handles it (the iteration's document's, or the looping container's). `fail_fast` is a group key, so `loop.fail_fast` in any form, even `false` or `null`, is a `RemovedGrammar` error naming that replacement.
 
 ## Conditions
 
@@ -146,8 +199,8 @@ Each iteration's actions are **all-or-nothing**:
 
 - All actions stage onto a copy of the iteration's pre-action frontmatter.
 - The staged copy is committed only when every action succeeds.
-- Under `fail_fast: false`, a partially-failed action list discards its stage and the next iteration restarts from the pre-action state.
-- Errors include the failing iteration and 1-based action index, e.g. `InvalidIncrementType at iteration 7, action 2 of 4`.
+- A failed action list discards its stage and fails the loop owner, named at the loop block and the pass: ``loop.action` failed after pass 7 (…): invalid increment at iteration 7, action 2 of 4 …``. No event of the pass that already finished runs again.
+- On a group or sequence the action writes the container's runtime `set` layer, which every child of the next pass reads as ordinary frontmatter.
 
 ### When templates inside action values are rendered
 
@@ -199,8 +252,8 @@ In addition to the _mutation operations_ above, which change real state, the loo
 | `loop.count`          | number  | 1-based iteration counter. `1` on the first iteration. |
 | `loop.is_first`       | boolean | `true` on iteration 1, `false` thereafter. |
 | `loop.is_last`        | boolean | `true` when this iteration is the final pass the cap permits (`count == max`), `false` otherwise. It says nothing about whether the condition will end the loop; see the note below. |
-| `loop.last_output`    | string  | In the body and in `start`: captured stdout from the **previous** iteration (empty on iteration 1). In the condition and in actions: stdout from the iteration that **just finished**. |
-| `loop.last_exit_code` | number  | **Process exit code** of a prompt run (Unix-style: `0` = success, non-zero = failure), with the same timing as `loop.last_output`. `0` in iteration 1's body because no prior run exists. **Narrow utility — read the note below before using.** |
+| `loop.last_output`    | text, array, or dictionary | The result of a pass: a document's captured stdout, a sequence's array of that pass's child results, a group's dictionary of leg results. In the body and in `start`: the **previous** pass's (`""`, `[]`, or `{}` on pass 1). In the pass's terminal event and `finalize`, the gate, the condition, and actions: the pass that **just finished**. |
+| `loop.last_exit_code` | number  | **Process exit code** of a prompt run (Unix-style: `0` = success, non-zero = failure), with the same timing as `loop.last_output`. `0` before any pass. **Narrow utility — read the note below before using.** |
 
 Read them in any of three spellings: dotted (`loop.count`), bracketed (`loop['count']`), or bare `loop` for the whole object. They can be used in the body, in compose-time frontmatter values, in your `while`/`until` expression, in your mutation operations, in the `start`, `success`, `failure`, and `finalize` lifecycle events of an iteration, and in the `loop:` block's own gate concerns.
 
@@ -221,7 +274,8 @@ Where `loop` is not what you expect:
 
 - **`fm.loop` is the configuration.** It reads the `loop:` block you wrote (`fm.loop.until`, `fm.loop.max`), never the values above.
 - **A missing member never falls back to the document.** `loop.nonexistent` is `null`, even when the document has a property of that name.
-- **Before the first iteration** (the loop's seed and bootstrap read) the values do not exist yet, and `loop` reads `null`.
+- **`initialize` is inside the loop.** It already reads pass 1's values: `count` `1`, `is_first` `true`, `is_last` `true` only when `max` is `1`, and the empty result.
+- **Before the loop exists** (a document's seed and bootstrap read) `loop` reads `null`.
 - **Outside any loop** `loop` is unavailable, with the typed scope diagnostic `claudine.outside-loop`. A non-looping document that reads it in its body or compose-time frontmatter fails before launch; one that reads it in a lifecycle event fails when that event fires, because a document cannot know in advance whether it will run inside a loop.
 - **A `proxy` target is not an iteration.** A document reached through `proxy` from a loop iteration does not receive the loop's values.
 
@@ -243,8 +297,6 @@ Continue from where you left off. Your last report was:
 If iteration 1 ends with `see {{…}} and $(rm -rf x)`, iteration 2's prompt contains exactly that text: no parse error, no shell approval, nothing run. The same holds for every value the loop produces, not only the loop values: a frontmatter key an action wrote, a value lifted from the composed document, and, inside a sequence, [`seq.outputs`](sequences.md#the-output-array). Only values a person typed (`--set`, `key=value`, interactive answers) are templates; see [CLI overrides interact with looping](#cli-overrides-interact-with-looping).
 
 > **`loop.is_last` means "last permitted", not "last".** A loop usually ends because of something the iteration itself produced: the agent's output, an exit code, or a file it wrote that the condition reads through `frontmatter(...)`. Nothing can know that before the iteration runs, so `is_last` does not try. It is `true` only on the `max`-th pass. If you want a prompt to say "this is your final attempt" in a loop that runs a fixed number of times, test the count directly: `{{ loop.count == 3 }}`, or set `max: 3` and let `is_last` do it.
->
-> **Planned.** The current engine instead *predicts* `is_last` by evaluating the condition before the iteration, which is exact for counter loops and silently wrong for every loop that ends on what the agent did, and which can raise when the condition reads a file the agent has not written yet. The cap-only definition above replaces it.
 
 For example, a loop action can stamp the iteration that produced a value:
 
@@ -256,29 +308,7 @@ loop:
 
 ### When `loop.last_exit_code` is actually useful
 
-This value carries information in **exactly one configuration**: a retry loop that explicitly opts into `fail_fast: false`. Outside that configuration it is always observed as `0` and is effectively dead.
-
-Why it's so narrow:
-
-- **Default behavior is `fail_fast: true`.** A non-zero exit halts the loop immediately, so iteration `N+1` never runs and never sees the failure.
-- **Agentic CLIs almost always exit `0` regardless of task success.** They reserve non-zero for catastrophic failures (timeouts, crashes, auth errors, user interrupts), not for "the agent's answer was wrong."
-- **It is *not* an iteration counter.** The expression engine has no arithmetic operators, so `{{loop.count - 1}}` is *not* a valid template. To get a zero-based counter, maintain it yourself with a `set` or `increment` action on a separate property.
-
-So the practical scope is: **retry on wrapper-detected failure** (typically a timeout or crash) when you've explicitly told the loop to keep going past such failures.
-
-```yaml
----
-loop:
-  until: "loop.last_exit_code == 0"
-  fail_fast: false   # required — without this, a failure halts the loop
-  max: 3
-  action: "increment(attempts)"
-attempts: 0
-timeout: 5m
----
-Try the thing. The loop will retry up to 3 times if the wrapper kills the
-child due to timeout, crash, or interrupt.
-```
+Rarely. A failed pass ends the loop before its gate, so a later pass never sees a failure there. What remains is a pass whose own lifecycle settled it as a success while its prompt run reported a non-zero code, which agentic CLIs almost never do: they reserve non-zero exits for timeouts, crashes, auth errors, and interrupts, not for "the agent's answer was wrong." It is also not an iteration counter; the expression engine has no arithmetic, so `{{loop.count - 1}}` is not valid.
 
 For "did the agent actually succeed at its task?" — exit code is the wrong tool. Use one of these stronger signals instead:
 
@@ -300,19 +330,35 @@ For "did the agent actually succeed at its task?" — exit code is the wrong too
 
 ## Iteration semantics
 
-`initialize` fires once, before the first iteration. Each iteration then runs a full composition cycle, and the decision about a next iteration is taken at the **loop gate**, which follows that iteration's `finalize`:
+Every primitive repeats by the same order. `initialize` fires once per invocation. Each pass then runs `start`, its body or children, its terminal event (`success`, `failure`, `blocked`, or `cancelled`), and `finalize`; after that the **loop gate** decides whether another pass runs:
 
-1. **Set `loop.is_last`** to whether this is the `max`-th pass.
-2. **Run the iteration**: compose the body against the iteration's state, fire `start`, launch the agent, fire `success` or `failure`, then `finalize`.
-3. **At the loop gate**, in this order:
-    1. run any lifecycle concerns authored inside the `loop:` block (its loose verbs or its `gate:` list). They run on every gate pass, including the one that ends the loop;
-    2. evaluate the condition against **the state this iteration ran with**, plus `loop.last_output` and `loop.last_exit_code` from this iteration;
-    3. if the condition says stop, the loop ends and the actions are **not** applied;
-    4. otherwise apply the actions, producing the state iteration `N+1` runs with.
+1. run any lifecycle concerns authored inside the `loop:` block (its loose verbs or its `gate:` list), on every pass including the one that ends the loop;
+2. evaluate the condition against current values and fresh file reads, with `loop.*` describing the pass that just finished;
+3. if the condition no longer asks for a pass, the loop ends: **condition met**;
+4. if it does but this was the `max`-th pass, the loop fails: **cap reached** (`LoopLimitExceeded`), and no action applies;
+5. otherwise stage the action, all or nothing, and start the next pass.
+
+```mermaid
+flowchart TD
+    I[initialize, once] --> P[prepare and start this pass]
+    P --> R[run the body or the children]
+    R --> T[terminal event, then finalize]
+    T --> G[loop gate]
+    G --> C{condition asks for another pass?}
+    C -->|no| S[condition met: success]
+    C -->|yes| M{cap permits another pass?}
+    M -->|no| E[cap reached: typed failure]
+    M -->|yes| A[stage the action]
+    A --> P
+```
+
+An unhandled failure, a handoff, a cancellation, or a [`break`](#breaking-out-of-a-loop) leaves this path without running the gate, the condition, or the action. A `retry` or `resume` accepted by the pass re-enters it without running its `finalize` and without advancing `loop.count`; the pass's `finalize` runs once, after its final attempt.
+
+When an outer loop repeats a child, each pass is a new invocation of the child: its own `initialize` and a fresh count. A loop nests in any other loop, and `loop.*` always names the innermost one.
 
 Two consequences are worth committing to memory.
 
-**The first iteration is unconditional.** A condition that is false from the start still runs the prompt once. Whether a primitive runs at all is decided *before* its loop, by a `when:` condition on the sequence step or group task that names it (planned; a false `when:` records the primitive as skipped and runs no iteration). Inside a document, the same opt-out is a `skip` from `initialize`:
+**The first pass is unconditional.** A condition that is false from the start still runs the prompt once. Whether a primitive runs at all is decided *before* its loop, by a [`when:` guard](sequences.md#task-guards-when) on the sequence step or group task that names it: a false guard records the primitive as skipped and runs no pass. Inside a document, the same opt-out is a `skip` from `initialize`:
 
 ```yaml
 initialize:
@@ -337,10 +383,36 @@ Read a condition as "*did the iteration that just finished satisfy this?*" rathe
 
 ### Leaving a loop early
 
-- **`break` (planned)** ends the innermost enclosing loop, whichever primitive owns it. The current iteration completes, `finalize` included, and the loop then stops without evaluating its condition or applying its actions. A loop ended by `break` is reported as its own outcome, distinct from "condition met" and "`max` reached". See [Flow Control — `break`](flow-control.md#break).
+- **`break`** ends the nearest enclosing loop, whichever primitive owns it. Each primitive between the `break` and the loop runs its `finalize` once, and the loop then stops without running its gate, evaluating its condition, or applying its actions. A loop ended by `break` is reported as its own outcome, distinct from "condition met" and "`max` reached". See [Breaking out of a loop](#breaking-out-of-a-loop).
 - An explicit `error` among the `loop:` block's lifecycle concerns fails the run before the condition is evaluated.
 - A `proxy` raised by an iteration's `start`, `success`, `failure`, or `finalize` ends the loop and hands off to its target, which enters at its own `initialize` and is not an extra iteration of this loop. No further iteration runs and the `loop:` block does not fire for the abandoned iteration. A proxy from `success` or `failure` skips that iteration's `finalize`, and one from `finalize` does not run it again.
 - `retry`, `resume`, and `proxy` authored inside the `loop:` block itself are not supported and fail the run with `LifecycleSetupPhaseRecoveryUnsupported`.
+
+### Breaking out of a loop
+
+A `break` from a pass's terminal event, or from the loop gate, ends the loop early with an optional reason and exit code:
+
+```yaml
+---
+loop:
+  until: "loop.count >= 10"
+  gate:
+    - when: "file_exists('@output/NEEDS_REVIEW.md')"
+      then:
+        - break: { reason: "needs human review at pass {{ loop.count }}", code: 2 }
+---
+Work through the next item in @TODO.md.
+```
+
+Run with `claudine compose`, a pass that leaves `NEEDS_REVIEW.md` behind ends the loop, prints the info line `loop broken: needs human review at pass 3 (code 2)`, and exits `2`. Without a reason the line reads `loop broken (code N)`. The rules worth knowing:
+
+- **Nearest loop only.** An inner loop's `break` does not end an outer loop; the outer loop reads its own condition as usual.
+- **Exit code.** Only the root invocation's loop (`claudine compose` of a looping document, or a looping root sequence) sets the process exit code. An inner loop's `code` appears only in the summary line, and the run continues.
+- **Results.** The broken loop publishes the work it completed; a document broken before it launched publishes nothing.
+- **Failures win.** Any unhandled failure, including a failing `finalize`, beats a pending `break`. Ctrl-C overrides it (exit `130`), and a `retry` discards it.
+- **No loop, no break.** A `break` fired outside any loop is a typed error of that event, `LifecycleBreakWithoutLoop`.
+
+[Flow Control — `break`](flow-control.md#break) covers concurrent groups, `break` from `initialize`, and exactly which events still fire.
 
 ## Iteration cap
 
@@ -350,29 +422,70 @@ Every loop is bounded so a runaway condition cannot hang indefinitely.
 - **Per-loop override:** `loop.max: <N>` on the primitive.
 - **Per-run override:** `--max-iterations <N>` on the CLI, or the `CLAUDINE_MAX_ITERATIONS` environment variable.
 
-Precedence is **CLI > environment > frontmatter > built-in default**.
+Precedence is **CLI > environment > frontmatter > built-in default**. A `CLAUDINE_MAX_ITERATIONS` that is not a positive integer (`0`, `ten`) fails a looping run that would use it before its first iteration, rather than being ignored; under `--max-iterations` the variable is never read.
 
-The `max`-th iteration always sees `loop.is_last: true`. If the condition still says "continue" after it, the loop exits with `LoopLimitExceeded`, carrying the prompt path and the iteration number that breached the cap, and the run fails. A loop that reaches its cap and whose condition then says "stop" ends normally.
+`max` may be a whole-value template. It is resolved **once**, before the first iteration, against the values the document's frontmatter resolves with: its own defaults, with the caller's setters and `--set` applied.
 
-A loop therefore ends in one of three ways, and sequence summaries and exit codes distinguish them (planned): the condition was met, `max` was reached, or a `break` fired.
+```yaml
+---
+cap: 4
+loop:
+  until: "n >= 3"
+  action: "increment(n)"
+  max: "{{ cap }}"
+n: 1
+---
+```
 
-## Fail-fast semantics
+`claudine compose count.md` runs with a cap of 4; `claudine compose count.md cap=2` runs with a cap of 2. A template that resolves to nothing (an undefined `cap`), to `0`, to a negative or fractional number, to text that is not an integer, or to a number too large for the platform is an error naming `loop.max` and the file. Changing `cap` during the loop does not move the cap.
 
-`fail_fast` controls how per-iteration failures propagate:
+The `max`-th pass always sees `loop.is_last: true`. If the condition still says "continue" after it, the loop exits with `LoopLimitExceeded`, carrying the file and the pass that reached the cap, and the loop owner fails like any unhandled failure (at the root, exit `1`). The condition is read first: a loop whose condition says "stop" after its `max`-th pass ends normally. Each loop has its own cap, and the runtime override applies to each loop independently.
 
-| Source of failure                                    | `fail_fast: true` (default)                                                 | `fail_fast: false`                                                              |
-|------------------------------------------------------|-----------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| Prompt run exits non-zero                            | Loop halts; `final_exit_code` is the failing run's code.                    | Loop continues; the next iteration sees the failure via `loop.last_exit_code`. |
-| An `error` in `success` that nothing recovers        | Loop halts; the error names the iteration and the `error` reason.           | Loop continues through the gate; the iteration's reason is reported as it ends. |
-| The iteration cannot complete (e.g. a refused `proxy`: missing target, cycle, hop limit) | Loop halts with that error.                                  | The error is reported and the next iteration starts; the `loop:` gate does not run for the failed iteration. |
-| Action raises an error (e.g. `InvalidIncrementType`) | Loop halts; the action stage for that iteration is discarded.               | Loop continues; the iteration's frontmatter remains in its pre-action state.    |
-| Loop condition cannot be parsed/evaluated            | Loop halts unconditionally — this is a structural error, not a runtime one. | Same.                                                                           |
+A loop therefore ends on its own terms in one of three ways:
 
-The `CLAUDINE_FAIL_FAST` environment variable overrides `loop.fail_fast`; precedence is **environment > loop frontmatter > built-in default (true)**. The sequence command does not inject this variable, and `--fail-fast` is removed grammar.
+| Outcome | Result | Summary line |
+|---|---|---|
+| Condition met | Success | None |
+| `max` reached | Typed failure, `LoopLimitExceeded` | The error |
+| `break` fired | Success, or the `break`'s `code` when it is the root loop | `loop broken: <reason> (code N)` |
+
+See [Breaking out of a loop](#breaking-out-of-a-loop).
+
+## Results of a looping primitive
+
+| Looping primitive | Inside it, across passes | Published to its parent, once, when the loop ends |
+|---|---|---|
+| document | `loop.last_output` | its final pass's output |
+| sequence | `seq.outputs` keeps growing with no per-pass nesting: two passes of `A`, `B` read `["A", "B", "A", "B"]` | its whole `seq.outputs` array |
+| group | `loop.last_output`, the previous pass's dictionary | its final pass's dictionary |
+
+A sequence's `loop.last_output` is only the current pass's array, never its cumulative `seq.outputs`. A group rebuilds its leg results and `group.legs`/`succeeded`/`failed`/`cancelled` each pass. Results publish to the parent only after successful cleanup: a loop that fails or is cancelled publishes no result, even after passes that completed. A loop ended by `break` publishes the work it completed. Runtime writes follow the container's own rules: a sequence's writes are the invocation's, and an atomic group withholds its legs' writes when it fails.
+
+### Retry inside a looping container
+
+A `retry` replaces the failed attempt of the current pass without erasing completed passes. The pass's output slice and the container's runtime `set` layer return to their state at the entry of that pass, and the retry's `with:` values are written after that. `loop.count`, the cap, and `initialize` are untouched, and `loop.last_output` again reads the previous pass. External file writes and commands are not rolled back and may repeat.
+
+So after pass 1 of `A`, `B` completes and pass 2 fails in `B` and retries, `seq.outputs` reads `["A1", "B1"]` when the retried pass 2 starts, never including the failed attempt's `A2`, and the final array holds one entry per child per completed pass.
+
+A container without a loop keeps its own rule: a retried attempt's child results reset and its runtime writes survive.
+
+## When a pass fails
+
+A loop has no fail-fast switch (see [Frontmatter shape](#frontmatter-shape)), and `CLAUDINE_FAIL_FAST` is not read. A pass that its own lifecycle did not recover is an unhandled failure: the loop ends with it, before its gate, its condition, or its action.
+
+| Source of failure | Result |
+|---|---|
+| The prompt run exits non-zero, or a container child fails, and no `failure` event recovers it | The loop ends with that failure; nothing more of it runs. |
+| An `error` in `success` that nothing recovers | The loop ends; the error names the pass and the reason. |
+| The pass cannot complete (for example, a refused `proxy`: missing target, cycle, hop limit) | The loop ends with that error, reported once. |
+| An explicit `error` in the gate | The loop owner fails with `LifecycleLoopGateFailed`, naming the pass; the condition is not read. |
+| The condition cannot be parsed or evaluated, or an action fails | The loop owner fails with `LoopEvaluationFailed`, naming the `loop:` key and the pass; nothing of the action is committed. |
+
+To keep repeating past a failure, recover it in the pass's own `failure` event (`retry`), and to tolerate a group leg's failure, use the group's `fail_fast: false`.
 
 ## User interrupt (Ctrl+C)
 
-Pressing **Ctrl+C** at any point during a `compose` / `inline-compose` run — including the pre-launch prep window where the source file is parsed, transclusions are resolved, target/model are selected, and shell preflight runs — halts the run with a friendly notice. The CLI installs a process-scoped `SIGINT` handler at the very top of the subcommand (just after positional argv parsing, before any I/O-heavy prep), so the handler is live throughout. It fires alongside the wrapper's per-iteration handler, so even when an agent CLI exits `0` after being interrupted (most do), the loop stops between iterations rather than starting a new one. When the interrupt is observed during loop execution the loop halts regardless of `fail_fast`. Post-prep checkpoints consult the same flag and bail out with exit code `130` before launching the agent if the user interrupted during prep.
+Pressing **Ctrl+C** at any point during a `compose` / `inline-compose` run — including the pre-launch prep window where the source file is parsed, transclusions are resolved, target/model are selected, and shell preflight runs — halts the run with a friendly notice. The CLI installs a process-scoped `SIGINT` handler at the very top of the subcommand (just after positional argv parsing, before any I/O-heavy prep), so the handler is live throughout. It fires alongside the wrapper's per-iteration handler, so even when an agent CLI exits `0` after being interrupted (most do), the loop stops between iterations rather than starting a new one. When the interrupt is observed during loop execution the loop halts. Post-prep checkpoints consult the same flag and bail out with exit code `130` before launching the agent if the user interrupted during prep.
 
 On interrupt the CLI:
 
@@ -402,16 +515,22 @@ A setter is authored text, so a template in it fills in on every iteration: `--s
 
 | Error                                                               | Cause                                                                                                                 |
 |---------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
-| `unknown loop.<key> key`                                            | A typo or unsupported key under `loop:`. The error message lists valid keys and offers a suggestion for common typos. |
+| `unknown loop.<key> key`                                            | A typo or unsupported key under `loop:`. The error message lists valid keys and suggests the closest one.            |
+| `loop.fail_fast` uses the removed `fail_fast` grammar (`RemovedGrammar`) | `fail_fast` under `loop:`, in any form. Remove it; handle a failed iteration in a `failure` event.                  |
+| `` `loop.max` template `{{ … }}` resolved to … ``                   | A templated cap did not resolve to a positive integer.                                                                |
+| `` invalid `CLAUDINE_MAX_ITERATIONS` value ``                       | The runtime cap override is not a positive integer.                                                                   |
 | `loop.action and loop.actions are aliases; specify only one`        | Both keys were set in the same document. Pick one.                                                                    |
 | `loop.while and loop.until are mutually exclusive`                  | Both `while:` and `until:` were set. Pick one.                                                                        |
 | `loop must define either while or until`                            | Neither condition key is present.                                                                                     |
 | `loop.max must be greater than zero`                                | `max:` is `0` or negative.                                                                                            |
-| `InvalidIncrementType at iteration N, action M of K`                | An `increment` / `decrement` target resolved to a non-numeric, non-numeric-string value.                              |
+| `` `loop.action` failed after pass N `` (`LoopEvaluationFailed`)     | An action failed, for example an `increment` / `decrement` target that is not numeric; the inner cause names the action. |
+| `` `loop.until` failed after pass N `` (`LoopEvaluationFailed`)      | The condition could not be parsed or evaluated.                                                                         |
+| `lifecycle loop gate raised an error after pass N` (`LifecycleLoopGateFailed`) | An explicit `error` in the `loop:` block's gate concerns.                                               |
 | `` invalid loop action at iteration N, action M of K: `<prop>` is reserved … `` (`InvalidAction`) | An action tried to write to `loop`, `replace`, or a retired `_loop_*` name. |
 | `RemovedGrammar`                                                    | A read of a retired `_loop_*` name; the message names the `loop.*` replacement.                                         |
-| `LifecycleStackInvalidShape`                                        | `when` at the `loop:` root, or loose lifecycle verbs beside `gate:`.                                                    |
+| `LifecycleStackInvalidShape`                                        | `when` at the `loop:` root, loose lifecycle verbs beside `gate:`, or `gate: null` / `gate: {}` (use `gate: []`).        |
 | `LoopLimitExceeded`                                                 | The cap was reached and the condition would still continue.                                                           |
+| `LifecycleBreakWithoutLoop`                                         | A `break` fired with no enclosing loop.                                                                               |
 | `LoopInterrupted`                                                   | The user pressed Ctrl+C; the loop halted between iterations and exited with code `130`.                               |
 
 ## See also

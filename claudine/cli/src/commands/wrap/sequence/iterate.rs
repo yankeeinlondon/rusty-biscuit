@@ -75,6 +75,9 @@ pub(super) struct SequenceRunContext<'a> {
     pub(super) silent: bool,
     pub(super) verbose: u8,
     pub(super) perf_enabled: bool,
+    /// The root sequence's `loop` values for the pass being run; `None` when
+    /// the root does not loop.
+    pub(super) loop_values: Option<claudine::composition::LoopAmbient>,
 }
 
 impl SequenceRunContext<'_> {
@@ -101,6 +104,7 @@ impl SequenceRunContext<'_> {
             silent: self.silent,
             verbose: self.verbose,
             perf_enabled: self.perf_enabled,
+            loop_values: self.loop_values.clone(),
         }
     }
 }
@@ -136,6 +140,8 @@ pub(super) enum StepOutcome {
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
         tasks: Vec<SequenceTaskResult>,
     },
+    /// The step's task had a false `when:` guard: nothing composed or ran.
+    Skipped,
 }
 
 /// Run every step in order, composing each at its turn.
@@ -205,6 +211,7 @@ pub(super) fn run_sequence_steps(
         let outcome = run_one_step(run, step_index, runtime_state);
         let duration = start.elapsed();
         let interrupted_step = matches!(outcome, StepOutcome::Interrupted { .. });
+        let skipped = matches!(outcome, StepOutcome::Skipped);
 
         let (success, error, error_snapshot, provider, agent_perf, compose_perf, tasks) =
             match outcome {
@@ -242,6 +249,7 @@ pub(super) fn run_sequence_steps(
                 compose_perf,
                 tasks,
             ),
+            StepOutcome::Skipped => (true, None, None, None, None, None, Vec::new()),
         };
 
         if let Some(acc) = perf_accumulator.as_mut() {
@@ -274,13 +282,21 @@ pub(super) fn run_sequence_steps(
             error_snapshot,
             duration,
             tasks: tasks.clone(),
+            skipped,
         });
 
-        if !run.silent {
+        if !run.silent && skipped {
+            emit_step_skipped(step_index, total_steps);
+        } else if !run.silent {
             emit_step_status(run, step_index, total_steps, success, &error, provider);
             emit_group_task_breakdown(&tasks);
         }
 
+        // A pending `break` starts no later step; the root's loop ends after
+        // this pass's cleanup.
+        if success && run.loop_values.as_ref().is_some_and(|ambient| ambient.breaks.is_pending()) {
+            break;
+        }
         if interrupted_step {
             debug!(step_index = step_index + 1, step_name = %step.name, "sequence step interrupted");
             if let Some(acc) = perf_accumulator.as_mut() {
@@ -393,10 +409,19 @@ fn run_one_step(
         run_evidence: Some(&step_run),
         invocation: &step_prep_context.invocation,
         file_resolution_context: step_prep_context.source_context.file_resolution_context(),
+        loop_values: run.loop_values.clone(),
         ..run.compose.clone()
     };
     let step_document = run.for_document(&step_prep_context, &step_compose);
     let run = &step_document;
+    // A guarded task is decided at its turn, before anything of it composes.
+    if let Some(task) = run.graph.steps.get(step_index).and_then(|s| s.task.as_ref()) {
+        match task_run::root_step_guard(run, &run.plan.steps[step_index].name, task, live.markdown.frontmatter().as_map(), &set_overrides, runtime_state) {
+            Ok(true) => {}
+            Ok(false) => return StepOutcome::Skipped,
+            Err(error) => return StepOutcome::failed(&error),
+        }
+    }
     let composed = match compose_with_late_collection(
         run,
         &step_compose,
@@ -677,6 +702,7 @@ fn emit_group_task_breakdown(tasks: &[SequenceTaskResult]) {
     let mut list = UnorderedList::empty();
     for task in tasks {
         let outcome = match (task.success, task.interrupted) {
+            (true, _) if task.skipped => "<dim>skipped</dim>",
             (true, _) => "<green>succeeded</green>",
             (false, true) => "<yellow>interrupted</yellow>",
             (false, false) => "<red>failed</red>",
@@ -688,6 +714,16 @@ fn emit_group_task_breakdown(tasks: &[SequenceTaskResult]) {
         )));
     }
     log::message(&list.render(&log::terminal()));
+}
+
+fn emit_step_skipped(step_index: usize, total_steps: usize) {
+    let status = Status::from_prose(format!(
+        "step <b><yellow>{}/{}</yellow></b> skipped (<dim><i>`when` was false</i></dim>)",
+        step_index + 1,
+        total_steps,
+    ))
+    .state(StatusState::Info);
+    log::message(&status.render(&log::terminal()));
 }
 
 fn emit_step_status(
@@ -733,6 +769,70 @@ fn emit_step_status(
         StatusState::Error
     };
     log::message(&Status::from_prose(prose).state(state).render(&log::terminal()));
+}
+
+/// Run a looping document as a step's or task's executable, through the
+/// canonical active-document pipeline, so it loops exactly as it does under
+/// `compose`. `scope` keeps everything the step owns, as for a handoff
+/// target; a handoff the document raises continues in
+/// [`run_step_proxy_loop`]. Returns the exit status and the final pass's
+/// output.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_step_document(
+    source: ResolvedCompositionSource,
+    reference: &str,
+    ledger: &SharedRunLedger,
+    run: &SequenceRunContext<'_>,
+    kind: CompositionKind,
+    scope: &StepScope,
+    mut caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
+    document: claudine::invocation_context::InvocationContext,
+    source_context: claudine::invocation_context::SourceContext,
+) -> Result<(i32, Option<String>)> {
+    let shared = run.shared;
+    let system_prompt_args = SystemPromptArgs {
+        append_file: shared.append_system_prompt.clone(),
+        replace_file: shared.replace_system_prompt.clone(),
+    };
+    let launch_area_fallback = Some(run.prep_context.launch_workspace.launch_cwd.clone());
+    let mut caller_overrides = Some(scope.caller_overrides.to_value());
+    let file_resolution_context = source_context.file_resolution_context().clone();
+    let (outcome, _) = prepare_and_run_active_document(
+        shared,
+        kind,
+        source,
+        reference,
+        &indexmap::IndexMap::new(),
+        None,
+        true,
+        &mut None,
+        &system_prompt_args,
+        &mut caller_overrides,
+        &mut caller_input_records,
+        composition::InteractiveSchemaOptions::default(),
+        &launch_area_fallback,
+        &run.compose.approval_cache,
+        ledger,
+        run.verbose,
+        None,
+        Vec::new(),
+        std::time::Instant::now(),
+        document,
+        source_context,
+        Some(scope),
+    )?;
+    match outcome {
+        ActiveDocumentOutcome::Done { exit_code, final_output } => Ok((exit_code, final_output)),
+        ActiveDocumentOutcome::Handoff(next) => run_step_proxy_loop(
+            next,
+            ledger,
+            run,
+            kind,
+            scope,
+            caller_input_records,
+            &file_resolution_context,
+        ),
+    }
 }
 
 /// Drive the handoff chain contained in one sequence step (or one `prompt:`

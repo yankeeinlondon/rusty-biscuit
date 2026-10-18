@@ -778,6 +778,13 @@ Two generations from the same inputs are byte-identical. Invalid inputs, a missi
 
 A refresh re-researches one platform in three passes: independent discovery, reconciliation against the curated sources and previous research, and curated-source maintenance. An independent evidence review follows. Each platform run is one [Claudine](../../claudine/docs/cli/sequence.md) sequence, executed by the Messenger-owned runner (`messenger research run RUN_ID`), which holds the fleet lock for the whole execution so platforms run one at a time and records what it observed in the run record.
 
+The run owns every process its sequence starts, and the fleet lock stays held until the sequence's work has ended, so no second run, cleanup, or promotion starts while a task of the first is still working:
+
+- **Stopped at the limit.** The runner first asks the sequence to stop as Ctrl+C would (on macOS, Linux, and WSL2), so Claudine cancels its running tasks and runs their `cancelled` and `finalize` cleanup. Whatever of it is still running once the sequence exits, or after ten seconds, is killed. Native Windows has no such request for a background process, so there the tree is killed at once.
+- **Exited on its own.** Claudine has already waited for its tasks, so the runner kills nothing. A process Claudine detached on purpose, such as the audio worker finishing a lifecycle sound, keeps running.
+
+The runner finds these processes by checking the process table about once a second while the sequence runs. A process that is started and then detached from its parent (a Unix double fork with `setsid`) within one of those intervals, after its parent has exited, is not found.
+
 Both limits are required and have no default. `SECONDS` caps the run's elapsed time — the runner stops a sequence that overruns it — and `INVOCATIONS` caps agent launches, per platform run. Each prepared prompt reserves one invocation in its `start` hook before the agent launches. Admissions are saved in `run.json` and remain spent across resumptions; a refused admission prevents the launch. Ledger-era records without an admission count start at zero, and the runner installs the hooks on their prepared prompts before execution. Unused allowance is not spent.
 
 ```bash

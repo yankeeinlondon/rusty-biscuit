@@ -349,48 +349,6 @@ Body.
     );
 }
 
-/// A group carrying `loop:` is rejected during preflight — before any member
-/// runs — because iteration commit semantics are not ratified.
-#[test]
-fn a_group_loop_is_rejected_before_anything_runs() {
-    let fixture = CliProcessFixture::named("sequence-groups");
-    fake_goose(&fixture);
-    let md = fixture.cwd().join("seq.md");
-    fs::write(
-        &md,
-        r#"---
-sequence:
-  - name: alpha
-    group:
-      name: bundle
-      loop:
-        while: "true"
-      tasks:
-        - name: member
-          shell: "printf 'ran\n' >> trace.txt"
----
-
-Body.
-"#,
-    )
-    .unwrap();
-
-    let (_, stderr, code) = run(
-        &fixture,
-        &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
-    );
-
-    assert_ne!(code, 0, "stderr:\n{stderr}");
-    assert!(
-        stderr.contains("loop"),
-        "the rejection must name the construct; stderr:\n{stderr}"
-    );
-    assert!(
-        trace(fixture.cwd()).is_empty(),
-        "preflight rejection means nothing ran; stderr:\n{stderr}"
-    );
-}
-
 /// A parallel group really overlaps its members: each task waits until every
 /// sibling has started before any of them can finish. Serial execution cannot
 /// satisfy that barrier.

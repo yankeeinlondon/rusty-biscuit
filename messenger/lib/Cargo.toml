@@ -30,6 +30,9 @@ darkmatter = { path = "../../darkmatter/lib", optional = true }
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"], optional = true }
 biscuit-hash = { path = "../../biscuit-hash/lib", optional = true }
 serde_path_to_error = { version = "0.1", optional = true }
+# Research runner (`research` feature only): finds and kills the sequence's
+# descendant processes, checking each PID's start time before signaling it.
+sysinfo = { version = "0.38.2", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = { version = "4", optional = true }
@@ -54,6 +57,8 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # validation plus darkmatter's test-only effect counters. A dev-dependency
 # never enters the send path's normal dependency graph.
 darkmatter = { path = "../../darkmatter/lib", features = ["effects-instrumentation"] }
+# `tests/research_refresh.rs`: checks that a stopped run's descendants are gone.
+sysinfo = "0.38.2"
 
 [features]
 default = ["discord", "slack"]
@@ -76,7 +81,7 @@ fcm = ["dep:reqwest"]
 # Typed loading and semantic validation of the provider research contract
 # (`messenger::research`). Maintenance consumers only; see
 # `features/2026-09-17-research-metadata-pipeline/architecture.md`.
-research = ["dep:darkmatter", "dep:biscuit-file", "dep:biscuit-hash", "dep:serde_path_to_error", "dep:sniff"]
+research = ["dep:darkmatter", "dep:biscuit-file", "dep:biscuit-hash", "dep:serde_path_to_error", "dep:sniff", "dep:sysinfo"]
 
 # Helper-stub binaries used by the desktop helper integration tests.
 # They are tiny (only `std`) and only built when the `desktop` feature is

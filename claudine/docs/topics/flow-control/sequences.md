@@ -29,6 +29,66 @@ Nested containers execute recursively. An empty nested list returns an empty
 array and still runs its container lifecycle. Only an inline list can carry container lifecycle events
 on its task; a reference carries those events in its referenced document.
 
+A container's `loop:` goes in one of three places: on a group object beside
+`tasks:`, at a sequence document's root beside `sequence:`, or on an inline
+nested sequence's task entry beside `sequence: [ … ]`. The block uses the
+[loop grammar](./looping.md#frontmatter-shape) and is checked when the
+sequence is resolved (a group file's when preflight loads it). The container
+then repeats by the same rules as a document: `initialize` once, `start`, its
+children, its terminal event, and `finalize` each pass, then the loop gate;
+see [Composition Looping](./looping.md#iteration-semantics) for the pass order,
+results, and retries inside a looping container.
+
+```yaml
+sequence:
+    - name: retry-build
+      loop: { until: "built", max: 3 }   # inline nested sequence: repeats its steps
+      sequence:
+          - name: build
+            shell: just build
+    - name: lint
+      shell: just lint
+      loop: { until: "clean" }           # error: a shell task takes no `loop:`
+```
+
+### What a referenced sequence reads
+
+A sequence referenced by file is a document: its events, its conditions, its
+`set` values, its lifecycle `shell` commands, and its steps read its own
+frontmatter, so it behaves the same whether you run it directly or reference
+it. Given `child.md`:
+
+```yaml
+---
+local_value: child-value
+start: [{ stdout: "{{ local_value }}" }]
+sequence: []
+---
+```
+
+both `claudine sequence child.md` and a root with
+`sequence: [{ name: child, sequence: child.md }]` print `child-value`, even
+when the root declares its own `local_value`. Values reach a referenced
+sequence the way they reach a referenced prompt document. Lowest precedence
+first:
+
+1. the referenced document's own properties
+2. invocation setters (`--set`, shorthand `key=value`)
+3. runtime writes made so far, by the caller or by the sequence itself
+
+The caller's authored frontmatter is not among them: a property only the root
+declares reads as `null` inside the referenced sequence. To pass a value down,
+write it at run time with `set`, or supply it with `--set`. A `set` inside the
+referenced sequence is a runtime write, so the caller sees it afterward.
+
+This applies when the reference names a whole sequence document: a Markdown
+file with `sequence:`, or a `kind: sequence` YAML, JSON, or JSON5 file,
+including one reached through a group leg or an external `task:` file. A
+reference with an `-> offset` or `::operator` suffix selects a list of steps
+rather than a document, so like an inline list it reads the frontmatter of the
+document that authored it. Group files carry no document properties; a group's
+own values are its `variables`, read through `group`.
+
 Groups are concurrent: omit `execution:`. Both `execution: parallel` and
 `execution: serial` are removed grammar; ordered work uses a nested
 `sequence:`. Every group leg requires a unique, nonempty string `name`.
@@ -95,8 +155,10 @@ simply requires every step to carry an executable.
 
 Optional task fields: `name`, `params:`
 (user setters passed to a `prompt` document), `timeout:` (per shell command),
-`operation:`, `flow:`. A field that cannot affect the chosen executable — say
-`params:` on a `shell:` task — is a typed error, not a silent no-op.
+`operation:`, `flow:`, and `when:` (any task with an executable; see
+[Task guards](#task-guards-when)). A field that cannot affect the
+chosen executable — say `params:` on a `shell:` task — is a typed error, not a
+silent no-op.
 
 ```yaml
 ---
@@ -114,6 +176,58 @@ sequence:
 ---
 Work on {{ seq.topic }}.
 ```
+
+### Task guards (`when:`)
+
+A `when:` beside a task's executable decides, at that task's turn, whether the
+task runs at all:
+
+```yaml
+sequence:
+    - name: stage
+      when: "stage == 'all'"          # stage=all on the command line runs it
+      shell: git add -A
+    - name: review
+      when: "length(seq.outputs) > 0"
+      prompt: "@prompts/review.md"
+```
+
+- **Where it goes.** On every sequence step and group leg that has an
+  executable (`prompt:`, `shell:`, `side_effect:`, `group:`, `sequence:`, or
+  `task:`), beside that executable. A step without an executable, which runs
+  the document body, takes no guard (`WhenMisplaced`: "`when` guards a task
+  and goes beside its executable; a step that runs the document body takes no
+  guard"). A `when:` at a sequence document's root, or on a group object, is
+  also an error; put it beside `group:` on the task.
+- **What it must be.** A non-empty string that parses as a condition
+  expression, the same surface as a lifecycle item's `when`. `null`, a
+  boolean, a number, a list, a map, `""`, or an unparsable expression is a
+  typed error naming the task's property (`sequence[0].when`). It is a task
+  option, never step state.
+- **What it reads.** Live state at the task's turn: the task's frontmatter
+  values (document values, caller setters, and runtime `set` writes), `seq`,
+  `loop`, and `group`. Truthiness is a lifecycle `when`'s. A guard is
+  read-only and runs no shell.
+- **False means skipped, not failed.** Nothing is composed or launched, no
+  lifecycle event fires, the task's own loop runs zero times, and nothing is
+  appended to `seq.outputs`. In a group the leg's outcome is `skipped` with a
+  null output. A root step prints `` step N/M skipped (`when` was false) ``;
+  a group breakdown shows `skipped`.
+- **Inside a loop** the guard is evaluated again on every pass of the
+  enclosing loop. A guarded looping container that runs starts its own loop
+  from a fresh count.
+- **Concurrent legs** read their group's start snapshot: runtime values are
+  frozen when the group starts, even for a leg admitted later under
+  `max_parallel`. File reads, such as `frontmatter('state.md', 'status')`,
+  stay live.
+- **An expression error fails the task**, located at the guard
+  (`TaskWhenEvaluationFailed`: "task guard `<path>.when` could not be
+  evaluated"). It is never read as false. A root step's runtime location reads
+  `tasks[N].when`.
+
+A guard never hides a task from [static preflight](#phase-1--static-preflight):
+a task whose guard will be false is still validated, and its shell commands are
+still approved before step 1.
 
 ## Step state
 
@@ -272,6 +386,13 @@ JSONL/NDJSON take operators but never an offset:
 sequence: list.ndjson::map(color, name)
 ```
 
+An object that repeats a key is an error in every format. YAML reports it
+itself; for JSON, JSON5, JSONL, and NDJSON, which would otherwise keep only
+the last value, the error names the file, the key, and the object's path
+(``duplicate key `name` at `sequence[0]` ``), plus the line for JSONL and
+NDJSON. JSON5 comments remain ordinary content, and a valid next JSONL record
+is unaffected by an error report about an earlier one.
+
 ### String list formats
 
 A string source is classified in this order: Markdown list markers (ordered or
@@ -374,7 +495,11 @@ Claudine walks the **entire task graph**:
   - **The first task** (the first step's task, or every leg of a first-step
     group, or the first child recursively through nested first-step sequences)
     resolves each command now, under the launch environment and the
-    caller's values, and approves those bytes. They are what runs.
+    caller's values, and approves those bytes. They are what runs. If a later
+    pass of an outer loop changes a value such a command reads (a loop action
+    or a runtime `set`), the changed command is refused before it runs
+    (`SequenceShellApprovalChanged`, naming `changed: <value>`); it is never
+    silently replaced by the approved bytes.
   - **Every later task** approves each command with a placeholder only by its
     typed shape (`just clean --out {{ string }}/build`), even when its values
     are known now, because an earlier task may change them. An `exact` rule for
@@ -418,8 +543,8 @@ Claudine walks the **entire task graph**:
   `group.*` values are late in its events as well as in its legs. Use a scalar
   expression such as `first(group.succeeded)` when passing an outcome to a command.
 
-  Root retries reuse the original approval set. If a nested source changes
-  before preparation, every newly discovered command
+  Root retries reuse the original approval set and the original task graph.
+  If a nested source changes before preparation, every newly discovered command
   must already belong to the invocation's approval set. Unapproved commands,
   templates, and prompt targets fail preparation before children start;
   concurrent descendants never open another approval prompt.
@@ -485,6 +610,8 @@ State layering, lowest precedence to highest:
 2. user setters (`--set`, shorthand `key=value`)
 3. accumulated runtime mutations (what `set` writes)
 
+Inside a referenced sequence document, layer 1 is that document's frontmatter,
+not the source's ([What a referenced sequence reads](#what-a-referenced-sequence-reads)).
 The lexical `seq` root travels beside these frontmatter layers.
 
 Layers 1 and 2 are authored, so their `{{ … }}` and `$( … )` spans are
@@ -498,9 +625,29 @@ inline-compose sequence's body write-backs — and any frontmatter an agent edit
 mid-run — are visible to later steps. Mid-run *external* edits take effect too;
 that is both the feature and the hazard.
 
-What is *not* re-derived at a step boundary: the step list. A
-`sequence: $(ls)` that would enumerate differently mid-run does not change the
-plan under execution.
+What is *not* re-derived at a step boundary: the task graph. The children
+preflight discovered — every step, group leg, and nested container, with their
+names, order, and executables — run as discovered for the whole invocation,
+including every retry. A `sequence: $(ls)` that would enumerate differently
+mid-run does not change the plan under execution, and neither does an earlier
+task that edits a later container's file. Here the `added` step never runs,
+even though its command is already approved:
+
+```yaml
+# root.md frontmatter
+sequence:
+  - name: rewrite
+    side_effect: { append_line: [child.yaml, "  - { name: added, shell: echo child }"] }
+  - name: nested
+    sequence: child.yaml     # child.yaml lists one step: { name: original, shell: echo child }
+```
+
+When a nested container prepares, its source is still read again: its own
+lifecycle events and a group's `variables` take the current file's values, and
+a command, template, or prompt document the reread introduces is refused
+because approval has closed. To let a later step observe a file an earlier
+step wrote, read the file when the step runs, through a prompt document or an
+expression such as `{{ frontmatter('state.md', 'status') }}`.
 
 **Mid-run failures.** A just-in-time composition failure is a failure of *that
 step*: recorded in the summary and routed to the enclosing container
@@ -520,6 +667,9 @@ or unadmitted legs map to `null`, and failed legs retain partial output.
 - A nested sequence publishes an array; a group publishes a dictionary keyed
   by leg name in declaration order. These values stay native when nested, for
   example `["first", ["inner"], {"lint": "clean"}]`.
+- A container that a [`break`](flow-control.md#break) passes through publishes
+  the work it completed, once, after its own cleanup: no placeholder for
+  children that never ran, and no synthetic break entry.
 - A failed container publishes nothing. A group with `fail_fast: true` also
   withholds all leg mutations on failure. With `fail_fast: false`, leg failures
   are handled and their mutations merge in declaration order. A failing
@@ -648,9 +798,10 @@ or `variables` scoping around one task.
 A group leg may itself declare a group or a sequence task. Each leg receives
 a private in-memory runtime branch; siblings share the filesystem.
 
-**Group `loop` is blocked.** Iteration commit semantics are unratified, so a
-group carrying `loop` is rejected at preflight with a typed, actionable error
-rather than left to implementation judgment.
+A group object's `loop:` repeats the whole group: every pass admits its legs
+again, rebuilds `group.legs` and the outcome lists, and exposes the pass's
+dictionary as `loop.last_output`. The parent receives only the final pass's
+dictionary; see [Composition Looping](./looping.md#results-of-a-looping-primitive).
 
 ### Task references and lifecycle events
 
@@ -703,6 +854,12 @@ duration (`45s`, `2m`) — a bare integer is rejected because the unit is part o
 the grammar, and `0s` is rejected rather than read as unbounded. A task passes
 when every command exits `0`. Stdout is concatenated in declaration order.
 
+Caller values (`key=value`, `--set`) are plain names to `shell:` commands and
+to authored step data, in the first task and in later ones, so
+`claudine sequence ship.md target=staging` lets a task run
+`shell: "just deploy {{ target }}"`. A caller value a command reads that is
+missing fails preflight.
+
 ### Ordered work
 
 Groups always run concurrently. `execution: serial` and `execution: parallel`
@@ -726,8 +883,9 @@ group:
   which case they admit in **declaration order** as slots free up.
 - **Snapshot isolation** — every task receives the same state snapshot and the
   same `seq.outputs` view, taken when the group starts. In-memory mutations
-  stay private until settlement. Nested steps re-read live files, so a sibling's
-  file edits can be visible when a later nested step prepares.
+  stay private until settlement. Nested steps read live files when they run, so a sibling's
+  file edits can be visible to a later nested step. The steps themselves stay
+  as preflight discovered them.
 - **State merge** — mutations fold in **task-declaration order**, never
   completion order. Disjoint keys merge cleanly; when two tasks wrote the same
   key the later-declared task wins and Claudine warns on stderr naming the key
@@ -784,18 +942,44 @@ An unhandled step failure stops the sequence. Document `fail_fast:` and the
 |---|---|
 | `0` | Every executed step succeeded (or a dynamic source resolved to 0 steps) |
 | `1` | At least one step failed |
+| `code` | A looping root sequence ended through `break`; the process exits with the `break`'s `code` (default `0`). See [Looping — Breaking out of a loop](looping.md#breaking-out-of-a-loop) |
 | `130` | Ctrl+C interrupted the sequence, or `Esc`/Ctrl+C left the provider review screen before any step started |
+
+### Dry run
 
 `--dry-run` performs the **full preflight**, then just-in-time-composes every
 step against the *initial* state — empty `seq.outputs`, no runtime mutations —
 without launching a provider and without inline-compose write-back.
 Late-binding references render exactly as a first-step composition would see
-them.
+them. Static validation and shell approval are the same as in a live run.
 
-> **`--dry-run` still executes shell work.** `$( … )` expansions and `shell:`
-> tasks run for real, because their output is what composition needs. A dry-run
-> of a sequence containing `shell: just commit` can commit. Use commands safe
-> to execute when rehearsing; dry-run does not provide filesystem isolation.
+What a dry run shows instead of doing:
+
+| Element | In a dry run |
+|---|---|
+| `shell:` task | Rendered, not run: `` rendered (dry-run): would run `<command>` `` with the approved bytes (or the template of a template-mode command). It publishes nothing. |
+| `side_effect:` task | Rendered with its authored action and arguments, templates unresolved: `` rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}` ``. It never writes a file or applies a runtime `set`. |
+| `loop:` | The body is visited once with pass 1's `loop.*` values: `` `loop` previews one pass (dry-run); repetition is not evaluated: until `<expr>`, max N ``. No gate, condition, or action is evaluated. |
+| Task `when:` | Shown, not evaluated: `` `<name>` runs when `<expr>` (not evaluated in a dry run) ``; the task is rendered. |
+| Lifecycle events | None fire. |
+| `prep` | Targets do not run; a literal target is listed as `prep target @helper.md (not run in a dry run)`. |
+
+The run ends with `Sequence previewed (dry-run): N step(s) rendered, none run`.
+
+> **Composition shell work still runs.** `$( … )` expansions in step documents
+> execute for real, because their output is what composition needs, so their
+> side effects happen. Dry-run does not provide filesystem isolation.
+
+`--dry-run-shell` (only with `--dry-run`; alone it is a usage error, exit `2`)
+additionally runs each `shell:` task once, during the single preview pass:
+
+```sh
+claudine sequence --dry-run --dry-run-shell release.md
+```
+
+Those commands have their real effects (a `git add` stages), but no provider
+launches, no `side_effect:` task runs, and no loop repetition or lifecycle
+event is turned back on.
 
 ## Requiring caller input
 
@@ -832,9 +1016,13 @@ switch sets, and a reportable field in Claudine's logs.
 
 ## Remaining planned behavior
 
-**Planned:** generalized container loops and persisted checkpoint/resume.
-Group `loop` is currently rejected. Recursive containers, their lifecycle
-events, cancellation, and native array/dictionary results are implemented.
+**Planned:** persisted checkpoint/resume; running a `kind: group` file as a
+[`prep`](flow-control.md#prep) target; and inventorying `prep` targets in the
+front-loaded approval: today a `prep` target is approved as its own invocation
+when it runs, under the caller's approval flags (`--yolo`, policy).
+Recursive containers, their lifecycle events and loops, task `when:` guards,
+`break` and `prep`, cancellation, and native array/dictionary results are
+implemented.
 
 
 ## Container lifecycle and recovery
@@ -896,8 +1084,9 @@ flowchart TD
 ```
 
 Dry-run fires no lifecycle events recursively and launches no provider or
-inline write-back. It still executes shell tasks and composition shell
-expansions against initial state: those commands can have real effects.
+inline write-back. It renders shell tasks rather than running them (unless
+`--dry-run-shell` is given), but composition shell expansions still run against
+initial state and can have real effects. See [Dry run](#dry-run).
 
 
 ## Cancellation

@@ -105,6 +105,30 @@ fn already_emitted_wraps_once_and_delegates_display() {
 }
 
 #[test]
+fn a_break_outside_a_loop_renders_as_its_own_error_not_as_a_crashed_expression() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+    let unowned = CompositionError::LifecycleBreakWithoutLoop {
+        source_path: PathBuf::from("review.md"),
+        property: "start[0].break".to_string(),
+    };
+    let err = CompositionError::LifecycleEvaluationError {
+        source_path: PathBuf::from("review.md"),
+        event: "start".to_string(),
+        surface: "break".to_string(),
+        message: unowned.to_string(),
+        property: Some("start[0].break".to_string()),
+        reason: LifecycleEvaluationReason::BreakWithoutLoop,
+        cause: None,
+    };
+    let rendered = strip_escape_codes(err.status_block(&Terminal::default()).render(&Terminal::default()));
+    let prose = rendered.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(prose.contains("lifecycle break outside a loop"), "{prose}");
+    assert!(prose.contains("fired outside any loop"), "{prose}");
+    assert!(!prose.contains("crashed expression"), "{prose}");
+}
+
+#[test]
 fn enrich_is_idempotent() {
     let source = source_from("---\ntitle: x\nprompt: 42\n---\nbody\n");
     let err = CompositionError::PromptPropertyWrongType("number".to_string())
@@ -424,15 +448,17 @@ fn loop_iteration_failed_falls_back_when_no_exit_reason() {
 }
 
 #[test]
-fn loop_invalid_still_reserved_for_frontmatter_problems() {
-    // Sanity: LoopInvalid is still the right variant for malformed
-    // frontmatter and renders distinctly from the runtime-fault
-    // variants above.
-    let err = CompositionError::LoopInvalid("`loop.max` must be greater than zero".to_string());
-    let rendered = err.to_string();
-    assert!(
-        rendered.starts_with("invalid loop definition:"),
-        "got: {rendered}"
+fn loop_invalid_names_its_file_and_key() {
+    // A loop configuration error names the file and the offending key, and
+    // renders distinctly from the runtime-fault variants above.
+    let err = CompositionError::LoopInvalid {
+        source_path: PathBuf::from("prompts/count.md"),
+        property: "loop.max".to_string(),
+        message: "`loop.max` must be greater than zero".to_string(),
+    };
+    assert_eq!(
+        err.to_string(),
+        "invalid loop definition (prompts/count.md): `loop.max` must be greater than zero"
     );
 }
 
@@ -2258,35 +2284,29 @@ fn lifecycle_action_invalid_long_form_source_twins_with_the_sourceless_shape() {
 }
 
 /// `LoopExpressionInvalid` derives its prose from `kind`, `condition`, and the
-/// cause's stage. Both stages must reproduce `LoopInvalid`'s text byte for byte.
+/// cause's stage.
 #[test]
-fn loop_expression_invalid_twins_with_loop_invalid_at_both_stages() {
-    let parse_twin = CompositionError::LoopInvalid(format!(
-        "failed to parse loop.while `1 +`: {}",
-        parse_error()
-    ));
+fn loop_expression_invalid_names_its_stage() {
     let parse_sourced = CompositionError::LoopExpressionInvalid {
         kind: "while".to_string(),
         condition: "1 +".to_string(),
         source: LoopExpressionCause::Parse(parse_error()),
     };
-    assert_eq!(parse_twin.to_string(), parse_sourced.to_string());
-    assert_eq!(parse_twin.code(), parse_sourced.code());
-    assert_eq!(parse_twin.detail(), parse_sourced.detail());
+    assert_eq!(
+        parse_sourced.to_string(),
+        format!("invalid loop definition: failed to parse loop.while `1 +`: {}", parse_error())
+    );
 
     let eval_cause = ExpressionError::UnknownFunction {
         name: "nope".to_string(),
     };
-    let eval_twin = CompositionError::LoopInvalid(format!(
-        "failed to evaluate loop.until `nope()`: {eval_cause}"
-    ));
+    let eval_text = format!("invalid loop definition: failed to evaluate loop.until `nope()`: {eval_cause}");
     let eval_sourced = CompositionError::LoopExpressionInvalid {
         kind: "until".to_string(),
         condition: "nope()".to_string(),
         source: LoopExpressionCause::Evaluate(Box::new(eval_cause)),
     };
-    assert_eq!(eval_twin.to_string(), eval_sourced.to_string());
-    assert_eq!(eval_twin.code(), eval_sourced.code());
+    assert_eq!(eval_sourced.to_string(), eval_text);
 }
 
 /// `LoopActionExpressionInvalid` derives `InvalidAction`'s two template

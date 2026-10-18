@@ -53,10 +53,10 @@ impl TaskExecution<'_> {
             &self.task.origin_path, self.stack.prepared_context, self.stack.file_resolution_context, self.stack.ctx_base_dir,
         )?;
         let seq = self.sequence_binding();
-        let (view, globals) = runtime_bindings(LifecycleScope::TaskSetup, LifecycleValues {
+        let (view, globals) = runtime_bindings_in_loop(LifecycleScope::TaskSetup, LifecycleValues {
             err: None, timing: self.stack.timing, group: self.stack.group,
             seq: Some(&seq),
-        });
+        }, self.stack.loop_values);
         let session = EvaluationSession::associate(view, &state, globals)
             .expect("task bindings agree with their scope").with_resolution_context(resolution);
         let context = biscuit_terminal::errors::SourceContext::new(site.source_file.clone(), site.source_file.clone(), site.authored.clone());

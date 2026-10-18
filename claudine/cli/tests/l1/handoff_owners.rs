@@ -649,48 +649,11 @@ fn sequence_start_proxy_replaces_the_container_before_any_body_step() {
     assert_eq!(run.code, Some(0), "{}", run.output);
 }
 
-/// The ledger records committed handoffs, never requests. Iteration 1's proxy
-/// is refused as a cycle and fails that iteration; with `fail_fast: false` the
-/// loop continues, and iteration 2's legitimate proxy is adopted rather than
-/// refused against an entry the refusal left behind.
-#[test]
-fn a_refused_request_leaves_no_entry_for_the_next_one_to_collide_with() {
-    let fixture = fixture("handoff-refused-then-legitimate");
-    write_target(&fixture);
-    let source = write_doc(
-        &fixture,
-        "loop.md",
-        concat!(
-            "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n    fail_fast: false\n",
-            "success:\n",
-            "    - when: \"loop.count == 1\"\n      then:\n          - append_line: [\"events.log\", \"refused request\"]\n          - proxy: ./loop.md\n",
-            "    - when: \"loop.count == 2\"\n      then:\n          - append_line: [\"events.log\", \"legitimate request\"]\n          - proxy: ./target.md\n",
-            "---\nloop body\n",
-        ),
-    );
-
-    let run = compose(&fixture, &source);
-
-    let mut expected = vec!["refused request", "legitimate request"];
-    expected.extend(TARGET_TRAIL);
-    assert_eq!(events(&fixture), expected, "{}", run.output);
-    // One "refused request" line: an adopted self-proxy would have restarted
-    // the loop at iteration 1 and appended it again.
-    // Reported once: the engine drops a non-halting iteration's error, so the
-    // loop executor is the only place that can show it.
-    assert_eq!(
-        run.output.matches("forms a cycle").count(),
-        1,
-        "iteration 1's refused self-proxy is reported exactly once: {}",
-        run.output
-    );
-    assert_no_false_cycle_on_target(&run);
-    assert_eq!(run.code, Some(0), "{}", run.output);
-}
-
-/// A refused overlay evaluation and a refused resolution are refusals too:
-/// neither leaves an entry, so the next iteration's legitimate proxy is adopted.
-fn refused_then_legitimate_row(name: &str, refused_action: &str, refusal: &str) {
+/// A refused handoff fails the pass that requested it, which ends the loop:
+/// nothing is adopted, no later pass runs, and the refusal is reported once.
+/// That a refusal leaves no ledger entry for a later request is the ledger's
+/// own contract (`coordinator::tests`), since no later request follows here.
+fn refused_handoff_row(name: &str, refused_action: &str, refusal: &str) {
     let fixture = fixture(name);
     write_target(&fixture);
     let source = write_doc(
@@ -698,10 +661,10 @@ fn refused_then_legitimate_row(name: &str, refused_action: &str, refusal: &str) 
         "loop.md",
         &format!(
             concat!(
-                "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n    fail_fast: false\n",
+                "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n",
                 "success:\n",
-                "    - when: \"loop.count == 1\"\n      then:\n          - append_line: [\"events.log\", \"refused request\"]\n          - {}\n",
-                "    - when: \"loop.count == 2\"\n      then:\n          - append_line: [\"events.log\", \"legitimate request\"]\n          - proxy: ./target.md\n",
+                "    - append_line: [\"events.log\", \"refused request {{{{ loop.count }}}}\"]\n",
+                "    - {}\n",
                 "---\nloop body\n",
             ),
             refused_action
@@ -710,41 +673,32 @@ fn refused_then_legitimate_row(name: &str, refused_action: &str, refusal: &str) 
 
     let run = compose(&fixture, &source);
 
-    let mut expected = vec!["refused request", "legitimate request"];
-    expected.extend(TARGET_TRAIL);
-    assert_eq!(events(&fixture), expected, "{}", run.output);
-    assert!(
-        run.output.contains(refusal),
-        "fixture check: iteration 1's request must really be refused: {}",
+    assert_eq!(events(&fixture), ["refused request 1"], "{}", run.output);
+    assert_eq!(
+        collapsed(&run).matches(refusal).count(),
+        1,
+        "the refusal is reported exactly once: {}",
         run.output
     );
-    assert_no_false_cycle_on_target(&run);
-    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert_eq!(run.code, Some(1), "{}", run.output);
 }
 
 #[test]
-fn a_refused_resolution_leaves_no_entry_for_the_next_request() {
-    refused_then_legitimate_row(
-        "handoff-refused-resolution",
-        "proxy: ./missing.md",
-        "missing.md",
-    );
+fn a_refused_cycle_ends_the_loop_with_one_report() {
+    refused_handoff_row("handoff-refused-cycle", "proxy: ./loop.md", "forms a cycle");
 }
 
 #[test]
-fn a_refused_overlay_evaluation_leaves_no_entry_for_the_next_request() {
-    refused_then_legitimate_row(
+fn a_refused_resolution_ends_the_loop_with_one_report() {
+    refused_handoff_row("handoff-refused-resolution", "proxy: ./missing.md", "cannot resolve `./missing.md`");
+}
+
+#[test]
+fn a_refused_overlay_evaluation_ends_the_loop_with_one_report() {
+    refused_handoff_row(
         "handoff-refused-overlay",
         "proxy: { target: ./target.md, with: { topic: \"{{ no_such_root() }}\" } }",
         "no_such_root",
-    );
-}
-
-fn assert_no_false_cycle_on_target(run: &Run) {
-    assert!(
-        !run.output.contains("hand-off to `./target.md` forms a cycle"),
-        "{}",
-        run.output
     );
 }
 

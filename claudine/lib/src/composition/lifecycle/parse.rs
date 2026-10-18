@@ -67,7 +67,8 @@ pub struct LifecycleParseOptions<'a> {
 const MAX_CONDITIONAL_DEPTH: usize = 5;
 
 /// The `loop:` keys the looping parser owns. Every other key of a `loop:`
-/// block is a lifecycle concern.
+/// block is a lifecycle concern. `fail_fast` stays here although it is
+/// removed: the looping parser owns its typed rejection.
 pub(crate) const LOOP_ITERATION_KEYS: &[&str] = &[
     "while",
     "until",
@@ -143,10 +144,31 @@ pub(crate) fn parse_lifecycle_config_with(
             source_file,
             options,
         };
-        config.stacks.loop_gate = parser.parse_loop_concerns(loop_obj, &document_order.child("loop"))?;
+        config.stacks.loop_gate = parser.parse_loop_concerns(
+            loop_obj,
+            &LifecyclePath::root("loop"),
+            &document_order.child("loop"),
+        )?;
     }
 
     Ok(config)
+}
+
+/// Parse the lifecycle concerns of a `loop:` block authored at `property`
+/// (`loop`, `tasks[2].loop`): the same grammar a document's `loop:` has.
+pub(crate) fn parse_loop_concerns_with(
+    loop_obj: &serde_json::Map<String, serde_json::Value>,
+    source_file: &Path,
+    property: &str,
+    authored: &AuthoredOrder,
+    options: &LifecycleParseOptions<'_>,
+) -> Result<Vec<LifecycleNode>, CompositionError> {
+    let parser = StackParser {
+        signal: LifecycleSignal::Loop,
+        source_file,
+        options,
+    };
+    parser.parse_loop_concerns(loop_obj, &LifecyclePath::root(property), authored)
 }
 
 /// Initialization is shell-free: a `shell` action, or a `set` value that runs
@@ -306,14 +328,17 @@ impl StackParser<'_> {
     /// The `loop:` block's lifecycle concerns: loose verb keys (a root
     /// dictionary) or a `gate:` stack, never both, and never `when`.
     ///
+    /// Unlike an event, a gate is never `null` or `{}`: an explicit empty gate
+    /// is `gate: []`.
+    ///
     /// Removed keys are rejected before the iteration controls are filtered
     /// out, so an old `loop.stack` cannot disappear unnoticed.
     fn parse_loop_concerns(
         &self,
         loop_obj: &serde_json::Map<String, serde_json::Value>,
+        path: &LifecyclePath,
         authored: &AuthoredOrder,
     ) -> Result<Vec<LifecycleNode>, CompositionError> {
-        let path = LifecyclePath::root("loop");
         // `action`/`actions` at the loop root are iteration controls, so only
         // the other removed keys are checked here, before filtering.
         let without_iteration: serde_json::Map<String, serde_json::Value> = loop_obj
@@ -321,7 +346,7 @@ impl StackParser<'_> {
             .filter(|(key, _)| !matches!(key.as_str(), "action" | "actions"))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        self.reject_removed_keys(&without_iteration, &path)?;
+        self.reject_removed_keys(&without_iteration, path)?;
         if loop_obj.contains_key("when") {
             return Err(shape_error(
                 self.source_file,
@@ -340,25 +365,42 @@ impl StackParser<'_> {
                     self.source_file,
                     &path.field(loose.as_str()),
                     format!(
-                        "`loop.{loose}` cannot sit beside `loop.gate`; a loop spells its lifecycle \
+                        "`{path}.{loose}` cannot sit beside `{path}.gate`; a loop spells its lifecycle \
                          concerns as loose verb keys or as a `gate:` list, not both"
                     ),
                 ));
             }
-            return self.parse_stack(gate, &path.field("gate"), &authored.child("gate"));
+            let gate_path = path.field("gate");
+            let empty_form = match gate {
+                serde_json::Value::Null => Some("`null`"),
+                serde_json::Value::Object(map) if map.is_empty() => Some("an empty dictionary"),
+                _ => None,
+            };
+            if let Some(form) = empty_form {
+                return Err(shape_error(
+                    self.source_file,
+                    &gate_path,
+                    format!(
+                        "`loop.gate` cannot be {form}; write `gate: []` for an explicit empty gate, \
+                         or omit `gate`"
+                    ),
+                ));
+            }
+            return self.parse_stack(gate, &gate_path, &authored.child("gate"));
         }
         if concerns.is_empty() {
             return Ok(Vec::new());
         }
-        self.parse_bundle(&concerns, &path, authored)
+        self.parse_bundle(&concerns, path, authored)
             .map(|actions| actions.into_iter().map(LifecycleNode::Action).collect())
     }
 
     /// A list: a stack root, or a `then`/`else` body. `depth` is the number
     /// of conditionals enclosing it.
     ///
-    /// Within one list an unconditional directive must be the last item; a
-    /// guarded item never counts as unconditional.
+    /// Within one list an unconditional directive that ends the event must be
+    /// the last item; a guarded item never counts as unconditional, and `prep`
+    /// returns, so items may follow it.
     fn parse_list(
         &self,
         items: &[serde_json::Value],
@@ -377,7 +419,7 @@ impl StackParser<'_> {
             }
             for node in self.parse_item(item, &path.index(index), &authored.at(index), depth)? {
                 if let LifecycleNode::Action(action) = &node
-                    && action.is_lifecycle_control()
+                    && action.ends_event()
                 {
                     terminal = Some(action.path.clone());
                 }
@@ -696,6 +738,8 @@ impl StackParser<'_> {
     /// Expand a dictionary bundle into its actions, in canonical order:
     /// `set`; the communication verbs; `shell`; side-effect and
     /// expression-function verbs by ascending ASCII name; the one directive.
+    /// A bundle holds at most one directive, and the returning `prep` counts
+    /// as one, so it too runs after the bundle's other verbs.
     ///
     /// `map` holds verbs plus an optional sibling `no_error`; a caller has
     /// already removed `when`. Several verbs use short form only; one verb may
@@ -742,7 +786,7 @@ impl StackParser<'_> {
                     .to_string(),
             ));
         }
-        if verbs.iter().filter(|(verb, _)| is_control_verb(verb)).count() > 1 {
+        if verbs.iter().filter(|(verb, _)| is_lifecycle_control_verb(verb)).count() > 1 {
             return Err(CompositionError::LifecycleMultipleLifecycleActions {
                 source_path: self.source_file.to_path_buf(),
                 property: path.to_string(),
@@ -847,9 +891,9 @@ impl StackParser<'_> {
                 });
             }
             // `with` is the one mapping-valued action parameter, and only the
-            // transitions that re-read a document take it.
+            // directives that read a document take it.
             if key == "with" {
-                if !matches!(verb, "proxy" | "retry") {
+                if !matches!(verb, "proxy" | "retry" | "prep") {
                     return Err(CompositionError::LifecycleWithUnsupported {
                         source_path: self.source_file.to_path_buf(),
                         property,
@@ -858,6 +902,19 @@ impl StackParser<'_> {
                 }
                 with = Some(parse_with(value, self.source_file, path, verb)?);
                 continue;
+            }
+            // `break.code` is a literal exit code: a quoted or interpolated
+            // number would pass the expression rule below.
+            if verb == "break" && key == "code" && !value.is_number() {
+                return Err(CompositionError::LifecycleInvalidArgs {
+                    source_path: self.source_file.to_path_buf(),
+                    property,
+                    action: verb.to_string(),
+                    message: format!(
+                        "`break.code` must be an integer from 0 to 255, got {}",
+                        json_type_name(value)
+                    ),
+                });
             }
             // Direct YAML object literals are not parameter values; object
             // data must be passed through a whole-value `{{ ... }}` span.
@@ -947,18 +1004,11 @@ fn canonical_rank(verb: &str) -> (u8, u8, String) {
         (1, position as u8, String::new())
     } else if verb == "shell" {
         (2, 0, String::new())
-    } else if is_control_verb(verb) {
+    } else if is_lifecycle_control_verb(verb) {
         (4, 0, String::new())
     } else {
         (3, 0, verb.to_string())
     }
-}
-
-fn is_control_verb(verb: &str) -> bool {
-    matches!(
-        verb,
-        "stop" | "skip" | "error" | "proxy" | "retry" | "resume" | "defer"
-    )
 }
 
 fn shape_error(source_file: &Path, path: &LifecyclePath, message: String) -> CompositionError {
@@ -1070,7 +1120,7 @@ fn parse_runtime_set(
     })
 }
 
-/// Parse the `with:` value of a `proxy` or `retry` long form.
+/// Parse the `with:` value of a `proxy`, `retry`, or `prep` long form.
 ///
 /// Accepts only a mapping. `{}` parses to an empty overlay, which the
 /// transition treats identically to an omitted `with:`. `action` is the
@@ -1157,7 +1207,7 @@ fn is_safe_path_segment(key: &str) -> bool {
 use indexmap::IndexMap;
 
 use super::*;
-use super::actions::{LifecycleConditional, for_each_action};
+use super::actions::{LifecycleConditional, for_each_action, is_lifecycle_control_verb};
 use super::super::authored_order::AuthoredOrder;
 use super::super::json_util::json_type_name;
 

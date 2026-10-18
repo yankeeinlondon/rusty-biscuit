@@ -263,6 +263,11 @@
   `research` also enables the library's existing optional `sniff` dependency
   (already used by `desktop`), whose Git work-tree discovery lets `prepare`
   refuse a research root below the Git top level; no crate was added.
+- `messenger/lib` adds an optional `sysinfo = "0.38.2"` edge through its
+  `research` feature (and as a development dependency): the research runner
+  finds and kills a stopped sequence's descendant processes, checking each
+  PID's start time before signaling it. The crate was already in the graph
+  through `sniff`, so the lockfile gains one edge and no package.
 - `messenger/lib` also uses the workspace `biscuit-test-harness` as a
   development dependency for `manifest_dir!()`, so its research fixture tests
   resolve the corpus at run time and still find it on the WSL2 nextest-archive

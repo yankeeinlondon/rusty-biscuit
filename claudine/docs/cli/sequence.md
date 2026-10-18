@@ -249,9 +249,21 @@ Each step's provider session gets these variables:
 ## Dry run
 
 `--dry-run` runs the full preflight and then composes every step against the
-starting state, without launching a provider. **Shell work still runs**:
-`$( … )` expansions and `shell:` steps execute for real, so a dry run of a
-sequence with `shell: git commit …` will commit.
+starting state, without launching a provider. It runs no lifecycle event and
+no `prep` target, previews each loop body once with pass 1's `loop` values,
+and shows each task guard instead of evaluating it. `shell:` and
+`side_effect:` tasks are rendered, not run:
+
+```text
+ℹ rendered (dry-run): would run `git add .`
+ℹ rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}`
+```
+
+**Composition still runs its `$( … )` expansions**, so their side effects
+happen. `--dry-run --dry-run-shell` also runs each `shell:` task once during
+the preview, for real (`git add` stages); it never launches a provider, runs
+no `side_effect:` task, and turns no loop or lifecycle event back on.
+`--dry-run-shell` without `--dry-run` is a usage error.
 
 ## Flags
 
@@ -266,7 +278,7 @@ Flags shared with `compose`:
 | System prompt | `--append-system-prompt`/`--asp <FILE>`, `--replace-system-prompt`/`--rsp <FILE>` |
 | Output | `-o`/`--output <FORMAT>`, `-q`/`--quiet`, `--silent`, `--perf` |
 | Values | `--set <JSON>`, `--operation`/`--op <OP>` |
-| Rehearsal | `--dry-run` |
+| Rehearsal | `--dry-run`, `--dry-run-shell` |
 
 `-y` is `--yolo`, not "answer yes". It turns on each provider's own
 auto-approval mode, and it approves every shell command during preflight

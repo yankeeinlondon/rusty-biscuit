@@ -1015,24 +1015,6 @@ fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
     assert!(!launched);
 }
 
-/// Group `loop` commit semantics are unratified, so a group carrying `loop`
-/// is blocked with an actionable error instead of invented semantics.
-#[test]
-#[cfg(unix)]
-fn sequence_rejects_group_loop() {
-    let fixture = CliProcessFixture::named("sequence-cli");
-    let md_file = fixture.cwd().join("seq.md");
-    fs::write(
-        &md_file,
-        "---\nsequence:\n    - name: one\n      group:\n          name: looper\n          loop:\n              while: \"true\"\n          tasks:\n              - shell: echo x\n---\nBody.\n",
-    )
-    .unwrap();
-
-    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
-    assert!(stderr.contains("group `loop`"), "stderr: {stderr}");
-    assert!(!launched);
-}
-
 /// A shell task that depends on `outputs` has no bytes up front, so it is
 /// approved only as a template; with no rule and no terminal to ask, preflight
 /// fails naming the authored command, before any step runs.

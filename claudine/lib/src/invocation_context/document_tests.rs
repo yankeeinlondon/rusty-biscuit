@@ -17,7 +17,7 @@ use tempfile::TempDir;
 use super::{DocumentEnvironment, EnvironmentSource, InvocationContext};
 use crate::composition::{
     PrepareOptions, PreparedComposition, ResolvedCompositionSource, approve_document_shell,
-    prepare_direct, resolve_fail_fast_from_env, resolve_max_iterations_from_env,
+    prepare_direct, resolve_max_iterations_from_env,
     resolve_pause_reset_margin_from_env,
 };
 use crate::harness::ShellApprovalOptions;
@@ -76,7 +76,6 @@ impl Fixture {
             ("MODEL".to_string(), format!("model-{dir}")),
             ("SCHEMAS_DIR".to_string(), self.schemas(dir).display().to_string()),
             ("CLAUDINE_MAX_ITERATIONS".to_string(), if dir == "a" { "3" } else { "7" }.to_string()),
-            ("CLAUDINE_FAIL_FAST".to_string(), (dir == "a").to_string()),
             ("CLAUDINE_PAUSE_RESET_MARGIN".to_string(), if dir == "a" { "1s" } else { "2s" }.to_string()),
         ]))
     }
@@ -182,8 +181,10 @@ fn assert_document_reads(fixture: &Fixture, prepared: &Prepared, dir: &str) {
         crate::composition::prepared_environment(&prepared.composition),
         fixture.map(dir),
     );
-    assert_eq!(resolve_max_iterations_from_env(environment), Some(if dir == "a" { 3 } else { 7 }));
-    assert_eq!(resolve_fail_fast_from_env(environment), Some(dir == "a"));
+    assert_eq!(
+        resolve_max_iterations_from_env(environment, std::path::Path::new("loop.md")).unwrap(),
+        Some(if dir == "a" { 3 } else { 7 }),
+    );
     assert_eq!(
         resolve_pause_reset_margin_from_env(environment),
         Some(std::time::Duration::from_secs(if dir == "a" { 1 } else { 2 })),

@@ -729,8 +729,10 @@ unhandled failure, or `130` on interruption. `--perf` adds aggregated timing;
 `--silent` suppresses per-step status messages.
 
 `--dry-run` performs preflight and composes against initial state without
-provider launches, lifecycle dispatch, or inline write-back. Shell tasks and
-composition shell expansions still run with real effects.
+provider launches, lifecycle dispatch, or inline write-back. `shell:` and
+`side_effect:` tasks are rendered, not run (`--dry-run-shell` runs the
+`shell:` tasks once); composition shell expansions still run with real
+effects.
 
 ### Per-step runtime bindings
 
@@ -1029,7 +1031,7 @@ When a sequence step fails in non-fail-fast mode, the only information preserved
 
 ### 9. Deeper Schema Coverage for Claudine Controls
 
-Claudine's trigger schemas now type its frontmatter in the launch verdict, but only within three conditional levels, with untyped values for the generated verbs and untyped sequence tasks; the parser alone judges the rest (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is also reported as an `anyOf` mismatch that echoes the value rather than naming the key. Recursive lifecycle types, typed generated-verb arguments, and narrower union diagnostics would surface these errors earlier and with better messages.
+Claudine's trigger schemas now type its frontmatter in the launch verdict, but event stacks other than `cancelled` only within three conditional levels (`cancelled` is typed at every depth the parser accepts), with untyped values for the generated verbs and untyped sequence tasks; the parser alone judges the rest (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is also reported as an `anyOf` mismatch that echoes the value rather than naming the key. Recursive lifecycle types, typed generated-verb arguments, and narrower union diagnostics would surface these errors earlier and with better messages.
 
 ### 10. Unified Telemetry Span Across All Three Commands
 
