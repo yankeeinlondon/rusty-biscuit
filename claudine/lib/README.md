@@ -253,7 +253,7 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 
 - **Direct composition** (`claudine compose <file>`): composes the full document as a prompt without mutating the source file
 - **Inline composition** (`claudine inline-compose <file>`): reads frontmatter `prompt` as input, then rewrites the document body from the provider's returned content while preserving source frontmatter
-- **Sequence composition** (`claudine sequence <file>`): runs a serial sequence of composition steps from a single document, reusing wrapper-grade execution with a shared approval cache and `FAIL_FAST` propagation across steps
+- **Sequence composition** (`claudine sequence <file>`): runs a serial sequence of composition steps from a single document, reusing wrapper-grade execution with a shared approval cache; a failed step ends the sequence unless a lifecycle stack recovers it
 
 Sub-modules:
 - `resolve` — source resolution via `biscuit-file::FileReference` with read/write permission validation

@@ -959,7 +959,7 @@ This is the gate working correctly — if production would prompt, the dry-run f
 
 ### Sequence Dry Run
 
-`sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a `=== Document N of M ===` divider before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately (fail-fast), exiting non-zero without launching any provider.
+`sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a horizontal rule before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately, exiting non-zero without launching any provider.
 
 A sequence dry run never executes its tasks or its control flow:
 
