@@ -82,6 +82,20 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   Real npm shims hit this too, so `claudine::child_environment::command`
   starts an npm `cmd-shim`'s target directly (`claudine/lib/src/npm_shim.rs`);
   a batch file of any other shape still fails.
+- **Two `cmd` processes appending to one file at once collide.** `echo x>>f`
+  from parallel group legs fails one leg with "The process cannot access the
+  file because it is being used by another process"; POSIX `>>` never does.
+  Give each concurrent writer its own file and merge them in the assertion
+  (claudine's `document_environment_routes::group_leg_shells_row`).
+- **A Claudine lifecycle `stdout` prints `\\` as `\`.** A `{{ seq.outputs }}`
+  holding a Windows path therefore reaches stdout as `["C:\Users\…"]`, which
+  is not JSON. Redact path strings in the text before parsing
+  (`sequence_frozen_graph::redact_rewrites`); macOS paths hide this.
+- **An ambient `Terminal::default()` renders differently on the Windows
+  runner.** It detects no color there, and at `ColorDepth::None` inline code
+  keeps its literal backticks, so a prose assertion that passes on macOS
+  fails. Pin the terminal (`Terminal::new_optimistic(80)` or a builder with an
+  explicit `color_depth`) in rendering tests.
 - **Spawn cost dominates many small processes.** Each git process costs tens
   of milliseconds on Windows versus a few on macOS, and git for Windows routes
   a local-path transport through MSYS `sh.exe`. Symptom: a Windows-only

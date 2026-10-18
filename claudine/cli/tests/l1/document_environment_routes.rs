@@ -528,8 +528,10 @@ fn group_leg_shells_row(name: &str, execution: &str) {
         "seq.md",
         &format!(
             "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      {execution}tasks:\n        - name: left\n          {}        - name: right\n          {}---\n",
-            shell_task("left", "          "),
-            shell_task("right", "          "),
+            // One log per leg: on Windows, two legs appending to one file at
+            // once fail with a sharing violation.
+            shell_task("left", "          ").replace("events.log", "left.log"),
+            shell_task("right", "          ").replace("events.log", "right.log"),
         ),
     );
 
@@ -539,7 +541,11 @@ fn group_leg_shells_row(name: &str, execution: &str) {
     );
 
     assert_eq!(run.code, Some(0), "{}", run.output);
-    let mut events = fixture.events();
+    let mut events: Vec<String> = ["left.log", "right.log"]
+        .iter()
+        .flat_map(|log| fs::read_to_string(fixture.cwd().join(log)).unwrap_or_default()
+            .lines().map(str::to_string).collect::<Vec<_>>())
+        .collect();
     // Parallel legs interleave; what each child saw is the contract.
     events.sort();
     let mut expected = shell_task_events(&fixture, "left", "left");
