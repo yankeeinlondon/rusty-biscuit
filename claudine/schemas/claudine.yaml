@@ -5,7 +5,9 @@
 # Each identifying key is matched once per non-null YAML type, so a value of
 # the wrong type still selects this schema and the payload then rejects it.
 # The payload declares no required property and leaves the document open, so
-# application data beside Claudine's controls is kept.
+# application data beside Claudine's controls is kept. `sequence` is declared
+# only by sequence.yaml, which every document with a non-null `sequence`
+# selects.
 kind: trigger-schema
 match:
     any:
@@ -80,9 +82,6 @@ $schema:
           value: "unknown -> stored hash payload"
           ignored: "string[] -> extra frontmatter keys ignored during hash computation"
     last_updated: "date -> managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"
-    sequence:
-        - "step[]@./lifecycle.yaml -> the sequence's tasks; deeper container grammar is parser-validated"
-        - "string -> a file reference to the sequence's tasks"
     loop: "loop@./lifecycle.yaml -> run the prompt repeatedly; beside `sequence:`, the sequence's loop"
     argv: "string[] -> arguments passed through to the agent"
     title: "string -> the document's title"

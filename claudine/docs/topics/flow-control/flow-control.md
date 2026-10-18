@@ -95,6 +95,8 @@ success:
 
 `stop` takes no arguments. `- stop`, `- stop:`, and `- stop: []` all mean the same thing.
 
+`stop` in `initialize` ends only `initialize`: the document still composes and the agent still launches. To opt a document out of its run, use [`skip`](#skip).
+
 ## `skip`
 
 Opts the whole document out of the run. The agent is never launched, and no later events fire for this document (`finalize` and `loop` do not fire either). If the document is one step of a [sequence](sequences.md), the sequence moves on to the next step.
@@ -107,6 +109,18 @@ initialize:
     then:
       - skip                            # already done, nothing to do
 ```
+
+**Why an opt-out uses `skip`, not `stop`.** `stop` ends the event it is in and nothing more, so a `stop` in `initialize` still lets the document compose and launch an agent that has nothing to do. `skip` ends the document's run. For example, a commit step that finds nothing staged should launch nothing:
+
+```yaml
+initialize:
+  - when: "length(current.staged_files) == 0"
+    then:
+      - message: "nothing staged; no commit"
+      - skip                            # with `stop`, the agent would still launch
+```
+
+A skipped document adds no entry to `seq.outputs`, so a later step reading `seq.outputs` sees only the steps that ran.
 
 `skip` is also how you make a [loop](looping.md) run zero times, because a loop always runs its body at least once.
 

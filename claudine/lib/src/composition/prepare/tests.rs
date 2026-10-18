@@ -1637,3 +1637,75 @@ fn direct_composition_parses_yolo_hint() {
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert!(prepared.selection_hints.yolo_enabled(false));
 }
+
+/// A `with:` overlay's file value resolves from the file that authored it —
+/// not the target's directory and not the launch directory — whether or not
+/// the caller supplied setters of its own, and a caller setter still outranks
+/// it, value and origin alike.
+#[test]
+fn an_anchored_overlay_file_value_resolves_from_its_authoring_file() {
+    let dir = TempDir::new().unwrap();
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    for (folder, marker) in [("router", "authoring"), ("target", "target"), ("", "launch")] {
+        let folder = root.join(folder);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("notes.md"), format!("---\nmarker: {marker}\n---\n")).unwrap();
+    }
+    let target = root.join("target/target.md");
+    fs::write(&target, "---\n$schema:\n  notes: 'file(required)'\n  choice: string\nmarker: \"{{ frontmatter(notes, 'marker') }}\"\n---\nROUTE={{ marker }}\n").unwrap();
+    let launch = crate::test_support::context_at(&root);
+    let router = launch.for_source(root.join("router/router.md"));
+    let values: indexmap::IndexMap<String, serde_json::Value> =
+        [("notes".to_string(), json!("./notes.md"))].into_iter().collect();
+
+    let prepare = |setters: Option<serde_json::Value>| {
+        let mut source = crate::composition::resolve_fixture_source(target.to_str().unwrap()).unwrap();
+        for (key, value) in &values {
+            source.markdown.frontmatter_mut().as_map_mut().insert(key.clone(), value.clone());
+        }
+        let records = crate::composition::CallerInputLayers::from_caller_overrides(setters.clone(), launch.clone()).caller_input_records;
+        let options = PrepareOptions {
+            proxy_overlay: crate::composition::AnchoredOverlay::new(values.clone(), &router),
+            set_overrides: setters,
+            caller_input_records: records,
+            ..PrepareOptions::new(launch.for_source(&target))
+        };
+        prepare_direct(&source, options).unwrap().prompt
+    };
+
+    assert!(prepare(None).contains("ROUTE=authoring"), "{}", prepare(None));
+    let unrelated = prepare(Some(json!({ "choice": "caller" })));
+    assert!(unrelated.contains("ROUTE=authoring"), "an unrelated caller setter must not move the overlay's origin: {unrelated}");
+    let pinned = prepare(Some(json!({ "notes": "notes.md" })));
+    assert!(pinned.contains("ROUTE=launch"), "the caller's setter outranks `with`, from the launch directory: {pinned}");
+}
+
+/// Layering keeps each key's origin with its value: a retry's value replaces
+/// the proxy's together with its origin, and a `null` removal carries none.
+#[test]
+fn anchored_overlays_layer_value_and_origin_together() {
+    let dir = TempDir::new().unwrap();
+    let source_origin = crate::test_support::context_at(dir.path()).for_source(dir.path().join("source/source.md"));
+    let retry_origin = crate::test_support::context_at(dir.path()).for_source(dir.path().join("target/target.md"));
+    let proxy = crate::composition::AnchoredOverlay::new(
+        [("kept", json!("./a.md")), ("replaced", json!("./b.md")), ("removed", json!("./c.md"))]
+            .into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        &source_origin,
+    );
+    let retry = crate::composition::AnchoredOverlay::new(
+        [("replaced", json!("./d.md")), ("removed", serde_json::Value::Null)]
+            .into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        &retry_origin,
+    );
+
+    let layered = proxy.layered(&retry);
+    let records = layered.input_records();
+
+    assert_eq!(layered.values()["replaced"], json!("./d.md"));
+    assert_eq!(layered.values()["removed"], serde_json::Value::Null);
+    assert_eq!(records["kept"].origin(), &source_origin);
+    assert_eq!(records["replaced"].origin(), &retry_origin);
+    assert_eq!(records["replaced"].raw(), &json!("./d.md"));
+    assert!(!records.contains_key("removed"), "a removal has no value to anchor");
+    assert_eq!(format!("{layered:?}"), r#"["kept", "replaced", "removed"]"#, "debug output names keys, never values");
+}

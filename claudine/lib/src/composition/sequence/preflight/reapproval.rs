@@ -221,7 +221,7 @@ pub(super) fn shell_resolution_failure(
 /// against early-binding values only: a whole-value span keeps its type.
 ///
 /// Every approval-time read sequence preflight makes goes through here — shell
-/// text, each placeholder of a template, and a prompt task's `params` — so they
+/// text, each placeholder of a template, and a prompt task's `with` — so they
 /// all see the same scope and values.
 ///
 /// ## Errors

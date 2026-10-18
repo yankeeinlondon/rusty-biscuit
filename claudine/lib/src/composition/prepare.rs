@@ -92,13 +92,16 @@ pub struct PrepareOptions {
     /// Complete lexical sequence root, carried outside frontmatter.
     pub sequence_binding: Option<serde_json::Value>,
     /// The immediate `proxy.with:` overlay of a document entered through a
-    /// hand-off (empty otherwise).
+    /// hand-off, with a pending `retry.with:` layered on top (empty
+    /// otherwise).
     ///
-    /// Its values were evaluated in the source document, so compose receives
-    /// them as the lowest **data** layer, beneath every override above. It
-    /// belongs to this document alone and is never part of the invocation's
-    /// [`CallerInputLayers`](super::CallerInputLayers).
-    pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+    /// Its values were evaluated in the authoring document, so compose
+    /// receives them as the lowest **data** layer, beneath every override
+    /// above, and a schema-selected file value resolves from the file that
+    /// authored it ([`compose_caller_records`](Self::compose_caller_records)).
+    /// It belongs to this document alone and is never part of the
+    /// invocation's [`CallerInputLayers`](super::CallerInputLayers).
+    pub proxy_overlay: super::AnchoredOverlay,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Commands pre-approved during pre-flight shell discovery: resolved
@@ -201,15 +204,40 @@ impl PrepareOptions {
     /// The caller records the schema stage judges `match()` globs by: the
     /// captured records, else every override supplied in the launch area,
     /// as composition derives them.
+    ///
+    /// The overlay's records join below them: an overlay key no override
+    /// above it supplies resolves from the file that authored it.
     pub(crate) fn schema_caller_records(&self) -> darkmatter::markdown::compose::CallerInputRecords {
-        if !self.caller_input_records.is_empty() {
+        let mut records = if self.caller_input_records.is_empty() {
+            darkmatter::markdown::compose::caller_input_records_for_overrides(
+                self.set_overrides.as_ref(),
+                &self.file_resolution_context,
+                self.file_ref_fallback_dir.as_deref(),
+            )
+        } else {
+            self.caller_input_records.clone()
+        };
+        let above = self.set_overrides.as_ref().and_then(serde_json::Value::as_object);
+        for (key, record) in self.proxy_overlay.input_records() {
+            if !records.contains_key(&key) && !above.is_some_and(|above| above.contains_key(&key)) {
+                records.insert(key, record);
+            }
+        }
+        records
+    }
+
+    /// The caller records composition receives.
+    ///
+    /// With no anchored overlay these are exactly the captured records, and
+    /// Darkmatter derives its own launch-area records when there are none.
+    /// An anchored overlay needs explicit records so its values keep their
+    /// authoring origin, which are then the
+    /// [`schema_caller_records`](Self::schema_caller_records).
+    pub(crate) fn compose_caller_records(&self) -> darkmatter::markdown::compose::CallerInputRecords {
+        if self.proxy_overlay.input_records().is_empty() {
             return self.caller_input_records.clone();
         }
-        darkmatter::markdown::compose::caller_input_records_for_overrides(
-            self.set_overrides.as_ref(),
-            &self.file_resolution_context,
-            self.file_ref_fallback_dir.as_deref(),
-        )
+        self.schema_caller_records()
     }
 
     /// Options that prepare against `file_resolution_context`, with every
@@ -437,11 +465,11 @@ fn canonical_compose_options(
         // altering the delivered text and defeating line-count-based report
         // truncation. Preserve the source line breaks for prompt delivery.
         .with_incidental_newline_mode(darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve);
-    let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+    let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
     overrides.extend(&options.layered_overrides());
     overrides.initialize_outputs();
     compose_opts = overrides.apply_to(compose_opts);
-    compose_opts = compose_opts.with_caller_input_records(options.caller_input_records.clone());
+    compose_opts = compose_opts.with_caller_input_records(options.compose_caller_records());
     let mut coercion_keys = options.name_coercion_keys.clone();
     coercion_keys.extend(super::sequence::reserved::NAME_COERCION_KEYS.iter().map(|key| key.to_string()));
     compose_opts = compose_opts.with_name_coercion_keys(coercion_keys);
@@ -639,7 +667,105 @@ pub(super) fn prepare_direct_with_prompt(
     options: PrepareOptions,
     prompt_source: PromptSource,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_direct_on(source, options, prompt_source, BodyCommands::Run)
+    prepare_direct_on(source, options, prompt_source, BodyCommands::Run, None)
+}
+
+/// [`prepare_direct_with_prompt`] with an optional [`ResolvedIdentitySelector`].
+pub(super) fn prepare_direct_with_prompt_selecting(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    prompt_source: PromptSource,
+    select: Option<&ResolvedIdentitySelector<'_>>,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_direct_on(source, options, prompt_source, BodyCommands::Run, select)
+}
+
+/// Chooses the launch identity a document's body renders with, from the
+/// selection hints of its resolved frontmatter.
+///
+/// Called once per compose, after every frontmatter value is resolved (a
+/// frontmatter `$( … )` included) and before the body renders. It returns the
+/// composition environment overrides that replace
+/// [`PrepareOptions::env_overrides`] for the body (`env.*`, and the
+/// `AGENT`/`MODEL` behind `ctx.agent`/`ctx.model`) and for every later
+/// re-preparation of the document (a retry, a resume, a loop refresh); see
+/// [`replace_env_overrides`]. Frontmatter values that read
+/// `env.AGENT`/`env.MODEL` have already resolved. Hints the frontmatter cannot
+/// parse skip the call; the preparation then reports them. An error ends the
+/// preparation before the body renders.
+pub type ResolvedIdentitySelector<'s> = dyn Fn(&EffectiveSelectionHints) -> Result<BTreeMap<String, String>, CompositionError>
+    + 's;
+
+/// Replace the `installed` composition overrides in `env` with `overrides`: a
+/// key only `installed` set returns to its `captured` value, or is unset.
+pub fn replace_env_overrides(
+    env: &mut std::collections::HashMap<String, String>,
+    installed: &BTreeMap<String, String>,
+    overrides: &BTreeMap<String, String>,
+    captured: Option<&crate::invocation_context::DocumentEnvironment>,
+) {
+    for key in installed.keys().filter(|key| !overrides.contains_key(*key)) {
+        match captured.and_then(|captured| captured.get(key)) {
+            Some(value) => {
+                env.insert(key.clone(), value.to_string());
+            }
+            None => {
+                env.remove(key);
+            }
+        }
+    }
+    env.extend(overrides.iter().map(|(key, value)| (key.clone(), value.clone())));
+}
+
+/// What [`ResolvedIdentitySelector`] chose inside one compose: the
+/// environment the body rendered with and the overrides that produced it.
+struct SelectedIdentity {
+    env: std::collections::HashMap<String, String>,
+    overrides: BTreeMap<String, String>,
+}
+
+/// Composes `markdown` for `request`, running `select` between its resolved
+/// frontmatter and its body.
+fn compose_selecting(
+    markdown: &Markdown,
+    request: &ComposeRequest,
+    source_path: &std::path::Path,
+    options: &PrepareOptions,
+    select: Option<&ResolvedIdentitySelector<'_>>,
+) -> Result<(Markdown, darkmatter::markdown::compose::ComposeReport, Option<SelectedIdentity>), CompositionError> {
+    let Some(select) = select else {
+        let (composed, report) = markdown
+            .compose_with(request)
+            .map_err(|e| map_compose_error(source_path, e))?;
+        return Ok((composed, report, None));
+    };
+    let captured = options
+        .invocation_context
+        .as_ref()
+        .map(crate::invocation_context::InvocationContext::document_environment);
+    let mut failure = None;
+    let mut selected = None;
+    let result = markdown.compose_with_frontmatter_hook(request, &mut |frontmatter, env| {
+        let Ok(hints) = super::parse_selection_hints_from_frontmatter(frontmatter) else {
+            return Ok(());
+        };
+        match select(&hints) {
+            Ok(overrides) => {
+                replace_env_overrides(env, &options.env_overrides, &overrides, captured);
+                selected = Some(SelectedIdentity { env: env.clone(), overrides });
+                Ok(())
+            }
+            Err(error) => {
+                failure = Some(error);
+                Err(MarkdownError::Transform("launch identity selection failed".to_string()))
+            }
+        }
+    });
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    let (composed, report) = result.map_err(|e| map_compose_error(source_path, e))?;
+    Ok((composed, report, selected))
 }
 
 /// Whether a preparation runs the body's `::shell` and `::shell-block`
@@ -684,9 +810,9 @@ pub fn prepare_loop_seed(
 ) -> Result<PreparedComposition, CompositionError> {
     match mode {
         CompositionMode::ChainedDocument => {
-            prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Defer)
+            prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Defer, None)
         }
-        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Defer),
+        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Defer, None),
     }
 }
 
@@ -702,9 +828,62 @@ pub fn prepare_sequence_probe(
 ) -> Result<PreparedComposition, CompositionError> {
     options.defer_schema_verdict = true;
     match mode {
-        CompositionMode::ChainedDocument => prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Probe),
-        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Probe),
+        CompositionMode::ChainedDocument => prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Probe, None),
+        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Probe, None),
     }
+}
+
+/// The selection hints `source`'s effective frontmatter names under
+/// `options`, read before it composes so the identity the launch selects from
+/// them can be installed in the environment its frontmatter resolves with.
+/// The body's environment is chosen inside the full preparation instead (see
+/// [`ResolvedIdentitySelector`]), where a frontmatter `$( … )` has run.
+///
+/// Composes the frontmatter surface only, with frontmatter `$(...)`
+/// expansion disabled: no shell, no transclusion, and no body directive runs,
+/// so the full preparation that follows is the only one with effects. Records
+/// no compose operation and no prepared-context consumer.
+///
+/// ## Returns
+///
+/// `None` when the read cannot decide the hints the full preparation will
+/// see: an `agent` or `model` still carries a shell substitution only that
+/// preparation runs, or the read fails (the full preparation reports the
+/// error with its own diagnostic).
+#[must_use]
+pub fn read_selection_hints(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    mode: CompositionMode,
+) -> Option<EffectiveSelectionHints> {
+    let mut ctx = derive_compose_context(source, options);
+    for (key, value) in &options.env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
+    }
+    let schema_phase = match mode {
+        CompositionMode::ChainedDocument => None,
+        CompositionMode::InlineFrontmatterPrompt => Some(SchemaPhase::Launch),
+    };
+    let compose_opts = canonical_compose_options(source, &ctx, options, schema_phase)
+        .with_deferred_schema_verdict(true)
+        .only_frontmatter_surface()
+        .disable(darkmatter::markdown::compose::ComposeOperation::FrontmatterShellExpansion)
+        .with_pre_approved_commands(
+            darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new(),
+        );
+    let request = prepared_request(compose_opts, options).ok()?;
+    let (composed, _report) = source.markdown.compose_with(&request).ok()?;
+    let frontmatter = composed.frontmatter();
+    let shell_dependent = ["agent", "model"].iter().any(|key| {
+        frontmatter
+            .as_map()
+            .get(*key)
+            .is_some_and(|value| value.to_string().contains("$("))
+    });
+    if shell_dependent {
+        return None;
+    }
+    super::parse_selection_hints_from_frontmatter(frontmatter).ok()
 }
 
 fn prepare_direct_on(
@@ -712,6 +891,7 @@ fn prepare_direct_on(
     options: PrepareOptions,
     prompt_source: PromptSource,
     body_commands: BodyCommands,
+    select: Option<&ResolvedIdentitySelector<'_>>,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     if let Some((key, replacement)) =
@@ -748,14 +928,16 @@ fn prepare_direct_on(
     )?;
     // Retain the caller's inputs so a later canonical preparation of this or a
     // proxied document re-applies exactly them.
-    let input_layers = super::CallerInputLayers::from_options(&options);
+    let mut input_layers = super::CallerInputLayers::from_options(&options);
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
-    let (composed, report) = source
-        .markdown
-        .compose_with(&compose_request)
-        .map_err(|e| map_compose_error(&source.resolved_path, e))?;
+    let (composed, report, selected) =
+        compose_selecting(&source.markdown, &compose_request, &source.resolved_path, &options, select)?;
+    if let Some(selected) = selected {
+        *ctx.env_mut() = selected.env;
+        input_layers.env_overrides = selected.overrides;
+    }
 
     let prompt = match prompt_source {
         PromptSource::ComposedBody => {
@@ -821,13 +1003,23 @@ pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_inline_on(source, options, BodyCommands::Run)
+    prepare_inline_on(source, options, BodyCommands::Run, None)
+}
+
+/// [`prepare_inline`] with an optional [`ResolvedIdentitySelector`].
+pub(super) fn prepare_inline_selecting(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    select: Option<&ResolvedIdentitySelector<'_>>,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_inline_on(source, options, BodyCommands::Run, select)
 }
 
 fn prepare_inline_on(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
     body_commands: BodyCommands,
+    select: Option<&ResolvedIdentitySelector<'_>>,
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
@@ -867,13 +1059,16 @@ fn prepare_inline_on(
         body_commands.apply(canonical_compose_options(source, &ctx, &options, Some(SchemaPhase::Launch))),
         &options,
     )?;
-    let input_layers = super::CallerInputLayers::from_options(&options);
+    let mut input_layers = super::CallerInputLayers::from_options(&options);
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
-    let (composed, report) = temp_md
-        .compose_with(&compose_request)
-        .map_err(|e| map_compose_error(&source.resolved_path, e))?;
+    let (composed, report, selected) =
+        compose_selecting(&temp_md, &compose_request, &source.resolved_path, &options, select)?;
+    if let Some(selected) = selected {
+        *ctx.env_mut() = selected.env;
+        input_layers.env_overrides = selected.overrides;
+    }
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let (selection_hints, lifecycle) =
@@ -1022,7 +1217,7 @@ fn effective_surface(
                 source,
                 options.file_ref_fallback_dir.as_deref(),
                 &options.file_resolution_context,
-                &options.caller_input_records,
+                &options.compose_caller_records(),
             )
             .ok()
             .flatten()
@@ -1191,7 +1386,7 @@ fn reject_removed_sequence_reads_in_source(
     options: &PrepareOptions,
     lifecycle: Option<&super::lifecycle::LifecycleConfig>,
 ) -> Result<(), CompositionError> {
-    let mut supplied = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+    let mut supplied = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
     supplied.extend(&options.layered_overrides());
     let mut authored = frontmatter_to_value(source.markdown.frontmatter());
     if let serde_json::Value::Object(values) = &mut authored {
@@ -1269,7 +1464,7 @@ pub fn validate_document_shell_late_values(
         .map_err(|error| map_compose_error(&source.resolved_path, error))?;
     let mut authored_values = frontmatter_to_value(source.markdown.frontmatter());
     if let serde_json::Value::Object(values) = &mut authored_values {
-        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(options.proxy_overlay.values());
         overrides.extend(&options.layered_overrides());
         values.extend(overrides.values().clone());
     }

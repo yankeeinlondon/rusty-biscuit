@@ -150,7 +150,7 @@ fn caller_set_override_beats_a_conflicting_with_key() {
         "and does so in the effective frontmatter, not only in the body"
     );
     assert_eq!(
-        state.overlay.get("phase"),
+        state.overlay.values().get("phase"),
         Some(&serde_json::json!(2)),
         "losing the precedence contest does not rewrite the stored overlay"
     );
@@ -466,7 +466,7 @@ fn schema_coercion_shapes_effective_frontmatter_but_not_the_stored_overlay() {
         "the schema coerces the overlay's number into the declared string"
     );
     assert_eq!(
-        state.overlay.get("phase"),
+        state.overlay.values().get("phase"),
         Some(&serde_json::json!(2)),
         "the stored overlay stays pre-schema — coercion never writes back"
     );
@@ -520,7 +520,10 @@ fn refreshing_the_same_target_reapplies_the_same_overlay() {
 fn a_hop_that_omits_with_installs_an_empty_overlay_rather_than_forwarding() {
     let fx = overlay_fixture("---\nphase: 1\n---\nphase={{ phase }}\n");
     let mut state = prompt_state(&fx.fx.source_path);
-    state.overlay.insert("phase".to_string(), serde_json::json!(5));
+    state.overlay = claudine::composition::AnchoredOverlay::new(
+        [("phase".to_string(), serde_json::json!(5))].into_iter().collect(),
+        state.file_resolution_context(),
+    );
 
     fx.adopt(&mut state, &[]);
 
@@ -542,18 +545,19 @@ fn a_hop_that_omits_with_installs_an_empty_overlay_rather_than_forwarding() {
 fn a_second_hop_replaces_the_overlay_rather_than_merging_it() {
     let fx = overlay_fixture("---\ntitle: t\n---\nbody\n");
     let mut state = prompt_state(&fx.fx.source_path);
-    state
-        .overlay
-        .insert("from_first_hop".to_string(), serde_json::json!("leaked"));
+    state.overlay = claudine::composition::AnchoredOverlay::new(
+        [("from_first_hop".to_string(), serde_json::json!("leaked"))].into_iter().collect(),
+        state.file_resolution_context(),
+    );
 
     fx.adopt(&mut state, &[("from_second_hop", serde_json::json!("own"))]);
 
     assert_eq!(
-        state.overlay.get("from_second_hop"),
+        state.overlay.values().get("from_second_hop"),
         Some(&serde_json::json!("own"))
     );
     assert_eq!(
-        state.overlay.get("from_first_hop"),
+        state.overlay.values().get("from_first_hop"),
         None,
         "the previous document's overlay must not survive into the next"
     );
@@ -615,7 +619,7 @@ fn an_overlay_does_not_create_a_distinct_identity_for_cycle_detection() {
         "a different overlay does not buy a second visit to the same document"
     );
     assert_eq!(
-        state.overlay.get("phase"),
+        state.overlay.values().get("phase"),
         Some(&serde_json::json!(1)),
         "a refused hop leaves the active document's overlay untouched"
     );
@@ -673,39 +677,42 @@ fn with_satisfies_a_required_schema_property_the_target_does_not_author() {
     assert_eq!(materialized.prompt.trim(), "plan proxies");
 }
 
-/// A file-valued overlay property resolves through the *target's* canonical
-/// file-resolution context — the same `file_ref_fallback_dir` a direct
-/// invocation would anchor on. `with:` adds no second path resolver, which is
-/// why a relative path means the same thing whoever supplied it.
+/// A file-valued overlay property resolves from the document that authored
+/// the `with:` — the router — not from the target's directory and not from the
+/// caller's launch-area anchor, which only the caller's own setters use. A
+/// bare relative reference follows the same rule as `./`.
 #[test]
-fn a_file_valued_overlay_property_resolves_through_the_targets_own_context() {
-    let fx = overlay_fixture(
-        "---\n$schema:\n    spec: 'file(required;eager)'\n---\nspec says: {{ spec }}\n",
-    );
+fn a_file_valued_overlay_property_resolves_from_the_router_that_authored_it() {
+    let fx = fixture(serde_json::json!({}));
+    std::fs::write(&fx.source_path, "---\ntitle: router\n---\nrouter body\n").unwrap();
+    let target = fx._dir.path().join("target-dir/target.md");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "---\n$schema:\n    spec: 'file(required;eager)'\n---\nspec says: {{ spec }}\n").unwrap();
+    let fx = OverlayFixture { fx, target };
+    let router_dir = fx.fx.source_path.parent().unwrap().to_path_buf();
     let launch_area = fx.dir().join("area");
     std::fs::create_dir_all(&launch_area).unwrap();
-    // `required;eager` resolves and existence-checks the reference; the file's
-    // contents are not what this asserts on.
-    std::fs::write(launch_area.join("spec.md"), "---\ntitle: s\n---\nspec\n").unwrap();
+    // `required;eager` resolves and existence-checks the reference; a decoy
+    // in each wrong directory makes the winner the only possible reading.
+    for dir in [&router_dir, &launch_area, &fx.target.parent().unwrap().to_path_buf()] {
+        std::fs::write(dir.join("spec.md"), "---\ntitle: s\n---\nspec\n").unwrap();
+    }
 
     let mut state = prompt_state(&fx.fx.source_path);
     // The caller's launch-area anchor, exactly as a direct invocation carries it.
     state.input_layers.file_ref_fallback_dir = Some(launch_area.clone());
 
-    // A bare relative reference: it can only resolve against the target's
-    // anchor, not against wherever the router happened to live.
     fx.adopt(&mut state, &[("spec", serde_json::json!("spec.md"))]);
     let materialized = fx
         .materialize(&mut state)
-        .expect("the overlay's file reference resolves against the launch area");
+        .expect("the overlay's file reference resolves from the router");
 
     assert_eq!(
         effective(&materialized, "spec"),
-        Some(serde_json::json!(launch_area.join("spec.md").display().to_string())),
-        "the target's resolver anchored the overlay's relative reference on the \
-         caller's launch area and rewrote it to the resolved path"
+        Some(serde_json::json!(router_dir.join("spec.md").display().to_string())),
+        "the overlay's relative reference resolves from the file that authored it"
     );
-    let presentation_path = launch_area
+    let presentation_path = router_dir
         .join("spec.md")
         .display()
         .to_string()

@@ -3,15 +3,19 @@
 //! Setext and ATX headings are already unified by the Phase-1 `extract_headings`
 //! authority, so both appear here identically. The document outline nests by
 //! heading level; workspace symbols expose document titles plus every heading,
-//! subsequence-matched.
+//! subsequence-matched, from each document's headings alone (the index
+//! store's stored headings, or a graph's through [`graph_symbol_documents`]).
 
 use lsp_types::{
     DocumentSymbol, Location, OneOf, SymbolKind, WorkspaceSymbol,
 };
 
+use std::path::PathBuf;
+
 use super::DocumentContext;
-use super::location::{line_range, node_location};
-use crate::graph::{HeadingPayload, WorkspaceGraph};
+use super::location::line_range;
+use crate::graph::{HeadingFact, HeadingPayload, WorkspaceGraph};
+use crate::workspace::file_path_to_uri;
 
 /// One flattened heading, ready to nest.
 struct Heading {
@@ -99,70 +103,102 @@ fn build_tree(headings: &[Heading], cursor: &mut usize, parent_level: u8) -> Vec
     out
 }
 
+/// One document as workspace symbols read it: its path and its headings in
+/// source order.
+pub type SymbolDocument = (PathBuf, Vec<HeadingFact>);
+
 /// Workspace symbols: document titles plus every heading, subsequence-matched
 /// against `query` (case-insensitive; an empty query matches everything).
-pub fn workspace_symbols(query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
+///
+/// `documents` holds each document once; symbols come out in `documents`
+/// order, so the registry's cap keeps the same ones on every call when the
+/// caller sorts it. A title symbol sits on the document's first line and a
+/// heading symbol on the heading's line, with the file name as container.
+pub fn workspace_symbols(query: &str, documents: &[SymbolDocument]) -> Vec<WorkspaceSymbol> {
     let mut out = Vec::new();
-    for record in graph.documents() {
-        let Some(doc_id) = graph.document_id(&record.path) else {
-            continue;
-        };
-        let file_name = record
-            .path
+    for (path, headings) in documents {
+        let uri = file_path_to_uri(path).unwrap_or_else(dummy_uri);
+        let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| record.path.to_string_lossy().to_string());
-        let title = document_title(graph, doc_id).unwrap_or_else(|| file_name.clone());
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        let title = title_of(headings.iter().map(|heading| (heading.level, heading.title.as_str())))
+            .unwrap_or_else(|| file_name.clone());
 
         if subsequence_match(query, &title) {
-            out.push(symbol(title.clone(), SymbolKind::FILE, None, record.root, graph));
+            out.push(symbol(title, SymbolKind::FILE, None, &uri, 1));
         }
-        for (node_id, node) in graph.headings(doc_id) {
-            if let Some(heading) = node.as_heading()
-                && subsequence_match(query, &heading.title)
-            {
-                out.push(symbol(
-                    heading.title.clone(),
-                    SymbolKind::STRING,
-                    Some(file_name.clone()),
-                    node_id,
-                    graph,
-                ));
+        for heading in headings {
+            if subsequence_match(query, &heading.title) {
+                out.push(symbol(heading.title.clone(), SymbolKind::STRING, Some(file_name.clone()), &uri, heading.line));
             }
         }
     }
     out
 }
 
+/// The [`SymbolDocument`]s of `graph`: every document that is not a
+/// referenced dependency, in document order.
+pub fn graph_symbol_documents(graph: &WorkspaceGraph) -> Vec<SymbolDocument> {
+    let mut out = Vec::new();
+    for record in graph.documents().iter().filter(|record| !record.dependency) {
+        let Some(doc_id) = graph.document_id(&record.path) else {
+            continue;
+        };
+        let headings = graph
+            .headings(doc_id)
+            .filter_map(|(_, node)| {
+                let heading = node.as_heading()?;
+                Some(HeadingFact {
+                    level: heading.level,
+                    title: heading.title.clone(),
+                    slug: heading.slug.clone(),
+                    span: node.span.clone(),
+                    title_span: heading.title_span.clone(),
+                    line: heading.line,
+                })
+            })
+            .collect();
+        out.push((record.path.clone(), headings));
+    }
+    out
+}
+
 /// The document's title: its first level-1 heading, else its first heading.
 pub(super) fn document_title(graph: &WorkspaceGraph, doc_id: crate::graph::DocumentId) -> Option<String> {
-    let mut first: Option<String> = None;
-    for (_, node) in graph.headings(doc_id) {
-        if let Some(heading) = node.as_heading() {
-            if heading.level == 1 {
-                return Some(heading.title.clone());
-            }
-            first.get_or_insert_with(|| heading.title.clone());
+    title_of(
+        graph
+            .headings(doc_id)
+            .filter_map(|(_, node)| node.as_heading())
+            .map(|heading| (heading.level, heading.title.as_str())),
+    )
+}
+
+/// The first level-1 title among `(level, title)` headings, else the first.
+fn title_of<'a>(headings: impl Iterator<Item = (u8, &'a str)>) -> Option<String> {
+    let mut first: Option<&str> = None;
+    for (level, title) in headings {
+        if level == 1 {
+            return Some(title.to_string());
         }
+        first.get_or_insert(title);
     }
-    first
+    first.map(str::to_string)
 }
 
 fn symbol(
     name: String,
     kind: SymbolKind,
     container_name: Option<String>,
-    node: crate::graph::NodeId,
-    graph: &WorkspaceGraph,
+    uri: &lsp_types::Uri,
+    line: usize,
 ) -> WorkspaceSymbol {
-    let location = node_location(graph, node)
-        .unwrap_or_else(|| Location::new(dummy_uri(), line_range(1)));
     WorkspaceSymbol {
         name,
         kind,
         tags: None,
         container_name,
-        location: OneOf::Left(location),
+        location: OneOf::Left(Location::new(uri.clone(), line_range(line))),
         data: None,
     }
 }

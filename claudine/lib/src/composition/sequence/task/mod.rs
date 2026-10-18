@@ -202,14 +202,15 @@ pub struct PromptTaskRequest {
     /// `true` when the document's own frontmatter carries a string `prompt:`,
     /// making this an inline-compose run that rewrites the document's body.
     pub inline_compose: bool,
-    /// The fully layered overrides: task `params` < sequence user setters <
+    /// The fully layered overrides: task `with` < sequence user setters <
     /// accumulated runtime mutations < the reserved overlay. Only the user
-    /// setters are authored; evaluated `params` and every later layer are data.
+    /// setters are authored; evaluated `with` and every later layer are data.
     pub set_overrides: LayeredOverrides,
-    /// The evaluated `params` alone, for diagnostics and reporting.
-    pub params: Map<String, Value>,
-    /// Source document that authored `params`, used to retain their file origin.
-    pub params_origin_path: std::path::PathBuf,
+    /// The evaluated `with` alone, which the runner anchors at
+    /// `with_origin_path` so a relative file value resolves from its author.
+    pub with: Map<String, Value>,
+    /// Source document that authored `with`, used to retain its file origin.
+    pub with_origin_path: std::path::PathBuf,
     /// Effective operation after group defaults and task overrides.
     pub operation: Option<String>,
     /// Effective flow after group defaults and task overrides.
@@ -240,6 +241,9 @@ pub struct PromptTaskRequest {
     /// which the document reads as `loop.*` unless it loops itself. `None`
     /// outside every loop.
     pub loop_values: Option<crate::composition::LoopAmbient>,
+    /// The task's place in the preflight graph, which its per-task provider
+    /// choice is keyed by.
+    pub task_identity: super::preflight::TaskIdentity,
 }
 
 /// A composition run opened for a group member or a whole parallel group.
@@ -420,7 +424,7 @@ pub struct TaskExecution<'a> {
     /// The lifecycle machinery, already carrying this task's effective
     /// frontmatter, runtime cell, and emitter routes.
     pub stack: &'a StackExecutionContext<'a>,
-    /// The state `params` and `timeout` evaluate against.
+    /// The state `with` and `timeout` evaluate against.
     pub state: &'a EffectiveState,
     /// The runtime cell this task accumulates mutations and outputs into.
     ///
@@ -431,7 +435,7 @@ pub struct TaskExecution<'a> {
     /// wrapper pipeline, so the document's own lifecycle `set` lands in the
     /// task's buffer rather than in the sequence's.
     pub runtime: Option<&'a std::sync::Arc<RuntimeState>>,
-    /// Sequence user setters (`--set` / `key=value`), which outrank `params`.
+    /// Sequence user setters (`--set` / `key=value`), which outrank `with`.
     pub user_setters: Option<&'a Value>,
     /// The reserved per-step overlay, which outranks everything.
     pub overlay: Option<&'a Value>,
@@ -828,16 +832,16 @@ impl TaskExecution<'_> {
             PreflightAction::Prompt { .. } => {
                 let mut request = prompt_request.expect("prompt requests pass the step barrier").clone();
                 let deferred = self.graph.prompt_references.iter().find(|reference| reference.path == request.path && reference.position == self.task.position)
-                    .map(|reference| reference.deferred_params.as_slice()).unwrap_or_default();
-                for (key, value) in &self.task.params {
+                    .map(|reference| reference.deferred_with.as_slice()).unwrap_or_default();
+                for (key, value) in &self.task.with {
                     if !deferred.contains(key) {
-                        match self.resolve_value(value, &format!("params.{key}")) {
-                            Ok(value) => { request.params.insert(key.clone(), value); }
+                        match self.resolve_with_entry(key, value) {
+                            Ok(value) => { request.with.insert(key.clone(), value); }
                             Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
                         }
                     }
                 }
-                request.set_overrides = self.layered_overrides(&request.params);
+                request.set_overrides = self.layered_overrides(&request.with);
                 request.runtime = self.runtime.cloned();
                 request.frame_writer = self.live.map(|live| live.rendered_writer());
                 self.run_prompt_request(&request)
@@ -907,7 +911,7 @@ impl TaskExecution<'_> {
     }
 
     fn prompt_request(&self, path: &std::path::Path, reference: &str) -> Result<PromptTaskRequest, CompositionError> {
-        let params = self.evaluate_params()?;
+        let with = self.evaluate_with()?;
         Ok(PromptTaskRequest {
             body_only: false,
             lifecycle_group: self.stack.group.cloned(),
@@ -927,9 +931,9 @@ impl TaskExecution<'_> {
                 .graph
                 .prompt_document(path)
                 .is_some_and(|document| document.inline_compose),
-            set_overrides: self.layered_overrides(&params),
-            params,
-            params_origin_path: self.task.origin_path.clone(),
+            set_overrides: self.layered_overrides(&with),
+            with,
+            with_origin_path: self.task.origin_path.clone(),
             operation: self.task.operation.clone(),
             flow: self.task.flow.clone(),
             runtime: self.runtime.map(std::sync::Arc::clone),
@@ -940,6 +944,7 @@ impl TaskExecution<'_> {
             run_evidence: self.run_evidence.cloned(),
             document: self.document.cloned(),
             loop_values: self.stack.loop_values.cloned(),
+            task_identity: self.task.identity.clone(),
         })
     }
 
@@ -1407,32 +1412,54 @@ impl TaskExecution<'_> {
         Ok(())
     }
 
-    /// Evaluate `params` just in time against the caller's effective state.
+    /// Evaluate `with` just in time against the caller's effective state.
     ///
     /// Whole-value typing survives: `topic: "{{ seq.index }}"` binds the
-    /// number, not its rendering.
-    fn evaluate_params(&self) -> Result<Map<String, Value>, CompositionError> {
+    /// number, not its rendering. Evaluation is atomic: the first failing
+    /// entry fails the task, so no partial mapping reaches its document.
+    fn evaluate_with(&self) -> Result<Map<String, Value>, CompositionError> {
         let mut evaluated = Map::new();
-        for (key, value) in &self.task.params {
+        for (key, value) in &self.task.with {
             if reserved::is_reserved_state_key(key) {
-                return Err(CompositionError::SequenceTaskParamReserved {
+                return Err(CompositionError::SequenceTaskWithReserved {
                     task: self.label(),
                     key: key.clone(),
                 });
             }
-            evaluated.insert(key.clone(), self.resolve_value(value, &format!("params.{key}"))?);
+            evaluated.insert(key.clone(), self.resolve_with_entry(key, value)?);
         }
         Ok(evaluated)
     }
 
+    /// Resolve one `with` entry, failing as the `with` family does: located at
+    /// the task's `with.<key>` in the file that authored it.
+    fn resolve_with_entry(&self, key: &str, value: &Value) -> Result<Value, CompositionError> {
+        self.resolve_value(value, &format!("with.{key}")).map_err(|error| match error {
+            CompositionError::SequenceTaskValueResolution { message, cause, .. } => {
+                CompositionError::LifecycleWithEvaluationFailed {
+                    source_path: self.task.diagnostic.source_path.clone(),
+                    property: self.task.diagnostic.task_property.clone(),
+                    path: format!("with.{key}"),
+                    target: match &self.task.action {
+                        PreflightAction::Prompt { reference, .. } => reference.clone(),
+                        _ => self.label(),
+                    },
+                    message,
+                    cause: Some(cause),
+                }
+            }
+            other => other,
+        })
+    }
+
     /// Fold the four layers into the overrides a prompt task composes against.
     ///
-    /// Precedence, lowest first: task `params`, sequence user setters,
+    /// Precedence, lowest first: task `with`, sequence user setters,
     /// accumulated runtime mutations, the reserved overlay (spec → *Task
-    /// Resolution and Lifecycle Semantics*). `params` were already evaluated
-    /// once against the task's state, so their results are data.
-    fn layered_overrides(&self, params: &Map<String, Value>) -> LayeredOverrides {
-        let mut base = LayeredOverrides::data(Some(&Value::Object(params.clone())));
+    /// Resolution and Lifecycle Semantics*). `with` was already evaluated
+    /// once against the task's state, so its results are data.
+    fn layered_overrides(&self, with: &Map<String, Value>) -> LayeredOverrides {
+        let mut base = LayeredOverrides::data(Some(&Value::Object(with.clone())));
         base.push(OverrideOrigin::Authored, self.user_setters);
         let snapshot = self.runtime.map(|runtime| runtime.snapshot());
         layered_set_overrides(base, snapshot.as_ref(), self.overlay)
@@ -1461,7 +1488,7 @@ impl TaskExecution<'_> {
 
     /// Resolve one authored value's `{{ … }}` spans against the effective state.
     ///
-    /// Task values (`params`, `timeout`, group `variables`) evaluate in the
+    /// Task values (`with`, `timeout`, group `variables`) evaluate in the
     /// task's pre-primary scope ([`LifecycleScope::TaskSetup`]): no `err`, and
     /// `group` only inside an established group. A group's own `variables`
     /// resolve before its scope is entered, so they never read `group`, and no

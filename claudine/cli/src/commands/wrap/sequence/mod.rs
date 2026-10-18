@@ -22,6 +22,7 @@ mod container;
 mod iterate;
 mod jit;
 mod phase1c;
+mod providers;
 mod report;
 mod resolve;
 mod review;
@@ -33,7 +34,7 @@ use jit::StepComposeContext;
 #[cfg(test)]
 use phase1c::find_first_unsupported;
 use phase1c::run_phase_1c_with_schema;
-use resolve::{apply_user_set_to_hints, dry_run_sequence_target, is_auto_selectable_state};
+use resolve::apply_user_set_to_hints;
 
 /// Exit code emitted when Ctrl+C is observed during a sequence run.
 /// Matches the standard `128 + SIGINT(2)` convention used by shells.
@@ -59,13 +60,13 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 /// gate approves is byte-identical to what runs; every other task command is
 /// approved by its typed shape. Referenced prompt documents contribute their
 /// `::shell` directives through the same pass, once per reference: each
-/// declares the sequence's late roots (and the task's late `params`) to
-/// Darkmatter's discovery, carries the task's approval-time `params` as data,
+/// declares the sequence's late roots (and the task's late `with` keys) to
+/// Darkmatter's discovery, carries the task's approval-time `with` as data,
 /// and, for a later task, requires every command with a placeholder to be a
 /// template. That is what makes "no approval prompts once the sequence starts"
 /// honest for work several hops from the sequence document. Schema verdicts are
-/// deferred during this discovery-only compose because prompt-task `params`
-/// bind just in time; the task's canonical prepare validates the resulting
+/// deferred during this discovery-only compose because prompt-task `with`
+/// binds just in time; the task's canonical prepare validates the resulting
 /// effective values.
 #[allow(clippy::too_many_arguments, clippy::result_large_err)]
 fn approve_preflight_graph(
@@ -139,11 +140,11 @@ fn approve_preflight_graph(
             // not created yet.
             .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied())
             .with_deferred_shell_roots(reference.deferred_shell_roots());
-        // The task's approval-time `params` reach its document as data, as
-        // they do at the task's turn.
-        if !reference.params.is_empty() {
+        // The task's approval-time `with` reaches its document as data, as
+        // it does at the task's turn.
+        if !reference.with.is_empty() {
             opts = composition::LayeredOverrides::data(Some(&serde_json::Value::Object(
-                reference.params.clone(),
+                reference.with.clone(),
             )))
             .apply_to(opts);
         }
@@ -475,10 +476,9 @@ fn execute_sequence_inner(
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
-    // ── Phase 1a: resolve target for every step (eager, pre-compose) ────
-    // Hints come from raw source frontmatter so {{env.AGENT}} resolves
-    // during per-step composition. User --set overrides on `agent`/`model`
-    // are honored if present at the top level of `--set`.
+    // The sequence document's own hints, with `--set` `agent`/`model` above
+    // them: what its body steps run on, and the outermost fallback for a
+    // task with no `agent` of its own (Phase 1a/1b below).
     let raw_hints =
         composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
     let raw_hints = apply_user_set_to_hints(raw_hints, user_set_overrides.as_ref())?;
@@ -568,10 +568,8 @@ fn execute_sequence_inner(
         ),
         None => claudine::model_catalog::ModelCatalogService::new(),
     };
-    // Phase 1 (2026-05-09-slow-prep): refresh is provider-scoped and only
-    // happens when a frontmatter `model` hint will actually be validated
-    // against the catalog. The previous unconditional `refresh_blocking()`
-    // shelled out to `opencode models` even for `--claude` runs.
+    // Selection refreshes no model catalog: prediction is read-only, and the
+    // shared resolver ranks against the cached and compiled listings.
     let favorite = prep_context
         .selection_config
         .as_ref()
@@ -585,210 +583,85 @@ fn execute_sequence_inner(
     // out.md`) must still prompt as long as stderr is a terminal; gating on
     // stdout would wrongly abort that normal CLI pattern.
     let is_tty = std::io::stderr().is_terminal();
-    let provider_locked = explicit_provider.is_some();
-    let model_locked = cli_model.is_some();
 
-    // ── Phase 1a/1b: resolve a target (or leave a render state) per step ─
+    // ── Phase 1a/1b: decide every task's provider ─────────────────────────
     //
-    // Under --dry-run the legacy non-TTY resolver must NOT run: it either
-    // auto-picks a provider or returns a legacy selection error, both of
-    // which would stop the per-step dry-run seam in
-    // `execute_composition_request_inner` from rendering the unresolved /
-    // invalid / not-installed agent states the spec requires. Classify the
-    // shared frontmatter agent hint exactly like the direct compose
-    // --dry-run path instead: auto-selectable states get a concrete target
-    // so `{{env.AGENT}}` interpolates and the model resolves; every other
-    // state becomes `None` and the seam renders it from the installed
-    // snapshot. No picker fires and no agent-resolution failure aborts.
-    let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> = if shared
-        .dry_run || total_steps == 0
-    {
-        let target = dry_run_sequence_target(
-            explicit_provider,
-            &raw_hints,
+    // Each provider-launching task is classified from its own `agent`:
+    // predicted (resolved now; one that cannot resolve fails the run before
+    // any task starts, even behind a false `when:`), decided at launch, or
+    // missing a provider, which takes the nearest enclosing sequence
+    // document's `agent`. Only a task still missing one gates the run: a
+    // terminal reviews it, and anything else fails with
+    // `AgentResolutionFailed`. A graph of only shell and side-effect tasks
+    // has no site and needs no provider.
+    let caller_sets_agent = user_set_overrides
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|setters| setters.contains_key("agent"));
+    let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &raw_hints, caller_sets_agent);
+    let mut selections = providers::select(
+        sites,
+        &providers::SelectionInputs {
             snapshot,
+            catalog: &catalog,
             cli_model,
-            &catalog,
-            super::composition::ModelResolveMode::dry_run(silent),
-            prep_context.invocation.document_environment(),
-        );
-        (0..total_steps).map(|_| target.clone()).collect()
-    } else {
-        // Live path: every step shares the document-level `agent` hint, so
-        // classify it once and apply the same TTY-only gate the direct
-        // compose path enforces in `resolve_live_target_with_tty`
-        // (composition/mod.rs). The legacy non-TTY resolver is deliberately
-        // *not* used here: it ignores `agent_invalid` and silently falls back
-        // to the configured favorite/default, which would auto-run a provider
-        // for a state the dry-run table reports as prompting — the exact
-        // drift this feature exists to prevent. An explicit `--<provider>`
-        // flag still wins and bypasses the gate.
-        let shared_state = if explicit_provider.is_some() {
-            None
-        } else {
-            Some(claudine::composition::classify_agent_resolution(
-                &raw_hints, snapshot,
-            ))
+            explicit_provider,
+            favorite,
+            environment: prep_context.invocation.document_environment(),
+            silent,
+            dry_run: shared.dry_run,
+        },
+    )?;
+    if !shared.dry_run && !is_tty && let Some(unresolved) = selections.first_unresolved() {
+        let providers::TaskTarget::Unresolved { state, own_hint, .. } = &unresolved.target else {
+            unreachable!("first_unresolved returns an unresolved target");
         };
-
-        // No-TTY prompting-state gate: a prompting state (no agent, invalid
-        // scalar, not-installed scalar, multi-installed list, zero-installed
-        // list) in a no-TTY session aborts before any provider runs, emitting
-        // the same styled `AgentResolutionFailed` message the dry-run table
-        // predicts. Mirrors the non-TTY arm of `resolve_live_target_with_tty`.
-        if let Some(state) = &shared_state
-            && !is_auto_selectable_state(state)
-            && !is_tty
-        {
-            return Err(CompositionError::AgentResolutionFailed {
+        // A task naming an ambiguous list fails as that task; a task missing
+        // a provider fails as the sequence document that names none.
+        return Err(if *own_hint {
+            providers::launch_error(
+                unresolved,
+                claudine::composition::SequenceTaskProviderProblem::Unresolvable {
+                    state: state.clone(),
+                    installed: snapshot.runnable.clone(),
+                },
+            )
+        } else {
+            CompositionError::AgentResolutionFailed {
                 source_path: source.resolved_path.clone(),
-                state: state.clone(),
+                state: claudine::composition::classify_agent_resolution(&raw_hints, snapshot),
                 installed: snapshot.runnable.clone(),
             }
-            .into());
         }
-
-        let mut drafts: Vec<SequenceStepDraft> = Vec::with_capacity(total_steps);
-        let mut refreshed_providers: std::collections::BTreeSet<claudine::provider::Provider> =
-            std::collections::BTreeSet::new();
-
-        for step_index in 0..total_steps {
-            let step = &plan.steps[step_index];
-
-            // Picker plan scoped to the classified state. Reusing the compose
-            // path's `scoped_picker_plan_for_state` narrows
-            // `ListMultipleInstalled` to the installed-from-list providers;
-            // every other state offers all installed agents. Explicit-provider
-            // runs have no classified state and use the unscoped plan.
-            let provider_plan = match shared_state.as_ref() {
-                Some(state) => super::composition::scoped_picker_plan_for_state(
-                    state, &raw_hints, snapshot, favorite,
-                ),
-                None => claudine::composition::build_picker_plan_with_hints(
-                    &raw_hints, snapshot, favorite,
-                ),
-            }
-            .unwrap_or(claudine::composition::ProviderPickerPlan {
-                options: Vec::new(),
-                default_index: 0,
-            });
-
-            // Provisional provider for model probing and the review-screen
-            // default. Explicit flag wins; otherwise the classified state
-            // decides: auto-selectable states resolve directly, TTY prompting
-            // states fall back to the scoped plan's default (the user confirms
-            // or changes it on the review screen). No-TTY prompting states
-            // already aborted above.
-            let resolved_provider = if let Some(provider) = explicit_provider {
-                Some(provider)
-            } else {
-                match shared_state.as_ref() {
-                    Some(claudine::composition::AgentResolutionState::Selected { provider }) => {
-                        Some(*provider)
-                    }
-                    Some(claudine::composition::AgentResolutionState::ListOneInstalled {
-                        selected,
-                        ..
-                    }) => Some(*selected),
-                    _ => provider_plan
-                        .options
-                        .get(provider_plan.default_index)
-                        .map(|o| o.provider),
-                }
-            };
-
-            let (model, model_reason) = if let Some(provider) = resolved_provider {
-                // Refresh once per unique provider; every step shares the
-                // document-level hints, so one warning per provider as well.
-                let first_for_provider = refreshed_providers.insert(provider);
-                let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug(), step = step_index).entered();
-                super::composition::resolve_document_model(
-                    &catalog,
-                    provider,
-                    &raw_hints,
-                    cli_model,
-                    super::composition::ModelResolveMode {
-                        refresh: first_for_provider,
-                        warn: first_for_provider && !silent,
-                    },
-                    prep_context.invocation.document_environment(),
-                )
-            } else {
-                (
-                    None,
-                    claudine::composition::ModelResolutionReason::ProviderDefault,
-                )
-            };
-
-            drafts.push(SequenceStepDraft {
-                step_index,
-                step_name: step.name.clone(),
-                provider_plan,
-                proposed_model: model.clone(),
-                model_reason,
-                provider_locked,
-                model_locked,
-                resolved_provider,
-            });
+        .into());
+    }
+    if !shared.dry_run && review::needs_review(is_tty, &selections) {
+        // The state-specific pre-prompt message (a styled `Invalid Agent:`
+        // line, the zero-installed-list breakdown) shares its source of truth
+        // with the dry-run table cell and the no-TTY abort body.
+        let root_state = claudine::composition::classify_agent_resolution(&raw_hints, snapshot);
+        if let Some(markup) = super::composition::agent_prompt_message(&root_state, &source.resolved_path) {
+            log::message(&claudine::composition::agent_message_prose(markup).render(&log::terminal()));
         }
-
-        // ── Phase 1b: review (TTY) or resolve directly ────────────────────
-        //
-        // Auto-selectable states (`Selected` / `ListOneInstalled`) resolve to a
-        // provider without prompting and must bypass the review screen, exactly
-        // like direct compose's `resolve_live_target_with_tty` returns before
-        // the picker for those states. Only prompting states reach the review
-        // UI, and only on a TTY; an explicit `--<provider>` flag and the no-TTY
-        // case keep the deterministic baseline. Shell and side-effect steps get
-        // no row, so a sequence of only those never opens the table.
-        let provider_reason = if explicit_provider.is_some() {
-            claudine::composition::ProviderResolutionReason::ExplicitFlag
-        } else if matches!(
-            shared_state.as_ref(),
-            Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
-        ) {
-            claudine::composition::ProviderResolutionReason::FrontmatterList
-        } else {
-            claudine::composition::ProviderResolutionReason::FrontmatterSingle
-        };
-        let live_targets = review::live_targets(
-            review::needs_review(is_tty, shared_state.as_ref()),
-            &plan.steps,
-            drafts,
-            provider_reason,
-            |eligible| {
-                // The state-specific pre-prompt message (a styled `Invalid
-                // Agent:` line, the zero-installed-list breakdown) shares its
-                // source of truth with the dry-run table cell and the no-TTY
-                // abort body, so the three surfaces cannot drift. A plain
-                // picker state has no message.
-                if let Some(state) = shared_state.as_ref()
-                    && let Some(markup) =
-                        super::composition::agent_prompt_message(state, &source.resolved_path)
-                {
-                    log::message(
-                        &claudine::composition::agent_message_prose(markup).render(&log::terminal()),
-                    );
-                }
-                // The --dry-run arm above returns before this point, so the
-                // dry-run seam never invokes a picker.
-                super::selection_ui::review_sequence(eligible, &catalog)
-            },
-        )?;
-        let Some(live_targets) = live_targets else {
+        if !review::review_selections(&mut selections, |drafts| {
+            super::selection_ui::review_sequence(drafts, &catalog)
+        })? {
             return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
-        };
-        live_targets.into_iter().map(Some).collect()
-    };
+        }
+    }
+    if !silent && (shared.dry_run || verbose > 0) {
+        emit_provider_plan(&selections);
+    }
+    let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> =
+        (0..total_steps).map(|index| selections.root_target(index)).collect();
 
-    // The resolved-provider check for every step whose provider is already
-    // known, so a forwarded switch a step's provider types differently fails
-    // before step 1 runs. Steps decided at runtime are checked before their
-    // spawn. Sequence steps are never interactive.
+    // The resolved-provider check for every task whose provider is already
+    // known, so a forwarded switch a task's provider types differently fails
+    // before the first task runs. Tasks decided at launch are checked before
+    // their spawn. Sequence tasks are never interactive.
     if !shared.dry_run {
-        for (step, target) in plan.steps.iter().zip(&resolved_targets) {
-            if let Some(target) = target
-                && review::is_review_eligible(step)
+        for selection in selections.iter() {
+            if let Some(target) = selection.target.planned()
                 && let Some(profile) = super::profile::profile_for_provider(target.provider)
             {
                 super::provider_tail_report::SwitchContext::for_launch(profile, true)
@@ -881,6 +754,7 @@ fn execute_sequence_inner(
         plan: &plan,
         graph: &graph,
         resolved_targets: &resolved_targets,
+        task_selections: &selections,
         selection: resolve::StepSelection {
             raw_hints: &raw_hints,
             catalog: &catalog,
@@ -967,6 +841,21 @@ fn execute_sequence_inner(
                 return Err(error.into());
             }
         }
+    }
+}
+
+/// List each provider-launching task with the provider it is predicted to
+/// run, or how its provider is decided: always under `--dry-run`, and under
+/// `--verbose` for a live run.
+fn emit_provider_plan(selections: &providers::TaskSelections) {
+    let rows = providers::plan_rows(selections);
+    if rows.is_empty() {
+        return;
+    }
+    let term = log::terminal();
+    log::message(&Status::from_prose("<b>Providers:</b>".to_string()).state(StatusState::Info).render(&term));
+    for row in rows {
+        log::message(&Status::from_prose(row).state(StatusState::Info).render(&term));
     }
 }
 

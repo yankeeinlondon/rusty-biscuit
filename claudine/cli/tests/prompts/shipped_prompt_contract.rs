@@ -648,6 +648,55 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
     assert_clean_lifecycle(&rendered);
 }
 
+/// With nothing staged, the shipped commit prompt's `initialize` skips the
+/// document: it exits zero and no agent launches. A `stop` there would end
+/// only `initialize` and still launch the agent with nothing to commit.
+#[cfg(unix)]
+#[test]
+fn shipped_commit_prompt_with_nothing_staged_launches_no_agent() {
+    use common::{CliProcessFixture, strip_ansi, write, write_executable};
+
+    let fixture = CliProcessFixture::named("shipped-commit-empty");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    write(
+        &fixture.cwd().join(".claudine/memory/commits.md"),
+        "# Commit lessons\n",
+    );
+    // An unstaged change: the dirty tree is not what `initialize` asks about.
+    write(&fixture.cwd().join("unstaged.txt"), "unstaged\n");
+
+    std::fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-codex"),
+        fixture.bin_dir().join("codex"),
+    ).unwrap();
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 99\n");
+    let launches = fixture.workspace_path().join("fake-codex");
+    let output = fixture
+        .command()
+        .env("FAKE_CODEX_DIR", &launches)
+        .env("FAKE_CODEX_PLAN", "ok")
+        .arg("compose")
+        .arg(prompts.join("commit.md"))
+        .args(["-y", "--codex"])
+        .output()
+        .unwrap();
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(output.status.success(), "a skipped commit must exit zero:\n{rendered}");
+    assert!(
+        !launches.join("argv-1.json").exists(),
+        "no agent may launch with nothing staged:\n{rendered}"
+    );
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
+    assert_clean_lifecycle(&rendered);
+}
+
 /// Composes `implement-plan.md` once through the normal CLI path and returns
 /// the prompt the provider received.
 ///

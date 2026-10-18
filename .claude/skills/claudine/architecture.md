@@ -663,9 +663,10 @@ Claudine enforces this at two boundaries:
 
 - **In memory — `LayeredOverrides`** (`runtime_state.rs`). Runtime values stay
   raw and typed (`seq.outputs`, loop action results, lifecycle `set:`,
-  task `params`, group `variables`, the step overlay, and the per-document
-  `PrepareOptions::proxy_overlay`, which carries the retained proxy overlay
-  with any one-read `retry.with` overlay merged on top). A loop iteration's
+  task `with`, group `variables`, the step overlay, and the per-document
+  `PrepareOptions::proxy_overlay`, an `AnchoredOverlay` that carries the
+  retained proxy overlay with any one-read `retry.with` overlay merged on
+  top). A loop iteration's
   values are not an override: they are the host-declared `loop` global
   (`ComposeOptions::with_host_globals`). `LayeredOverrides::apply_to` is the only
   call to Darkmatter's `with_override_layers`, splitting keys into an authored
@@ -864,14 +865,22 @@ earlier step would create fails there as the unchanged typed
 the file first. A sequence step's prompt is composed before its `initialize`
 runs; a target that step *proxies* to is still staged inside the harness.
 
-File-valued input keeps its provenance through that service. A reference
-authored in a document resolves from the document's source context; an eager
-`file` value supplied by the caller (`--set` or an immediate `proxy.with`
-overlay) resolves through the captured launch-area `FileResolutionContext` and
-is stored as the resolved absolute path. Ordinary strings are never probed as
-files. Overlay null-removal still applies to the authored layer because an
-override object cannot represent an absent key; non-null overlay values also
-travel through the caller layer so this resolution distinction is preserved.
+File-valued input keeps its provenance through that service: a relative file
+value resolves from the file that authored it. A reference authored in a
+document resolves from the document's source context; a caller value (`--set`,
+`key=value`) carries a `CallerInputRecord` with the captured launch-area
+`FileResolutionContext`; every `with` carries the context of the file that
+wrote it. Task `with` becomes origin-anchored records in `task_run.rs`
+(`with_origin_path`). `proxy.with`/`retry.with` travel as
+`composition::AnchoredOverlay` (values plus per-key origin; the CLI anchors a
+committed handoff at `ProxyProvenance::source_path`, a retry at the document
+itself), and `PrepareOptions::compose_caller_records` folds its records below
+the caller's, skipping any key a higher override layer supplies. `prep.with`
+reaches the target as `SharedComposeArgs::set` with `set_origin` set to the
+calling document. Ordinary strings are never probed as files; a schema
+`[file, string]` union leaves the value raw. Overlay null-removal still
+applies to the authored layer because an override object cannot represent an
+absent key; a null carries no record.
 
 Two `cli/tests/l1/composition_seams.rs` guards hold these lines mechanically: the
 `compose_with` allowlist (four sanctioned composer sites) and the ambient-capture

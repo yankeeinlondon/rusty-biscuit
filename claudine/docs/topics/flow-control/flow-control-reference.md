@@ -94,7 +94,7 @@ The target must exist. A missing target fails with a typed `Unresolvable file re
 - on `retry` it parameterizes the **fresh re-read of the same document** for the retried attempt (see [Retry overlays](#retry-overlays));
 - on `prep` it parameterizes the **called target**, with `proxy`'s shape, typing, and evaluation rules. It is the target's only caller values: the caller's own setters do not reach a `prep` target (see [`prep`](#prep)).
 
-`resume` takes no `with:`: it continues a live session rather than reading a document anew.
+`resume` takes no `with:`: it continues a live session rather than reading a document anew. A sequence's prompt task takes a `with:` with the same shape, typing, and file rules ([Task inputs](sequences.md#task-inputs-with)).
 
 ```yaml
 success:
@@ -110,7 +110,7 @@ success:
           area: "{{ ctx.area }}"
 ```
 
-The rules below hold for both directives unless a section says otherwise.
+The rules below hold for all three directives unless a section says otherwise.
 
 #### Shape rules
 
@@ -133,6 +133,27 @@ Keys are static strings that name target properties. They are never interpolated
 - YAML numbers, booleans, arrays, objects, and nulls keep their authored types.
 
 Nested mappings are data here. This is the only place in the lifecycle surface where a nested mapping is a legal parameter value.
+
+#### Relative files resolve from the file that wrote them
+
+A relative file value in `with:` resolves from the document whose lifecycle holds the directive, wherever the target lives:
+
+```yaml
+# prompts/router.md
+success:
+  - proxy:
+      target: "@prompts/review/next.md"
+      with:
+        plan: ./plans/today.md   # prompts/plans/today.md, not prompts/review/plans/today.md
+```
+
+- **Only file values move.** A value is resolved only when the target's schema types it as `file`; any other string stays the string you wrote. When the schema allows both a file and a string (`[file, string]`), the value stays as written.
+- **The schema decides how.** An eager `file` must exist, from the authoring document's directory, before the target runs. A lazy `file` that does not exist binds to the path it would have there. A remote URL stays a URL.
+- **Forwarding keeps identity.** `{{ plan }}` that copies a value the router's own schema already resolved passes that resolved path on. A relative string a document passes on without having resolved it (its schema typed it as a string) resolves from that document, the one whose `with:` names it.
+- **`retry` resolves from the same document**, since the document retrying is the one that wrote it. **`prep`** resolves from the calling document.
+- **Caller values keep their own origin.** A `key=value` or `--set` value still resolves from the directory the command was launched in, and still outranks `with:`.
+
+This is a change: a `proxy.with` path used to resolve as if the target had written it (and a `prep.with` path from the launch directory). A `with:` that relied on that must be rewritten relative to the document that holds it.
 
 #### Evaluation
 

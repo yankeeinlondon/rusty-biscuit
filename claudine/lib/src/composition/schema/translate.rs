@@ -46,7 +46,7 @@ pub(in crate::composition) fn schema_error_to_composition_error(
 pub(super) fn handle_compose_error(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: &PrepareMode,
+    mode: &PrepareMode<'_>,
     err: CompositionError,
     dropped: &mut Vec<DroppedOptional>,
 ) -> Result<PreparedComposition, CompositionError> {
@@ -76,7 +76,7 @@ pub(super) fn handle_compose_error(
 pub(super) fn translate_schema_failure(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: &PrepareMode,
+    mode: &PrepareMode<'_>,
     mut problems: Vec<ValidationProblem>,
     summary: String,
     schema_source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
@@ -118,7 +118,7 @@ pub(super) fn translate_schema_failure(
 
     // Darkmatter names the base it resolved from, which for a caller value can
     // be the document's directory; report the caller's instead (R4).
-    rebase_caller_file_problems(&mut problems, &options.caller_input_records);
+    rebase_caller_file_problems(&mut problems, &options.compose_caller_records());
     let snapshot = build_effective_instance(source, options.set_overrides.as_ref());
     let effective = load_effective_schema(
         source,
@@ -128,11 +128,11 @@ pub(super) fn translate_schema_failure(
         &options.schema_caller_records(),
     )?;
     let phase = match mode {
-        PrepareMode::Inline => Some(SchemaPhase::Launch),
-        PrepareMode::Direct(_) => None,
+        PrepareMode::Inline(_) => Some(SchemaPhase::Launch),
+        PrepareMode::Direct(..) => None,
     };
     let mut categorized = categorize_problems(&problems, effective.as_ref(), phase);
-    if matches!(mode, PrepareMode::Direct(_)) {
+    if matches!(mode, PrepareMode::Direct(..)) {
         // Direct compose fills a required property its own expression left
         // `null` at launch, through interactive collection; see
         // `promote_null_required_to_missing`.
@@ -183,7 +183,7 @@ pub(super) fn translate_schema_failure(
                     retry_err,
                     options.file_ref_fallback_dir.as_deref(),
                     &options.file_resolution_context,
-                    &options.caller_input_records,
+                    &options.compose_caller_records(),
                     phase,
                 )
             }

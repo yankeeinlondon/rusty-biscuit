@@ -123,7 +123,7 @@ pub struct StepExecutable {
     pub field: ExecutableField,
     /// The declared executable value, verbatim.
     pub value: Value,
-    /// The task-option keys/values (`params`, `timeout`, …) declared alongside.
+    /// The task-option keys/values (`with`, `timeout`, …) declared alongside.
     pub options: Map<String, Value>,
 }
 

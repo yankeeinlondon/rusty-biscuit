@@ -1541,3 +1541,28 @@ fn focused_text_input_cell_has_no_underline_and_clears_when_focus_moves() {
     assert_eq!(reused, render_into(&mut state, 60, 2));
     assert_eq!(underlined_cells(&reused), vec![]);
 }
+
+#[test]
+fn a_static_row_value_pins_one_cell_of_an_editable_column_read_only() {
+    let rows = vec![
+        Row::new(vec![
+            RowCell::new("label", CellValue::StaticText("locked".into())),
+            RowCell::new("name", CellValue::StaticText("Codex".into())),
+            RowCell::new("active", CellValue::StaticText("on".into())),
+        ]),
+        Row::new(vec![
+            RowCell::new("label", CellValue::StaticText("open".into())),
+            RowCell::new("name", CellValue::Text("draft".into())),
+            RowCell::new("active", CellValue::Boolean(false)),
+        ]),
+    ];
+    let mut state = InputTableState::try_new(sample_columns(), rows).expect("a static cell fits any column");
+    // Focus skips the whole locked row and lands on the open row's input.
+    assert_eq!(state.focus(), (1, 1));
+    assert!(!state.rows()[0][1].is_focusable());
+    InputTable.handle_event(&mut state, press(KeyCode::Char('x')));
+    let typed = state.rows_typed();
+    assert_eq!(typed[0].get("name"), Some(&CellValue::StaticText("Codex".into())));
+    assert_eq!(typed[0].get("active"), Some(&CellValue::StaticText("on".into())));
+    assert_eq!(typed[1].get("name"), Some(&CellValue::Text("draftx".into())));
+}

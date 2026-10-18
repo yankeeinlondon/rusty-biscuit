@@ -445,6 +445,7 @@ pub(super) fn run_composition_body(
         runtime_state: std::sync::Arc::clone(&runtime_state),
         suppress_output_commit: request.suppress_output_commit,
         last_final_output: None,
+        launched_providers: Vec::new(),
         input_layers: request.prepared.input_layers.clone(),
         entry: request.prepared.entry,
         invocation_context: request.invocation_context.clone(),
@@ -520,6 +521,11 @@ pub(super) fn run_composition_body(
         collector.set_agent_perf(perf);
     }
     let terminal_signal = guard.terminal_signal();
+    if let Some(log) = &request.launch_log {
+        for provider in &prompt_state.launched_providers {
+            log.record(*provider);
+        }
+    }
     let outcome = SingleCompositionOutcome {
         exit_code,
         provider,

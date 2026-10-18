@@ -1096,10 +1096,16 @@ mod tests;
 mod structured_tests;
 
 /// Lifecycle commands retain inherited streams while sharing task shells' tree
-/// ownership. Cancellation is worker-local; cleanup suspends the original stop
-/// request so its commands can finish under their own contract.
+/// ownership, except one that shares this process's terminal (see
+/// [`holds_terminal_foreground`]). Cancellation is worker-local; cleanup
+/// suspends the original stop request so its commands can finish under their
+/// own contract.
 pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, std::io::Error> {
     if crate::composition::lifecycle::cancellation::requested() { return Ok(130); }
+    #[cfg(unix)]
+    if holds_terminal_foreground() {
+        return run_in_own_group(command);
+    }
     isolate_process_tree(command);
     let mut child = command.spawn()?;
     let tree = match ProcessTree::own(&child) {
@@ -1122,6 +1128,66 @@ pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, 
         }
         if crate::composition::lifecycle::cancellation::requested() {
             tree.terminate(&mut child);
+            let _ = child.wait();
+            return Ok(130);
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// Whether this process is in the foreground process group of its controlling
+/// terminal.
+///
+/// A lifecycle command inherits that terminal. Moved into a group of its own,
+/// it would be a background job: the kernel stops it (`SIGTTIN`/`SIGTTOU`) the
+/// first time it reads the terminal or changes its modes, and nothing ever
+/// resumes it, so a nested interactive `claudine` never finishes. The provider
+/// wrapper's inherited-output spawn keeps such a child in its group for the
+/// same reason.
+#[cfg(unix)]
+fn holds_terminal_foreground() -> bool {
+    use std::os::fd::AsRawFd;
+
+    // Opening `/dev/tty` fails when there is no controlling terminal, the case
+    // (CI, test runners) where isolation cannot stop anything.
+    let Ok(terminal) = std::fs::File::open("/dev/tty") else {
+        return false;
+    };
+    // SAFETY: both calls only read process state; the descriptor is open for
+    // the duration of the call.
+    let foreground = unsafe { libc::tcgetpgrp(terminal.as_raw_fd()) };
+    foreground > 0 && foreground == unsafe { libc::getpgrp() }
+}
+
+/// Run a lifecycle command in this process's own group, where it keeps the
+/// terminal's foreground.
+///
+/// Ctrl-C reaches the whole tree through the terminal. Any other cancellation
+/// can address only the direct child: what it left running in the background
+/// outlives it, as it did before lifecycle commands owned their trees.
+#[cfg(unix)]
+fn run_in_own_group(command: &mut Command) -> Result<i32, std::io::Error> {
+    let mut child = command.spawn()?;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.code().unwrap_or(-1)),
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if crate::composition::lifecycle::cancellation::requested() {
+            // SAFETY: a positive pid addresses only this unreaped child.
+            unsafe {
+                libc::kill(child.id() as i32, libc::SIGTERM);
+            }
+            let deadline = Instant::now() + TREE_KILL_GRACE;
+            while Instant::now() < deadline && matches!(child.try_wait(), Ok(None)) {
+                std::thread::sleep(POLL_INTERVAL);
+            }
+            let _ = child.kill();
             let _ = child.wait();
             return Ok(130);
         }

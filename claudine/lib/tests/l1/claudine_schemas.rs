@@ -1,5 +1,5 @@
 //! Claudine's schema bundle under `claudine/schemas/` (`2026-10-21-claudine-schemas`,
-//! criteria 1–5): the five files load through Darkmatter's loader, the action
+//! criteria 1–5): the bundle's files load through Darkmatter's loader, the action
 //! types agree with the lifecycle parser's verb inventory and Darkmatter's
 //! catalogs, the bundles copy the category short forms, the ordinary and
 //! `initialize` lifecycle stacks are typed three conditional levels deep and
@@ -150,6 +150,24 @@ pub(crate) struct Judged {
 }
 
 impl Discovered {
+    /// Whether the discovered trigger whose file text is `trigger` selects
+    /// the document at `path`, evaluated on the discovered registry.
+    pub(crate) fn selects(&self, path: &Path, trigger: &str) -> bool {
+        let markdown = Markdown::try_from(path).expect("document loads");
+        let frontmatter = frontmatter_json(&markdown);
+        let envelope = parse_trigger_envelope_from_str(trigger)
+            .expect("the trigger parses")
+            .expect("a trigger envelope");
+        let subject = PathSubject::new(path, &self.context);
+        self.schemas
+            .trigger_registry()
+            .expect("discovery installed a registry")
+            .triggers
+            .iter()
+            .filter(|discovered| discovered.envelope == envelope)
+            .any(|discovered| discovered.envelope.match_arms.0.iter().any(|arm| matches(arm, &frontmatter, &subject)))
+    }
+
     /// Judges the document at `path`: which shipped triggers its frontmatter
     /// selects (evaluated on the discovered registry, identified by their
     /// envelopes), the effective schema, and the validation report.
@@ -378,6 +396,8 @@ macro_rules! shipped_bundle {
             ("linking.yaml", include_str!("../../../schemas/linking.yaml").to_string()),
             ("claudine.yaml", include_str!("../../../schemas/claudine.yaml").to_string()),
             ("inline-compose.yaml", include_str!("../../../schemas/inline-compose.yaml").to_string()),
+            ("sequence-types.yaml", include_str!("../../../schemas/sequence-types.yaml").to_string()),
+            ("sequence.yaml", include_str!("../../../schemas/sequence.yaml").to_string()),
         ]
     };
 }
@@ -655,11 +675,17 @@ fn every_file_loads_and_every_export_resolves() {
         "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
     ];
     assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
+    let sequence_exports = [
+        "steps", "step", "task", "group", "steps-2", "step-2", "task-2", "group-2", "steps-3", "step-3", "task-3",
+        "group-3",
+    ];
+    assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
 
-    // Both triggers load, and each payload resolves: a document selecting
-    // both gets every payload property.
+    // The three triggers load, and each payload resolves: a document
+    // selecting claudine.yaml and inline-compose.yaml gets every payload
+    // property of both.
     let discovered = repo.discover().expect("the shipped bundle loads");
-    assert_eq!(discovered.schemas.trigger_registry().expect("registry").triggers.len(), 2);
+    assert_eq!(discovered.schemas.trigger_registry().expect("registry").triggers.len(), 3);
     let path = repo.write_document("both.md", "---\nprompt: hi\n---\n");
     let judged = discovered
         .judge(
@@ -1196,22 +1222,26 @@ fn sequence_container_schema_contract() {
         ("retry", "cancelled: [retry]", false),
         ("bundle-retry", "cancelled: {retry: null}", false),
         ("number", "cancelled: 7", false),
-        ("task-fields", "cancelled: []\nsequence: [{name: review, prompt: './step.md', operation: review, flow: audit, topic: parsing, params: {x: 1}}]", true),
+        ("task-fields", "cancelled: []\nsequence: [{name: review, prompt: './step.md', operation: review, flow: audit, topic: parsing, with: {x: 1}}]", true),
         ("nested", "cancelled: []\nsequence: [{name: child, sequence: [], cancelled: []}, {group: {tasks: [{name: leg, shell: 'echo done'}], fail_fast: false, cancelled: []}}]", true),
     ] {
         let path = repo.write_document(&format!("container-{name}.md"), &format!("---\n{yaml}\n---\n"));
         let judged = discovered.judge(&path, trigger, inline).unwrap();
         assert!(judged.claudine, "{name}: selects shipped trigger");
         assert_eq!(judged.report.valid, valid, "{name}: {:?}", judged.report);
-        for retired in ["fail_fast", "state", "previous", "next", "outputs", "sequence_id"] {
+        for retired in ["state", "previous", "next", "outputs", "sequence_id"] {
             assert!(!judged.properties.contains(retired), "retired catalog property {retired}");
         }
+        // Root `fail_fast` is declared only by sequence.yaml, as `null`, so
+        // a value is rejected by name (see `sequence_schema.rs`).
+        assert_eq!(judged.properties.contains("fail_fast"), yaml.contains("sequence:"), "{name}: fail_fast");
     }
 }
 
-/// Task guards and container loops are typed by shape only: a guard is
-/// non-empty text, a container loop an object. The task and loop parsers
-/// judge their contents.
+/// A task guard is typed by shape only: non-empty text. A first-level
+/// container's loop (on a group object, or beside an inline nested
+/// sequence) uses the shared `loop` type; a deeper container's loop is an
+/// object. The task and loop parsers judge the rest.
 #[test]
 fn task_when_and_container_loop_schema_shapes() {
     let files = shipped_bundle!();
@@ -1229,6 +1259,11 @@ fn task_when_and_container_loop_schema_shapes() {
         ("group-loop", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true'}}}]", true),
         ("group-loop-scalar", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x}], loop: 5}}]", false),
         ("nested-loop-list", "cancelled: []\nsequence: [{name: child, sequence: [], loop: [until]}]", false),
+        ("group-loop-max-zero", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true', max: 0}}}]", false),
+        ("nested-loop-unknown-key", "cancelled: []\nsequence: [{name: child, sequence: [], loop: {until: 'true', maxx: 2}}]", false),
+        // Below the first container level the loop is an object; the loop
+        // parser rejects `max: 0` before anything runs.
+        ("deeper-loop-max-zero", "cancelled: []\nsequence: [{name: a, sequence: [{name: b, sequence: [], loop: {until: 'true', max: 0}}]}]", true),
         ("root-loop", "loop: {until: 'true'}\nsequence: [{name: a, shell: x, when: ready}]", true),
     ] {
         let path = repo.write_document(&format!("shape-{name}.md"), &format!("---\n{yaml}\n---\n"));
@@ -1450,7 +1485,7 @@ fn imported_task_cancelled_rejects_forbidden_actions() {
         include_str!("../../../schemas/inline-compose.yaml"),
         CancelledSite {
             name: "imported task",
-            frontmatter: "$schema:\n  nested: task@../schemas/lifecycle.yaml\nnested:\n  name: child\n  sequence: []\n  cancelled: ITEMS",
+            frontmatter: "$schema:\n  nested: task@../schemas/sequence-types.yaml\nnested:\n  name: child\n  sequence: []\n  cancelled: ITEMS",
             pointer: "/nested/cancelled/0",
         },
         &FORBIDDEN_IN_CANCELLED[..1],
@@ -1465,7 +1500,7 @@ fn imported_group_cancelled_rejects_forbidden_actions() {
         include_str!("../../../schemas/inline-compose.yaml"),
         CancelledSite {
             name: "imported group",
-            frontmatter: "$schema:\n  nested: group@../schemas/lifecycle.yaml\nnested:\n  tasks: [{ name: leg, shell: 'echo done' }]\n  cancelled: ITEMS",
+            frontmatter: "$schema:\n  nested: group@../schemas/sequence-types.yaml\nnested:\n  tasks: [{ name: leg, shell: 'echo done' }]\n  cancelled: ITEMS",
             pointer: "/nested/cancelled/0",
         },
         &FORBIDDEN_IN_CANCELLED[..1],
@@ -1480,7 +1515,7 @@ fn imported_group_leg_cancelled_rejects_forbidden_actions() {
         include_str!("../../../schemas/inline-compose.yaml"),
         CancelledSite {
             name: "imported group leg",
-            frontmatter: "$schema:\n  nested: group@../schemas/lifecycle.yaml\nnested:\n  tasks:\n    - name: leg\n      sequence: []\n      cancelled: ITEMS",
+            frontmatter: "$schema:\n  nested: group@../schemas/sequence-types.yaml\nnested:\n  tasks:\n    - name: leg\n      sequence: []\n      cancelled: ITEMS",
             pointer: "/nested/tasks/0/cancelled/0",
         },
         &FORBIDDEN_IN_CANCELLED[..1],
@@ -1685,13 +1720,13 @@ fn cancelled_dictionaries_reject_forbidden_actions() {
     assert!(report.valid, "a dictionary of permitted verbs: {:?}", problems(&report));
 }
 
-/// Pins the documented container bound: SimplifiedSchema inlines named types
-/// and cannot recurse, so containers are typed two levels deep (a task or
-/// group, and its direct children). A third-level container's list is any
-/// list, so its `cancelled` stack is checked by the task parser before
-/// anything runs, not by the schema. This bound is the agreed contract
-/// (sequence-containers requirement 5, ruling R1-HR1); deepening it is a
-/// deliberate change.
+/// Pins the documented `cancelled` bound: SimplifiedSchema inlines named
+/// types and cannot recurse, and each container level inlines the next one
+/// twice, so `cancelled` is typed on the first two container levels only (a
+/// task or group, and its direct children). A third-level container is typed,
+/// but its `cancelled` stack is checked by the task parser before anything
+/// runs, not by the schema. Deepening this bound is a deliberate change: each
+/// level multiplies the compiled schema of every Claudine launch.
 #[test]
 fn grandchild_cancelled_is_left_to_the_task_parser() {
     let repo = SchemaRepo::new(&shipped_bundle!());

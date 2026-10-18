@@ -87,7 +87,8 @@ pub enum HeadingCompletionStyle {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkspaceConfig {
-    /// Optional root override (relative to the LSP workspace folder).
+    /// Optional root override: a relative path is joined onto each LSP
+    /// workspace folder, and an absolute path replaces them.
     pub root: Option<PathBuf>,
     /// Include globs for workspace discovery.
     pub include: Vec<String>,
@@ -133,8 +134,8 @@ impl Default for WikiConfig {
 /// One baseline schema extension (e.g. Claudine): pure data, no code paths.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchemaExtensionConfig {
-    /// SimplifiedSchema YAML path (relative paths resolve against the
-    /// workspace root).
+    /// SimplifiedSchema YAML path (relative paths resolve against the first
+    /// workspace folder, not `workspace.root`).
     pub path: PathBuf,
     /// Activation globs (e.g. `.claude/**`).
     #[serde(default)]
@@ -145,7 +146,8 @@ pub struct SchemaExtensionConfig {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SchemaConfig {
-    /// Strict mode: unknown frontmatter keys become diagnostics.
+    /// Strict mode: unknown frontmatter keys become errors rather than
+    /// warnings, and missing required keys are diagnosed.
     pub strict: bool,
     /// Baseline schema extensions by name.
     pub extensions: BTreeMap<String, SchemaExtensionConfig>,
@@ -505,8 +507,8 @@ impl ConfigState {
     }
 
     /// Applies `workspace/didChangeConfiguration` settings and reloads the
-    /// config file in the same pass (editors don't watch `.dmls.toml` for
-    /// us).
+    /// config file in the same pass, so a client without a reliable file
+    /// watcher still picks up `.dmls.toml` edits.
     ///
     /// Accepts either `{ "dmls": { ... } }` or the bare section object; a
     /// `null` settings value clears the overlay. Any other non-object value

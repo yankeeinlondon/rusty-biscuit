@@ -1,10 +1,11 @@
 //! `md schema validate` and `md schema triggers` against Claudine's shipped
 //! schema bundle (`claudine/schemas/`, `2026-10-21-claudine-schemas`
-//! criteria 1 and 5): the five files are copied into a fixture repository's
-//! `schemas/` folder, and a representative subset of Claudine's AC5 fixture
-//! corpus, which carries no `$schema:`, is discovered and validated through
-//! the CLI. The full corpus is judged in-process by Claudine's
-//! `claudine_schemas` suite.
+//! criteria 1 and 5, and `2026-10-26-task-inputs-and-providers` criterion 9):
+//! the seven files are copied into a fixture repository's `schemas/` folder,
+//! and a representative subset of Claudine's AC5 and sequence-schema fixture
+//! corpora, which carry no `$schema:` pointer, is discovered and validated
+//! through the CLI. The full corpora are judged in-process by Claudine's
+//! `claudine_schemas` and `sequence_schema` suites.
 
 use crate::common;
 
@@ -84,7 +85,7 @@ fn assert_record(records: &BTreeMap<String, Value>, name: &str, valid: bool, exp
 }
 
 #[test]
-fn claudine_bundle_loads_and_both_triggers_are_discovered() {
+fn claudine_bundle_loads_and_its_triggers_are_discovered() {
     let process = CliProcessFixture::new();
     // Read here rather than in a helper, so an edit to one of these files
     // schedules this test alone.
@@ -94,6 +95,8 @@ fn claudine_bundle_loads_and_both_triggers_are_discovered() {
         ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
         ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
         ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
     ];
     let documents = repository(
         &process,
@@ -137,6 +140,8 @@ fn lifecycle_defects_are_reported_at_their_event_and_key() {
         ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
         ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
         ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
     ];
     let documents = repository(
         &process,
@@ -165,6 +170,8 @@ fn malformed_identifying_values_select_the_trigger_and_unrelated_data_does_not()
         ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
         ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
         ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
     ];
     let documents = repository(
         &process,
@@ -193,6 +200,8 @@ fn parser_only_defects_pass_schema_validation() {
         ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
         ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
         ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
     ];
     let documents = repository(
         &process,
@@ -208,4 +217,58 @@ fn parser_only_defects_pass_schema_validation() {
     for name in ["depth6", "shell-in-initialize-below-typed-levels", "generated-verb-arbitrary-value"] {
         assert_record(&records, name, true, &[]);
     }
+}
+
+#[test]
+fn sequence_documents_select_the_sequence_trigger_and_validate_through_the_cli() {
+    let process = CliProcessFixture::new();
+    // Read here rather than in a helper, so an edit to one of these files
+    // schedules this test alone.
+    let bundle = [
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
+    ];
+    let documents = repository(
+        &process,
+        &bundle,
+        &[
+            ("example-containers-kinds", include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/example-containers-kinds.md")),
+            ("level3-valid", include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/level3-valid.md")),
+            ("group-execution", include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/group-execution.md")),
+            ("root-fail-fast", include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/root-fail-fast.md")),
+            ("sequence-mapping", include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/sequence-mapping.md")),
+        ],
+    );
+
+    // A document whose only control is `sequence` selects sequence.yaml alone.
+    let output = process
+        .command()
+        .args(["schema", "triggers"])
+        .arg(&documents[0])
+        .output()
+        .expect("md runs");
+    assert!(output.status.success(), "{output:?}");
+    let trace = String::from_utf8_lossy(&output.stdout);
+    let line = |trigger: &str| {
+        trace
+            .lines()
+            .find(|line| line.contains(&format!("{trigger} ")))
+            .unwrap_or_else(|| panic!("`{trigger}` is listed:\n{trace}"))
+            .to_string()
+    };
+    assert!(!line("sequence.yaml").contains("not matched") && line("sequence.yaml").contains("matched"), "{trace}");
+    assert!(line("claudine.yaml").contains("not matched"), "{trace}");
+
+    let (code, records) = validate(&process, &documents);
+    assert_eq!(code, Some(1), "{records:?}");
+    assert_record(&records, "example-containers-kinds", true, &[]);
+    assert_record(&records, "level3-valid", true, &[]);
+    assert_record(&records, "group-execution", false, &[("/sequence/0/group", "\"execution\"")]);
+    assert_record(&records, "root-fail-fast", false, &[("/fail_fast", "null")]);
+    assert_record(&records, "sequence-mapping", false, &[("/sequence", "tasks")]);
 }

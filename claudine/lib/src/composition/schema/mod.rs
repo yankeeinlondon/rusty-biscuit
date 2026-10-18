@@ -50,7 +50,10 @@ use super::error::{
     CompositionError, DroppedOptional, DroppedOptionalSource, DroppedOptionalStage,
     InteractiveShape, MissingProperty, TextFormat,
 };
-use super::prepare::{PrepareOptions, PromptSource, prepare_direct_with_prompt, prepare_inline};
+use super::prepare::{
+    PrepareOptions, PromptSource, ResolvedIdentitySelector, prepare_direct_with_prompt_selecting,
+    prepare_inline_selecting,
+};
 use super::types::{CompositionMode, PreparedComposition, ResolvedCompositionSource};
 use darkmatter::markdown::schemas::{SchemaPhase, ValidationReport};
 
@@ -144,8 +147,29 @@ pub fn prepare_direct_with_schema(
     prepare_with_schema(
         source,
         options,
-        PrepareMode::Direct(PromptSource::ComposedBody),
+        PrepareMode::Direct(PromptSource::ComposedBody, None),
     )
+}
+
+/// [`prepare_direct_with_schema`], choosing the launch identity the body
+/// renders with from the document's resolved frontmatter.
+///
+/// `select` is called once the frontmatter is resolved, every frontmatter
+/// `$( … )` included, and before the body renders, with the hints that
+/// frontmatter names and the composition environment to edit; see
+/// [`ResolvedIdentitySelector`]. The single compose runs each frontmatter and
+/// body command once.
+///
+/// ## Errors
+///
+/// As [`prepare_direct_with_schema`], plus `select`'s, which ends the
+/// preparation before the body renders.
+pub fn prepare_direct_with_schema_selecting(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    select: &ResolvedIdentitySelector<'_>,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Direct(PromptSource::ComposedBody, Some(select)))
 }
 
 /// [`prepare_direct_with_schema`] for a caller-supplied prompt.
@@ -164,7 +188,7 @@ pub fn prepare_direct_with_schema_and_prompt(
     options: PrepareOptions,
     prompt_source: PromptSource,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_with_schema(source, options, PrepareMode::Direct(prompt_source))
+    prepare_with_schema(source, options, PrepareMode::Direct(prompt_source, None))
 }
 
 /// Wrap [`prepare_inline`] with schema-aware error categorization and
@@ -178,19 +202,35 @@ pub fn prepare_inline_with_schema(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
-    prepare_with_schema(source, options, PrepareMode::Inline)
+    prepare_with_schema(source, options, PrepareMode::Inline(None))
 }
 
+/// [`prepare_inline_with_schema`], choosing the launch identity as
+/// [`prepare_direct_with_schema_selecting`] does.
+///
+/// ## Errors
+///
+/// As [`prepare_inline_with_schema`], plus `select`'s.
+pub fn prepare_inline_with_schema_selecting(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    select: &ResolvedIdentitySelector<'_>,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Inline(Some(select)))
+}
+
+/// The preparation a schema-aware entry runs (and reruns after dropping an
+/// invalid optional), with its identity selector, if any.
 #[derive(Clone)]
-pub(super) enum PrepareMode {
-    Direct(PromptSource),
-    Inline,
+pub(super) enum PrepareMode<'s> {
+    Direct(PromptSource, Option<&'s ResolvedIdentitySelector<'s>>),
+    Inline(Option<&'s ResolvedIdentitySelector<'s>>),
 }
 
 fn prepare_with_schema(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: PrepareMode,
+    mode: PrepareMode<'_>,
 ) -> Result<PreparedComposition, CompositionError> {
     let set_overrides = options.set_overrides.clone();
     prepare_with_schema_verdict(source, options, mode).map_err(|err| {
@@ -201,7 +241,7 @@ fn prepare_with_schema(
 fn prepare_with_schema_verdict(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: PrepareMode,
+    mode: PrepareMode<'_>,
 ) -> Result<PreparedComposition, CompositionError> {
     let mut dropped: Vec<DroppedOptional> = Vec::new();
     let file_ref_fallback_dir = options.file_ref_fallback_dir.clone();
@@ -219,13 +259,13 @@ fn prepare_with_schema_verdict(
 fn run_prepare(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
-    mode: &PrepareMode,
+    mode: &PrepareMode<'_>,
 ) -> Result<PreparedComposition, CompositionError> {
     match mode {
-        PrepareMode::Direct(prompt_source) => {
-            prepare_direct_with_prompt(source, options, prompt_source.clone())
+        PrepareMode::Direct(prompt_source, select) => {
+            prepare_direct_with_prompt_selecting(source, options, prompt_source.clone(), *select)
         }
-        PrepareMode::Inline => prepare_inline(source, options),
+        PrepareMode::Inline(select) => prepare_inline_selecting(source, options, *select),
     }
 }
 
@@ -240,7 +280,7 @@ fn post_shell_validate(
     source: &ResolvedCompositionSource,
     mut prepared: PreparedComposition,
     mut dropped: Vec<DroppedOptional>,
-    _mode: &PrepareMode,
+    _mode: &PrepareMode<'_>,
     _file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> Result<PreparedComposition, CompositionError> {
     // No `$schema` (or a deferred read that could not prepare it) → no

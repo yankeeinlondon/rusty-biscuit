@@ -22,18 +22,26 @@ fn run_sequence(root: &str, files: &[(&str, &str)]) -> (String, String, i32) {
 
 /// Replaces the path an `append_line` step reports as its output with
 /// `<rewrite>`, so expectations do not depend on the private workspace path.
+///
+/// The path is redacted in the text, before JSON parsing: the `stdout` action
+/// prints `\\` as `\`, so a Windows path reaches stdout with bare backslashes.
 fn redact_rewrites(stdout: &str) -> String {
-    fn walk(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::String(text) if text.ends_with(".yaml") => *text = "<rewrite>".into(),
-            serde_json::Value::Array(items) => items.iter_mut().for_each(walk),
-            serde_json::Value::Object(entries) => entries.values_mut().for_each(walk),
-            _ => {}
+    let mut redacted = String::with_capacity(stdout.len());
+    let mut rest = stdout;
+    while let Some(open) = rest.find('"') {
+        let Some(len) = rest[open + 1..].find('"') else { break };
+        let quoted = &rest[open + 1..open + 1 + len];
+        redacted.push_str(&rest[..open]);
+        if quoted.ends_with(".yaml") {
+            redacted.push_str("\"<rewrite>\"");
+        } else {
+            redacted.push_str(&rest[open..open + len + 2]);
         }
+        rest = &rest[open + len + 2..];
     }
-    let mut value: serde_json::Value = serde_json::from_str(stdout)
+    redacted.push_str(rest);
+    let value: serde_json::Value = serde_json::from_str(&redacted)
         .unwrap_or_else(|error| panic!("stdout is not JSON ({error}): {stdout}"));
-    walk(&mut value);
     value.to_string()
 }
 

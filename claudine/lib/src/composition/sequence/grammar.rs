@@ -413,6 +413,7 @@ pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std:
     }
     validate_container_events(map, origin)?;
     task_when(map, origin, property)?;
+    task_with(map, origin, property)?;
     task_loop(map, origin, property)?;
     if let Some(Value::Object(group)) = map.get("group") {
         let group_property = child_property(property, "group");
@@ -489,6 +490,24 @@ fn task_when(map: &serde_json::Map<String, Value>, origin: &std::path::Path, pro
         other => return Err(invalid(format!("`when` must be an expression string, got {}", json_type_name(other)), None)),
     }
     Ok(())
+}
+
+/// Check a prompt task's `with:` against the shape every `with` shares.
+///
+/// Only a `prompt:` task takes `with`; on any other step the option catalog
+/// rejects it by name, so its shape is not judged here. `with: {}` is valid
+/// and equals no `with`.
+///
+/// ## Errors
+///
+/// The `LifecycleWith*` shape errors, rooted at the task's `with`.
+fn task_with(map: &serde_json::Map<String, Value>, origin: &std::path::Path, property: &str) -> Result<(), CompositionError> {
+    match map.get("with") {
+        Some(value) if map.contains_key("prompt") => {
+            super::super::lifecycle::with_mapping_shape(value, origin, property).map(drop)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Place a task-level `loop:`: an inline nested sequence's loop is a sequence

@@ -180,5 +180,6 @@ is LSP framing only.
   arguments for a standalone trace.
 
 **Probe the server by hand.** `dmls --version` proves the binary runs;
-`dmls --bench-index <dir>` proves it can index a workspace (stage timings and
-graph counts) without any editor involved.
+`dmls --bench-index <dir>` proves it can index a workspace (an index store
+fill, then a warm restart answering references, rename, and workspace
+symbols) without any editor involved.

@@ -615,7 +615,7 @@ the phrase text.
 
 Inside a sequence, values that a step receives from the sequence are treated as
 late: the lexical `seq`, `group`, and `loop` roots, keys set by the
-caller with `--set`, and a prompt task's `params`. A phrase reading a lexical
+caller with `--set`, and a prompt task's `with`. A phrase reading a lexical
 root, or reading a late property by bare name, `fm.key`, or `fm['key']`, is not
 pre-warmed; nor is a phrase
 whose computed index (`fm[name]`) or whole-`fm` read could reach one. During
@@ -803,6 +803,15 @@ start:
 A non-zero exit code is an action error unless `no_error: true` is set. A
 `shell` action returns nothing; to branch on a command, read its result with
 `set`.
+
+A `shell` command uses Claudine's own terminal, so it can be interactive:
+`shell: just commit` may launch another `claudine compose` that prompts or
+drives an agent's TUI. When cancellation stops a running command, the command
+and everything it started end together, with one exception on macOS and Linux:
+while Claudine is the terminal's foreground job, the command runs in
+Claudine's own process group so the terminal does not stop it. Ctrl-C still
+reaches everything it started, but a sibling-failure cancellation ends only
+the command itself, not background processes it left running.
 
 #### Shell actions approved by their shape
 

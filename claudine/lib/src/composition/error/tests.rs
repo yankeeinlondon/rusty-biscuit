@@ -121,7 +121,10 @@ fn a_break_outside_a_loop_renders_as_its_own_error_not_as_a_crashed_expression()
         reason: LifecycleEvaluationReason::BreakWithoutLoop,
         cause: None,
     };
-    let rendered = strip_escape_codes(err.status_block(&Terminal::default()).render(&Terminal::default()));
+    // A pinned terminal: at `ColorDepth::None` inline code keeps its literal
+    // backticks, so an ambient `Terminal::default()` failed on Windows runners.
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.status_block(&term).render(&term));
     let prose = rendered.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(prose.contains("lifecycle break outside a loop"), "{prose}");
     assert!(prose.contains("fired outside any loop"), "{prose}");

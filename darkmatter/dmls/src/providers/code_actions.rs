@@ -632,7 +632,7 @@ mod tests {
         let path = Path::new("/t.md");
         let source_map =
             SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
-        let graph = WorkspaceGraph::build_with_roots(&BTreeMap::new(), 0, &[], &crate::graph::NoContexts);
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 0, &crate::graph::NoContexts);
         let config = DmlsConfig::default();
         let profile = ClientProfile {
             client_name: None,
@@ -646,6 +646,7 @@ mod tests {
             supports_snippets: false,
             client_watches_files: false,
             needs_watch_fallback: false,
+            supports_relative_watch_patterns: false,
             supports_file_operations: false,
             supports_workspace_configuration: false,
             supports_semantic_tokens: false,

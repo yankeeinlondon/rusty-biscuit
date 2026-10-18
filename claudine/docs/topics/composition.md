@@ -959,7 +959,7 @@ This is the gate working correctly — if production would prompt, the dry-run f
 
 ### Sequence Dry Run
 
-`sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a `=== Document N of M ===` divider before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately (fail-fast), exiting non-zero without launching any provider.
+`sequence --dry-run` exercises the whole sequence as one logical command. Each step is composed and rendered in order: all bodies are concatenated to **stdout**, while each step's frontmatter and metadata table go to **stderr**, separated by a horizontal rule before every document after the first. A composition failure in any step renders the error to stderr and stops the sequence immediately, exiting non-zero without launching any provider.
 
 A sequence dry run never executes its tasks or its control flow:
 
@@ -996,7 +996,7 @@ start:
 `claudine compose` of this document fails launch validation at
 `/start/0/shell`, and no provider is launched. The report names the action's
 path and echoes the offending value (`{"cmd":"git status"}`); it does not yet
-single out the unknown key. [Schemas](schemas.md) describes the five schema
+single out the unknown key. [Schemas](schemas.md) describes the seven schema
 files, what they check, and how a document reaches them.
 
 The rules:
@@ -1044,19 +1044,32 @@ flowchart LR
     V -- valid --> S["start → provider"]
 ```
 
-The `claudine` binary embeds the five schema files, so this holds for an
+The `claudine` binary embeds the seven schema files, so this holds for an
 installed binary with no checkout. A schema file on disk with the same name
 wins over the embedded copy; see
 [How a Document Reaches the Schemas](schemas.md#how-a-document-reaches-the-schemas).
 
 ### Caller File Provenance and Materialization
 
-Each explicit caller setter (`key=value` or `--set`) retains an immutable,
-per-property record containing the raw value and the file-resolution context
-captured at launch. Canonical preparation keeps that record separate from the
-effective frontmatter map. Document frontmatter, schema defaults, `proxy.with`,
-runtime mutation, and sequence/task-authored values retain their own ownership
-and are not relabeled as caller input.
+One rule decides where a relative file value resolves from: **the file that
+authored it**.
+
+| Value | Resolves from |
+|---|---|
+| a caller setter (`key=value`, `--set`) | the launch directory |
+| a prompt task's `with:` | the sequence document, or the `kind: task`/`kind: group` file that wrote the task |
+| a `proxy.with:` or `prep.with:` | the document whose lifecycle holds the directive, not the target |
+| a `retry.with:` | the retried document itself |
+| the document's own frontmatter | the document |
+
+Each explicit caller setter retains an immutable, per-property record
+containing the raw value and the file-resolution context captured at launch.
+Each `with:` value carries the same kind of record, with the context of the
+file that authored it, layered below the caller's: a caller setter for the
+same property replaces the `with` value and its origin together. Canonical
+preparation keeps these records separate from the effective frontmatter map.
+Document frontmatter, schema defaults, and runtime mutation retain their own
+ownership, and a `with` value is never relabeled as caller input.
 
 Before frontmatter interpolation pass 1, Darkmatter applies the active
 document's effective schema to each caller record. For a root union, the arm
@@ -1087,7 +1100,7 @@ native identity. Absent and explicit-null properties, ordinary strings, and
 document-owned file references are not caller-materialized.
 
 Proxy, retry, resume, inline-compose, and sequence/task entry preserve the same
-raw value and per-property origin. Fresh reads rematerialize them against the
+raw value and per-property origin, for caller and `with` records alike. Fresh reads rematerialize them against the
 new active schema; a reused loop plan keeps its installed semantic identity.
 Neither route recaptures process CWD, and a proxy target cannot re-anchor a
 caller-owned value merely because it declares a different file mode.
@@ -1559,7 +1572,7 @@ failure:
             reason: "{{ err.msg }}"
 ```
 
-**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot. What the document does not name falls back to the invocation's plan: a document with no `agent:` keeps the planned provider, and one with no `model:` (and no `--model`) keeps the planned model while it keeps that provider. A sequence step's plan is its reviewed or planned target; elsewhere the planned model is the invocation's own, minus a model the launched document's frontmatter chose, so a retry after `model:` is removed launches without it.
+**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot. What the document does not name falls back to the invocation's plan: a document with no `agent:` keeps the planned provider, and one with no `model:` (and no `--model`) keeps the planned model while it keeps that provider. A sequence task's plan is the target its provider selection chose (its own predicted provider, the enclosing sequence document's, or a review-screen choice); elsewhere the planned model is the invocation's own, minus a model the launched document's frontmatter chose, so a retry after `model:` is removed launches without it.
 
 **One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, the provider overlay plan, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
 
@@ -1600,7 +1613,7 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
 - **`inline-compose`** stays inline mode across a handoff, but only the **final** target is eligible for the inline closure. The document that proxied away is not rewritten.
 - **`compose --loop`** (any looping document) ends the loop on a proxy from any event that can raise one — `initialize`, `start`, `success`, `failure`, or `finalize` — and hands the target to the command's coordinator. No further source iteration runs, and the loop gate does not fire for the abandoned iteration. The target is not an extra iteration.
 - **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff. This holds for a step that runs the document body and for a `prompt:` task, whichever event raised the proxy:
-    - the target reads the step's inputs (the user's setters, a task's `params`, and the lexical `seq` root) and sees the step's environment (a task's `operation` as `OPERATION`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; runtime `set` writes and committed `seq.outputs` remain visible to later steps;
+    - the target reads the step's inputs (the user's setters, a task's `with`, and the lexical `seq` root) and sees the step's environment (a task's `operation` as `OPERATION`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; runtime `set` writes and committed `seq.outputs` remain visible to later steps;
     - the task publishes one `seq.outputs` entry after successful finalization: the final target's. A target that fails fails the task and propagates to the enclosing container's failure handler; an unhandled failure stops the sequence;
     - each task owns its chain, so two parallel siblings may both proxy to the same target, while a cycle within one task's chain is still refused;
     - a step that runs the document body publishes every completed provider run, as a `retry` does, so a proxy from `success` leaves the source's entry and the target's.
@@ -1884,7 +1897,7 @@ Repository observations are request-local, not a process-global cache, and are k
 
 Shell execution follows workspace intent rather than source location. Composition documents and system prompts run `::shell` from the launch repository root; for a launch outside a repository, the explicit launch CWD is used. A prompt or harness stored in another directory or repository does not move the agent's shell working directory.
 
-A sequence task’s primary `side_effect` action derives its `SourceContext` from the document that authored the task. File-touching effects therefore target files next to that origin document, including when an externalized `task:` or `group:` file is referenced from another repository. Task `setup:`/`teardown:` are removed grammar; prompt documents or inline containers own lifecycle work. Prompt-task `params` retain that same authoring origin when the target schema selects a file value; immutable CLI caller records remain a separate, higher-precedence layer with the invocation's launch origin.
+A sequence task’s primary `side_effect` action derives its `SourceContext` from the document that authored the task. File-touching effects therefore target files next to that origin document, including when an externalized `task:` or `group:` file is referenced from another repository. Task `setup:`/`teardown:` are removed grammar; prompt documents or inline containers own lifecycle work. Prompt-task `with` values retain that same authoring origin when the target schema selects a file value; immutable CLI caller records remain a separate, higher-precedence layer with the invocation's launch origin.
 
 ## Performance Reporting
 

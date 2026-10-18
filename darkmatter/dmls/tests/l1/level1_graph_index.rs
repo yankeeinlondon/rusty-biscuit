@@ -1,24 +1,22 @@
 //! L1 integration fixtures for the Phase 3 workspace graph.
 //!
-//! Exercises the public discover → index → graph pipeline over real temp
-//! workspaces (graph edge extraction) and the invalidation matrix (edit,
-//! delete, rename) through the `WorkspaceIndex` public API. These are pure
-//! (in-memory graph, on-disk fixtures) and need no LSP session, so they stay
-//! ungated.
+//! Exercises the public discover → parse → graph pipeline over real temp
+//! workspaces (graph edge extraction, through the test-only full-workspace
+//! [`Oracle`]) and the invalidation matrix (edit, delete, rename) through
+//! the `WorkspaceIndex` public API. These are pure (in-memory graph, on-disk
+//! fixtures) and need no LSP session, so they stay ungated.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use darkmatter::markdown::compose::RequestSnapshot;
-use dmls::context::RepositoryContexts;
 
-use dmls::config::WorkspaceConfig;
+use crate::common::oracle::Oracle;
 use dmls::graph::{EdgeKind, WorkspaceIndex};
-use dmls::workspace::{SilentProgress, index_workspace};
 
-/// The contexts the server would build for documents under `root`.
-fn contexts(root: &Path) -> Arc<RepositoryContexts> {
-    Arc::new(RepositoryContexts::new(RequestSnapshot::new(root)))
+/// A graph over every Markdown file under `root`.
+fn oracle(root: &Path) -> Oracle {
+    Oracle::build(&[root.to_path_buf()], RequestSnapshot::new(root))
 }
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -36,13 +34,8 @@ fn cross_file_link_edges_resolve_through_discovery() {
     write(root, "index.md", "# Home\n\nSee [setup](guide/setup.md#install).\n");
     write(root, "guide/setup.md", "# Setup\n\n## Install\n\nSteps.\n");
 
-    let index = index_workspace(
-        &[root.to_path_buf()],
-        &WorkspaceConfig::default(),
-        &SilentProgress,
-        contexts(root),
-    );
-    let snapshot = index.snapshot();
+    let oracle = oracle(root);
+    let snapshot = oracle.graph();
     assert_eq!(snapshot.document_count(), 2);
 
     let setup = snapshot.document_id(&root.join("guide/setup.md")).unwrap();
@@ -63,14 +56,8 @@ fn wiki_basename_index_flags_ambiguity() {
     write(root, "b/note.md", "# B note\n");
     write(root, "c/unique.md", "# Unique\n");
 
-    let index = index_workspace(
-        &[root.to_path_buf()],
-        &WorkspaceConfig::default(),
-        &SilentProgress,
-        contexts(root),
-    );
-    let keys = index.snapshot();
-    let keys = keys.key_index();
+    let oracle = oracle(root);
+    let keys = oracle.graph().key_index();
     assert!(keys.is_ambiguous("note"));
     assert!(!keys.is_ambiguous("unique"));
 }
@@ -116,12 +103,7 @@ fn generated_corpus_indexes_without_panic() {
     let temp = tempfile::tempdir().unwrap();
     // A small slice: generate tiny-100 and index it end to end.
     dmls::generate_corpus(dmls::CorpusTier::Tiny100, temp.path()).unwrap();
-    let index = index_workspace(
-        &[temp.path().to_path_buf()],
-        &WorkspaceConfig::default(),
-        &SilentProgress,
-        contexts(temp.path()),
-    );
-    assert_eq!(index.len(), 100);
-    assert!(index.snapshot().edge_count() > 0);
+    let oracle = oracle(temp.path());
+    assert_eq!(oracle.files().len(), 100);
+    assert!(oracle.graph().edge_count() > 0);
 }

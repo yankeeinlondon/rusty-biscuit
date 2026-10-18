@@ -1129,10 +1129,11 @@ fn shipped_container_schema_resolves_for_authored_parameter_completion() {
     for (name, text) in [
         ("action.yaml", include_str!("../../../../schemas/action.yaml")),
         ("lifecycle.yaml", include_str!("../../../../schemas/lifecycle.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../schemas/sequence-types.yaml")),
     ] {
         write(&tmp.path().join(name), text);
     }
-    write(&tmp.path().join("nested.md"), "---\n$schema:\n  nested: task@./lifecycle.yaml\n---\n");
+    write(&tmp.path().join("nested.md"), "---\n$schema:\n  nested: task@./sequence-types.yaml\n---\n");
     let ctx = ScopeContext::discover_from(tmp.path());
     let effective = load_effective_schema("./nested.md", &ctx).expect("shipped task schema loads");
     let names = property_names(&effective, "", &HashSet::new(), &[]);

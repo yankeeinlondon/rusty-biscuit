@@ -389,11 +389,11 @@ fn run_sequence_inner(
     }
 
     let caller_input_records =
-        claudine::composition::CallerInputLayers::from_caller_overrides(
+        super::compose::caller_input_records(
+            &shared,
             set_overrides.clone(),
             invocation.launch_file_resolution_context().clone(),
-        )
-        .caller_input_records;
+        );
 
     // Schema-aware doc-level scrub: drop invalid optional values only.
     // Required-value validation is deferred to per-step pre-validation
@@ -481,6 +481,7 @@ mod tests {
             max_iterations: None,
             on_rate_limit: None,
             caller_arguments: Default::default(),
+            set_records: Default::default(),
             provider_tail: Default::default(),
             provider_tail_notices: Default::default(),
         }

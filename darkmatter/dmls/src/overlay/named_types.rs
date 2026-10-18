@@ -227,7 +227,7 @@ impl NamedTypeCatalog {
                 let path = named_type_reference_path(&target, base_dir, schema_roots, context)
                     .ok()
                     .flatten()?;
-                let text: Arc<str> = Arc::from(std::fs::read_to_string(&path).ok()?);
+                let text: Arc<str> = Arc::from(crate::work_counters::read_to_string(&path).ok()?);
                 let document = parse_standalone_schema_document(&text, &path).ok().flatten();
                 Some(ExternalNamespace { target, path, text, document })
             })

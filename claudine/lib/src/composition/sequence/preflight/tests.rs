@@ -870,7 +870,7 @@ mod group_schema {
     fn meaningless_task_field_is_rejected() {
         let error = group_error(json!({
             "name": "g",
-            "tasks": [ { "shell": "echo x", "params": { "a": 1 } } ],
+            "tasks": [ { "shell": "echo x", "with": { "a": 1 } } ],
         }));
         assert!(
             matches!(
@@ -1236,6 +1236,11 @@ mod shell {
                 ),
                 "`{root_name}` must be rejected in a shell command; got: {error}",
             );
+            // The guidance names the task input by its current key; `params`
+            // is step data, not an input.
+            let message = error.to_string();
+            assert!(message.contains("a task's `with`"), "{message}");
+            assert!(!message.contains("`params`"), "{message}");
         }
     }
 
@@ -1523,7 +1528,7 @@ mod steps {
                 json!([
                     { "name": "alpha", "topic": "parsing" },
                     { "name": "run tests", "shell": "just test" },
-                    { "name": "review", "prompt": "review.md", "params": { "topic": "x" } },
+                    { "name": "review", "prompt": "review.md", "with": { "topic": "x" } },
                 ]),
             )],
             "Work on {{ seq.topic }}.\n",
@@ -1542,9 +1547,9 @@ mod steps {
         let review = graph.steps[2].task.as_ref().unwrap();
         assert!(matches!(review.action, PreflightAction::Prompt { .. }));
         assert_eq!(
-            review.params.get("topic").and_then(Value::as_str),
+            review.with.get("topic").and_then(Value::as_str),
             Some("x"),
-            "params travel with the node unevaluated; they bind just in time",
+            "`with` travels with the node unevaluated; it binds just in time",
         );
     }
 
@@ -1572,6 +1577,77 @@ mod steps {
         assert!(
             matches!(&task.action, PreflightAction::Shell { commands } if commands == &["echo external"])
         );
+    }
+
+    /// A `kind: task` file carries its own `with`, authored by that file.
+    #[test]
+    fn a_task_file_carries_its_own_with() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("tasks")).unwrap();
+        fs::write(root.join("tasks/review.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        write_legacy_yaml(
+            root,
+            "tasks/task.yaml",
+            &json!({ "kind": "task", "prompt": "review.md", "with": { "notes": "./notes.md" } }),
+        );
+        let source = write_legacy_source(
+            root,
+            "seq.md",
+            &[("sequence", json!([{ "name": "one", "task": "tasks/task.yaml" }]))],
+            "Body.\n",
+        );
+        let graph = legacy_graph_for(&source).unwrap();
+        let task = graph.steps[0].task.as_ref().unwrap();
+        assert_eq!(task.with.get("notes"), Some(&json!("./notes.md")));
+        assert!(task.origin_path.ends_with("tasks/task.yaml"), "{}", task.origin_path.display());
+    }
+
+    /// External task references are immutable: `with` goes inside the task
+    /// file, never beside `task:`.
+    #[test]
+    fn with_beside_a_task_reference_is_rejected() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        write_legacy_yaml(root, "task.yaml", &json!({ "kind": "task", "prompt": "review.md" }));
+        let source = write_legacy_source(
+            root,
+            "seq.md",
+            &[("sequence", json!([{ "name": "one", "task": "task.yaml", "with": { "x": 1 } }]))],
+            "Body.\n",
+        );
+        let error = legacy_err_for(&source);
+        assert!(
+            matches!(
+                &error,
+                CompositionError::SequenceInvalidTaskField { field, executable, .. }
+                    if field == "with" && executable == "task"
+            ),
+            "got: {error:?}",
+        );
+    }
+
+    /// A malformed `with` in a `kind: task` file is the `with` family's error,
+    /// located at that file's own top-level `with`.
+    #[test]
+    fn a_task_file_with_a_malformed_with_is_located_at_the_file() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::write(root.join("review.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        write_legacy_yaml(root, "task.yaml", &json!({ "kind": "task", "prompt": "review.md", "with": 42 }));
+        let source = write_legacy_source(
+            root,
+            "seq.md",
+            &[("sequence", json!([{ "name": "one", "task": "task.yaml" }]))],
+            "Body.\n",
+        );
+        let error = legacy_err_for(&source);
+        let CompositionError::LifecycleWithNotMapping { source_path, property, path, actual } = &error else {
+            panic!("expected LifecycleWithNotMapping, got {error:?}");
+        };
+        assert!(source_path.ends_with("task.yaml"), "{}", source_path.display());
+        assert_eq!((property.as_str(), path.as_str(), actual.as_str()), ("", "with", "number"));
+        assert!(error.to_string().starts_with("`with` must be a mapping, got number"), "{error}");
     }
 
     /// A `kind: task` file must actually declare that kind.
@@ -1778,7 +1854,7 @@ mod template_position {
                 .with_source_file(&reference.path)
                 .with_deferred_schema_verdict(true)
                 .with_deferred_shell_roots(reference.deferred_shell_roots())
-                .with_data_overrides(Value::Object(reference.params.clone()));
+                .with_data_overrides(Value::Object(reference.with.clone()));
             Ok(ComposeRequest::with_context(options, crate::test_support::context_for(&reference.path))
                 .unwrap())
         })
@@ -2040,7 +2116,7 @@ mod template_position {
                     json!([{
                         "name": "one",
                         "prompt": "doc.md",
-                        "params": { "pkg": "{{ last(seq.outputs) }}", "topic": "{{ title }}" },
+                        "with": { "pkg": "{{ last(seq.outputs) }}", "topic": "{{ title }}" },
                     }]),
                 ),
             ],
@@ -2051,8 +2127,8 @@ mod template_position {
             panic!("one reference: {:?}", graph.prompt_references);
         };
         assert_eq!(reference.position, TaskPosition::First);
-        assert_eq!(reference.deferred_params, vec!["pkg".to_string()]);
-        assert_eq!(reference.params.get("topic"), Some(&json!("t")));
+        assert_eq!(reference.deferred_with, vec!["pkg".to_string()]);
+        assert_eq!(reference.with.get("topic"), Some(&json!("t")));
 
         let policy = TempDir::new().unwrap();
         let error = approve(&graph, &policy).expect_err("the late command needs a template approval");
@@ -2079,8 +2155,8 @@ mod template_position {
             &[(
                 "sequence",
                 json!([
-                    { "name": "one", "prompt": "doc.md", "params": { "topic": "t" } },
-                    { "name": "two", "prompt": "doc.md", "params": { "topic": "t" } },
+                    { "name": "one", "prompt": "doc.md", "with": { "topic": "t" } },
+                    { "name": "two", "prompt": "doc.md", "with": { "topic": "t" } },
                 ]),
             )],
             "Body.\n",
@@ -2234,7 +2310,7 @@ mod shell_template_program_approval {
                 resolve_graph_shell_approvals(&graph, &options, &|reference| {
                     Ok(ComposeRequest::with_context(ComposeOptions::new().with_source_file(&reference.path)
                         .with_deferred_schema_verdict(true).with_deferred_shell_roots(reference.deferred_shell_roots())
-                        .with_data_overrides(Value::Object(reference.params.clone())), crate::test_support::context_for(&reference.path)).unwrap())
+                        .with_data_overrides(Value::Object(reference.with.clone())), crate::test_support::context_for(&reference.path)).unwrap())
                 })
             };
             let requests = handler.1.lock().unwrap();

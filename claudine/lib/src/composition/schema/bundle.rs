@@ -1,6 +1,6 @@
 //! Claudine's schema bundle, compiled into the binary.
 //!
-//! The five files under `claudine/schemas/` are the only definition of
+//! The seven files under `claudine/schemas/` are the only definition of
 //! Claudine's schemas. They are embedded verbatim with `include_str!` and
 //! offered to Darkmatter's trigger discovery as the last-resort location after
 //! the five document-context schema roots, so an installed `claudine` validates
@@ -13,7 +13,7 @@ use darkmatter::markdown::schemas::{EffectiveSchema, EmbeddedSchemaBundle, Schem
 /// The bundle's name in origins, traces, and errors (`embedded:claudine/…`).
 pub const CLAUDINE_SCHEMA_BUNDLE_NAME: &str = "claudine";
 
-/// The five schema files as `(file name, text)` pairs, byte-identical to the
+/// The seven schema files as `(file name, text)` pairs, byte-identical to the
 /// repository files.
 pub const CLAUDINE_SCHEMA_FILES: &[(&str, &str)] = &[
     ("action.yaml", include_str!("../../../../schemas/action.yaml")),
@@ -21,11 +21,13 @@ pub const CLAUDINE_SCHEMA_FILES: &[(&str, &str)] = &[
     ("inline-compose.yaml", include_str!("../../../../schemas/inline-compose.yaml")),
     ("lifecycle.yaml", include_str!("../../../../schemas/lifecycle.yaml")),
     ("linking.yaml", include_str!("../../../../schemas/linking.yaml")),
+    ("sequence-types.yaml", include_str!("../../../../schemas/sequence-types.yaml")),
+    ("sequence.yaml", include_str!("../../../../schemas/sequence.yaml")),
 ];
 
 /// The trigger files of the bundle. A property whose winning declaration is
 /// one of these triggers, embedded or on disk, is a Claudine control.
-pub const CLAUDINE_TRIGGER_FILES: &[&str] = &["claudine.yaml", "inline-compose.yaml"];
+pub const CLAUDINE_TRIGGER_FILES: &[&str] = &["claudine.yaml", "inline-compose.yaml", "sequence.yaml"];
 
 /// The embedded bundle handed to
 /// [`DarkmatterSchemas::with_embedded_trigger_bundle`](darkmatter::markdown::schemas::DarkmatterSchemas::with_embedded_trigger_bundle).

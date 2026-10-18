@@ -974,6 +974,11 @@ impl ComposeOptions {
         &self.context
     }
 
+    /// The captured runtime context, for a stage that changes it mid-run.
+    pub(crate) fn context_mut(&mut self) -> &mut ComposeContext {
+        &mut self.context
+    }
+
     /// Disables a single operation.
     #[must_use]
     pub fn disable(mut self, op: ComposeOperation) -> Self {

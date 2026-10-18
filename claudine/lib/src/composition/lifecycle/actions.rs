@@ -27,7 +27,7 @@
 //! - [`ExpressionFunctionAction`] — read-only Darkmatter expression
 //!   functions invoked for their result.
 
-use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder};
+use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 use darkmatter::markdown::compose::{ResolvedShellValue, check_frontmatter_shell_value};
 use indexmap::IndexMap;
@@ -417,7 +417,7 @@ impl RuntimeSet {
             if key.is_empty() {
                 return Err(RuntimeSetError::EmptyKey);
             }
-            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
+            if super::parse::is_dynamic_with_key(key) {
                 return Err(RuntimeSetError::DynamicKey(key.clone()));
             }
         }
@@ -543,7 +543,7 @@ impl WithOverlay {
     /// the key.
     pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, WithOverlayError> {
         for key in authored.keys() {
-            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
+            if super::parse::is_dynamic_with_key(key) {
                 return Err(WithOverlayError::DynamicKey(key.clone()));
             }
         }

@@ -611,6 +611,10 @@ fn the_trigger_envelope_matrix_holds_for_json_syntax() {
         let fields: Vec<&str> = fields.iter().copied().filter(|field| !field.is_empty()).collect();
         format!("{{{}}}\n", fields.join(", "))
     };
+    // A duplicate key or trailing bracket makes the document unparseable, and
+    // a malformed flow mapping has no column-0 `kind: trigger-schema` line, so
+    // those rows are unclaimed rather than load errors (the claim rule in the
+    // "Repository Trigger Schemas" section of `topics/schemas/definition.md`).
     let cells = vec![
         ("control", doc(&[kind, match_, schema]), Applies),
         ("kind absent", doc(&["", match_, schema]), Unclassified),
@@ -619,8 +623,8 @@ fn the_trigger_envelope_matrix_holds_for_json_syntax() {
         ("kind one element wrong", doc(&[r#""kind": ["trigger-schema", 42]"#, match_, schema]), Unclassified),
         ("kind every element wrong", doc(&[r#""kind": [1, 2]"#, match_, schema]), Unclassified),
         ("kind empty", doc(&[r#""kind": """#, match_, schema]), Unclassified),
-        ("kind duplicate", doc(&[kind, kind, match_, schema]), Error),
-        ("kind trailing", doc(&[r#""kind": "trigger-schema"]"#, match_, schema]), Error),
+        ("kind duplicate", doc(&[kind, kind, match_, schema]), Unclassified),
+        ("kind trailing", doc(&[r#""kind": "trigger-schema"]"#, match_, schema]), Unclassified),
         ("match absent", doc(&[kind, "", schema]), Error),
         ("match null", doc(&[kind, r#""match": null"#, schema]), Error),
         ("match wrong type", doc(&[kind, r#""match": 42"#, schema]), Error),
@@ -631,9 +635,9 @@ fn the_trigger_envelope_matrix_holds_for_json_syntax() {
         (
             "match duplicate",
             doc(&[kind, r#""match": {"prompt": "string(required)", "prompt": "string(required)"}"#, schema]),
-            Error,
+            Unclassified,
         ),
-        ("match trailing", doc(&[kind, r#""match": {"prompt": "string(required)"}}"#, schema]), Error),
+        ("match trailing", doc(&[kind, r#""match": {"prompt": "string(required)"}}"#, schema]), Unclassified),
         ("$schema absent", doc(&[kind, match_, ""]), Error),
         ("$schema null", doc(&[kind, match_, r#""$schema": null"#]), Error),
         ("$schema wrong type", doc(&[kind, match_, r#""$schema": 42"#]), Error),
@@ -645,10 +649,33 @@ fn the_trigger_envelope_matrix_holds_for_json_syntax() {
         (
             "$schema duplicate",
             doc(&[kind, match_, r#""$schema": {"model": "string", "model": "number"}"#]),
-            Error,
+            Unclassified,
         ),
-        ("$schema trailing", doc(&[kind, match_, r#""$schema": {"model": "string"}]"#]), Error),
+        ("$schema trailing", doc(&[kind, match_, r#""$schema": {"model": "string"}]"#]), Unclassified),
         ("non-string top-level key", doc(&[kind, match_, schema, r#"42: "extra""#]), Error),
     ];
     walk(&cells);
+}
+
+/// An embedded document that is not valid YAML and does not claim the
+/// envelope is an import target only; one that claims it is an
+/// `EmbeddedTriggerLoad` carrying the YAML error.
+#[test]
+fn an_unparseable_embedded_document_fails_only_when_it_claims_the_envelope() {
+    let fixture = Fixture::new();
+    let quiet = bundle(
+        "quiet",
+        vec![("host.yaml", HOST_TRIGGER.into()), ("lifecycle.yaml", LIFECYCLE.into()), ("action.yaml", ACTION.into()), ("notes.yaml", "notes: a: b\n".into())],
+    );
+    let api = fixture.schemas(&[quiet]).expect("an unclaimed document is not a trigger");
+    assert_eq!(api.trigger_registry().map(|registry| registry.triggers.len()), Some(1));
+
+    let loud = bundle("loud", vec![("host.yaml", "kind: trigger-schema\nnotes: a: b\n".into())]);
+    let error = fixture.schemas(&[loud]).err().expect("a claimed document is fatal");
+    let (bundle_name, name, source) = embedded_load_error(&error).unwrap_or_else(|| panic!("{error:?}"));
+    assert_eq!((bundle_name, name), ("loud", "host.yaml"));
+    assert!(
+        matches!(source, SchemaError::TriggerEnvelopeYaml { line: Some(2), column: Some(9), .. }),
+        "{source:?}"
+    );
 }

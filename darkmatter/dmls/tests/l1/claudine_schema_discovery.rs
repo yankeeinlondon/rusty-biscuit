@@ -1,9 +1,10 @@
 //! DMLS applies Claudine's schemas by trigger discovery alone.
 //!
 //! A fixture repository holds package `claudine/lib` in package area
-//! `claudine`, with a complete copy of Claudine's five schema files in the
+//! `claudine`, with a complete copy of Claudine's seven schema files in the
 //! area's `schemas/` folder. A document under the package that declares no
-//! `$schema` is typed by the `claudine.yaml` trigger's payload, read from disk
+//! `$schema` is typed by the `claudine.yaml` and `sequence.yaml` trigger
+//! payloads, read from disk
 //! through the document's schema roots. DMLS has no Claudine dependency, so
 //! nothing else could supply it.
 //!
@@ -24,12 +25,14 @@ use dmls::{DmlsConfig, OverlayState};
 use serde_json::{Value, json};
 
 /// Claudine's complete schema bundle, copied byte for byte into the fixture.
-const BUNDLE: [(&str, &str); 5] = [
+const BUNDLE: [(&str, &str); 7] = [
     ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
     ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
     ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
     ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
     ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+    ("sequence-types.yaml", include_str!("../../../../claudine/schemas/sequence-types.yaml")),
+    ("sequence.yaml", include_str!("../../../../claudine/schemas/sequence.yaml")),
 ];
 
 /// The eleven linking keys `linking.yaml` types.
@@ -220,6 +223,43 @@ const VALID_LIFECYCLE_DOCUMENT: &str = concat!(
         "max_turns: 5\n",
         "---\n\nBody\n",
 );
+
+/// A sequence document with no `$schema` pointer is typed by the
+/// `sequence.yaml` trigger: the container specification's example raises no
+/// schema diagnostic, and an undeclared step key is step data.
+#[test]
+fn sequence_documents_are_typed_by_the_sequence_trigger() {
+    let workspace = LspWorkspace::new();
+    let fixture = Fixture::new(workspace.path());
+    let kinds = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/example-containers-kinds.md");
+    let step_data = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/step-data.md");
+    let kinds_path = fixture.document("kinds.md", kinds);
+    let step_data_path = fixture.document("step-data.md", step_data);
+
+    let found = session_diagnostics(&workspace, &fixture, &[(&kinds_path, kinds), (&step_data_path, step_data)]);
+    assert!(found[0].is_empty(), "kinds: {:?}", found[0]);
+    assert!(found[1].is_empty(), "step data: {:?}", found[1]);
+}
+
+/// A group's removed `execution` key is reported at the group, naming the
+/// key, and a sequence document's root `fail_fast` at its own path.
+#[test]
+fn removed_sequence_keys_are_reported_at_their_paths() {
+    let workspace = LspWorkspace::new();
+    let fixture = Fixture::new(workspace.path());
+    let execution = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/group-execution.md");
+    let fail_fast = include_str!("../../../../claudine/lib/tests/fixtures/sequence-schema/root-fail-fast.md");
+    let execution_path = fixture.document("execution.md", execution);
+    let fail_fast_path = fixture.document("fail-fast.md", fail_fast);
+
+    let found = session_diagnostics(&workspace, &fixture, &[(&execution_path, execution), (&fail_fast_path, fail_fast)]);
+    assert!(
+        found[0].iter().any(|(path, message)| path == "/sequence/0/group" && message.contains("execution")),
+        "expected a diagnostic at /sequence/0/group naming execution: {:?}",
+        found[0]
+    );
+    assert!(found[1].iter().any(|(path, _)| path == "/fail_fast"), "expected a diagnostic at /fail_fast: {:?}", found[1]);
+}
 
 /// A valid lifecycle stack and all eleven linking keys raise no schema
 /// diagnostic, and a wrongly typed linking key is rejected.

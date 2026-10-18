@@ -1,8 +1,8 @@
 //! Claudine's embedded schema bundle and the launch verdict that uses it
 //! (`2026-10-21-claudine-schemas`, criteria 6, 10, and 13).
 //!
-//! - The embed: `CLAUDINE_SCHEMA_FILES` is the five repository files byte for
-//!   byte, each parses as its kind, and every export and both payloads resolve
+//! - The embed: `CLAUDINE_SCHEMA_FILES` is the seven repository files byte for
+//!   byte, each parses as its kind, and every export and every payload resolves
 //!   through the embedded seam with no disk schema anywhere.
 //! - The input robustness matrix of `claudine_schemas_matrix.rs`, walked with
 //!   each edited bundle supplied as an embedded bundle.
@@ -150,14 +150,16 @@ fn judge_memory(schemas: &DarkmatterSchemas, frontmatter: &str) -> (EffectiveSch
 
 #[test]
 fn embedded_files_are_the_repository_files_byte_for_byte() {
-    let repository: [(&str, &str); 5] = [
+    let repository: [(&str, &str); 7] = [
         ("action.yaml", include_str!("../../../schemas/action.yaml")),
         ("claudine.yaml", include_str!("../../../schemas/claudine.yaml")),
         ("inline-compose.yaml", include_str!("../../../schemas/inline-compose.yaml")),
         ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml")),
         ("linking.yaml", include_str!("../../../schemas/linking.yaml")),
+        ("sequence-types.yaml", include_str!("../../../schemas/sequence-types.yaml")),
+        ("sequence.yaml", include_str!("../../../schemas/sequence.yaml")),
     ];
-    assert_eq!(CLAUDINE_SCHEMA_FILES, &repository[..], "the embed is the five repository files, unchanged");
+    assert_eq!(CLAUDINE_SCHEMA_FILES, &repository[..], "the embed is the seven repository files, unchanged");
     assert_eq!(claudine_schema_bundle().name(), CLAUDINE_SCHEMA_BUNDLE_NAME);
     assert_eq!(claudine_schema_bundle().files(), CLAUDINE_SCHEMA_FILES);
 
@@ -173,7 +175,7 @@ fn embedded_files_are_the_repository_files_byte_for_byte() {
             .unwrap_or_else(|| panic!("{name} is a schema library"));
         assert_eq!(library.envelope, StandaloneSchemaEnvelope::Tagged, "{name} is a `kind: schema` library");
     }
-    assert_eq!(triggers, CLAUDINE_TRIGGER_FILES, "exactly the two trigger files are trigger envelopes");
+    assert_eq!(triggers, CLAUDINE_TRIGGER_FILES, "exactly the three trigger files are trigger envelopes");
 }
 
 /// One export's probes: its library, its name, and a value it accepts and one
@@ -215,6 +217,17 @@ const LIFECYCLE_PROBES: &[ExportProbe] = &[
     ("loop-action", "{ op: increment, prop: n }", "{ op: jump, prop: n }"),
     ("loop-action-entry", "increment(n)", "{ op: increment }"),
     ("loop", "{ while: \"ctx.x\", max: 3 }", "{ max: 0 }"),
+];
+
+/// The first level and the untyped boundary; the levels between are judged
+/// through the disk bundle in `sequence_schema.rs`. Every probe inlines the
+/// container types, so a longer list makes this test slow.
+const SEQUENCE_TYPES_PROBES: &[ExportProbe] = &[
+    ("steps", "[a, { name: b, shell: x }]", "{ a: 1 }"),
+    ("task", "{ name: a, prompt: a.md, with: { x: 1 }, topic: data }", "{ name: a, with: [1] }"),
+    ("group", "{ tasks: [{ name: a, shell: x }], max_parallel: 2 }", "{ tasks: [{ name: a }], execution: parallel }"),
+    ("task-3", "{ name: c, sequence: [{ with: [1] }] }", "{ name: c, with: [1] }"),
+    ("group-3", "{ tasks: [{ anything: 1 }] }", "{ tasks: [] }"),
 ];
 
 /// Negative probes are lists or mappings where a scalar is declared, since
@@ -298,6 +311,11 @@ fn embedded_linking_exports_resolve_without_disk_schemas() {
 }
 
 #[test]
+fn embedded_sequence_types_exports_resolve_without_disk_schemas() {
+    assert_exports_resolve_embedded("sequence-types.yaml", SEQUENCE_TYPES_PROBES);
+}
+
+#[test]
 fn embedded_payloads_apply_without_disk_schemas() {
     let bare = Bare::new();
     let schemas = bare.schemas(claudine_schema_bundle());
@@ -311,7 +329,10 @@ fn embedded_payloads_apply_without_disk_schemas() {
         .iter()
         .map(|trigger| trigger.source.to_string())
         .collect();
-    assert_eq!(sources, ["embedded:claudine/claudine.yaml", "embedded:claudine/inline-compose.yaml"]);
+    assert_eq!(
+        sources,
+        ["embedded:claudine/claudine.yaml", "embedded:claudine/inline-compose.yaml", "embedded:claudine/sequence.yaml"]
+    );
 
     // claudine.yaml's payload, with its lifecycle, action, and linking imports.
     let (effective, found, valid) =
@@ -344,6 +365,28 @@ fn embedded_payloads_apply_without_disk_schemas() {
     let (_, found, valid) = judge_memory(&schemas, "prompt: hi\nhash: [1]");
     assert!(!valid);
     assert_eq!(top_level(found.into_iter().map(|(pointer, _)| pointer)), BTreeSet::from(["hash".to_string()]));
+
+    // sequence.yaml's payload, with its sequence-types and lifecycle imports:
+    // a sequence document with no other control is a Claudine control.
+    let (effective, found, valid) = judge_memory(
+        &schemas,
+        "sequence: [{ name: a, sequence: [{ name: b, group: { tasks: [{ name: c, shell: x }], loop: { until: done } } }] }]",
+    );
+    assert!(valid, "{found:?}");
+    for property in ["sequence", "template", "fail_fast"] {
+        assert_eq!(effective.origins[property].trigger_source(), embedded("sequence.yaml"), "{property}");
+        assert!(is_claudine_owned(&effective, property), "{property} is a Claudine control");
+    }
+    assert!(effective.dependencies().is_empty());
+    for (frontmatter, property) in [
+        ("sequence: [{ name: a, sequence: [{ name: b, sequence: [{ name: c, with: [1] }] }] }]", "sequence"),
+        ("sequence: [{ group: { tasks: [{ name: l }], execution: parallel } }]", "sequence"),
+        ("sequence: [a]\nfail_fast: true", "fail_fast"),
+    ] {
+        let (_, found, valid) = judge_memory(&schemas, frontmatter);
+        assert!(!valid, "`{frontmatter}` is rejected");
+        assert_eq!(top_level(found.into_iter().map(|(pointer, _)| pointer)), BTreeSet::from([property.to_string()]));
+    }
 
     bare.assert_untouched();
 }

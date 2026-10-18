@@ -130,20 +130,42 @@ fn a_root_reserved_key_cannot_be_authored_as_state() {
 #[test]
 fn a_task_field_meaningless_for_the_executable_is_rejected() {
     let workspace = CliProcessFixture::named("sequence-errors-cli");
-    // `params` are user setters applied to a *prompt* document; a shell task
-    // has no document to set them on, so silently dropping them would hide a
-    // real authoring mistake.
+    // `with` sets values on a *prompt* document; a shell task has no document
+    // to set them on, so silently dropping them would hide a real authoring
+    // mistake.
     let doc = write(
         &workspace,
         "field.md",
-        "---\nsequence:\n  - name: alpha\n    shell: echo hi\n    params:\n      topic: x\n---\nBody\n",
+        "---\nsequence:\n  - name: alpha\n    shell: echo hi\n    with:\n      topic: x\n---\nBody\n",
     );
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("`params`") && stderr.contains("not valid for a `shell` task"),
+        stderr.contains("`with`") && stderr.contains("not valid for a `shell` task"),
         "expected the invalid-task-field rejection; stderr:\n{stderr}"
     );
+}
+
+/// A prompt task's `with` shares every `with`'s shape errors, rendered at the
+/// task's own `with` in the sequence document before anything runs.
+#[test]
+fn a_malformed_task_with_is_the_with_family_error_at_the_task() {
+    let workspace = CliProcessFixture::named("sequence-errors-cli-with-shape");
+    for (name, with, says) in [
+        ("whole.md", "'{{ payload }}'", "whole-mapping"),
+        ("list.md", "[1]", "must be a mapping"),
+        ("null.md", "null", "must be a mapping"),
+        ("dynamic.md", "{ '{{ key }}': 1 }", "with` keys must be static"),
+    ] {
+        let doc = write(
+            &workspace,
+            name,
+            &format!("---\nsequence:\n  - name: beta\n    prompt: child.md\n    with: {with}\n---\nBody\n"),
+        );
+        let stderr = run_and_flatten(&workspace, &doc, &[]);
+        assert!(stderr.contains(says), "{name}: stderr:\n{stderr}");
+        assert!(stderr.contains("sequence[0].with"), "{name}: the error names the task's `with`; stderr:\n{stderr}");
+    }
 }
 
 // ============================================================================

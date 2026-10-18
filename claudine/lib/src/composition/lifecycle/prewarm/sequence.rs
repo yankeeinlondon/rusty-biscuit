@@ -6,7 +6,7 @@
 //! action runs. What preflight cannot know yet is left late:
 //!
 //! - every key a sequence injects (the per-step overlay, the caller's
-//!   setters, and a prompt task's `params`, judged per task, so one document
+//!   setters, and a prompt task's `with`, judged per task, so one document
 //!   reached by two tasks is classified against each task's inputs);
 //! - a frontmatter value still holding a template or shell expansion, since
 //!   resolving it would mean executing it;
@@ -104,7 +104,7 @@ impl Walk<'_> {
             PreflightAction::Prompt { path, .. } => {
                 if let Some(document) = self.graph.prompt_document(path) {
                     let mut injected = self.injected.clone();
-                    injected.extend(task.params.keys().cloned());
+                    injected.extend(task.with.keys().cloned());
                     let frontmatter = document
                         .markdown
                         .frontmatter()

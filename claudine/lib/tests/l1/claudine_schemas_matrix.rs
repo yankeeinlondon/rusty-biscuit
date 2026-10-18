@@ -556,6 +556,7 @@ pub(crate) fn walk_from(column_name: &str, syntax: Syntax, shipped: &[BundleFile
     let source = as_json(text_of(shipped, column.file));
     let mut failures = Vec::new();
     for (shape, expected) in SHAPES.iter().zip(column.outcomes) {
+        let expected = unclaimed_trigger(column, *shape).unwrap_or(expected);
         let mut document = source.clone();
         let duplicate = edit(&mut document, column.pointer, *shape);
         let edited = serialize(&document, syntax, duplicate.as_ref(), *shape == Shape::Trailing);
@@ -569,6 +570,18 @@ pub(crate) fn walk_from(column_name: &str, syntax: Syntax, shipped: &[BundleFile
         }
     }
     assert!(failures.is_empty(), "{column_name} ({syntax:?}, {origin:?}):\n{}", failures.join("\n"));
+}
+
+/// The outcome of a trigger file that a duplicate key or trailing garbage
+/// makes invalid YAML. Darkmatter claims an unparseable file as a trigger
+/// envelope only through a column-0 `kind: trigger-schema` line with a plain
+/// `kind` key, and this matrix writes every key quoted (`"kind":`, in both
+/// syntaxes), so the file is unclassified: its trigger is gone, the probes are
+/// unconstrained, and nothing is selected.
+fn unclaimed_trigger(column: &Column, shape: Shape) -> Option<Outcome> {
+    let unparseable = matches!(shape, Shape::Duplicate | Shape::Trailing);
+    (unparseable && CLAUDINE_TRIGGER_FILES.contains(&column.file))
+        .then_some(if column.selection { Selects(false, false) } else { UNCONSTRAINED })
 }
 
 macro_rules! matrix_tests {

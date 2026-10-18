@@ -153,11 +153,12 @@ source document's Markdown body. A step **with** one runs that instead of the
 body. A source with no body — a `kind: sequence` YAML file invoked directly —
 simply requires every step to carry an executable.
 
-Optional task fields: `name`, `params:`
-(user setters passed to a `prompt` document), `timeout:` (per shell command),
+Optional task fields: `name`, `with:`
+(frontmatter values for a `prompt` document; see
+[Task inputs](#task-inputs-with)), `timeout:` (per shell command),
 `operation:`, `flow:`, and `when:` (any task with an executable; see
 [Task guards](#task-guards-when)). A field that cannot affect the
-chosen executable — say `params:` on a `shell:` task — is a typed error, not a
+chosen executable — say `with:` on a `shell:` task — is a typed error, not a
 silent no-op.
 
 ```yaml
@@ -169,13 +170,57 @@ sequence:
       shell: just test
     - name: review
       prompt: "@prompts/review.md"
-      params:
+      with:
           topic: "{{ seq.topic }}"
     - name: build-phase
       group: build-group@my-catalog.yaml
 ---
 Work on {{ seq.topic }}.
 ```
+
+### Task inputs (`with:`)
+
+A prompt task's `with:` sets top-level frontmatter values on the document the
+task runs, for that run only. It is the same word, and the same rules, as the
+`with:` on `proxy`, `retry`, and `prep`
+([Passing values with `with:`](flow-control-reference.md#passing-values-with-with)).
+
+```yaml
+# sequences/review.md
+sequence:
+    - name: review
+      prompt: "@prompts/_reviews/feature-review.md"
+      with:
+          spec: "{{ spec }}"
+          notes: ./notes/review-hints.md   # sequences/notes/review-hints.md
+```
+
+- **When it evaluates.** At the task's turn, against the sequence's live
+  state (step values, `seq.*`, runtime `set` writes, `ctx.*`, `env.*`); a
+  group leg reads the group's start snapshot. A value that is exactly one
+  `{{ … }}` keeps the expression's type; text around a span makes a string.
+  The first value that fails stops the task before its document is composed
+  (`LifecycleWithEvaluationFailed`, located at the task's `with`).
+- **Precedence**, lowest first: the task document's own frontmatter, `with`,
+  the caller's setters (`agent=codex`, `--set`), runtime `set` writes, and
+  the generated `seq`/`group`/`loop` roots. A `with` key naming one of those
+  roots or a generated step field (`index`, `outputs`, …) is refused.
+- **Relative files resolve from the file that wrote them**: the sequence
+  document for an inline task, the `kind: task` or `kind: group` file for a
+  task written there. Only values the document's schema types as `file` are
+  resolved; other strings stay strings.
+- **Only on `prompt:` tasks.** On `shell:`, `side_effect:`, `group:`,
+  `task:`, or nested `sequence:` it is a typed error naming `with`. A
+  `task: file` reference cannot carry one beside it; put `with:` inside the
+  task file.
+- **Shape.** `with:` must be a mapping of static keys: `null`, a list, or a
+  scalar is `LifecycleWithNotMapping`, one whole-value
+  `with: "{{ payload }}"` is `LifecycleWithWholeMapping`, and a key holding
+  `{{ … }}` or `$( … )` is `LifecycleWithDynamicKey`. `with: {}` is the same
+  as no `with`.
+
+`params:` is not a task field. On a step it is ordinary step data, read as
+`seq.params` like any other key.
 
 ### Task guards (`when:`)
 
@@ -328,7 +373,9 @@ settles.
 Rejected with a typed error naming the offending key:
 
 - executable and task keys — `prompt`, `shell`, `side_effect`, `group`, `sequence`, `task`,
-  `setup`, `teardown`, `params`, `timeout`, `operation`, `flow`
+  `setup`, `teardown`, `with`, `when`, `timeout`, `operation`, `flow`. A step key
+  named `with` or `when` is always read as the task option, never as step
+  data; `params` is not on this list, so it is ordinary step data
 - generated state keys — `id`, `is_first`, `is_last`, `index`, `count`, `previous`, `next`, `outputs`, `run_id`
 - runtime roots — `seq`, `group`, `loop`
 
@@ -484,6 +531,22 @@ Claudine walks the **entire task graph**:
   document. Reference cycles are rejected with the complete active chain. Reusing a
   sequence later is legal, as is nesting distinct groups from the same catalog.
   Catalog entries appear as `catalog.json#group-name` in cycle diagnostics.
+- **Every task's provider is predicted** from its own `agent`, the same way its
+  launch chooses it: its prompt document's frontmatter, then its `with:`, then
+  the caller's setters. A sequence whose tasks all name providers runs with no
+  document-level `agent` and no review screen; a task with none (`null`
+  counts as none; an `agent: []` fails here, because an agent list needs at
+  least one entry) takes the
+  nearest enclosing sequence document's `agent`, and only a task left without
+  one opens the review screen (or fails the run without a terminal). A task
+  naming a provider that is not installed fails here, before any task launches,
+  even behind a false `when:`. A hint that reads a later value (`seq.outputs`,
+  `loop`, `group`, `current`, a key a lifecycle `set` writes, or a `$( … )`) is
+  *decided at launch* and checked when its task is prepared; an expression
+  error in a hint that reads none of those (an unknown function, say) fails
+  here like an uninstalled provider. Prediction runs
+  nothing and composes nothing. Each step's status line names the provider that
+  ran. See [`claudine sequence` → Choosing providers](../../cli/sequence.md#choosing-providers).
 - **Schemas validate and missing properties aggregate** across all steps and all
   referenced prompt documents, with one interactive collection pass.
 - **Every shell command is approved before the first step** — `shell:` tasks,
@@ -509,7 +572,7 @@ Claudine walks the **entire task graph**:
   A placeholder reading a value an earlier step produces — `seq.outputs`, `loop`,
   or, inside a group, `group` — is a **late value**: it is not read at
   preflight, and its command is approved only by its shape in any task. A step
-  value or a prompt task's `param` derived from one is late too. Every other
+  value or a prompt task's `with` entry derived from one is late too. Every other
   value a command reads (template values, caller values, `fm.*`,
   `ctx.*`, `env.*`) is read now, and a `null` fails preflight before step 1. A
   lifecycle global that never exists at approval (`err`, `timing`, `current`,
@@ -572,12 +635,19 @@ Claudine walks the **entire task graph**:
   that names a Git fact such as `ctx.staged_files` reads the same observation.
   Each step then observes Git state again when it runs, as its own composition
   run, so a step still sees what earlier steps changed.
-- **Provider and model resolve once**, producing a per-step target vector.
-  This plan reads the launch environment. When a step or group leg starts, it
+- **Provider and model resolve once per task**, producing one target per
+  provider-launching task. This plan reads the launch environment. When a step or group leg starts, it
   captures its own environment, and the model is selected again from it: a
   later step whose environment sets `MODEL=b` launches with `b`, even if the
-  launch environment named another model. The provider stands as planned,
-  because no environment variable selects it. A model given with `--model`, or
+  launch environment named another model. A predicted provider stands,
+  because no environment variable selects it, unless the task's prompt
+  document, read fresh at its turn, names a different `agent`. A task
+  *decided at launch* resolves its provider at its turn. Either way the
+  provider and model are chosen from the document's evaluated frontmatter
+  before its body renders, so the body's `env.AGENT`/`env.MODEL` and the
+  child's environment name what launches. An `agent` or `model` produced by
+  a frontmatter `$( … )` is chosen after that command runs, still before the
+  body renders, and each command runs once. A model given with `--model`, or
   confirmed on the review screen, also stands.
 
 A preflight failure aborts the sequence. Preparation
@@ -617,8 +687,8 @@ The lexical `seq` root travels beside these frontmatter layers.
 Layers 1 and 2 are authored, so their `{{ … }}` and `$( … )` spans are
 templates. Runtime mutations and lexical roots are produced by the run, so they reach composition as
 **data**: a value holding `{{ ctx.repo }}` stays that text, through arrays and
-objects too. Evaluated task `params` and group `variables` are data for the
-same reason.
+objects too. Evaluated task `with` values and group `variables` are data for
+the same reason.
 
 **Live-disk chaining.** Because each step re-reads the source, an
 inline-compose sequence's body write-backs — and any frontmatter an agent edits

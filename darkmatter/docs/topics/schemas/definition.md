@@ -2946,8 +2946,9 @@ condition.
 Effective precedence is caller baseline, matching trigger payloads (schema
 root order and then filename order), then the document's own `$schema`. Trigger
 payloads must be merge-compatible object schemas. Discovery is transactional:
-an invalid opted-in envelope rejects the scan, while unrelated YAML files are
-ignored. Library hosts opt in explicitly with
+an invalid opted-in envelope rejects the scan, while YAML files that do not
+[claim the envelope](#which-files-claim-the-envelope) are ignored, even when
+they are not valid YAML. Library hosts opt in explicitly with
 `DarkmatterSchemas::with_trigger_discovery`; `md compose` and
 `md schema validate` opt in for repository-backed files and accept
 `--no-trigger-schemas`. Use `md schema triggers <file>` to inspect the five
@@ -2963,6 +2964,65 @@ Schema roots (search order):
 4. SCHEMAS_DIR: unset
 5. home: /home/me/schemas (absent)
 ```
+
+#### Which files claim the envelope
+
+A schema root also holds ordinary YAML: payloads, named-type libraries, and
+files unrelated to Darkmatter. Only a file that **claims** the envelope can
+break trigger discovery, so a scratch file with a syntax error never disables
+the triggers beside it.
+
+- **Valid YAML** claims the envelope when its top-level mapping has
+  `kind: trigger-schema`, however the mapping is written (quoted keys and
+  JSON-style mappings included).
+- **YAML that does not parse** claims it only when a line declares it the
+  conventional way: `kind` at column 0, optional spaces, `:`, then exactly
+  `trigger-schema` (plain, single-quoted, or double-quoted), optionally
+  followed by whitespace and a `#` comment. Windows line endings and an
+  initial byte-order mark make no difference.
+
+| Line in a file that does not parse | Claims the envelope? |
+| --- | --- |
+| `kind: trigger-schema` | yes: a YAML error |
+| `kind: "trigger-schema"  # note` | yes: a YAML error |
+| `kind : 'trigger-schema'` | yes: a YAML error |
+| `  kind: trigger-schema` (indented, so nested) | no: ignored |
+| `kind: trigger-schema-extra` | no: ignored |
+| `# kind: trigger-schema` (commented out) | no: ignored |
+| `kind: trigger-schema` inside a multi-line quoted or block scalar | no: ignored |
+| `kind: schema`, or no `kind:` line at all | no: ignored |
+
+This fallback recognizes only a conventional block-mapping declaration. A
+malformed flow mapping (`{kind: trigger-schema, match: …`) or an unusual key
+spelling is ignored when it does not parse. The limit affects only how a
+broken file is recovered from; valid YAML is classified from its parsed
+mapping as above.
+
+A claimed file that is not valid YAML fails with an error that names the YAML
+problem and its position (`SchemaError::TriggerEnvelopeYaml`, inside
+`TriggerLoad` for a schema-root file and `EmbeddedTriggerLoad` for a bundle
+file), not the match grammar. With this `schemas/note-trigger.yaml`:
+
+```yaml
+kind: trigger-schema
+match:
+    kind: literal(note; required)
+description: Note: a colon here breaks YAML
+$schema: note.yaml
+```
+
+```text
+trigger-schema file `…/schemas/note-trigger.yaml` is not valid YAML at line 4, column 18:
+mapping values are not allowed in this context
+```
+
+The line and column are one-based, and the column counts characters. The
+hint that `md compose` and `md schema validate` print points at YAML syntax:
+a plain value that contains `: ` or ` #`, or starts with an indicator such
+as `@` or `*`, must be quoted (`description: "Note: a colon here is fine"`).
+DMLS publishes the same error on the trigger file; while the file is open,
+the diagnostic starts at the reported position. Errors in a file that parses (a bad `match`, or none at all)
+are still reported as trigger-schema match or envelope errors.
 
 #### Embedded trigger bundles
 

@@ -37,7 +37,7 @@ observe preparations through the `test-fixtures` seam
 Only phrases *ready early* are submitted: literal text, or reads of `fm`/bare
 properties, `ctx`, `env` with no function call and no `$(`/backtick
 (`prewarm/classify.rs`); late globals, sequence overlay keys, `--set` keys and
-task `params` wait for their event. A lifecycle `set` changes runtime state,
+task `with` keys wait for their event. A lifecycle `set` changes runtime state,
 not the reread, so a phrase reading a `set` key misses the cache (never wrong
 audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm).
 
@@ -332,7 +332,12 @@ explicitly inherit `lifecycle::cancellation::CancellationToken` scopes. Keep
 terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
 allows terminal actions to finish after cancellation while preserving repeat
 interrupt grace. Lifecycle shell exact/template dispatch shares task shells'
-owned process trees.
+owned process trees, except on Unix while Claudine holds its terminal's
+foreground (`task/shell.rs::holds_terminal_foreground`): an inherited-terminal
+child in a group of its own is stopped by `SIGTTIN`/`SIGTTOU` forever (a
+nested `claudine compose` from `shell: just commit` hung this way), so it runs
+in Claudine's group and only the direct child is terminated on cancellation.
+Regression: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`.
 Container events use
 `lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
 precedes static preflight, nested preparation is just in time. Retry preserves
@@ -344,17 +349,58 @@ through data overrides so canonical rereads do not fire container events again. 
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
 Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
-SimplifiedSchema inlines named types (no recursion), so `lifecycle.yaml`
-types two container levels (`task`/`group`, then `step-2`/`task-2`/`group-2`),
-each with `cancelled: cancelled-stack`; other container events stay
-shape-only, because every inlined full `stack` slows each validation
-(see [Schemas](topics/schemas.md#sequence-containers)). The
+The sequence trigger is `schemas/sequence.yaml` (matches any non-null
+`sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
+`fail_fast` is reported by name), and it is the only declaration of
+`sequence`: `claudine.yaml` no longer declares it, and a sequence document's
+events and `loop` are typed by `claudine.yaml`, which they select. The
+container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
+SimplifiedSchema inlines named types (no recursion), so they are unrolled to
+three typed levels (`task`/`group`, `-2`, `-3`; below that any list). Each
+level inlines the next twice (task `sequence:` and group `tasks:`), so a
+container field costs 4x per level: `cancelled: cancelled-stack` on levels
+1–2 only, the shared `loop` type on level 1 only (object below), other events
+shape-only. Fully typed container events and loops measured +3 s per
+document (release `md`) and doubling `sequence` in both triggers +0.34 s per
+process (debug); every trigger payload is loaded whenever any trigger loads,
+so this cost hits every Claudine launch (see
+[Schemas](topics/schemas.md#sequence-containers)). A group is closed but a
+union with a file reference, so `execution`/`max_paralel` are reported at
+`/…/group` with the value in the message; a top-level `sequence: 42` is
+coerced to the string arm (schema valid; the parser rejects it). The
 `cancelled-*` family is unrolled to the parser's `MAX_CONDITIONAL_DEPTH` (5)
 with no conditional at level 6; its conditionals use one
 `<pattern::^(?:then|else)$>` key, since literal `then`+`else` inline each body
 twice and grow the schema 2^n (measured 10x per validation at five levels).
 DMLS neither completes pattern keys nor resolves values below them, which is
 why `initialize-*` keeps literal keys and three typed levels.
+
+## Per-task provider selection
+
+A sequence has no single planned target. Preflight predicts each `prompt:`
+task's provider from its own `agent` (`PreflightTask.provider`, computed in
+`composition/sequence/preflight/providers.rs` without running or composing
+anything) and keys every task by its graph `TaskIdentity`. The CLI
+(`wrap/sequence/providers.rs`) turns predictions into per-task targets
+(own / enclosing-document fallback / decided at launch / unresolved), fails an
+unusable static hint with `SequenceTaskProviderSelection` before any task
+starts, and gates only on unresolved tasks (review on a terminal, else
+`AgentResolutionFailed`). `WrapperPromptRunner::document_target` prepares
+each task under its own target; `launch_target` mirrors the rebuild's rule over
+the document's effective hints, and `jit::compose_step_selecting` calls it
+twice: on a frontmatter-only read (`composition::read_selection_hints`, no
+shells) so frontmatter values see the choice, and inside the one full
+preparation (`prepare_{direct,inline}_with_schema_selecting` →
+`ResolvedIdentitySelector`, over Darkmatter's
+`Markdown::compose_with_frontmatter_hook`) after frontmatter `$(…)` runs and
+before the body renders, so the prompt's `env.AGENT`/`env.MODEL`, the child
+environment, and the spawn agree with each command run once. The selected
+overrides replace `CallerInputLayers.env_overrides`, so a retry/resume reread
+keeps them. The launch rebuild
+(`select_rebuilt_provider`) stays authoritative, and status lines read the
+spawned attempts from the run's `LaunchLog`, never the plan. Review rows map
+back by identity; read-only rows use `CellValue::StaticText` in an editable
+`InputTable` column. User docs: [`claudine sequence` → Choosing providers](../../../claudine/docs/cli/sequence.md#choosing-providers).
 
 ## Lexical sequence bindings
 
@@ -497,7 +543,7 @@ of a topic doc.
 
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
-- [Schemas](topics/schemas.md) — the five `claudine/schemas/` files, event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
+- [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
 - [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards

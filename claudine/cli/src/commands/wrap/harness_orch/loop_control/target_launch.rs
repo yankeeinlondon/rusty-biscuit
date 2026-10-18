@@ -210,9 +210,9 @@ pub(crate) struct LaunchRebuildIntent {
     /// document's own `model:` names one and the rebuild keeps
     /// [`Self::fallback_provider`] — the model counterpart of that field.
     ///
-    /// A sequence step carries its planned target's model here (a review-screen
-    /// choice, or the model planned from the sequence document), which the
-    /// launched document cannot re-derive. It must never hold a model the
+    /// A sequence task carries its planned target's model here (a review-screen
+    /// choice, or the model preflight planned from the task's hints or the
+    /// sequence document's), which the launched document cannot re-derive. It must never hold a model the
     /// launched document's own frontmatter chose: that one is re-derived from
     /// each refreshed read, so a retry after `model:` is removed drops it.
     pub(crate) fallback_model: Option<(String, ModelResolutionReason)>,
@@ -640,10 +640,10 @@ fn resolve_launch_model(
 /// The [`LaunchRebuildIntent::fallback_model`] for a composition launching
 /// under `target`.
 ///
-/// A sequence step's target was planned from the review screen or from the
-/// sequence document rather than the document the step launches (its model
-/// re-selected under the step's own map when the step entered), so its model
-/// is carried whatever its reason. Outside a sequence
+/// A sequence task's target was planned before the document it launches was
+/// read (from the review screen, or by preflight from the task's hints or the
+/// sequence document's), its model re-selected under the task's own map when
+/// it entered, so its model is carried whatever its reason. Outside a sequence
 /// the target was resolved from the launched document itself, so a model its
 /// frontmatter chose is left to each refreshed read; a model from `--model`
 /// or the environment is carried, which the rebuild would re-derive

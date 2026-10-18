@@ -174,8 +174,10 @@ impl TaskExecution<'_> {
                                     task.action = PreflightAction::Prompt {
                                         path: sequence.origin_path.clone(), reference: sequence.origin_path.display().to_string(),
                                     };
-                                    task.params.clear(); task.setup = None; task.teardown = None;
+                                    task.with.clear(); task.setup = None; task.teardown = None;
                                     task.shell_sites.clear(); task.preflight_approvals.clear();
+                                    task.identity = self.task.identity.sequence_child(index);
+                                    task.provider = None;
                                     task
                                 };
                                 &body_task
@@ -474,7 +476,7 @@ impl TaskExecution<'_> {
             }
             let mut task = self.task.clone();
             task.action = PreflightAction::Prompt { path: path.clone(), reference: target.into() };
-            task.params.clear(); task.setup = None; task.teardown = None;
+            task.with.clear(); task.setup = None; task.teardown = None;
             let execution = TaskExecution { task: &task, ..*self };
             let request = execution.prompt_request(&path, target)?;
             self.prompt.validate(&request)?;

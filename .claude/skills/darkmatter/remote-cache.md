@@ -23,6 +23,10 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   path and creates directories inside the write that needs them. A missing root
   stays missing and an existing one stays byte-identical unless an artifact is
   written. Never add eager `create_dir_all` or a platform-cache fallback.
+  These no-fallback rules govern the remote transport cache only. The DMLS
+  index store (`dmls/src/index_store/`) deliberately differs: it creates its
+  directory under `biscuit_file::user_cache_dir()` (or `DMLS_CACHE_DIR`) and
+  falls back to memory whenever the store is unusable (see `dmls.md`).
 - Freshness is controlled by `RemoteReadConfig` and the CLI remote freshness,
   refresh, and TTL flags. Response `Cache-Control` outranks all of them:
   `no-store` is never written (an on-disk `no-store` entry is purged), and

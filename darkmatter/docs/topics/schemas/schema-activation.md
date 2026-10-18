@@ -39,6 +39,25 @@ background service to monitor later changes.
 This is the initial scheduling policy. Performance tuning may adjust scheduling
 later; no particular polling interval is part of the authoring contract.
 
+## When DMLS Discovers Rules
+
+DMLS discovers trigger rules once per document and reuses them; it does not
+search the schema roots again for each request. At startup, before it lists
+the workspace's files, it prepares a trigger registry for each workspace
+folder. Every other document gets its registry the first time it is
+analyzed. The schema-root files are read once and shared by every registry
+whose roots include them, so a document inside a package or package area
+reads only the roots no earlier registry covered, such as that package's
+`schemas/`. A document outside every workspace folder has no trigger
+registry.
+
+A cached registry is served without reading the disk until one of its inputs
+changes: a watched change to a schema-root file or to a file a trigger
+depends on, a save of any YAML file, a server-side rescan, a configuration
+change, or a package-manifest change. The registry is rebuilt on the next
+request that needs it. [DMLS Indexing](../../lsp/indexing.md) covers the
+registry's scopes and its log lines.
+
 ## Gathering Facts Before Matching
 
 Darkmatter first parses the rules and identifies the facts their conditions
@@ -98,11 +117,16 @@ When a failure prevents Darkmatter from deciding whether a schema applies, the
 consumer reports incomplete validation and identifies the source and cause.
 Checks that depend on that schema cannot be reported as current. Independent
 checks continue; DMLS likewise withholds dependent hover and completion data
-without falling back to old definitions. A successful refresh restores those
+without falling back to old definitions. The one exception is a trigger file
+that fails to load: DMLS reports the failure and keeps serving the last
+registry that loaded for documents where that file is not shadowed, so
+completion and hover do not flap mid-edit. A successful refresh restores those
 checks and clears the associated failure.
 
-Failure scope follows discovery scope. A broken automatically discovered package
-rule cannot affect sibling packages. A rule in the `SCHEMAS_DIR` folder or
+Failure scope follows discovery scope. Only a file that
+[claims the trigger envelope](./definition.md#which-files-claim-the-envelope)
+can fail discovery; other YAML in a schema root is ignored. A broken
+automatically discovered package rule cannot affect sibling packages. A rule in the `SCHEMAS_DIR` folder or
 `~/schemas` is in the schema roots of every document Darkmatter checks, in any
 repository, so a broken one affects all of them until it is fixed.
 Intentionally removing an optional rule is different from losing an import

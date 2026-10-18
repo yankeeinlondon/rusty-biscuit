@@ -74,7 +74,7 @@ pub use coordinator::{
 };
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
-    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource,
+    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, SequenceTaskProviderProblem,
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
     LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
     SequenceExpressionCause,
@@ -133,6 +133,7 @@ pub use prepare::{
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
     approve_document_shell, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
     prepare_bootstrap, prepare_direct, prepare_document, prepare_inline, prepare_loop_seed, prepare_sequence_probe,
+    read_selection_hints, replace_env_overrides, ResolvedIdentitySelector,
 };
 #[cfg(test)]
 pub(crate) use resolve::resolve_fixture_source;
@@ -154,8 +155,9 @@ pub use schema::{
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
     description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
     pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,
-    prepare_direct_with_schema,
-    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema, render_optional_line,
+    prepare_direct_with_schema, prepare_direct_with_schema_selecting,
+    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema,
+    prepare_inline_with_schema_selecting, render_optional_line,
     render_required_line, schema_status_report_prose,
 };
 pub use select::{
@@ -184,8 +186,8 @@ pub use sequence::{
     build_step_overlay, resolve_sequence_plan, resolve_sequence_plan_with,
 };
 pub use types::{
-    AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
-    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
+    AgentHint, AnchoredOverlay, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
+    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan, LaunchLog,
     InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, LoopLocation,
     LoopOwner, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,

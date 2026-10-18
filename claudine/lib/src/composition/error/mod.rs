@@ -289,6 +289,27 @@ pub enum CompositionError {
         installed: Vec<Provider>,
     },
 
+    /// A sequence task's own provider hint can never select a provider, found
+    /// at preflight before any task launched or, for a hint decided at
+    /// launch, when the task's document is prepared, before it spawns.
+    #[error("{task} cannot select a provider from `{property}` in {}: {problem}", hint_path.display())]
+    SequenceTaskProviderSelection {
+        /// A label locating the task.
+        task: String,
+        /// The document that authored the task.
+        task_path: PathBuf,
+        /// The file that wrote the hint: the task's prompt document, the file
+        /// whose `with` set it, or the sequence for a caller setter.
+        hint_path: PathBuf,
+        /// The hint's source-rooted property (`agent`, `tasks[1].with.agent`).
+        property: String,
+        /// The enclosing containers, outermost first (`group \`review\``).
+        containers: Vec<String>,
+        /// Why no provider can be selected. Boxed: the classified state it
+        /// may carry would otherwise widen every `CompositionError`.
+        problem: Box<SequenceTaskProviderProblem>,
+    },
+
     /// The `agent` frontmatter property is not a valid type.
     #[error("frontmatter `agent` must be a string or array of strings, got {0}")]
     AgentHintWrongType(String),
@@ -928,16 +949,20 @@ pub enum CompositionError {
         param: String,
     },
 
-    /// A `proxy.with` or `retry.with` overlay was authored with something other
-    /// than a YAML mapping.
+    /// A `with:` — a prompt task's, or a `proxy`, `retry`, or `prep`
+    /// directive's — was authored with something other than a YAML mapping
+    /// (including `null`).
     #[error(
-        "`{property}.{path}` must be a mapping, got {actual} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        "`{at}` must be a mapping, got {actual} ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path),
+        at = with_property_path(property, path)
     )]
     LifecycleWithNotMapping {
-        /// The prompt file whose lifecycle frontmatter held the action.
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// The authored path of the action (e.g. `failure[0].retry`).
+        /// The authored path of the `with`'s owner: the action (e.g.
+        /// `failure[0].retry`) or the task (`sequence[1]`; empty for the task
+        /// an external `kind: task` file is).
         property: String,
         /// The `with`-rooted path below the action (`with`). Joined to
         /// `property` for the rendered property path.
@@ -952,13 +977,14 @@ pub enum CompositionError {
     /// Named out-of-scope for v1: authors write the mapping explicitly and may
     /// inject typed object or array values at individual keys.
     #[error(
-        "`{property}.{path}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        "`{at}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path),
+        at = with_property_path(property, path)
     )]
     LifecycleWithWholeMapping {
-        /// The prompt file whose lifecycle frontmatter held the action.
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// The authored path of the action.
+        /// The authored path of the `with`'s owner (action or task).
         property: String,
         /// The `with`-rooted path below the action.
         path: String,
@@ -969,13 +995,14 @@ pub enum CompositionError {
     /// A `with` overlay key carries an interpolation span. Keys name target
     /// frontmatter properties and are never interpolated.
     #[error(
-        "`{property}.{path}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        "`{at}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path),
+        at = with_property_path(property, path)
     )]
     LifecycleWithDynamicKey {
-        /// The prompt file whose lifecycle frontmatter held the action.
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// The authored path of the action.
+        /// The authored path of the `with`'s owner (action or task).
         property: String,
         /// The `with`-rooted path below the action. It gains a trailing
         /// `.{key}` segment only when the key is a safe path segment — a
@@ -986,30 +1013,32 @@ pub enum CompositionError {
         key: String,
     },
 
-    /// A `with` overlay value could not be resolved at event time.
+    /// A `with` value could not be resolved: a directive's when it fired, a
+    /// prompt task's at the task's turn.
     ///
     /// The message carries the underlying expression-layer reason. Neither it
     /// nor any other field echoes a resolved overlay value: an overlay may
     /// carry secrets, so a diagnostic names properties, not contents.
     #[error(
-        "`{property}.{path}` could not be resolved for the `{verb}` to `{target}`: {message} \
-         ({source_path})",
+        "`{at}` could not be resolved for {purpose}: {message} ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path),
-        verb = overlay_directive(property)
+        at = with_property_path(property, path),
+        purpose = with_purpose(property, target)
     )]
     LifecycleWithEvaluationFailed {
-        /// The prompt file whose lifecycle frontmatter held the action.
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// The authored path of the action that fired (e.g. `failure[0].proxy`).
-        /// Its last segment is the directive that carried the overlay
-        /// ([`overlay_directive`]); the verb is not stored separately so the
-        /// error enum stays within its size budget.
+        /// The authored path of the `with`'s owner: the action that fired
+        /// (e.g. `failure[0].proxy`), whose last segment is the directive
+        /// ([`overlay_directive`]; the verb is not stored separately so the
+        /// error enum stays within its size budget), or the prompt task
+        /// (`sequence[1]`; empty for an external `kind: task` file).
         property: String,
         /// The failing path below the action, carried down to the exact nested
         /// value (e.g. `with.metadata.area`).
         path: String,
         /// The document the overlay was built for: the evaluated proxy target,
-        /// or the current document for `retry`.
+        /// the current document for `retry`, or the task's prompt reference.
         target: String,
         /// The expression-layer reason.
         message: String,
@@ -1020,10 +1049,10 @@ pub enum CompositionError {
 
     /// A `with` overlay was authored on an action that does not take one.
     ///
-    /// Only `proxy` and `retry` accept `with`.
+    /// Only `proxy`, `retry`, and `prep` accept `with`.
     #[error(
         "lifecycle action `{verb}` in `{property}` does not accept a `with` overlay; \
-         `with` is only valid on `proxy` and `retry` ({source_path})",
+         `with` is only valid on `proxy`, `retry`, and `prep` ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleWithUnsupported {
@@ -1991,7 +2020,8 @@ pub enum CompositionError {
     #[error(
         "shell command `{command}` in {task} references `{root}`, which is not available to a \
          sequence shell command; shell commands are approved before the sequence starts, so \
-         they may read early-binding values (`state`, `params`, `fm.*`, `ctx.*`, `env.*`) and \
+         they may read early-binding values (step values, a task's `with`, `fm.*`, `ctx.*`, \
+         `env.*`) and \
          the values earlier steps produce (`outputs`, `loop`, and `group` inside a group)"
     )]
     SequenceShellLateBinding {
@@ -2225,15 +2255,16 @@ pub enum CompositionError {
         problem: String,
     },
 
-    /// A task parameter targets a reserved key.
+    /// A task `with:` key targets a reserved key: a generated step field or
+    /// one of the executor-owned `seq`, `group`, and `loop` views.
     #[error(
-        "parameter `{key}` in {task} targets a reserved key; \
-         `seq`, `group`, and `loop` are executor-owned views"
+        "`with.{key}` in {task} targets a reserved key; generated step fields and \
+         `seq`, `group`, and `loop` are executor-owned"
     )]
-    SequenceTaskParamReserved {
+    SequenceTaskWithReserved {
         /// A label locating the task.
         task: String,
-        /// The refused parameter name.
+        /// The refused `with` key.
         key: String,
     },
 
@@ -2242,7 +2273,7 @@ pub enum CompositionError {
     SequenceTaskValueResolution {
         /// A label locating the task.
         task: String,
-        /// The task field being evaluated (`params.topic`, `timeout`).
+        /// The task field being evaluated (`timeout`, `variables.topic`).
         field: String,
         /// The underlying evaluation failure.
         message: String,
@@ -3722,8 +3753,10 @@ impl CompositionError {
             CompositionError::LifecycleWithNotMapping { property, path, .. }
             | CompositionError::LifecycleWithWholeMapping { property, path, .. }
             | CompositionError::LifecycleWithDynamicKey { property, path, .. }
-            | CompositionError::LifecycleWithEvaluationFailed { property, path, .. }
-            | CompositionError::LifecycleSetPositionalRemoved { property, path, .. }
+            | CompositionError::LifecycleWithEvaluationFailed { property, path, .. } => {
+                Some(FrontmatterHighlight::Property(with_property_path(property, path)))
+            }
+            CompositionError::LifecycleSetPositionalRemoved { property, path, .. }
             | CompositionError::LifecycleSetNotMapping { property, path, .. }
             | CompositionError::LifecycleSetInvalidKey { property, path, .. } => {
                 Some(FrontmatterHighlight::Property(format!("{property}.{path}")))
@@ -3873,9 +3906,74 @@ enum FrontmatterHighlight {
 #[cfg(test)]
 mod tests;
 
-/// The directive (`proxy` or `retry`) whose `with` overlay a
-/// [`CompositionError::LifecycleWithEvaluationFailed`] names: the last
-/// segment of the action's authored path.
-pub(crate) fn overlay_directive(property: &str) -> &str {
-    property.rsplit('.').next().unwrap_or(property)
+/// The directive (`proxy`, `retry`, or `prep`) whose `with` overlay a
+/// `LifecycleWith*` error names — the last segment of the action's authored
+/// path — or `None` when the owner is a prompt task.
+pub(crate) fn overlay_directive(property: &str) -> Option<&str> {
+    property.rsplit('.').next().filter(|verb| matches!(*verb, "proxy" | "retry" | "prep"))
+}
+
+/// The rendered path of a `LifecycleWith*` error: `path` below its owner,
+/// or `path` alone when the owner is the external task file itself.
+pub(crate) fn with_property_path(property: &str, path: &str) -> String {
+    if property.is_empty() { path.to_string() } else { format!("{property}.{path}") }
+}
+
+/// What a `with` was resolved for, in a sentence: "the `proxy` to `x.md`", or
+/// "the task running `x.md`".
+pub(crate) fn with_purpose(property: &str, target: &str) -> String {
+    match overlay_directive(property) {
+        Some(verb) => format!("the `{verb}` to `{target}`"),
+        None => format!("the task running `{target}`"),
+    }
+}
+
+/// Why a sequence task's provider hint selects no provider; see
+/// [`CompositionError::SequenceTaskProviderSelection`].
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum SequenceTaskProviderProblem {
+    /// The canonical non-interactive rule cannot select from the hint: an
+    /// unknown name, a provider that is not installed, or a list with no
+    /// single installed member.
+    #[error("{}", unresolvable_reason(state))]
+    Unresolvable {
+        /// The classified hint.
+        state: super::types::AgentResolutionState,
+        /// The installed providers, for the diagnostic list.
+        installed: Vec<Provider>,
+    },
+    /// The hint is not a string or a list of strings.
+    #[error("`{key}` must be a string or a list of strings, got {found}")]
+    WrongType {
+        /// `agent` or `model`.
+        key: &'static str,
+        /// The JSON type it has (`number`, an array member's `boolean`).
+        found: String,
+    },
+    /// An otherwise static hint failed to evaluate.
+    #[error("it could not be evaluated: {0}")]
+    Evaluation(#[source] super::lifecycle_context::LifecycleCause),
+    /// The hint reads the provider identity it selects.
+    #[error("it reads `{0}`, which is the identity it selects")]
+    Circular(String),
+    /// A document's `agent` is an empty list, which the launch schema rejects.
+    #[error("an `agent` list needs at least one entry")]
+    EmptyAgentList,
+}
+
+fn unresolvable_reason(state: &super::types::AgentResolutionState) -> String {
+    use super::types::AgentResolutionState as State;
+    match state {
+        State::NoAgent => "it names no provider".into(),
+        State::SingleInvalid { hint } => format!("`{hint}` is not a known provider"),
+        State::SingleNotInstalled { provider } => format!("{provider} is not installed"),
+        State::ZeroInstalledList { .. } => "no provider it lists is installed".into(),
+        State::ListMultipleInstalled { installed, .. } => format!(
+            "it lists {} installed providers and nothing chooses between them without a terminal",
+            installed.len()
+        ),
+        State::Selected { provider } | State::ListOneInstalled { selected: provider, .. } => {
+            format!("{provider} was selected")
+        }
+    }
 }

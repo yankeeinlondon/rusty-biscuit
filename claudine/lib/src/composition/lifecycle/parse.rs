@@ -1132,53 +1132,14 @@ fn parse_with(
     verb: &str,
 ) -> Result<WithOverlay, CompositionError> {
     let property = action.to_string();
-    let Some(map) = value.as_object() else {
-        // A lone whole-value span reads as "supply the entire mapping from one
-        // expression". That is a named non-goal rather than a type error, so
-        // it gets its own actionable diagnostic instead of the generic one.
-        if let serde_json::Value::String(raw) = value {
-            let trimmed = raw.trim();
-            let spans = ExpressionFinder::find_all_plain(trimmed);
-            if let Some(span) = spans.first()
-                && spans.len() == 1
-                && span.start == 0
-                && span.end == trimmed.len()
-            {
-                return Err(CompositionError::LifecycleWithWholeMapping {
-                    source_path: source_file.to_path_buf(),
-                    property,
-                    path: "with".to_string(),
-                    raw: raw.clone(),
-                });
-            }
-        }
-        return Err(CompositionError::LifecycleWithNotMapping {
-            source_path: source_file.to_path_buf(),
-            property,
-            path: "with".to_string(),
-            actual: json_type_name(value).to_string(),
-        });
-    };
-
+    let map = with_mapping_shape(value, source_file, &property)?;
     let authored: IndexMap<String, serde_json::Value> = map
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
     WithOverlay::new(authored).map_err(|err| match err {
-        WithOverlayError::DynamicKey(key) => CompositionError::LifecycleWithDynamicKey {
-            source_path: source_file.to_path_buf(),
-            // A dynamic key has no honest dotted representation — `with.{{ x }}`
-            // would name a property that does not exist — so the path stays
-            // rooted at `with` and the key travels in its own field.
-            path: if is_safe_path_segment(&key) {
-                format!("with.{key}")
-            } else {
-                "with".to_string()
-            },
-            property: property.clone(),
-            key,
-        },
+        WithOverlayError::DynamicKey(key) => with_dynamic_key_error(source_file, &property, &key),
         // A value that fails the shared action-value rule is the same authoring
         // fault as a bad value on any other parameter, so it reuses that
         // diagnostic rather than adding a `with`-specific variant.
@@ -1193,6 +1154,75 @@ fn parse_with(
             source: None,
         },
     })
+}
+
+/// Check the shape every `with:` shares — a task's and a `proxy`, `retry`, or
+/// `prep` directive's — and return its mapping.
+///
+/// `property` is the owner's authored path (the directive, or the task; empty
+/// for the task an external `kind: task` file is). A lone whole-value span is
+/// [`CompositionError::LifecycleWithWholeMapping`], checked before the generic
+/// [`CompositionError::LifecycleWithNotMapping`] (which `null` also raises), and
+/// a key carrying a `{{ … }}` or `$( … )` span is
+/// [`CompositionError::LifecycleWithDynamicKey`]. Values are not judged here.
+pub(crate) fn with_mapping_shape<'a>(
+    value: &'a serde_json::Value,
+    source_file: &Path,
+    property: &str,
+) -> Result<&'a serde_json::Map<String, serde_json::Value>, CompositionError> {
+    let Some(map) = value.as_object() else {
+        // A lone whole-value span reads as "supply the entire mapping from one
+        // expression". That is a named non-goal rather than a type error, so
+        // it gets its own actionable diagnostic instead of the generic one.
+        if let serde_json::Value::String(raw) = value {
+            let trimmed = raw.trim();
+            let spans = ExpressionFinder::find_all_plain(trimmed);
+            if let Some(span) = spans.first()
+                && spans.len() == 1
+                && span.start == 0
+                && span.end == trimmed.len()
+            {
+                return Err(CompositionError::LifecycleWithWholeMapping {
+                    source_path: source_file.to_path_buf(),
+                    property: property.to_string(),
+                    path: "with".to_string(),
+                    raw: raw.clone(),
+                });
+            }
+        }
+        return Err(CompositionError::LifecycleWithNotMapping {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            path: "with".to_string(),
+            actual: json_type_name(value).to_string(),
+        });
+    };
+    if let Some(key) = map.keys().find(|key| is_dynamic_with_key(key)) {
+        return Err(with_dynamic_key_error(source_file, property, key));
+    }
+    Ok(map)
+}
+
+/// Whether a `with:` key carries an interpolation span. Keys name target
+/// frontmatter properties and are never interpolated.
+pub(crate) fn is_dynamic_with_key(key: &str) -> bool {
+    !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(")
+}
+
+fn with_dynamic_key_error(source_file: &Path, property: &str, key: &str) -> CompositionError {
+    CompositionError::LifecycleWithDynamicKey {
+        source_path: source_file.to_path_buf(),
+        // A dynamic key has no honest dotted representation — `with.{{ x }}`
+        // would name a property that does not exist — so the path stays
+        // rooted at `with` and the key travels in its own field.
+        path: if is_safe_path_segment(key) {
+            format!("with.{key}")
+        } else {
+            "with".to_string()
+        },
+        property: property.to_string(),
+        key: key.to_string(),
+    }
 }
 
 /// Whether `key` can be appended to a dotted property path without inventing

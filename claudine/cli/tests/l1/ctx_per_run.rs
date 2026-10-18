@@ -883,7 +883,10 @@ sequence:
             - { name: stage, shell: 'git add a.txt' }
 ---
 "#);
-    let output = fixture.command().args(["sequence", "--claude", "--yolo", "--silent"])
+    // The `stage` shell runs `git`; Git for Windows is outside the minimal
+    // system set.
+    let output = fixture.command_builder().host_path().build()
+        .args(["sequence", "--claude", "--yolo", "--silent"])
         .arg(&source).assert().success().get_output().clone();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout.lines().collect::<Vec<_>>(), ["root-start 0", "group-start 0", "leg-start 0",

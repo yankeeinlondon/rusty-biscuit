@@ -2107,6 +2107,7 @@ fn execute_attempt_phase(
     // subsequent failures as `Failure` rather than `Blocked`.
     if child_spawned {
         lifecycle_guard.mark_provider_launched();
+        prompt_state.launched_providers.push(provider);
     }
     // `execute_harness_attempt` can fail before spawning a child (e.g. a
     // malformed runaway `exit_expressions` regex in

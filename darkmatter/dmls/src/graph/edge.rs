@@ -63,7 +63,7 @@ impl EdgeKind {
 pub enum EdgeTarget {
     /// A resolved node in this snapshot.
     Node(NodeId),
-    /// An existing file outside the indexed documents, as the shared file
+    /// An existing file outside the graph's documents, as the shared file
     /// resolver found it. It has no nodes, so its headings are unknown.
     File(PathBuf),
     /// An unresolved raw target string (broken link, unmatched wiki form, …).
