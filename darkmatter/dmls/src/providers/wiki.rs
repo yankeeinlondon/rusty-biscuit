@@ -191,6 +191,9 @@ fn hover_value(graph: &WorkspaceGraph, payload: &WikiLinkPayload) -> String {
         WikiResolution::Unresolved => {
             format!("⚠️ Unresolved wiki target: `[[{}]]`", payload.target)
         }
+        // Only a request-scoped graph over part of the universe yields this,
+        // and no hover is served from one.
+        WikiResolution::OutsideGraph => format!("Wiki target: `[[{}]]`", payload.target),
         WikiResolution::EmptyTarget => "⚠️ Empty wiki target".to_string(),
         WikiResolution::EmptyHeading(_) => "Wiki heading target is empty".to_string(),
         WikiResolution::Unsupported => {
@@ -287,18 +290,23 @@ fn file_completions(
     offset: usize,
     partial: &str,
 ) -> Vec<CompletionItem> {
-    let wiki_docs = ctx.graph.wiki_docs();
-    let source = doc_id.0 as usize;
+    let wiki_docs = ctx.graph.wiki_universe().docs();
+    let Some(source) = ctx.graph.wiki_slot(doc_id) else {
+        return Vec::new();
+    };
     let start = offset - partial.len();
     let Some(range) = ctx.source_map.byte_range_to_lsp(start..offset) else {
         return Vec::new();
     };
     let mut out = Vec::new();
     for (index, record) in ctx.graph.documents().iter().enumerate() {
-        if index == source || record.dependency {
+        if index == doc_id.0 as usize || record.dependency {
             continue;
         }
-        let insertion = insertion_path(&wiki_docs, index, source, ctx.config.wiki.path_style);
+        let Some(target) = ctx.graph.wiki_slot(DocumentId(index as u32)) else {
+            continue;
+        };
+        let insertion = insertion_path(wiki_docs, target, source, ctx.config.wiki.path_style);
         if !partial.is_empty() && !insertion.starts_with(partial) {
             continue;
         }
@@ -324,8 +332,9 @@ fn heading_target_doc(ctx: &DocumentContext, doc_id: DocumentId, target: &str) -
     }
     match wiki::parse_file_target(target) {
         ParseOutcome::Target(parsed) => {
-            match wiki::resolve_file(&parsed, &ctx.graph.wiki_docs(), doc_id.0 as usize) {
-                Match::One(index) => Some(DocumentId(index as u32)),
+            let source = ctx.graph.wiki_slot(doc_id)?;
+            match wiki::resolve_file(&parsed, ctx.graph.wiki_universe().docs(), source) {
+                Match::One(slot) => ctx.graph.slot_document(slot),
                 _ => None,
             }
         }
@@ -420,7 +429,7 @@ fn push_resolution_diagnostic(
     out: &mut Vec<Diagnostic>,
 ) {
     let (severity, code_value, message, related) = match &payload.resolution {
-        WikiResolution::Resolved(_) => return,
+        WikiResolution::Resolved(_) | WikiResolution::OutsideGraph => return,
         WikiResolution::Unresolved => (
             DiagnosticSeverity::WARNING,
             code::WIKI_UNRESOLVED_TARGET,

@@ -265,8 +265,13 @@ pub enum WikiResolution {
     /// The file resolved but the `#heading` fragment matched no heading; the
     /// node is the resolved file's root so navigation still works.
     HeadingMissing(NodeId),
-    /// Multiple file candidates (document roots), in stable display order.
+    /// More than one file in the wiki universe matched. Lists the candidates
+    /// that are documents of this snapshot (their roots), in stable display
+    /// order; a snapshot over part of the universe may list fewer than two.
     Ambiguous(Vec<NodeId>),
+    /// Exactly one file in the wiki universe matched, and it is not a
+    /// document of this snapshot (a request-scoped graph over a few files).
+    OutsideGraph,
     /// No file candidate matched.
     Unresolved,
     /// `[[]]` / `[[|alias]]` — an empty target.

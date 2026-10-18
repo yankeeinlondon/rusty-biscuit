@@ -632,7 +632,7 @@ mod tests {
         let path = Path::new("/t.md");
         let source_map =
             SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
-        let graph = WorkspaceGraph::build_with_roots(&BTreeMap::new(), 0, &[], &crate::graph::NoContexts);
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 0, &crate::graph::NoContexts);
         let config = DmlsConfig::default();
         let profile = ClientProfile {
             client_name: None,

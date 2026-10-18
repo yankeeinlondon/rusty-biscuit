@@ -19,6 +19,7 @@ pub mod corpus;
 pub mod diagnostics;
 mod full_index;
 pub mod graph;
+pub mod index_store;
 pub mod log_capture;
 pub mod overlay;
 pub mod providers;

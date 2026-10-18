@@ -41,6 +41,7 @@ use dmls::capabilities::ClientProfile;
 use dmls::config::ConfigState;
 use dmls::context::RepositoryContexts;
 use dmls::graph::{WorkspaceGraph, index_document};
+use dmls::wiki::WikiUniverse;
 use dmls::providers::rename::{RenameEnv, RenameError};
 use dmls::providers::{DocumentContext, ProviderRegistry};
 use dmls::source_map::{PositionEncoding, SourceMap};
@@ -48,7 +49,7 @@ use dmls::workspace::{
     DocumentStore, discover_workspace, file_path_to_uri, resolve_wiki_roots, uri_to_file_path,
 };
 use lsp_types::{
-    DocumentChangeOperation, DocumentChanges, FileRename, InitializeParams, Location, OneOf,
+    DocumentChangeOperation, DocumentChanges, FileRename, InitializeParams, Location, NumberOrString, OneOf,
     Position, Range, SymbolKind, TextEdit, Uri, WorkspaceEdit, WorkspaceSymbol,
 };
 
@@ -202,6 +203,16 @@ pub struct Oracle {
     graph: WorkspaceGraph,
 }
 
+/// Which files a [scoped](Oracle::scoped) graph matches wiki links against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UniverseScope {
+    /// Every listed file, as the index store supplies it.
+    FileList,
+    /// Only the scoped documents: what a graph derived for itself before the
+    /// universe was external. A negative control.
+    Documents,
+}
+
 impl Oracle {
     /// Lists, reads, and parses every Markdown file under `roots`, then
     /// builds the graph once.
@@ -214,20 +225,60 @@ impl Oracle {
     /// When the file list is incomplete or a listed file cannot be read: an
     /// oracle over part of the corpus would answer wrongly.
     pub fn build(roots: &[PathBuf], snapshot: RequestSnapshot) -> Self {
+        Self::build_over(roots, snapshot, None, UniverseScope::FileList)
+    }
+
+    /// A request-scoped graph over only the listed files in `documents`,
+    /// matching wiki links against `universe`, answered exactly like the
+    /// oracle. With [`UniverseScope::FileList`] its answers must equal the
+    /// full oracle's for any request whose referrers are all in `documents`.
+    ///
+    /// ## Panics
+    ///
+    /// As [`Oracle::build`], and when a path in `documents` is not listed.
+    pub fn scoped(
+        roots: &[PathBuf],
+        snapshot: RequestSnapshot,
+        documents: &[PathBuf],
+        universe: UniverseScope,
+    ) -> Self {
+        Self::build_over(roots, snapshot, Some(documents), universe)
+    }
+
+    fn build_over(
+        roots: &[PathBuf],
+        snapshot: RequestSnapshot,
+        documents: Option<&[PathBuf]>,
+        scope: UniverseScope,
+    ) -> Self {
         let config = ConfigState::load(roots.to_vec(), None);
         let report = discover_workspace(roots, &config.effective().workspace);
         assert!(report.is_complete(), "oracle file list incomplete: {:?}", report.errors);
+        if let Some(documents) = documents {
+            for path in documents {
+                assert!(report.files.contains(path), "{} is not listed", path.display());
+            }
+        }
         let mut texts = BTreeMap::new();
         let mut indices = BTreeMap::new();
-        for path in report.files {
-            let text = std::fs::read_to_string(&path)
+        for path in &report.files {
+            if documents.is_some_and(|documents| !documents.contains(path)) {
+                continue;
+            }
+            let text = std::fs::read_to_string(path)
                 .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-            indices.insert(path.clone(), index_document(&path, &text));
-            texts.insert(path, text);
+            indices.insert(path.clone(), index_document(path, &text));
+            texts.insert(path.clone(), text);
         }
         let wiki_roots = resolve_wiki_roots(roots, config.effective().wiki.wiki_root.as_deref());
         let contexts = RepositoryContexts::new(snapshot);
-        let graph = WorkspaceGraph::build_with_roots(&indices, 1, &wiki_roots, &contexts);
+        // The full oracle's universe is its whole file list: the reference
+        // every request-scoped graph's answers must equal.
+        let universe = match scope {
+            UniverseScope::FileList => WikiUniverse::new(report.files.iter().cloned(), &wiki_roots),
+            UniverseScope::Documents => WikiUniverse::new(indices.keys().cloned(), &wiki_roots),
+        };
+        let graph = WorkspaceGraph::build_with_roots(&indices, 1, universe, &contexts);
         Self {
             roots: roots.to_vec(),
             config,
@@ -313,6 +364,42 @@ impl Oracle {
             .collect();
         dmls::providers::rename::will_rename_files(&self.rename_env(), &files)
             .map(|edit| normalize_workspace_edit(&edit))
+    }
+
+    /// The wiki diagnostics of the listed file `path` as `(line, code,
+    /// message)`, sorted. Related information is left out: it lists the
+    /// ambiguous candidates that are documents of the graph, so a scoped
+    /// graph lists fewer of them by design.
+    pub fn wiki_diagnostics(&self, path: &Path) -> Vec<(u32, String, String)> {
+        let text = self.text(path);
+        let uri = file_path_to_uri(path).expect("absolute document path");
+        let source_map = self.source_map(path, text);
+        let resolution = self.contexts.for_document(path);
+        let ctx = DocumentContext {
+            uri: &uri,
+            path,
+            text,
+            source_map: &source_map,
+            graph: &self.graph,
+            doc_id: self.graph.document_id(path),
+            config: self.config.effective(),
+            profile: &self.profile,
+            overlay: None,
+            resolution: &resolution,
+        };
+        let mut out: Vec<(u32, String, String)> = dmls::providers::wiki::diagnostics(&ctx)
+            .into_iter()
+            .map(|diagnostic| {
+                let code = match diagnostic.code {
+                    Some(NumberOrString::String(code)) => code,
+                    Some(NumberOrString::Number(code)) => code.to_string(),
+                    None => String::new(),
+                };
+                (diagnostic.range.start.line, code, diagnostic.message)
+            })
+            .collect();
+        out.sort();
+        out
     }
 
     /// `workspace/symbol` for `query` (after the registry's cap).

@@ -12,6 +12,7 @@
 //! - [`logical_path`] — canonicalization (NFC, extension elision, percent
 //!   decoding, portability keys).
 //! - [`resolve`] — file-target classification, matching, and ranking.
+//! - [`universe`] — the set of files wiki links are matched against.
 //!
 //! The graph builder ([`crate::graph`]) turns scanned links into wiki-link
 //! nodes with resolved `references` edges; the [`crate::providers::wiki`]
@@ -20,6 +21,7 @@
 pub mod logical_path;
 pub mod resolve;
 pub mod scanner;
+pub mod universe;
 
 pub use logical_path::{
     canonical_segments, decode_percent_once, elide_markdown_extension, has_markdown_extension, nfc,
@@ -30,3 +32,4 @@ pub use resolve::{
     resolve_file, shortest_unique_suffix,
 };
 pub use scanner::{ScannedWikiLink, scan_wiki_links};
+pub use universe::WikiUniverse;

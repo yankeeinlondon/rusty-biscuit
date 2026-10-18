@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::arena::{DocumentContexts, Listing, WorkspaceGraph, is_markdown_path};
+use crate::wiki::WikiUniverse;
 use super::edge::{EdgeKind, EdgeTarget};
 use super::node::{LinkTarget, NodeId, WikiResolution};
 use super::substrate::{DocumentIndex, index_document};
@@ -121,7 +122,7 @@ impl WorkspaceIndex {
             &BTreeSet::new(),
             Listing::Pending,
             0,
-            &[],
+            WikiUniverse::default(),
             contexts.as_ref(),
         ));
         Self {
@@ -718,13 +719,25 @@ impl WorkspaceIndex {
     fn rebuild(&mut self) {
         self.generation += 1;
         let dependencies: BTreeSet<PathBuf> = self.dependencies().cloned().collect();
+        // The universe is this index's own wiki candidates: the file list
+        // plus every other document that is not a referenced dependency
+        // (open buffers outside the list). It is exactly the set the graph
+        // derived for itself before the universe became a parameter, so
+        // open-document diagnostics are unchanged.
+        let universe = WikiUniverse::new(
+            self.listed
+                .iter()
+                .chain(self.documents.keys().filter(|path| !dependencies.contains(*path)))
+                .cloned(),
+            &self.wiki_roots,
+        );
         self.snapshot = Arc::new(WorkspaceGraph::build_listed(
             &self.documents,
             &self.listed,
             &dependencies,
             self.listing,
             self.generation,
-            &self.wiki_roots,
+            universe,
             self.contexts.as_ref(),
         ));
     }
@@ -996,7 +1009,8 @@ mod tests {
         // Headings and transclusions only: no backlinks or wiki candidacy.
         assert_eq!(snapshot.links(target_doc).count() + snapshot.wiki_links(target_doc).count(), 0);
         assert!(snapshot.transclusion_cycle(snapshot.document_id(&source).unwrap()).is_some());
-        assert!(snapshot.wiki_docs()[target_doc.0 as usize].canonical.is_empty());
+        let target_slot = snapshot.wiki_slot(target_doc).unwrap();
+        assert!(snapshot.wiki_universe().docs()[target_slot].canonical.is_empty());
         let source_doc = snapshot.document_id(&source).unwrap();
         let (_, wiki) = snapshot.wiki_links(source_doc).next().unwrap();
         assert!(!matches!(wiki.as_wiki_link().unwrap().resolution, WikiResolution::Resolved(_)));

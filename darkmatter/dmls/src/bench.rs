@@ -30,6 +30,7 @@ use serde::Serialize;
 
 use crate::config::WorkspaceConfig;
 use crate::graph::{DocumentContexts, WorkspaceGraph};
+use crate::wiki::WikiUniverse;
 use crate::workspace::discover_workspace;
 use crate::workspace::startup::{SilentProgress, collect_indices_from_files};
 
@@ -155,7 +156,12 @@ pub fn bench_index(root: &Path, contexts: &dyn DocumentContexts) -> BenchReport 
     // Graph build → reverse index → snapshot swap, timed as the three R-6
     // stages `from_indices` runs back to back.
     let build_start = Instant::now();
-    let assembly = WorkspaceGraph::assemble(&indices, BENCH_GENERATION, &[], contexts);
+    let assembly = WorkspaceGraph::assemble(
+        &indices,
+        BENCH_GENERATION,
+        Arc::new(WikiUniverse::new(indices.keys().cloned(), &[])),
+        contexts,
+    );
     stages.graph_build_ms = elapsed_ms(build_start);
 
     let reverse_start = Instant::now();
