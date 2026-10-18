@@ -405,12 +405,15 @@ fn a_proxy_target_with_an_invalid_control_fails_before_its_provider() {
     assert!(!marker.exists(), "{}", result.stderr);
 }
 
+/// A step document whose control only the launch schema rejects fails at its
+/// turn, before its provider. (A static `agent: []` is not used here: preflight
+/// rejects it before any step launches.)
 #[test]
 fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-sequence");
     let launches = launch_recorder::install(&fixture, "goose", "exit 0");
     write_doc(&fixture, "good.md", "---\ntitle: Good\n---\nGOOD-STEP\n");
-    write_doc(&fixture, "bad.md", "---\nagent: []\n---\nBAD-STEP\n");
+    write_doc(&fixture, "bad.md", "---\nagent: goose\ninteractive: sometimes\n---\nBAD-STEP\n");
     let sequence = write_doc(
         &fixture,
         "seq.md",
@@ -420,7 +423,7 @@ fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() 
     let result = run(&fixture, "sequence", &sequence, &[]);
 
     assert_eq!(result.code, Some(1), "{}", result.stderr);
-    assert!(result.stderr.contains("/agent") && result.stderr.contains("bad.md"), "{}", result.stderr);
+    assert!(result.stderr.contains("/interactive") && result.stderr.contains("bad.md"), "{}", result.stderr);
     let argv = launch_recorder::launches(&launches);
     assert_eq!(argv.len(), 1, "only the valid step launches:\n{}", result.stderr);
     assert!(goose_prompt(&argv[0]).contains("GOOD-STEP"), "{argv:?}");

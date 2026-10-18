@@ -594,7 +594,11 @@ fn execute_sequence_inner(
     // terminal reviews it, and anything else fails with
     // `AgentResolutionFailed`. A graph of only shell and side-effect tasks
     // has no site and needs no provider.
-    let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &raw_hints);
+    let caller_sets_agent = user_set_overrides
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|setters| setters.contains_key("agent"));
+    let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &raw_hints, caller_sets_agent);
     let mut selections = providers::select(
         sites,
         &providers::SelectionInputs {

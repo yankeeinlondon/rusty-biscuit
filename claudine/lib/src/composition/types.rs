@@ -564,6 +564,13 @@ pub struct EffectiveSelectionHints {
 }
 
 impl EffectiveSelectionHints {
+    /// Whether the parsed `agent` is a hint: a provider or an invalid name.
+    /// An absent, null, or empty-list `agent` is not.
+    #[must_use]
+    pub fn names_agent(&self) -> bool {
+        self.agent.is_some() || !self.agent_invalid.is_empty()
+    }
+
     /// Explicit CLI/environment intent wins over the document's default.
     pub fn yolo_enabled(&self, cli_yolo: bool) -> bool {
         cli_yolo || self.yolo.unwrap_or(false)

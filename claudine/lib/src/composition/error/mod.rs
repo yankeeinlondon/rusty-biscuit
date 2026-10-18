@@ -3956,6 +3956,9 @@ pub enum SequenceTaskProviderProblem {
     /// The hint reads the provider identity it selects.
     #[error("it reads `{0}`, which is the identity it selects")]
     Circular(String),
+    /// A document's `agent` is an empty list, which the launch schema rejects.
+    #[error("an `agent` list needs at least one entry")]
+    EmptyAgentList,
 }
 
 fn unresolvable_reason(state: &super::types::AgentResolutionState) -> String {

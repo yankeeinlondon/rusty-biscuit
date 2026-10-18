@@ -629,36 +629,28 @@ impl<'a> WrapperPromptRunner<'a> {
                 .selection
                 .for_document(planned, hints, document.document_environment())
         });
-        let mut env_overrides = self.env_overrides.clone();
-        match &target {
-            Some(target) => {
-                env_overrides.insert("AGENT".to_string(), target.provider.as_slug().to_string());
-                match &target.model {
-                    Some(model) => {
-                        env_overrides.insert("MODEL".to_string(), model.clone());
-                    }
-                    None => {
-                        env_overrides.remove("MODEL");
-                    }
-                }
-            }
-            None => {
-                env_overrides.remove("AGENT");
-                env_overrides.remove("MODEL");
-            }
-        }
+        let env_overrides = identity_env(self.env_overrides.clone(), target.as_ref());
         (target, env_overrides)
     }
 
-    /// The target a task whose `agent` is decided at launch runs under, from
-    /// its composed document: the canonical non-interactive rule over the
-    /// composed hints, or its fallback when the document names no `agent`.
-    /// Every other task keeps `planned`.
+    /// The target a task launches under, from its document's effective
+    /// selection hints, mirroring the launch rebuild's rule
+    /// (`select_rebuilt_provider`, `resolve_launch_model`) so the composed
+    /// prompt, the child environment, and the spawned provider agree:
+    ///
+    /// - the provider stays `planned`'s when `--<provider>` pins it, when the
+    ///   hints name no `agent`, or (for a task not decided at launch) when the
+    ///   hint still names `planned`'s provider, which keeps a review choice
+    ///   from a list; otherwise the hint decides it by the canonical
+    ///   non-interactive rule, so a document an earlier task rewrote launches
+    ///   on its fresh `agent`;
+    /// - the model stays `planned`'s while the provider does and the hints
+    ///   name no `model`; otherwise it is re-resolved from the hints.
     ///
     /// ## Errors
     ///
-    /// [`CompositionError::SequenceTaskProviderSelection`] when the composed
-    /// hint selects no installed provider, before the task spawns.
+    /// [`CompositionError::SequenceTaskProviderSelection`] when the hint
+    /// selects no installed provider, before the task spawns.
     #[allow(clippy::result_large_err)]
     fn launch_target(
         &self,
@@ -670,15 +662,35 @@ impl<'a> WrapperPromptRunner<'a> {
         let Some(selection) = self.run.task_selections.get(identity) else {
             return Ok(planned);
         };
-        if !matches!(selection.target, super::providers::TaskTarget::AtLaunch(_))
-            || self.run.shared.explicit_provider().is_some()
-        {
+        let at_launch = matches!(selection.target, super::providers::TaskTarget::AtLaunch(_));
+        let explicit = self.run.shared.explicit_provider().is_some();
+        let keeps_provider = |planned: &ResolvedExecutionTarget| {
+            explicit
+                || !composed.names_agent()
+                || (!at_launch
+                    && composed.agent_invalid.is_empty()
+                    && match &composed.agent {
+                        Some(claudine::composition::AgentHint::Single(provider)) => *provider == planned.provider,
+                        Some(claudine::composition::AgentHint::List(providers)) => providers.contains(&planned.provider),
+                        None => false,
+                    })
+        };
+        if let Some(planned) = planned.as_ref().filter(|planned| keeps_provider(planned)) {
+            if composed.model.is_none() {
+                return Ok(Some(planned.clone()));
+            }
+            return Ok(Some(self.run.selection.for_document(
+                planned.clone(),
+                composed,
+                document.document_environment(),
+            )));
+        }
+        // A predicted task with no planned target (a dry run's "no provider")
+        // stays without one until its document names an `agent`.
+        if explicit || (!at_launch && !composed.names_agent()) {
             return Ok(planned);
         }
         let snapshot = &self.run.prep_context.installed_snapshot;
-        if composed.agent.is_none() && composed.agent_invalid.is_empty() && planned.is_some() {
-            return Ok(planned);
-        }
         let state = claudine::composition::classify_agent_resolution(composed, snapshot);
         let Some(provider) = super::providers::auto_selected(&state) else {
             return Err(super::providers::launch_error(
@@ -708,6 +720,27 @@ impl<'a> WrapperPromptRunner<'a> {
             model_reason,
         }))
     }
+}
+
+/// `env` with `AGENT`/`MODEL` naming `target`; with no target, neither.
+fn identity_env(
+    mut env: BTreeMap<String, String>,
+    target: Option<&ResolvedExecutionTarget>,
+) -> BTreeMap<String, String> {
+    match target {
+        Some(target) => {
+            env.insert("AGENT".to_string(), target.provider.as_slug().to_string());
+            match &target.model {
+                Some(model) => env.insert("MODEL".to_string(), model.clone()),
+                None => env.remove("MODEL"),
+            };
+        }
+        None => {
+            env.remove("AGENT");
+            env.remove("MODEL");
+        }
+    }
+    env
 }
 
 impl PromptTaskRunner for WrapperPromptRunner<'_> {
@@ -900,10 +933,18 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         prompt_compose_context.deferred_shell_roots = request.deferred_shell_roots.clone();
         prompt_compose_context.document_shell_values = Some(request.document_shell_values.clone());
         prompt_compose_context.loop_values = request.loop_values.clone();
-        let (document_target, document_env_overrides) = self.document_target(&document, &request.task_identity);
+        let (planned_target, document_env_overrides) = self.document_target(&document, &request.task_identity);
         let mut overrides = request.set_overrides.clone();
         if request.body_only { super::container::mask_body_events(&mut overrides); }
-        let composed = super::jit::compose_step(
+        // The identity is selected from the document's effective frontmatter
+        // before its body renders, so `env.AGENT`/`env.MODEL` in the prompt
+        // name the provider and model that launch, not the prediction's.
+        #[allow(clippy::result_large_err)]
+        let select_identity = |hints: &claudine::composition::EffectiveSelectionHints| {
+            let target = self.launch_target(&request.task_identity, planned_target.clone(), hints, &document)?;
+            Ok(identity_env(document_env_overrides.clone(), target.as_ref()))
+        };
+        let composed = super::jit::compose_step_selecting(
             &source,
             &prompt_compose_context,
             &overrides,
@@ -912,26 +953,21 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             // A referenced prompt document *is* its body; composing it to
             // nothing is the error the empty-body guard exists to name.
             false,
+            Some(&select_identity),
         )?;
 
+        // The composed hints decide the launch; they are the ones the
+        // selector saw before the body rendered.
         let document_target = self.launch_target(
             &request.task_identity,
-            document_target,
+            planned_target,
             &composed.prepared.selection_hints,
             &document,
         )?;
         let shared = self.run.shared;
         let resolved =
             shared.resolve_session_interactivity(composed.prepared.selection_hints.interactive);
-        let mut env_overrides = document_env_overrides;
-        // A target decided at launch names the provider the child runs.
-        if let Some(target) = &document_target {
-            env_overrides.insert("AGENT".to_string(), target.provider.as_slug().to_string());
-            match &target.model {
-                Some(model) => env_overrides.insert("MODEL".to_string(), model.clone()),
-                None => env_overrides.remove("MODEL"),
-            };
-        }
+        let mut env_overrides = identity_env(document_env_overrides, document_target.as_ref());
         let mut task_owned_env = super::jit::step_owned_env(self.run.effective_fail_fast);
         if let Some(operation) = &request.operation {
             env_overrides.insert("OPERATION".to_string(), operation.clone());

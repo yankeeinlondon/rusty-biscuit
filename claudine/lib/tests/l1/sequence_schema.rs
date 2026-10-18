@@ -134,9 +134,12 @@ fn each_typed_container_level_validates_and_deeper_levels_are_untyped() {
 /// key are reported at the group, with the key named in the message (a
 /// group is a union of an object and a file reference, so the problem is the
 /// union's). Root `fail_fast` is declared `null`, so a value is reported at
-/// `/fail_fast`; the sequence parser rejects it too.
+/// `/fail_fast`; the sequence parser rejects it too. An explicit null passes
+/// the schema, and the parser, which rejects any present root `fail_fast`, is
+/// what refuses it.
 #[test]
 fn removed_and_misspelled_keys_are_reported_by_name() {
+    const ROOT_FAIL_FAST_NULL: &str = "---\nfail_fast: null\nsequence:\n    - name: one\n      shell: just one\n---\nBody.\n";
     assert_sequence_rows(&[
         (
             "group-execution",
@@ -153,11 +156,15 @@ fn removed_and_misspelled_keys_are_reported_by_name() {
             include_str!("../fixtures/sequence-schema/root-fail-fast.md"),
             Invalid(&[("/fail_fast", "not of type \"null\"")]),
         ),
+        ("root-fail-fast-null", ROOT_FAIL_FAST_NULL, Valid),
     ]);
 
     let repo = SchemaRepo::new(&[]);
     let path = repo.write_document("root-fail-fast.md", include_str!("../fixtures/sequence-schema/root-fail-fast.md"));
     let error = sequence_rejection(&repo, &path).expect("the parser rejects root fail_fast");
+    assert!(error.to_string().contains("fail_fast"), "{error}");
+    let path = repo.write_document("root-fail-fast-null.md", ROOT_FAIL_FAST_NULL);
+    let error = sequence_rejection(&repo, &path).expect("the parser rejects root `fail_fast: null`");
     assert!(error.to_string().contains("fail_fast"), "{error}");
 }
 
@@ -169,7 +176,7 @@ fn undeclared_step_keys_are_step_data() {
 }
 
 /// Every non-null `sequence` selects the trigger; a mapping then fails the
-/// payload. A native number is selected too, but Darkmatter coerces a
+/// payload. A native number or boolean is selected too, but Darkmatter coerces a
 /// top-level scalar to the file-reference string arm, so the schema accepts
 /// it and the sequence parser is what rejects it. A null or absent
 /// `sequence` selects nothing.
@@ -182,6 +189,7 @@ fn sequence_trigger_activation_follows_the_value_shape() {
             Invalid(&[("/sequence", "\"tasks\"")]),
         ),
         ("sequence-number", include_str!("../fixtures/sequence-schema/sequence-number.md"), Valid),
+        ("sequence-boolean", "---\nsequence: true\n---\n", Valid),
         // An empty list activates and is valid; a list is judged per item,
         // so one malformed item is reported at its own index.
         ("sequence-empty", "---\nsequence: []\n---\n", Valid),
@@ -193,6 +201,9 @@ fn sequence_trigger_activation_follows_the_value_shape() {
     let discovered = repo.discover().expect("the shipped bundle loads");
     let number = repo.write_document("sequence-number.md", include_str!("../fixtures/sequence-schema/sequence-number.md"));
     let error = sequence_rejection(&repo, &number).expect("the parser rejects `sequence: 42`");
+    assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{error}");
+    let boolean = repo.write_document("sequence-boolean.md", "---\nsequence: true\n---\n");
+    let error = sequence_rejection(&repo, &boolean).expect("the parser rejects `sequence: true`");
     assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{error}");
 
     for (name, text) in [

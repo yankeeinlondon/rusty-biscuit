@@ -229,6 +229,7 @@ fn prediction_calls_the_evaluator_only_for_an_evaluable_template() {
             with: &empty,
             with_evaluated: &empty,
             with_deferred: &[],
+            with_failed: &Default::default(),
             with_origin: Path::new("/seq.md"),
             task_property: "tasks[0]",
             step_frontmatter: &Default::default(),
@@ -269,4 +270,219 @@ fn every_task_gets_a_distinct_graph_identity() {
     assert_eq!(identity(&group.tasks[0]), "tasks[2].group.tasks[0]");
     let PreflightAction::Sequence(nested) = &group.tasks[1].action else { panic!("a sequence") };
     assert_eq!(identity(nested.steps[0].task.as_ref().unwrap()), "tasks[2].group.tasks[1].sequence[0]");
+}
+
+fn failed_at(state: &HintState) -> (&str, String) {
+    match state {
+        HintState::Failed { source, cause } => (source.property.as_str(), cause.to_string()),
+        other => panic!("expected a failed hint, got {other:?}"),
+    }
+}
+
+/// An ordinary expression error in a static `with` selection input is a
+/// located failure, never a value decided at launch.
+#[test]
+fn a_with_selection_input_that_fails_to_evaluate_is_a_failure() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    for key in ["agent", "model"] {
+        let path = sequence(
+            dir.path(),
+            json!([
+                { "name": "first", "prompt": "plain.md" },
+                { "name": "second", "prompt": "plain.md", "with": { key: "{{ no_such_function() }}" } }
+            ]),
+            "agent: claude\n",
+        );
+        let graph = build(&path, json!({}));
+        let prediction = prediction(&graph, 1);
+        let state = if key == "agent" { &prediction.agent } else { &prediction.model };
+        let (property, cause) = failed_at(state);
+        assert_eq!(property, format!("tasks[1].with.{key}"));
+        assert!(cause.contains("no_such_function"), "{cause}");
+        assert!(prediction.failure().is_some());
+        // Shell discovery still treats the entry as bound at the task's turn.
+        let reference = graph.prompt_references.iter().find(|reference| reference.with.is_empty()
+            && reference.deferred_with == vec![key.to_string()]);
+        assert!(reference.is_some(), "{:?}", graph.prompt_references);
+    }
+}
+
+/// A document hint reading a `with` entry that failed is that entry's failure,
+/// not the document's default for it and not a late value.
+#[test]
+fn a_document_hint_reading_a_failed_with_entry_is_that_entrys_failure() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "review.md", "---\npick: claude\nagent: \"{{ pick }}\"\n---\n\nReview.\n");
+    let path = sequence(
+        dir.path(),
+        json!([{ "name": "review", "prompt": "review.md", "with": { "pick": "{{ no_such_function() }}" } }]),
+        "",
+    );
+    let graph = build(&path, json!({}));
+    let (property, cause) = failed_at(&prediction(&graph, 0).agent);
+    assert_eq!(property, "tasks[0].with.pick");
+    assert!(cause.contains("no_such_function"), "{cause}");
+    // A caller setter replacing the entry means the document never reads it.
+    let graph = build(&path, json!({ "pick": "codex" }));
+    assert_eq!(static_agent(&prediction(&graph, 0).agent).0, &json!("codex"));
+}
+
+/// A failed `with` entry no selection input reads changes no prediction.
+#[test]
+fn a_failed_with_entry_no_hint_reads_leaves_the_prediction_alone() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "review.md", "---\nagent: codex\n---\n\nReview {{ topic }}.\n");
+    let path = sequence(
+        dir.path(),
+        json!([{ "name": "review", "prompt": "review.md", "with": { "topic": "{{ no_such_function() }}" } }]),
+        "",
+    );
+    let graph = build(&path, json!({}));
+    let prediction = prediction(&graph, 0);
+    assert_eq!(static_agent(&prediction.agent).0, &json!("codex"));
+    assert!(prediction.failure().is_none());
+}
+
+/// Genuine late values in `with` stay decided at launch, and the provider's
+/// own identity stays circular, even though none evaluates at preflight.
+#[test]
+fn late_with_selection_inputs_remain_decided_at_launch() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "---\ntitle: p\n---\n\nPlain.\n");
+    for (key, value) in [
+        ("agent", "{{ seq.outputs[0] }}"),
+        ("model", "{{ seq.outputs[0] }}"),
+        ("agent", "{{ current.branch }}"),
+        ("agent", "{{ loop.count }}"),
+    ] {
+        let path = sequence(
+            dir.path(),
+            json!([
+                { "name": "pick", "shell": "echo codex" },
+                { "name": "run", "prompt": "plain.md", "with": { key: value } }
+            ]),
+            "",
+        );
+        let graph = build(&path, json!({}));
+        let prediction = prediction(&graph, 1);
+        let state = if key == "agent" { &prediction.agent } else { &prediction.model };
+        assert!(matches!(state, HintState::DecidedAtLaunch { reason: LaunchDecision::LateValue, .. }), "{value}: {state:?}");
+        assert!(prediction.failure().is_none(), "{value}");
+    }
+    // A concurrent leg reading its group's values.
+    let path = sequence(
+        dir.path(),
+        json!([{ "name": "batch", "group": { "tasks": [
+            { "name": "leg", "prompt": "plain.md", "with": { "agent": "{{ group.name }}" } }
+        ] } }]),
+        "",
+    );
+    let graph = build(&path, json!({}));
+    let PreflightAction::Group(group) = &graph.steps[0].task.as_ref().unwrap().action else { panic!("a group") };
+    let leg = group.tasks[0].provider.as_ref().unwrap();
+    assert!(matches!(leg.agent, HintState::DecidedAtLaunch { reason: LaunchDecision::LateValue, .. }), "{leg:?}");
+    // The selected provider's own identity.
+    for (key, variable) in [("agent", "env.AGENT"), ("model", "env.MODEL")] {
+        let path = sequence(
+            dir.path(),
+            json!([{ "name": "run", "prompt": "plain.md", "with": { key: format!("{{{{ {variable} }}}}") } }]),
+            "",
+        );
+        let graph = build(&path, json!({}));
+        let prediction = prediction(&graph, 0);
+        let state = if key == "agent" { &prediction.agent } else { &prediction.model };
+        assert!(matches!(state, HintState::Circular { variable: read, .. } if read == variable), "{state:?}");
+    }
+}
+
+/// `null` is no `agent` hint, in every layer, so the task is missing a
+/// provider; an empty string is an invalid name, still the task's own hint.
+/// `[]` breaks the launch schema's rule that an `agent` list needs at least
+/// one entry, so in the document or `with` it is a failure located there; a
+/// caller setter's `[]` is no hint. The deciding layer still wins: an empty
+/// caller or `with` value masks the document's `agent`.
+#[test]
+fn an_empty_agent_hint_is_missing_a_provider_or_a_located_failure() {
+    let dir = TempDir::new().unwrap();
+    for (empty, expected) in [
+        (json!(null), TaskProviderClass::Missing),
+        (json!([]), TaskProviderClass::Predicted),
+        (json!(""), TaskProviderClass::Predicted),
+    ] {
+        let flow = serde_json::to_string(&empty).unwrap();
+        let empty_list = empty == json!([]);
+        // The prompt document's own frontmatter.
+        write(dir.path(), "empty.md", &format!("---\nagent: {flow}\nmodel: {flow}\n---\n\nEmpty.\n"));
+        let path = sequence(dir.path(), json!([{ "name": "a", "prompt": "empty.md" }]), "agent: claude\n");
+        let graph = build(&path, json!({}));
+        let task = prediction(&graph, 0);
+        assert_eq!(task.class(), expected, "document {flow}: {task:?}");
+        if empty_list {
+            assert!(matches!(&task.agent, HintState::EmptyAgentList { source }
+                if source.property == "agent"
+                    && source.layer == HintLayer::Document
+                    && source.source_path.ends_with("empty.md")));
+            // `model: []` is valid and means no model.
+            assert!(matches!(&task.model, HintState::Static { value, .. } if value == &json!([])));
+        } else {
+            assert!(task.failure().is_none(), "document {flow}");
+        }
+        // The task's `with`, over a document naming a provider.
+        write(dir.path(), "named.md", "---\nagent: gemini\n---\n\nNamed.\n");
+        let path = sequence(
+            dir.path(),
+            json!([{ "name": "a", "prompt": "named.md", "with": { "agent": empty.clone(), "model": empty.clone() } }]),
+            "agent: claude\n",
+        );
+        let graph = build(&path, json!({}));
+        let task = prediction(&graph, 0);
+        assert_eq!(task.class(), expected, "with {flow}: {task:?}");
+        if empty_list {
+            assert!(matches!(&task.agent, HintState::EmptyAgentList { source }
+                if source.property == "tasks[0].with.agent" && source.layer == HintLayer::With));
+            assert!(task.failure().is_some());
+        } else {
+            assert_eq!(static_agent(&task.agent).1, HintLayer::With, "with {flow}");
+            assert!(task.failure().is_none(), "with {flow}");
+        }
+        // A caller setter, over both: `[]` is no hint here.
+        let graph = build(&path, json!({ "agent": empty.clone() }));
+        let task = prediction(&graph, 0);
+        let setter_expected = if empty_list { TaskProviderClass::Missing } else { expected };
+        assert_eq!(task.class(), setter_expected, "setter {flow}: {task:?}");
+        assert!(task.failure().is_none(), "{flow}");
+    }
+}
+
+/// A hint reading a key only a lifecycle `set` creates (it has no value before
+/// that write) is decided at launch, whether the task's `with` or its prompt
+/// document reads it.
+#[test]
+fn a_hint_reading_a_key_only_a_runtime_write_creates_is_decided_at_launch() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "first.md", "---\nsuccess:\n  - set:\n      chosen: opencode\n---\n\nFirst.\n");
+    write(dir.path(), "plain.md", "---\ntitle: s\n---\n\nSecond.\n");
+    write(dir.path(), "reads.md", "---\nvia: \"{{ chosen }}\"\nagent: \"{{ via }}\"\n---\n\nSecond.\n");
+    for second in [
+        json!({ "name": "second", "prompt": "plain.md", "with": { "agent": "{{ chosen }}" } }),
+        json!({ "name": "second", "prompt": "reads.md" }),
+    ] {
+        let path = sequence(dir.path(), json!([{ "name": "first", "prompt": "first.md" }, second.clone()]), "");
+        let graph = build(&path, json!({}));
+        let prediction = prediction(&graph, 1);
+        assert!(
+            matches!(prediction.agent, HintState::DecidedAtLaunch { reason: LaunchDecision::RuntimeWritten, .. }),
+            "{second}: {prediction:?}"
+        );
+        assert_eq!(prediction.class(), TaskProviderClass::DecidedAtLaunch, "{second}");
+    }
+    // A key nothing writes stays an ordinary read of an absent value.
+    let path = sequence(
+        dir.path(),
+        json!([{ "name": "only", "prompt": "plain.md", "with": { "agent": "{{ never_written }}" } }]),
+        "",
+    );
+    let graph = build(&path, json!({}));
+    assert!(!matches!(prediction(&graph, 0).agent, HintState::DecidedAtLaunch { .. }), "{:?}", prediction(&graph, 0));
 }

@@ -178,6 +178,44 @@ pub(super) fn compose_step(
     approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     allow_empty_body: bool,
 ) -> Result<StepComposition, CompositionError> {
+    compose_step_selecting(source, ctx, set_overrides, env_overrides, approved, allow_empty_body, None)
+}
+
+/// Chooses the launch identity's environment (`AGENT`/`MODEL`) from a
+/// document's effective selection hints; see [`compose_step_selecting`].
+pub(super) type IdentitySelector<'s> = dyn Fn(
+        &composition::EffectiveSelectionHints,
+    ) -> Result<BTreeMap<String, String>, CompositionError>
+    + 's;
+
+/// [`compose_step`], with the identity the document launches under resolved
+/// before its body renders, so the body's `env.AGENT`/`env.MODEL` name what
+/// the launch selects. `select` returns the environment the composition uses
+/// in place of `env_overrides`. It runs twice, on the same inputs:
+///
+/// - on a frontmatter-only, shell-free read
+///   ([`composition::read_selection_hints`]), so frontmatter values that read
+///   `env.AGENT`/`env.MODEL` see the selection too; that read decides nothing
+///   when a hint waits on a frontmatter `$( … )`;
+/// - inside the one full preparation, on the frontmatter every command has
+///   resolved, before the body renders
+///   ([`composition::ResolvedIdentitySelector`]). This is what the body reads.
+///
+/// A validation probe never selects.
+///
+/// ## Errors
+///
+/// As [`compose_step`], plus `select`'s.
+#[allow(clippy::result_large_err, clippy::too_many_arguments)]
+pub(super) fn compose_step_selecting(
+    source: &ResolvedCompositionSource,
+    ctx: &StepComposeContext<'_>,
+    set_overrides: &LayeredOverrides,
+    env_overrides: &BTreeMap<String, String>,
+    approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
+    allow_empty_body: bool,
+    select: Option<&IdentitySelector<'_>>,
+) -> Result<StepComposition, CompositionError> {
     // Schema pre-validation before the shell pass. A step whose effective
     // frontmatter is missing required values must report that rather than let
     // Darkmatter's compose surface a raw `SchemaValidationFailed`, which would
@@ -214,6 +252,18 @@ pub(super) fn compose_step(
     // document here would grant new bytes or shapes after the sequence starts.
     let mut prepare_options =
         step_prepare_options(&step_source, ctx, step_overrides, env_overrides, allow_empty_body);
+    let mode = if ctx.inline_mode {
+        composition::CompositionMode::InlineFrontmatterPrompt
+    } else {
+        composition::CompositionMode::ChainedDocument
+    };
+    let select = select.filter(|_| !ctx.validation_probe);
+    if let Some(select) = select
+        && let Some(hints) = composition::read_selection_hints(&step_source, &prepare_options, mode)
+    {
+        let selected = select(&hints)?;
+        replace_identity_env(&mut prepare_options, selected, ctx.invocation.document_environment());
+    }
     let mut approved = approved;
     if ctx.validation_probe {
         let template_preflight =
@@ -231,6 +281,12 @@ pub(super) fn compose_step(
         } else {
             composition::CompositionMode::ChainedDocument
         })?
+    } else if let Some(select) = select {
+        if ctx.inline_mode {
+            composition::prepare_inline_with_schema_selecting(&step_source, prepare_options, select)?
+        } else {
+            composition::prepare_direct_with_schema_selecting(&step_source, prepare_options, select)?
+        }
     } else if ctx.inline_mode {
         composition::prepare_inline_with_schema(&step_source, prepare_options)?
     } else {
@@ -250,6 +306,21 @@ pub(super) fn compose_step(
     approved.extend(lifecycle_preflight.approved_commands);
 
     Ok(StepComposition { prepared, approved })
+}
+
+/// Install `env` as the composition's environment overrides, in the options
+/// and in the launch context they carry. A key the previous overrides set that
+/// `env` drops (a `MODEL` the selected target has none of) returns to the
+/// document's captured value, or is unset.
+fn replace_identity_env(
+    options: &mut PrepareOptions,
+    env: BTreeMap<String, String>,
+    captured: &claudine::invocation_context::DocumentEnvironment,
+) {
+    if let Some(context) = options.prepared_context.as_mut() {
+        composition::replace_env_overrides(context.env_mut(), &options.env_overrides, &env, Some(captured));
+    }
+    options.env_overrides = env;
 }
 
 /// The options one step both discovers its template shell commands with and

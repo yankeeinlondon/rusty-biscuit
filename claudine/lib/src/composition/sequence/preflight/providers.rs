@@ -8,7 +8,9 @@
 //! evaluated against early-binding state only, and one that needs a later
 //! output, loop or group values, `current.*`, a runtime-written key, or a shell
 //! substitution is left for the launch. Nothing here runs a lifecycle action, a
-//! shell, or a provider, composes a body, or refreshes a model catalog.
+//! shell, or a provider, composes a body, or refreshes a model catalog. An
+//! ordinary expression error in a value that reads none of those is a typed
+//! failure, whichever layer wrote it.
 //!
 //! The launch-time rebuild stays authoritative: a prediction gates the run,
 //! names the provider on review and preflight rows, and fails a task naming an
@@ -86,7 +88,9 @@ pub enum HintState {
         #[allow(missing_docs)]
         reason: LaunchDecision,
     },
-    /// An otherwise static value whose evaluation failed.
+    /// An otherwise static value whose evaluation failed, or that reads a
+    /// task `with` entry whose evaluation failed (`source` then names that
+    /// entry). An expression error is never a late value.
     Failed {
         #[allow(missing_docs)]
         source: HintSource,
@@ -101,6 +105,14 @@ pub enum HintState {
         /// The identity path the value reads.
         variable: String,
     },
+    /// A static `agent: []` from the prompt document or the task's `with`.
+    /// The launch schema requires an `agent` list to have at least one entry,
+    /// so the task would otherwise pass selection and fail when it starts,
+    /// after earlier tasks ran. A caller setter's `[]` is no hint instead.
+    EmptyAgentList {
+        #[allow(missing_docs)]
+        source: HintSource,
+    },
 }
 
 /// A task's predicted `agent` and `model`.
@@ -110,11 +122,17 @@ pub struct ProviderPrediction {
     pub agent: HintState,
     #[allow(missing_docs)]
     pub model: HintState,
-    /// Every frontmatter key the chosen `agent` and `model` values read,
-    /// directly or through another key. Preflight compares it with the keys
-    /// the graph's lifecycle writes once the whole graph is known.
-    pub(crate) reads: BTreeSet<String>,
+    /// The templated `agent` and `model` values (under [`HINT_ENTRY`]) and
+    /// every key they read, directly or through another key, with its value.
+    /// Once the whole graph is known, preflight checks whether these read a
+    /// key the graph's lifecycle writes, including one with no value before
+    /// that write.
+    pub(crate) dependencies: Vec<(String, Value)>,
 }
+
+/// The name a selection value takes in [`ProviderPrediction::dependencies`],
+/// which no frontmatter key can have.
+const HINT_ENTRY: &str = "\u{0}hint";
 
 /// The three classes a prompt task's provider falls into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,30 +141,44 @@ pub enum TaskProviderClass {
     Predicted,
     /// The task's own `agent`, decided when it launches.
     DecidedAtLaunch,
-    /// No `agent` of its own: an enclosing sequence's, a review choice, or none.
+    /// No `agent` of its own (absent, a static `null`, or a caller setter's
+    /// `[]`): an enclosing sequence's, a review choice, or none.
     Missing,
 }
 
 impl ProviderPrediction {
-    /// The task's class. A failed or circular `agent` is still its own hint,
+    /// The task's class, from its `agent` as the canonical hint parser reads
+    /// it: a static `null`, or a caller setter's `[]`, is no hint, so the task
+    /// is [`TaskProviderClass::Missing`] like one with no `agent` at all (an
+    /// empty string is an invalid name, still its own hint). A failed or
+    /// circular `agent`, or a document or `with` `[]`, is its own hint,
     /// so it is [`TaskProviderClass::Predicted`]; [`Self::failure`] reports it.
     #[must_use]
     pub fn class(&self) -> TaskProviderClass {
         match &self.agent {
             HintState::Absent => TaskProviderClass::Missing,
-            HintState::DecidedAtLaunch { .. } => TaskProviderClass::DecidedAtLaunch,
-            HintState::Static { .. } | HintState::Failed { .. } | HintState::Circular { .. } => {
-                TaskProviderClass::Predicted
+            HintState::Static { value, .. } if !crate::composition::hints::agent_value_names_a_hint(value) => {
+                TaskProviderClass::Missing
             }
+            HintState::DecidedAtLaunch { .. } => TaskProviderClass::DecidedAtLaunch,
+            HintState::Static { .. }
+            | HintState::Failed { .. }
+            | HintState::Circular { .. }
+            | HintState::EmptyAgentList { .. } => TaskProviderClass::Predicted,
         }
     }
 
-    /// The first `agent`/`model` hint that can never select a provider.
+    /// The first `agent`/`model` hint that cannot decide a launch: a failed,
+    /// circular, or empty-list one. A circular hint stops mattering when a
+    /// higher-precedence source (a provider flag for `agent`; `--model` or a
+    /// model variable for `model`) decides its key, which the caller applies.
     #[must_use]
     pub fn failure(&self) -> Option<&HintState> {
         [&self.agent, &self.model]
             .into_iter()
-            .find(|state| matches!(state, HintState::Failed { .. } | HintState::Circular { .. }))
+            .find(|state| {
+                matches!(state, HintState::Failed { .. } | HintState::Circular { .. } | HintState::EmptyAgentList { .. })
+            })
     }
 
     /// The task's own static hints as a frontmatter mapping, which the
@@ -163,15 +195,21 @@ impl ProviderPrediction {
         hints
     }
 
-    /// Move a static or failed hint that reads a key the graph writes at
+    /// Move a static, failed, or empty-list hint that reads a key the graph writes at
     /// runtime, or that is such a key, to the launch.
     pub(crate) fn defer_runtime_written(&mut self, written: &HashSet<String>) {
-        let reads_written = self.reads.iter().any(|key| written.contains(key));
+        let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
+        let reads_written = !self.dependencies.is_empty()
+            && derived_deferred_keys(self.dependencies.iter().map(|(key, value)| (key, value)), &no_roots, written)
+                .contains(HINT_ENTRY);
         for (key, state) in SELECTION_KEYS.iter().zip([&mut self.agent, &mut self.model]) {
             if !(reads_written || written.contains(*key)) {
                 continue;
             }
-            if let HintState::Static { source, .. } | HintState::Failed { source, .. } = state {
+            if let HintState::Static { source, .. }
+            | HintState::Failed { source, .. }
+            | HintState::EmptyAgentList { source } = state
+            {
                 *state = HintState::DecidedAtLaunch {
                     source: source.clone(),
                     reason: LaunchDecision::RuntimeWritten,
@@ -190,8 +228,12 @@ pub(crate) struct HintLayers<'a> {
     pub(crate) with: &'a Map<String, Value>,
     /// The `with` entries preflight evaluated against early-binding state.
     pub(crate) with_evaluated: &'a Map<String, Value>,
-    /// The `with` keys that read a late value.
+    /// The `with` keys preflight did not evaluate: those that read a late
+    /// value, and those in `with_failed`.
     pub(crate) with_deferred: &'a [String],
+    /// The `with` entries whose early evaluation failed, with the cause. A
+    /// selection input that reads one is [`HintState::Failed`], not late.
+    pub(crate) with_failed: &'a HashMap<String, crate::composition::lifecycle_context::LifecycleCause>,
     /// The file that authored `with`, and the task's source-rooted property.
     pub(crate) with_origin: &'a Path,
     pub(crate) task_property: &'a str,
@@ -219,7 +261,7 @@ pub(crate) fn predict(
     layers: &HintLayers<'_>,
     evaluate: &mut Evaluator<'_>,
 ) -> Result<ProviderPrediction, crate::composition::CompositionError> {
-    let mut reads = BTreeSet::new();
+    let mut dependencies = Vec::new();
     let mut document_state: HashMap<String, Value> = layers
         .document
         .iter()
@@ -227,9 +269,21 @@ pub(crate) fn predict(
         .collect();
     document_state.extend(layers.with_evaluated.iter().map(|(key, value)| (key.clone(), value.clone())));
     document_state.extend(layers.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
-    let agent = predict_key("agent", layers, &document_state, &mut reads, evaluate)?;
-    let model = predict_key("model", layers, &document_state, &mut reads, evaluate)?;
-    Ok(ProviderPrediction { agent, model, reads })
+    let agent = reject_empty_agent_list(predict_key("agent", layers, &document_state, &mut dependencies, evaluate)?);
+    let model = predict_key("model", layers, &document_state, &mut dependencies, evaluate)?;
+    Ok(ProviderPrediction { agent, model, dependencies })
+}
+
+/// See [`HintState::EmptyAgentList`].
+fn reject_empty_agent_list(state: HintState) -> HintState {
+    match state {
+        HintState::Static { value: Value::Array(entries), source }
+            if entries.is_empty() && source.layer != HintLayer::CallerSetter =>
+        {
+            HintState::EmptyAgentList { source }
+        }
+        other => other,
+    }
 }
 
 /// What [`predict`] evaluates a document value with.
@@ -245,7 +299,7 @@ fn predict_key(
     key: &str,
     layers: &HintLayers<'_>,
     document_state: &HashMap<String, Value>,
-    reads: &mut BTreeSet<String>,
+    dependencies: &mut Vec<(String, Value)>,
     evaluate: &mut Evaluator<'_>,
 ) -> Result<HintState, crate::composition::CompositionError> {
     if let Some(value) = layers.caller_setters.get(key) {
@@ -270,9 +324,12 @@ fn predict_key(
         let entry = format!("\u{0}with.{key}");
         let mut state: HashMap<String, Value> = layers.step_frontmatter.clone();
         state.insert(entry.clone(), value.clone());
-        let decided = classify_reads(&entry, &state, &HashSet::new(), reads);
+        let decided = classify_reads(&entry, &state, &HashSet::new(), dependencies);
         if let Some(state) = decided.into_state(source.clone()) {
             return Ok(state);
+        }
+        if let Some(cause) = layers.with_failed.get(key) {
+            return Ok(HintState::Failed { source, cause: cause.clone() });
         }
         if layers.with_deferred.iter().any(|deferred| deferred == key) {
             return Ok(HintState::DecidedAtLaunch { source, reason: LaunchDecision::LateValue });
@@ -293,10 +350,18 @@ fn predict_key(
     let mut raw_state: HashMap<String, Value> = layers.document.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     raw_state.extend(layers.with.iter().map(|(k, v)| (k.clone(), v.clone())));
     raw_state.extend(layers.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
-    let late_with: HashSet<String> = layers.with_deferred.iter().cloned().collect();
-    let decided = classify_reads(key, &raw_state, &late_with, reads);
+    let late_with: HashSet<String> = layers
+        .with_deferred
+        .iter()
+        .filter(|name| !layers.with_failed.contains_key(*name))
+        .cloned()
+        .collect();
+    let decided = classify_reads(key, &raw_state, &late_with, dependencies);
     if let Some(state) = decided.into_state(source.clone()) {
         return Ok(state);
+    }
+    if let Some(failure) = failed_with_read(key, layers, &raw_state) {
+        return Ok(failure);
     }
     if !contains_expression(value) {
         return Ok(HintState::Static { value: value.clone(), source });
@@ -304,6 +369,31 @@ fn predict_key(
     Ok(match evaluate(value, document_state)? {
         Ok(value) => HintState::Static { value, source },
         Err(cause) => HintState::Failed { source, cause },
+    })
+}
+
+/// The failure of the first (by name) failed `with` entry `key` of
+/// `raw_state` reads, directly or through another key, located at that entry.
+/// An entry a caller setter replaces is not read.
+fn failed_with_read(key: &str, layers: &HintLayers<'_>, raw_state: &HashMap<String, Value>) -> Option<HintState> {
+    let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
+    let mut failed: Vec<_> = layers
+        .with_failed
+        .iter()
+        .filter(|(name, _)| !layers.caller_setters.contains_key(*name))
+        .collect();
+    failed.sort_by(|left, right| left.0.cmp(right.0));
+    failed.into_iter().find_map(|(name, cause)| {
+        derived_deferred_keys(raw_state.iter(), &no_roots, &HashSet::from([name.clone()]))
+            .contains(key)
+            .then(|| HintState::Failed {
+                source: HintSource {
+                    layer: HintLayer::With,
+                    source_path: layers.with_origin.to_path_buf(),
+                    property: super::property_child(&super::property_child(layers.task_property, "with"), name),
+                },
+                cause: cause.clone(),
+            })
     })
 }
 
@@ -325,18 +415,21 @@ impl ReadClass {
 }
 
 /// Classify `key` of `state` by what it reads, directly or through other keys
-/// of `state`, and add those keys to `reads`. `late` names keys already known
-/// to be late.
+/// of `state`, and add its value and theirs to `dependencies`. `late` names
+/// keys already known to be late.
 fn classify_reads(
     key: &str,
     state: &HashMap<String, Value>,
     late: &HashSet<String>,
-    reads: &mut BTreeSet<String>,
+    dependencies: &mut Vec<(String, Value)>,
 ) -> ReadClass {
     // A literal reads nothing.
-    if !state.get(key).and_then(value_text).is_some_and(|text| text.contains("{{") || text.contains("$(")) {
+    let Some(value) = state.get(key).filter(|value| {
+        value_text(value).is_some_and(|text| text.contains("{{") || text.contains("$("))
+    }) else {
         return ReadClass::Evaluable;
-    }
+    };
+    let mut reads = BTreeSet::new();
     let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
     let reaches = |marked: &HashSet<String>| -> bool {
         marked.contains(key) || derived_deferred_keys(state.iter(), &no_roots, marked).contains(key)
@@ -345,8 +438,12 @@ fn classify_reads(
     for candidate in state.keys() {
         if candidate != key && reaches(&HashSet::from([candidate.clone()])) {
             reads.insert(candidate.trim_start_matches("\u{0}with.").to_string());
+            dependencies.push((candidate.clone(), state[candidate].clone()));
         }
     }
+    // A key the value reads that has no value yet is still a read: a
+    // lifecycle `set` may create it before the task's turn.
+    dependencies.push((HINT_ENTRY.to_string(), value.clone()));
     let circular: HashSet<String> = state
         .iter()
         .filter(|(_, value)| value_text(value).is_some_and(|text| first_target_identity_root(&text).is_some()))

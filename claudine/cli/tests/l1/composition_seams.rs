@@ -55,17 +55,21 @@ use std::path::{Path, PathBuf};
 /// `composition::prepare`.
 const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
     AllowedSite {
-        site: "composition::prepare::prepare_direct_on",
+        site: "composition::prepare::compose_selecting",
         calls: 1,
-        reason: "the canonical direct-document composer (the sanctioned owner); \
-                 `prepare_direct`, the canonical service's every entry, and the \
-                 loop seed's read (`prepare_loop_seed`) delegate here",
+        reason: "the canonical composer (the sanctioned owner): `prepare_direct_on` and \
+                 `prepare_inline_on`, and through them `prepare_direct`, `prepare_inline`, \
+                 the canonical service's every entry, and the loop seed's read, delegate \
+                 here; its other arm is the same single compose with a launch-identity \
+                 hook between frontmatter and body",
     },
     AllowedSite {
-        site: "composition::prepare::prepare_inline_on",
+        site: "composition::prepare::read_selection_hints",
         calls: 1,
-        reason: "the canonical inline-compose composer (the sanctioned owner); \
-                 `prepare_inline` and the loop seed's read delegate here",
+        reason: "the shell-free selection read: the same option assembly as the \
+                 canonical composer, narrowed to the frontmatter surface with \
+                 frontmatter shells disabled; it produces no prompt and runs nothing, \
+                 so it is a stage of the sanctioned owner, not a second composer",
     },
     AllowedSite {
         site: "composition::prepare::compose_bootstrap",

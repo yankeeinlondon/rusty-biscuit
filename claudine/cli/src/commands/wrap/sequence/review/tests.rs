@@ -52,6 +52,20 @@ fn select_in(
     installed: &[Provider],
     explicit: Option<Provider>,
 ) -> Result<TaskSelections, CompositionError> {
+    select_with_model(dir, steps, extra, installed, explicit, None, &DocumentEnvironment::default())
+}
+
+/// [`select_in`] under `--model` `cli_model` and the captured `environment`.
+#[allow(clippy::result_large_err)]
+fn select_with_model(
+    dir: &Path,
+    steps: Value,
+    extra: &str,
+    installed: &[Provider],
+    explicit: Option<Provider>,
+    cli_model: Option<&str>,
+    environment: &DocumentEnvironment,
+) -> Result<TaskSelections, CompositionError> {
     write(
         dir,
         "seq.md",
@@ -63,19 +77,18 @@ fn select_in(
     let plan = claudine::composition::resolve_sequence_plan(&source, &context).unwrap().unwrap();
     let graph = claudine::composition::build_preflight_graph(&plan, &source, &context).unwrap();
     let root_hints = claudine::composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter()).unwrap();
-    let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &root_hints);
+    let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &root_hints, false);
     let snapshot = snapshot(installed);
     let catalog = ModelCatalogService::new();
-    let environment = DocumentEnvironment::default();
     providers::select(
         sites,
         &SelectionInputs {
             snapshot: &snapshot,
             catalog: &catalog,
-            cli_model: None,
+            cli_model,
             explicit_provider: explicit,
             favorite: None,
-            environment: &environment,
+            environment,
             silent: true,
             dry_run: false,
         },
@@ -323,6 +336,74 @@ fn a_hint_reading_its_own_identity_fails_as_circular() {
     assert_eq!(problem, SequenceTaskProviderProblem::Circular("env.AGENT".into()));
 }
 
+/// A provider flag decides the provider above every `agent` hint, so a
+/// circular one, in the document or in `with`, no longer blocks.
+#[test]
+fn a_provider_flag_makes_a_circular_agent_irrelevant() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "self.md", "---\nagent: \"{{ env.AGENT }}\"\n---\n\nSelf.\n");
+    write(dir.path(), "plain.md", "Plain.\n");
+    let steps = json!([
+        { "name": "a", "prompt": "self.md" },
+        { "name": "b", "prompt": "plain.md", "with": { "agent": "{{ ctx.agent }}" } },
+    ]);
+    let selections = select_in(dir.path(), steps, "", ALL, Some(Provider::Claude)).unwrap();
+    for at in ["tasks[0]", "tasks[1]"] {
+        assert!(matches!(target(&selections, at), TaskTarget::Own(t) if t.provider == Provider::Claude), "{at}");
+    }
+}
+
+/// A circular `model` is irrelevant once `--model`, a provider-specific model
+/// variable, or `MODEL` decides the model; a provider flag alone does not.
+#[test]
+fn a_higher_model_source_makes_a_circular_model_irrelevant() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "self.md", "---\nmodel: \"{{ env.MODEL }}\"\n---\n\nSelf.\n");
+    let steps = || json!([{ "name": "a", "prompt": "self.md" }]);
+    let none = DocumentEnvironment::default();
+    let flag_only = select_with_model(dir.path(), steps(), "agent: claude\n", ALL, Some(Provider::Claude), None, &none);
+    let (_, property, _, problem) = selection_failure(flag_only.unwrap_err());
+    assert_eq!(property, "model");
+    assert_eq!(problem, SequenceTaskProviderProblem::Circular("env.MODEL".into()));
+
+    let deciding = [
+        (Some("explicit-model"), DocumentEnvironment::default(), ModelResolutionReason::ExplicitCli),
+        (None, DocumentEnvironment::from_iter([("MODEL", "explicit-model")]), ModelResolutionReason::GenericEnv),
+        (
+            None,
+            DocumentEnvironment::from_iter([("CLAUDE_MODEL", "explicit-model")]),
+            ModelResolutionReason::ProviderEnv("CLAUDE_MODEL"),
+        ),
+    ];
+    for (cli_model, environment, reason) in deciding {
+        let selections =
+            select_with_model(dir.path(), steps(), "agent: claude\n", ALL, None, cli_model, &environment).unwrap();
+        let TaskTarget::Fallback(target) = target(&selections, "tasks[0]") else {
+            panic!("{reason:?}: {:?}", target(&selections, "tasks[0]"));
+        };
+        assert_eq!((target.provider, target.model.as_deref()), (Provider::Claude, Some("explicit-model")));
+        assert_eq!(target.model_reason, reason);
+    }
+}
+
+/// A failed or empty-list hint is not a mere selection input: the task's
+/// prompt still evaluates it, so a provider flag does not excuse it.
+#[test]
+fn a_provider_flag_does_not_excuse_a_failed_or_empty_agent() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "plain.md", "Plain.\n");
+    for (agent, expected) in [(json!("{{ no_such_function() }}"), "evaluation"), (json!([]), "empty")] {
+        let steps = json!([{ "name": "a", "prompt": "plain.md", "with": { "agent": agent.clone() } }]);
+        let error = select_in(dir.path(), steps, "", ALL, Some(Provider::Claude)).unwrap_err();
+        let (_, property, _, problem) = selection_failure(error);
+        assert_eq!(property, "tasks[0].with.agent", "{agent}");
+        match expected {
+            "evaluation" => assert!(matches!(problem, SequenceTaskProviderProblem::Evaluation(_)), "{problem:?}"),
+            _ => assert_eq!(problem, SequenceTaskProviderProblem::EmptyAgentList),
+        }
+    }
+}
+
 // -- review ------------------------------------------------------------------
 
 fn chosen(provider: Provider) -> ResolvedExecutionTarget {
@@ -402,4 +483,58 @@ fn a_body_step_uses_the_sequence_documents_agent() {
         TaskTarget::Unresolved { state: AgentResolutionState::SingleInvalid { .. }, own_hint: false, .. }
     ));
     let _ = EffectiveSelectionHints::default();
+}
+
+/// A task whose own `agent` is `null` (in its document or its `with`) has no
+/// provider of its own: it takes the enclosing sequence's, and with none it is
+/// an editable review row, never a selection failure before the rows exist.
+#[test]
+fn a_null_agent_hint_is_missing_a_provider_and_reviewable() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "empty.md", "---\nagent: null\n---\n\nEmpty.\n");
+    write(dir.path(), "named.md", "---\nagent: gemini\n---\n\nNamed.\n");
+    let steps = json!([
+        { "name": "document", "prompt": "empty.md" },
+        { "name": "with", "prompt": "named.md", "with": { "agent": null } }
+    ]);
+    let selections = select_in(dir.path(), steps.clone(), "agent: claude\n", ALL, None).unwrap();
+    for at in ["tasks[0]", "tasks[1]"] {
+        assert!(matches!(target(&selections, at), TaskTarget::Fallback(t) if t.provider == Provider::Claude), "{at}");
+    }
+    let mut selections = select_in(dir.path(), steps, "", ALL, None).unwrap();
+    for at in ["tasks[0]", "tasks[1]"] {
+        assert!(
+            matches!(target(&selections, at), TaskTarget::Unresolved { state: AgentResolutionState::NoAgent, own_hint: false, .. }),
+            "{at}: {:?}",
+            target(&selections, at)
+        );
+    }
+    let shown = Cell::new(Vec::new());
+    review_selections(&mut selections, |drafts| {
+        shown.set(drafts.iter().map(|d| d.read_only.clone()).collect());
+        Ok(vec![chosen(Provider::Codex), chosen(Provider::Codex)])
+    })
+    .unwrap();
+    assert_eq!(shown.take(), [None, None], "both rows are editable");
+}
+
+/// A task whose own `agent` is `[]` (in its document or its `with`) fails
+/// selection at the layer that wrote it, with or without an enclosing
+/// `agent`: no review row is built for a hint the launch schema rejects.
+#[test]
+fn an_empty_agent_list_fails_selection_where_it_was_written() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "empty.md", "---\nagent: []\n---\n\nEmpty.\n");
+    write(dir.path(), "named.md", "---\nagent: gemini\n---\n\nNamed.\n");
+    for (step, property) in [
+        (json!({ "name": "document", "prompt": "empty.md" }), "agent"),
+        (json!({ "name": "with", "prompt": "named.md", "with": { "agent": [] } }), "tasks[0].with.agent"),
+    ] {
+        for sequence_frontmatter in ["agent: claude\n", ""] {
+            let error = select_in(dir.path(), json!([step.clone()]), sequence_frontmatter, ALL, None).unwrap_err();
+            let (_, found, _, problem) = selection_failure(error);
+            assert_eq!(found, property, "{step}");
+            assert_eq!(problem, SequenceTaskProviderProblem::EmptyAgentList, "{step}");
+        }
+    }
 }

@@ -149,6 +149,18 @@ pub struct PreflightGraph {
     pub prompt_references: Vec<PromptReference>,
 }
 
+/// A prompt task's `with`, as preflight evaluated it against the step's
+/// early-binding values.
+struct PreparedWith {
+    /// The entries that evaluated.
+    evaluated: Map<String, Value>,
+    /// The entries the document's shell discovery treats as late: those that
+    /// read a late value, and every key of `failed`. Sorted.
+    deferred: Vec<String>,
+    /// The entries whose evaluation failed, with the cause.
+    failed: HashMap<String, crate::composition::lifecycle_context::LifecycleCause>,
+}
+
 /// One task's reference to a prompt document, as its shell discovery needs it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PromptReference {
@@ -800,11 +812,8 @@ impl<'a> Loader<'a> {
                 let reference = expect_reference(value, "prompt", label)?;
                 let document = self.load_prompt(&reference, origin)?;
                 let with = option_map(options, "with");
-                let (with_evaluated, with_deferred) =
-                    self.record_prompt_reference(&document, &with, origin, state, placement);
-                provider = Some(self.predict_provider(
-                    &document, &with, &with_evaluated, &with_deferred, origin, property,
-                )?);
+                let prepared = self.record_prompt_reference(&document, &with, origin, state, placement);
+                provider = Some(self.predict_provider(&document, &with, &prepared, origin, property)?);
                 PreflightAction::Prompt {
                     path: document,
                     reference,
@@ -1916,9 +1925,12 @@ impl<'a> Loader<'a> {
     /// A `with` entry whose value reads a late root (directly or through a step
     /// value derived from one) is late inside the document too. Every other
     /// entry is evaluated now, against the step's early-binding values, so
-    /// the document's commands see it as they will at the task's turn; one
-    /// that cannot be evaluated here is treated as late rather than failing
-    /// preflight, because `with` otherwise binds only at the task's turn.
+    /// the document's commands see it as they will at the task's turn.
+    ///
+    /// An entry whose evaluation fails is late for shell discovery, because
+    /// `with` otherwise binds only at the task's turn, but [`PreparedWith`]
+    /// keeps its cause so provider prediction can fail a selection input that
+    /// reads it instead of mistaking it for a late value.
     fn record_prompt_reference(
         &mut self,
         path: &Path,
@@ -1926,13 +1938,14 @@ impl<'a> Loader<'a> {
         origin: &Path,
         state: &EffectiveState,
         placement: Placement,
-    ) -> (Map<String, Value>, Vec<String>) {
+    ) -> PreparedWith {
         let mut deferred: Vec<String> =
             derived_deferred_keys(with.iter(), &sequence_deferred_roots(), &self.step_derived)
                 .into_iter()
                 .filter(|key| with.contains_key(key))
                 .collect();
         let mut evaluated = Map::new();
+        let mut failed = HashMap::new();
         for (key, value) in with {
             if deferred.contains(key) {
                 continue;
@@ -1953,7 +1966,16 @@ impl<'a> Loader<'a> {
                 Ok(Ok(resolved)) => {
                     evaluated.insert(key.clone(), resolved);
                 }
-                _ => deferred.push(key.clone()),
+                Ok(Err(error)) => {
+                    failed.insert(
+                        key.clone(),
+                        crate::composition::lifecycle_context::LifecycleCause::new(Box::new(error).into()),
+                    );
+                    deferred.push(key.clone());
+                }
+                // The resolution context itself could not be built; the
+                // document's own evaluation reports that.
+                Err(_) => deferred.push(key.clone()),
             }
         }
         deferred.sort();
@@ -1967,7 +1989,7 @@ impl<'a> Loader<'a> {
         if !self.graph.prompt_references.contains(&reference) {
             self.graph.prompt_references.push(reference);
         }
-        (evaluated, deferred)
+        PreparedWith { evaluated, deferred, failed }
     }
 
     /// Predict a prompt task's provider from its document, its `with`, and the
@@ -1977,8 +1999,7 @@ impl<'a> Loader<'a> {
         &mut self,
         document: &Path,
         with: &Map<String, Value>,
-        with_evaluated: &Map<String, Value>,
-        with_deferred: &[String],
+        prepared: &PreparedWith,
         origin: &Path,
         task_property: &str,
     ) -> Result<providers::ProviderPrediction, CompositionError> {
@@ -2000,8 +2021,9 @@ impl<'a> Loader<'a> {
             document: &frontmatter,
             document_path: document,
             with,
-            with_evaluated,
-            with_deferred,
+            with_evaluated: &prepared.evaluated,
+            with_deferred: &prepared.deferred,
+            with_failed: &prepared.failed,
             with_origin: origin,
             task_property,
             step_frontmatter: &step_frontmatter,

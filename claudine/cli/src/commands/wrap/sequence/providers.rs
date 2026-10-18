@@ -10,17 +10,20 @@
 //! - **fallback** — no `agent` of its own: the nearest enclosing sequence
 //!   document's `agent`, or the review screen's choice;
 //! - **at launch** — an `agent` only the task's turn can evaluate; it is
-//!   resolved from the composed document before the task spawns.
+//!   resolved from the document's evaluated frontmatter before its body
+//!   renders.
 //!
-//! The launch-time rebuild stays authoritative: a document whose composed
+//! The launch-time rebuild stays authoritative: a document whose fresh
 //! `agent` differs from the target still launches on its own `agent`, and
-//! the status line reports what launched.
+//! the status line reports what launched. The task runner applies the same
+//! rule before composing, so the prompt's `env.AGENT`/`env.MODEL` and the
+//! child's environment name that launch.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use claudine::composition::sequence::preflight::providers::{
-    HintState, ProviderPrediction, TaskProviderClass,
+    self, HintState, ProviderPrediction, TaskProviderClass,
 };
 use claudine::composition::sequence::preflight::{
     PreflightAction, PreflightGraph, PreflightTask, TaskIdentity,
@@ -68,6 +71,11 @@ pub(super) enum OwnHints {
     /// A body step composes its sequence document, so that document's hints
     /// are its own. `None` when the document names no `agent`.
     Body(Option<(PathBuf, EffectiveSelectionHints)>),
+    /// A body step composing a referenced sequence document (named here)
+    /// whose static `agent` is `[]`, which no caller setter replaces: the
+    /// launch schema would reject the composed document after earlier tasks
+    /// ran, so selection fails it instead.
+    BodyEmptyAgentList(PathBuf),
 }
 
 /// How a task's provider is decided.
@@ -178,14 +186,16 @@ pub(super) struct SelectionInputs<'a> {
 }
 
 /// Every provider-launching site of `graph`, in launch order. `root_hints`
-/// are the sequence document's hints with the caller's `--set` applied.
+/// are the sequence document's hints with the caller's `--set` applied;
+/// `caller_sets_agent` is whether that `--set` names `agent`.
 pub(super) fn collect_sites(
     graph: &PreflightGraph,
     plan: &composition::SequencePlan,
     root_path: &Path,
     root_hints: &EffectiveSelectionHints,
+    caller_sets_agent: bool,
 ) -> Vec<TaskSite> {
-    let root_document = names_agent(root_hints).then(|| (root_path.to_path_buf(), root_hints.clone()));
+    let root_document = root_hints.names_agent().then(|| (root_path.to_path_buf(), root_hints.clone()));
     let mut sites = Vec::new();
     for (index, step) in graph.steps.iter().enumerate() {
         match &step.task {
@@ -199,7 +209,9 @@ pub(super) fn collect_sites(
                 own: OwnHints::Body(root_document.clone()),
                 enclosing: Vec::new(),
             }),
-            Some(task) => visit(task, index, &step.name, &[], root_document.as_slice(), &mut sites),
+            Some(task) => {
+                visit(task, index, &step.name, &[], root_document.as_slice(), caller_sets_agent, &mut sites);
+            }
         }
     }
     sites
@@ -213,6 +225,7 @@ fn visit(
     step_name: &str,
     containers: &[String],
     enclosing: &[(PathBuf, EffectiveSelectionHints)],
+    caller_sets_agent: bool,
     sites: &mut Vec<TaskSite>,
 ) {
     let name = task.name.clone().unwrap_or_else(|| step_name.to_string());
@@ -237,8 +250,15 @@ fn visit(
                 .frontmatter
                 .as_ref()
                 .and_then(|frontmatter| hints_from_map(frontmatter).ok())
-                .filter(names_agent)
+                .filter(EffectiveSelectionHints::names_agent)
                 .map(|hints| (sequence.origin_path.clone(), hints));
+            let empty_agent_list = !caller_sets_agent
+                && sequence
+                    .frontmatter
+                    .as_ref()
+                    .and_then(|frontmatter| frontmatter.get("agent"))
+                    .and_then(Value::as_array)
+                    .is_some_and(Vec::is_empty);
             let inner: Vec<(PathBuf, EffectiveSelectionHints)> =
                 own.into_iter().chain(enclosing.iter().cloned()).collect();
             let mut nested = containers.to_vec();
@@ -253,10 +273,14 @@ fn visit(
                         label: format!("{} → {}", task.label, step.name),
                         task_path: sequence.origin_path.clone(),
                         containers: nested.clone(),
-                        own: OwnHints::Body(inner.first().cloned()),
+                        own: if empty_agent_list {
+                            OwnHints::BodyEmptyAgentList(sequence.origin_path.clone())
+                        } else {
+                            OwnHints::Body(inner.first().cloned())
+                        },
                         enclosing: Vec::new(),
                     }),
-                    Some(child) => visit(child, root_step, &step.name, &nested, &inner, sites),
+                    Some(child) => visit(child, root_step, &step.name, &nested, &inner, caller_sets_agent, sites),
                 }
             }
         }
@@ -264,7 +288,7 @@ fn visit(
             let mut nested = containers.to_vec();
             nested.push(format!("group `{}`", group.name));
             for leg in &group.tasks {
-                visit(leg, root_step, &leg.label, &nested, enclosing, sites);
+                visit(leg, root_step, &leg.label, &nested, enclosing, caller_sets_agent, sites);
             }
         }
         PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
@@ -278,8 +302,14 @@ fn visit(
 /// [`CompositionError::SequenceTaskProviderSelection`] for the first task, in
 /// launch order, whose own hint can never select a provider: a name that is
 /// unknown or not installed, a list with no installed member, a wrong-typed
-/// hint, an evaluation failure, or a hint that reads its own identity. A task
-/// whose `when:` will be false is checked like any other.
+/// hint, an evaluation failure, an `agent: []`, or a hint that reads its own
+/// identity. A task whose `when:` will be false is checked like any other.
+///
+/// A provider flag makes every `agent` hint's provider irrelevant, and
+/// `--model`, a provider-specific model variable, or `MODEL` every `model`
+/// hint's model, so a hint reading its own identity fails only when no such
+/// source decides its key. The other failures stand under any override: the
+/// task's prompt still evaluates the hint when it composes.
 #[allow(clippy::result_large_err)]
 pub(super) fn select(
     sites: Vec<TaskSite>,
@@ -300,7 +330,49 @@ fn select_one(
     inputs: &SelectionInputs<'_>,
     warned: &mut BTreeSet<Provider>,
 ) -> Result<(TaskTarget, EffectiveSelectionHints), CompositionError> {
-    let own = own_hints(site)?;
+    let mut own = own_hints(site)?;
+    // Provider and model precedence apply separately: a circular hint blocks
+    // only when nothing above it decides its key.
+    if inputs.explicit_provider.is_none()
+        && let Some(circular) = own.circular_agent.take()
+    {
+        return Err(circular.error(site));
+    }
+    let circular_model = own.circular_model.take();
+    let (target, hints) = select_target(site, own, inputs, warned)?;
+    if let Some(circular) = circular_model
+        && !model_decided_above_hints(&target, inputs)
+    {
+        return Err(circular.error(site));
+    }
+    Ok((target, hints))
+}
+
+/// Whether a source above every `model` hint decides the model: `--model`,
+/// a provider-specific model variable, or `MODEL`. For a task whose provider
+/// is not known yet, only the provider-independent sources count.
+fn model_decided_above_hints(target: &TaskTarget, inputs: &SelectionInputs<'_>) -> bool {
+    match target {
+        TaskTarget::Own(target) | TaskTarget::Fallback(target) => matches!(
+            target.model_reason,
+            ModelResolutionReason::ExplicitCli
+                | ModelResolutionReason::ProviderEnv(_)
+                | ModelResolutionReason::GenericEnv
+        ),
+        TaskTarget::AtLaunch(_) | TaskTarget::Unresolved { .. } => {
+            inputs.cli_model.is_some()
+                || inputs.environment.lookup("MODEL").is_some_and(|model| !model.is_empty())
+        }
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn select_target(
+    site: &TaskSite,
+    own: OwnSelection,
+    inputs: &SelectionInputs<'_>,
+    warned: &mut BTreeSet<Provider>,
+) -> Result<(TaskTarget, EffectiveSelectionHints), CompositionError> {
     if let Some(provider) = inputs.explicit_provider {
         let target = target_for(provider, ProviderResolutionReason::ExplicitFlag, &own.hints, inputs, warned);
         return Ok((TaskTarget::Own(target), own.hints));
@@ -350,10 +422,43 @@ fn select_one(
 /// A site's own hints, parsed by the canonical selection-hint parser.
 struct OwnSelection {
     class: TaskProviderClass,
+    /// The static hints; a circular key is left out.
     hints: EffectiveSelectionHints,
     /// Where the `agent` (or failing hint) was written.
     hint_path: PathBuf,
     property: String,
+    /// An `agent` reading the identity it selects, which fails only when no
+    /// provider flag replaces it.
+    circular_agent: Option<CircularHint>,
+    /// The same for `model`, replaced by `--model` or a model variable.
+    circular_model: Option<CircularHint>,
+}
+
+/// A hint that reads the identity it selects, and where it was written.
+struct CircularHint {
+    variable: String,
+    hint_path: PathBuf,
+    property: String,
+}
+
+impl CircularHint {
+    fn from_state(state: &HintState) -> Option<Self> {
+        let HintState::Circular { source, variable } = state else { return None };
+        Some(Self {
+            variable: variable.clone(),
+            hint_path: source.source_path.clone(),
+            property: source.property.clone(),
+        })
+    }
+
+    fn error(&self, site: &TaskSite) -> CompositionError {
+        task_error(
+            site,
+            self.hint_path.clone(),
+            self.property.clone(),
+            SequenceTaskProviderProblem::Circular(self.variable.clone()),
+        )
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -364,22 +469,36 @@ fn own_hints(site: &TaskSite) -> Result<OwnSelection, CompositionError> {
             hints: EffectiveSelectionHints::default(),
             hint_path: site.task_path.clone(),
             property: "agent".into(),
+            circular_agent: None,
+            circular_model: None,
         }),
         OwnHints::Body(Some((path, hints))) => Ok(OwnSelection {
             class: TaskProviderClass::Predicted,
             hints: hints.clone(),
             hint_path: path.clone(),
             property: "agent".into(),
+            circular_agent: None,
+            circular_model: None,
         }),
+        OwnHints::BodyEmptyAgentList(path) => Err(task_error(
+            site,
+            path.clone(),
+            "agent".into(),
+            SequenceTaskProviderProblem::EmptyAgentList,
+        )),
         OwnHints::Task(prediction) => {
             let (hint_path, property) = hint_location(prediction, site);
-            if let Some(failure) = prediction.failure() {
-                let problem = match failure {
-                    HintState::Circular { variable, .. } => SequenceTaskProviderProblem::Circular(variable.clone()),
+            // A failed or empty-list hint fails even under an override: the
+            // composed document still evaluates it, so the launch would fail
+            // on it after earlier tasks ran. A circular one is only a
+            // selection input; [`select_one`] decides whether it matters.
+            for state in [&prediction.agent, &prediction.model] {
+                let problem = match state {
                     HintState::Failed { cause, .. } => SequenceTaskProviderProblem::Evaluation(cause.clone()),
-                    _ => unreachable!("only failed and circular hints are failures"),
+                    HintState::EmptyAgentList { .. } => SequenceTaskProviderProblem::EmptyAgentList,
+                    _ => continue,
                 };
-                let (hint_path, property) = state_location(failure).unwrap_or((hint_path, property));
+                let (hint_path, property) = state_location(state).unwrap_or((hint_path, property));
                 return Err(task_error(site, hint_path, property, problem));
             }
             let hints = hints_from_map(&prediction.static_hints()).map_err(|error| {
@@ -390,7 +509,14 @@ fn own_hints(site: &TaskSite) -> Result<OwnSelection, CompositionError> {
                 };
                 task_error(site, hint_path.clone(), property.clone(), SequenceTaskProviderProblem::WrongType { key, found })
             })?;
-            Ok(OwnSelection { class: prediction.class(), hints, hint_path, property })
+            Ok(OwnSelection {
+                class: prediction.class(),
+                hints,
+                hint_path,
+                property,
+                circular_agent: CircularHint::from_state(&prediction.agent),
+                circular_model: CircularHint::from_state(&prediction.model),
+            })
         }
     }
 }
@@ -409,7 +535,8 @@ fn state_location(state: &HintState) -> Option<(PathBuf, String)> {
         HintState::Static { source, .. }
         | HintState::DecidedAtLaunch { source, .. }
         | HintState::Failed { source, .. }
-        | HintState::Circular { source, .. } => Some((source.source_path.clone(), source.property.clone())),
+        | HintState::Circular { source, .. }
+        | HintState::EmptyAgentList { source } => Some((source.source_path.clone(), source.property.clone())),
     }
 }
 
@@ -418,7 +545,7 @@ fn state_location(state: &HintState) -> Option<(PathBuf, String)> {
 pub(super) fn launch_error(selection: &TaskSelection, problem: SequenceTaskProviderProblem) -> CompositionError {
     let (hint_path, property) = match &selection.site.own {
         OwnHints::Task(prediction) => hint_location(prediction, &selection.site),
-        OwnHints::Body(_) => (selection.site.task_path.clone(), "agent".into()),
+        OwnHints::Body(_) | OwnHints::BodyEmptyAgentList(_) => (selection.site.task_path.clone(), "agent".into()),
     };
     task_error(&selection.site, hint_path, property, problem)
 }
@@ -523,10 +650,6 @@ fn hints_from_map(map: &Map<String, Value>) -> Result<EffectiveSelectionHints, C
         }
     }
     composition::parse_selection_hints_from_frontmatter(&frontmatter)
-}
-
-fn names_agent(hints: &EffectiveSelectionHints) -> bool {
-    hints.agent.is_some() || !hints.agent_invalid.is_empty()
 }
 
 /// The review rows: an editable row for each unresolved site, and a read-only

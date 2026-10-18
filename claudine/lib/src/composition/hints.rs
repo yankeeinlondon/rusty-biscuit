@@ -117,6 +117,15 @@ pub(super) fn parse_agent_hint_full(
     Ok(result)
 }
 
+/// Whether an `agent` value is a hint at all, as the canonical parser reads
+/// it. Null and an empty list are no hint (the task has no `agent` of its
+/// own); an empty string is an invalid provider name, and a wrong-typed value
+/// is a hint that fails, so both are hints.
+#[must_use]
+pub(crate) fn agent_value_names_a_hint(value: &serde_json::Value) -> bool {
+    parse_agent_hint_full(value).map_or(true, |parsed| !parsed.valid.is_empty() || !parsed.invalid.is_empty())
+}
+
 /// Parse the `model` frontmatter value into a typed `ModelHint`.
 ///
 /// Accepts a single string or an array of strings. Model identifiers
