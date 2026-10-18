@@ -1051,12 +1051,25 @@ wins over the embedded copy; see
 
 ### Caller File Provenance and Materialization
 
-Each explicit caller setter (`key=value` or `--set`) retains an immutable,
-per-property record containing the raw value and the file-resolution context
-captured at launch. Canonical preparation keeps that record separate from the
-effective frontmatter map. Document frontmatter, schema defaults, `proxy.with`,
-runtime mutation, and sequence/task-authored values retain their own ownership
-and are not relabeled as caller input.
+One rule decides where a relative file value resolves from: **the file that
+authored it**.
+
+| Value | Resolves from |
+|---|---|
+| a caller setter (`key=value`, `--set`) | the launch directory |
+| a prompt task's `with:` | the sequence document, or the `kind: task`/`kind: group` file that wrote the task |
+| a `proxy.with:` or `prep.with:` | the document whose lifecycle holds the directive, not the target |
+| a `retry.with:` | the retried document itself |
+| the document's own frontmatter | the document |
+
+Each explicit caller setter retains an immutable, per-property record
+containing the raw value and the file-resolution context captured at launch.
+Each `with:` value carries the same kind of record, with the context of the
+file that authored it, layered below the caller's: a caller setter for the
+same property replaces the `with` value and its origin together. Canonical
+preparation keeps these records separate from the effective frontmatter map.
+Document frontmatter, schema defaults, and runtime mutation retain their own
+ownership, and a `with` value is never relabeled as caller input.
 
 Before frontmatter interpolation pass 1, Darkmatter applies the active
 document's effective schema to each caller record. For a root union, the arm
@@ -1087,7 +1100,7 @@ native identity. Absent and explicit-null properties, ordinary strings, and
 document-owned file references are not caller-materialized.
 
 Proxy, retry, resume, inline-compose, and sequence/task entry preserve the same
-raw value and per-property origin. Fresh reads rematerialize them against the
+raw value and per-property origin, for caller and `with` records alike. Fresh reads rematerialize them against the
 new active schema; a reused loop plan keeps its installed semantic identity.
 Neither route recaptures process CWD, and a proxy target cannot re-anchor a
 caller-owned value merely because it declares a different file mode.
@@ -1600,7 +1613,7 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
 - **`inline-compose`** stays inline mode across a handoff, but only the **final** target is eligible for the inline closure. The document that proxied away is not rewritten.
 - **`compose --loop`** (any looping document) ends the loop on a proxy from any event that can raise one — `initialize`, `start`, `success`, `failure`, or `finalize` — and hands the target to the command's coordinator. No further source iteration runs, and the loop gate does not fire for the abandoned iteration. The target is not an extra iteration.
 - **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff. This holds for a step that runs the document body and for a `prompt:` task, whichever event raised the proxy:
-    - the target reads the step's inputs (the user's setters, a task's `params`, and the lexical `seq` root) and sees the step's environment (a task's `operation` as `OPERATION`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; runtime `set` writes and committed `seq.outputs` remain visible to later steps;
+    - the target reads the step's inputs (the user's setters, a task's `with`, and the lexical `seq` root) and sees the step's environment (a task's `operation` as `OPERATION`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; runtime `set` writes and committed `seq.outputs` remain visible to later steps;
     - the task publishes one `seq.outputs` entry after successful finalization: the final target's. A target that fails fails the task and propagates to the enclosing container's failure handler; an unhandled failure stops the sequence;
     - each task owns its chain, so two parallel siblings may both proxy to the same target, while a cycle within one task's chain is still refused;
     - a step that runs the document body publishes every completed provider run, as a `retry` does, so a proxy from `success` leaves the source's entry and the target's.
@@ -1884,7 +1897,7 @@ Repository observations are request-local, not a process-global cache, and are k
 
 Shell execution follows workspace intent rather than source location. Composition documents and system prompts run `::shell` from the launch repository root; for a launch outside a repository, the explicit launch CWD is used. A prompt or harness stored in another directory or repository does not move the agent's shell working directory.
 
-A sequence task’s primary `side_effect` action derives its `SourceContext` from the document that authored the task. File-touching effects therefore target files next to that origin document, including when an externalized `task:` or `group:` file is referenced from another repository. Task `setup:`/`teardown:` are removed grammar; prompt documents or inline containers own lifecycle work. Prompt-task `params` retain that same authoring origin when the target schema selects a file value; immutable CLI caller records remain a separate, higher-precedence layer with the invocation's launch origin.
+A sequence task’s primary `side_effect` action derives its `SourceContext` from the document that authored the task. File-touching effects therefore target files next to that origin document, including when an externalized `task:` or `group:` file is referenced from another repository. Task `setup:`/`teardown:` are removed grammar; prompt documents or inline containers own lifecycle work. Prompt-task `with` values retain that same authoring origin when the target schema selects a file value; immutable CLI caller records remain a separate, higher-precedence layer with the invocation's launch origin.
 
 ## Performance Reporting
 

@@ -648,46 +648,34 @@ or more steps have invalid required values, claudine returns a single
 aggregated `CompositionError::SequenceMissingProperties` listing every
 failing step so the user can fix the entire sequence in one edit pass.
 
-##### Phase 1b: Resolve Provider/Model for Every Step
+##### Phase 1b: Decide Every Task's Provider
 
-1. Detects installed providers and builds snapshot
-2. Loads selection config and model catalog
-3. For each step: resolves provider (explicit flag or non-TTY chain), resolves model
-4. Builds a `SequenceStepDraft` for every step, including shell and side-effect steps, carrying the step's index in the whole sequence
+1. Detects installed providers and builds the snapshot; loads the selection config and model catalog
+2. Collects one site per provider-launching task from the preflight graph (`prompt:` tasks at any depth, and body steps), keyed by its graph identity (`tasks[2].group.tasks[1]`). `shell` and `side_effect` tasks have none, so a graph of only those needs no provider
+3. Classifies each site from preflight's read-only prediction of its own `agent` (prompt frontmatter < `with` < caller setters):
+    - **predicted** — resolved now by the canonical non-interactive rule; an unknown, uninstalled, wrong-typed, or self-referential (`env.AGENT`) hint is `SequenceTaskProviderSelection`, naming the task, the property, and the enclosing containers, before any task starts (a false `when:` included)
+    - **decided at launch** — the hint reads a later value; it is resolved from the composed document before the task spawns
+    - **missing a provider** — the nearest enclosing sequence document's `agent` (nested file first, then outward) is its fallback
+4. Resolves each target's model with the shared resolver, without refreshing any catalog
 
-**Phase 1c: Review or validate:**
+**Phase 1c: Gate and review:**
 
-- **If failures exist**: returns `SequenceSelectionFailed` aggregate error
-- **Every path** first converts each draft to a baseline `ResolvedExecutionTarget` (the provider and model reasons included), one per step in step order
-- **Explicit provider, or an auto-selected agent**: the baseline is the result; no review screen
-- **Non-TTY and a provider choice is required**: the run aborts before any step starts, even if no step would have a review row
-- **TTY and a provider choice is required**: only review-eligible drafts go to the review screen (`biscuit-tui::InputTable`). Eligibility comes from the step's outer executable alone:
+- **Explicit provider**: every site uses it; no review screen
+- **No site left without a provider**: the run starts; no review screen
+- **Non-TTY and a site is left without one**: the run fails with `AgentResolutionFailed` for the sequence document (or, for a task's own ambiguous list, `SequenceTaskProviderSelection`) before any task starts
+- **TTY and a site is left without one**: the review screen (`biscuit-tui::InputTable`) shows a row per site, labeled with its root step's position and name. Only sites without a provider are editable; a task naming its own provider is a read-only row showing it, and a task decided at launch shows `decided at launch`
+    - `Ctrl+S` returns one target per editable row; each is stored by the site's identity as its fallback, never by row number or name
+    - A review that returns a different number of targets than editable rows is an error, not a cancellation, and nothing is applied
+    - `Esc` or Ctrl+C exits `130` before any task starts
 
-    | Outer executable | Review row |
-    |------------------|------------|
-    | `prompt`, `task`, `group`, none (body step) | Yes |
-    | `shell`, `side_effect` | No |
-
-    - Rows are labeled with the original one-based step position and name (`3 review`), so hidden steps leave gaps
-    - `Ctrl+S` returns one target per row; each is written back into the baseline at its draft's step index, never by row number or name. Hidden steps keep their baseline target and reasons
-    - A review that returns a different number of targets than rows is an error, not a cancellation, and nothing is merged
-    - `Esc` or Ctrl+C exits `130` before any step starts
-    - When no draft is eligible, the screen does not open, the state's pre-prompt message (`Invalid Agent:` etc.) is not printed, and the baseline is used
-
-For example, a `prompt`, `shell`, `prompt` sequence shows rows `1` and `3`;
-a choice on row `3` changes the third target and leaves the second target and
-its reasons untouched.
-
-Each step's target is the plan its launch falls back to. When the step's
-launch identity is rebuilt from the document it runs (every attempt, retry,
-resume, and proxy adoption), the provider is the explicit flag, then the
-document's `agent`, then the planned provider; the model is `--model`, then
-the document's `model` (behind the environment's model variables, as in
-[Model Resolution](#model-resolution)), then the planned model, used only
-while the rebuild keeps the planned provider. Outside a sequence the planned
-model is the invocation's own, except that a model the launched document's
-frontmatter chose is re-read from each refreshed document, so a retry after
-`model:` is removed launches without it.
+Each task's target is what its document is prepared under: `AGENT`/`MODEL`
+in its composition environment name it. The launch identity is still rebuilt
+from the document it runs (every attempt, retry, resume, and proxy adoption):
+the explicit flag, then the composed `agent`, then the target. The model is
+`--model`, then the environment's model variables, then the document's
+`model`, then the target's model, used only while the rebuild keeps the
+target's provider. Every spawned attempt records its provider, and the step
+status line reports the final one (with the chain when they differ).
 
 **Affected by:**
 
@@ -695,8 +683,8 @@ frontmatter chose is re-read from each refreshed document, so a retry after
 |--------------------------------|------------------------------------------------------------|
 | `--provider` / `--claude` etc. | Bypasses the review screen; every step uses the flag's provider |
 | `--model`                      | Locks the model cell for every row in the review table     |
-| Per-step frontmatter `agent`   | Influences default provider for that step                  |
-| Per-step frontmatter `model`   | Influences default model for that step                     |
+| A task's own `agent`           | Decides that task's provider; a static one is checked before any task starts |
+| A task's own `model`           | Decides that task's model, below `--model` and the environment |
 
 ##### Phase 1d: Shell Pre-flight Completion
 

@@ -37,7 +37,7 @@ observe preparations through the `test-fixtures` seam
 Only phrases *ready early* are submitted: literal text, or reads of `fm`/bare
 properties, `ctx`, `env` with no function call and no `$(`/backtick
 (`prewarm/classify.rs`); late globals, sequence overlay keys, `--set` keys and
-task `params` wait for their event. A lifecycle `set` changes runtime state,
+task `with` keys wait for their event. A lifecycle `set` changes runtime state,
 not the reread, so a phrase reading a `set` key misses the cache (never wrong
 audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm).
 
@@ -355,6 +355,24 @@ with no conditional at level 6; its conditionals use one
 twice and grow the schema 2^n (measured 10x per validation at five levels).
 DMLS neither completes pattern keys nor resolves values below them, which is
 why `initialize-*` keeps literal keys and three typed levels.
+
+## Per-task provider selection
+
+A sequence has no single planned target. Preflight predicts each `prompt:`
+task's provider from its own `agent` (`PreflightTask.provider`, computed in
+`composition/sequence/preflight/providers.rs` without running or composing
+anything) and keys every task by its graph `TaskIdentity`. The CLI
+(`wrap/sequence/providers.rs`) turns predictions into per-task targets
+(own / enclosing-document fallback / decided at launch / unresolved), fails an
+unusable static hint with `SequenceTaskProviderSelection` before any task
+starts, and gates only on unresolved tasks (review on a terminal, else
+`AgentResolutionFailed`). `WrapperPromptRunner::document_target` prepares
+each task under its own target; `launch_target` resolves a decided-at-launch
+task from its composed hints before spawn. The launch rebuild
+(`select_rebuilt_provider`) stays authoritative, and status lines read the
+spawned attempts from the run's `LaunchLog`, never the plan. Review rows map
+back by identity; read-only rows use `CellValue::StaticText` in an editable
+`InputTable` column. User docs: [`claudine sequence` → Choosing providers](../../../claudine/docs/cli/sequence.md#choosing-providers).
 
 ## Lexical sequence bindings
 

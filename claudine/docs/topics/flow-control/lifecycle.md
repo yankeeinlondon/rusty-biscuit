@@ -615,7 +615,7 @@ the phrase text.
 
 Inside a sequence, values that a step receives from the sequence are treated as
 late: the lexical `seq`, `group`, and `loop` roots, keys set by the
-caller with `--set`, and a prompt task's `params`. A phrase reading a lexical
+caller with `--set`, and a prompt task's `with`. A phrase reading a lexical
 root, or reading a late property by bare name, `fm.key`, or `fm['key']`, is not
 pre-warmed; nor is a phrase
 whose computed index (`fm[name]`) or whole-`fm` read could reach one. During
