@@ -16,7 +16,8 @@ use dmls::context::context_build_count;
 use serde_json::{Value, json};
 
 /// A client that watches files, with work-done progress so a test can wait
-/// for the startup index, and resource operations for create-file actions.
+/// for the workspace file list, and resource operations for create-file
+/// actions.
 fn watched_params(folders: &[&Path]) -> Value {
     let folders: Vec<Value> = folders
         .iter()
@@ -184,10 +185,12 @@ fn documents_in_one_repository_share_one_context_built_at_its_root() {
     write(&first, first_text);
     write(&second, second_text);
 
-    let before = context_build_count();
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(watched_params(&[workspace.path()]));
     fixture.wait_for_startup_complete();
+    // Startup prepared the workspace folder's own (repository-less) context
+    // for its trigger registry; the documents' repository is built once.
+    let before = context_build_count();
     open(&fixture, &uri(&first), first_text);
     open(&fixture, &uri(&second), second_text);
 
@@ -197,7 +200,7 @@ fn documents_in_one_repository_share_one_context_built_at_its_root() {
     assert_eq!(
         context_build_count() - before,
         1,
-        "the startup index and both documents share the repository's one build"
+        "both documents share the repository's one build"
     );
     fixture.shutdown();
 }

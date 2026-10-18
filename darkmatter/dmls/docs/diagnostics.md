@@ -156,11 +156,20 @@ the biscuit-file failure class (`InvalidReference`, `MissingContext`,
 | `wiki.empty-target` | An empty target (`[[]]` / `[[\|alias]]`). |
 | `wiki.empty-heading` | An empty heading query (`[[target#]]`). |
 | `wiki.unsupported-syntax` | A v1-unsupported form (embed, block ref, interwiki). |
-| `wiki.portability-collision` | Indexed paths collide under case-fold / NFC normalization (workspace-scope). |
+| `wiki.portability-collision` | Paths in the workspace file list collide under case-fold / NFC normalization (workspace-scope). |
 | `wiki.invalid-percent-escape` | A malformed percent escape, treated literally. |
 | `wiki.confusing-extension` | Resolved to a visually confusing name (e.g. `note.md.md`). |
 | `wiki.ambiguous-heading-spelling` | Resolved by exact text, but a different heading would match by slug. |
 | `wiki.ambiguous-after-rename` | A file rename would leave a wiki link with no unique replacement spelling. |
+
+Findings that depend on which files exist wait for the workspace file list,
+which DMLS builds in the background after startup: `dm.links.broken_path`,
+`dm.links.missing_anchor`, `dm.transclusion.broken_path`,
+`dm.transclusion.cycle`, `wiki.unresolved-target`, `wiki.ambiguous-target`,
+and `wiki.heading-missing-in-target` are withheld until the list is ready,
+then published. If the walk hit an error, the list is incomplete and the
+three `wiki.*` codes stay withheld, since wiki resolution is decided by the
+list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 
 ### Layer 2 — Frontmatter & schema (`source: darkmatter.frontmatter` / `darkmatter.schema` / `darkmatter.style`)
 
@@ -212,11 +221,18 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
   error are published on that document — they are never duplicated onto the
   Markdown documents whose `$schema` consumes it.
 - **Trigger-schema load failures are published on the envelope.** When a
-  repository-scoped trigger-registry scan fails for an envelope whose payload
-  cannot be loaded, DMLS publishes a file-level `dm.schema.prepare` diagnostic
-  on that envelope file (even when it is not open) instead of failing
-  silently; the last-good registry keeps serving consumers meanwhile, and a
-  recovered scan clears the diagnostic.
+  repository-scoped trigger-registry scan fails for an envelope that cannot
+  be loaded (invalid YAML, a malformed match, or a payload that does not
+  resolve), DMLS publishes a `dm.schema.prepare` diagnostic on that envelope
+  file (even when it is not open) instead of failing silently. A closed
+  envelope's diagnostic sits at the start of the file. Once it is open, an
+  envelope that is not valid YAML is diagnosed from the reported line and
+  column to the end of that line, and other failures cover the whole file. Registries are
+  first prepared at startup, so a broken envelope in a workspace folder's
+  schema roots is reported before any document opens. The last-good registry keeps serving consumers meanwhile,
+  and a recovered scan clears the diagnostic. A YAML file that does not
+  [claim the envelope](../../docs/topics/schemas/definition.md#which-files-claim-the-envelope)
+  is never diagnosed this way.
 
 ### Layer 3 — Darkmatter DSL (`source: darkmatter.compose` / `darkmatter.security`)
 

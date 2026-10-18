@@ -55,8 +55,8 @@ const CLASSES: [ResolutionFailure; 5] = [
 ];
 
 /// A client that watches files, with work-done progress so the test can wait
-/// for the startup index, and resource operations so create-file actions are
-/// offered.
+/// for the workspace file list, and resource operations so create-file
+/// actions are offered.
 fn client_params(folder: &Path) -> Value {
     json!({
         "processId": null,
@@ -345,7 +345,7 @@ fn open_document(session: &mut LspFixture<'_>, document: &Path) -> DocumentState
     }
 }
 
-/// One LSP session per part: a session's startup index and the cells' opens
+/// One LSP session per part: a session's startup and the cells' opens
 /// dominate the matrix's cost, so it is split across tests nextest runs in
 /// parallel. Documents share a part with every entry point on them; `match()`
 /// validation cells open one document per candidate, so they are spread
@@ -370,8 +370,8 @@ fn run_matrix_part(part: usize) {
     let fixture = ParityFixture::create(workspace.path());
 
     // Entry points sharing a consumer share one document. Every document is
-    // written before startup, so the startup index holds every target and
-    // every cell document, whichever part opens it.
+    // written before startup, so the workspace file list holds every target
+    // and every cell document, whichever part opens it.
     let mut documents: Vec<(PathBuf, Vec<(Row, DocumentCell)>)> = Vec::new();
     let mut glob_cells: Vec<(Row, GlobDocumentCell)> = Vec::new();
     for row in rows_for(Owner::Dmls) {

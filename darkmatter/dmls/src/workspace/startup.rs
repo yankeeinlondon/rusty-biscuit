@@ -3,14 +3,16 @@
 //! Server startup only lists files ([`list_files`]); Markdown is parsed when
 //! a feature needs it. A full-index build hands the list to a fixed pool of
 //! worker threads (crossbeam channels, no async runtime — AD-3) that read and
-//! parse in parallel ([`collect_indices_from_files`]); results assemble into
-//! one immutable snapshot. Progress is reported through the
+//! parse in parallel ([`parse_full_index_round`], and
+//! [`collect_indices_from_files`] for the bench); results assemble into one
+//! immutable snapshot. Progress is reported through the
 //! [`ProgressReporter`] seam so the protocol loop can drive
 //! `window/workDoneProgress` while tests use a silent collector.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::unbounded;
@@ -27,7 +29,7 @@ use super::discover::{DiscoveryReport, discover_workspace};
 /// Because indexing is parallel these are aggregate CPU time per stage, not
 /// disjoint wall-clock slices (the stages overlap across workers). The bench
 /// harness reports them as the R-6 `read`/`hash`/`frontmatter`/`parse_markdown`
-/// /`directives` stages so a bench run can attribute cold-start cost.
+/// /`directives` stages so a bench run can attribute full-index cost.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IndexStageTimings {
     /// Reading file contents from disk.
@@ -99,17 +101,44 @@ pub fn collect_indices_from_files(
     reporter: &dyn ProgressReporter,
 ) -> (BTreeMap<PathBuf, DocumentIndex>, IndexStageTimings) {
     reporter.begin("Indexing workspace");
-    let out = parallel_index(files, reporter);
+    let out = parallel_index(files, reporter, &AtomicBool::new(false));
     reporter.end();
-    out
+    (out.parsed, out.stages)
+}
+
+/// What one full-index build round read and parsed.
+#[derive(Debug, Default)]
+pub struct FullIndexRound {
+    /// The files that were read and parsed.
+    pub parsed: BTreeMap<PathBuf, DocumentIndex>,
+    /// The files that could not be read as UTF-8 text, with the error. Any
+    /// entry fails the build; see [`WorkspaceIndex::finish_full_build`].
+    pub failed: Vec<(PathBuf, String)>,
+    /// Whether the round stopped early because its build was cancelled; its
+    /// results are then incomplete and must be discarded.
+    pub cancelled: bool,
+}
+
+/// Reads and parses `files` for a full-index build, reporting each finished
+/// file to `reporter` (without `begin`/`end`, which span the whole build).
+///
+/// `cancel` is checked between files, so a cancelled build stops promptly
+/// without aborting a parse midway.
+pub fn parse_full_index_round(
+    files: &[PathBuf],
+    reporter: &dyn ProgressReporter,
+    cancel: &AtomicBool,
+) -> FullIndexRound {
+    let out = parallel_index(files, reporter, cancel);
+    FullIndexRound {
+        parsed: out.parsed,
+        failed: out.failed,
+        cancelled: cancel.load(Ordering::SeqCst),
+    }
 }
 
 /// Discovers and parses a workspace into a per-document index map, without
-/// assembling the graph.
-///
-/// The protocol loop uses this so it can *merge* the disk-derived documents
-/// under any already-open buffers (open buffers are authoritative) before a
-/// single snapshot build.
+/// assembling the graph ([`index_workspace`] assembles it).
 pub fn collect_indices(
     roots: &[PathBuf],
     config: &WorkspaceConfig,
@@ -117,9 +146,9 @@ pub fn collect_indices(
 ) -> BTreeMap<PathBuf, DocumentIndex> {
     reporter.begin("Indexing workspace");
     let report = list_files(roots, config);
-    let (indices, _timings) = parallel_index(&report.files, reporter);
+    let out = parallel_index(&report.files, reporter, &AtomicBool::new(false));
     reporter.end();
-    indices
+    out.parsed
 }
 
 /// Lists a workspace's files without reading them, logging each duplicate
@@ -139,18 +168,30 @@ pub fn list_files(roots: &[PathBuf], config: &WorkspaceConfig) -> DiscoveryRepor
     report
 }
 
+/// What [`parallel_index`] produced.
+struct ParallelIndex {
+    parsed: BTreeMap<PathBuf, DocumentIndex>,
+    failed: Vec<(PathBuf, String)>,
+    stages: IndexStageTimings,
+}
+
 /// Reads and parses `files` across a worker pool, reporting progress and
-/// accumulating per-stage timings.
+/// accumulating per-stage timings. Workers stop taking files once `cancel`
+/// is set.
 fn parallel_index(
     files: &[PathBuf],
     reporter: &dyn ProgressReporter,
-) -> (BTreeMap<PathBuf, DocumentIndex>, IndexStageTimings) {
+    cancel: &AtomicBool,
+) -> ParallelIndex {
     let total = files.len();
-    let mut map: BTreeMap<PathBuf, DocumentIndex> = BTreeMap::new();
-    let mut stages = IndexStageTimings::default();
+    let mut out = ParallelIndex {
+        parsed: BTreeMap::new(),
+        failed: Vec::new(),
+        stages: IndexStageTimings::default(),
+    };
     if total == 0 {
         reporter.report(0, 0);
-        return (map, stages);
+        return out;
     }
 
     let worker_count = worker_count(total);
@@ -159,7 +200,7 @@ fn parallel_index(
         let _ = work_tx.send(file.clone());
     }
     drop(work_tx);
-    type IndexResult = Option<(DocumentIndex, Duration, IndexTimings)>;
+    type IndexResult = Result<(DocumentIndex, Duration, IndexTimings), String>;
     let (result_tx, result_rx) = unbounded::<(PathBuf, IndexResult)>();
 
     std::thread::scope(|scope| {
@@ -168,6 +209,9 @@ fn parallel_index(
             let result_tx = result_tx.clone();
             scope.spawn(move || {
                 while let Ok(path) = work_rx.recv() {
+                    if cancel.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let index = read_and_index(&path);
                     let _ = result_tx.send((path, index));
                 }
@@ -180,32 +224,32 @@ fn parallel_index(
 
         let mut done = 0;
         while let Ok((path, result)) = result_rx.recv() {
-            if let Some((index, read, timings)) = result {
-                map.insert(path, index);
-                stages.accumulate(read, timings);
+            match result {
+                Ok((index, read, timings)) => {
+                    out.parsed.insert(path, index);
+                    out.stages.accumulate(read, timings);
+                }
+                Err(error) => {
+                    tracing::debug!("unreadable {}: {error}", path.display());
+                    out.failed.push((path, error));
+                }
             }
             done += 1;
             reporter.report(done, total);
         }
     });
 
-    (map, stages)
+    out
 }
 
 /// Reads one file and indexes it, capturing the read and per-stage parse
-/// timings; `None` when unreadable or not valid UTF-8.
-fn read_and_index(path: &Path) -> Option<(DocumentIndex, Duration, IndexTimings)> {
+/// timings; the read error when it is unreadable or not valid UTF-8.
+fn read_and_index(path: &Path) -> Result<(DocumentIndex, Duration, IndexTimings), String> {
     let read_start = Instant::now();
-    let source = match crate::work_counters::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            tracing::debug!("skipping unreadable {}: {error}", path.display());
-            return None;
-        }
-    };
+    let source = crate::work_counters::read_to_string(path).map_err(|error| error.to_string())?;
     let read = read_start.elapsed();
     let (index, timings) = index_document_timed(path, &source);
-    Some((index, read, timings))
+    Ok((index, read, timings))
 }
 
 /// Worker count: at least one, at most the available parallelism, never more
@@ -221,7 +265,7 @@ fn worker_count(files: usize) -> usize {
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
 
     fn write(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);
@@ -283,6 +327,41 @@ mod tests {
             Arc::new(crate::graph::NoContexts),
         );
         assert!(index.is_empty());
+    }
+
+    #[test]
+    fn test_a_full_index_round_reports_unreadable_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(root, "good.md", "# Good\n");
+        std::fs::write(root.join("binary.md"), [0xff, 0xfe, 0x00]).unwrap();
+        let files = vec![root.join("good.md"), root.join("binary.md"), root.join("missing.md")];
+
+        let progress = RecordingProgress::default();
+        let round = parse_full_index_round(&files, &progress, &AtomicBool::new(false));
+        assert!(!round.cancelled);
+        assert_eq!(round.parsed.keys().cloned().collect::<Vec<_>>(), vec![root.join("good.md")]);
+        let mut failed: Vec<PathBuf> = round.failed.iter().map(|(path, _)| path.clone()).collect();
+        failed.sort();
+        assert_eq!(failed, vec![root.join("binary.md"), root.join("missing.md")]);
+        // A round reports each file, but `begin`/`end` belong to the build.
+        assert_eq!(*progress.last.lock().unwrap(), (3, 3));
+        assert_eq!(progress.begins.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_a_cancelled_round_reads_nothing_more() {
+        let temp = tempfile::tempdir().unwrap();
+        write(temp.path(), "a.md", "# A\n");
+        let before = crate::work_counters::work_counts();
+        let round = parse_full_index_round(
+            &[temp.path().join("a.md")],
+            &SilentProgress,
+            &AtomicBool::new(true),
+        );
+        assert!(round.cancelled);
+        assert!(round.parsed.is_empty() && round.failed.is_empty());
+        assert_eq!(crate::work_counters::work_counts().since(before).reads, 0);
     }
 
     #[test]

@@ -16,6 +16,12 @@
 //! marks it stale: the prior parse and hash are kept, and the next need
 //! re-reads the file and reuses the parse when the hash is unchanged. Open
 //! buffers override disk until they close.
+//!
+//! The full index is built in rounds off the index lock
+//! ([`WorkspaceIndex::begin_full_build`], [`WorkspaceIndex::finish_full_build`]).
+//! Every path whose disk, buffer, or list state changes while a round reads
+//! is recorded, and the round's parse of it is discarded; the build becomes
+//! full only when a round leaves nothing unparsed.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -41,6 +47,20 @@ pub enum Invalidation {
     },
 }
 
+/// What a full-index build does after a round; see
+/// [`WorkspaceIndex::finish_full_build`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FullBuildStep {
+    /// Every listed document is parsed; the index is full.
+    Ready,
+    /// Documents remain unparsed (they changed, were opened, closed, or
+    /// listed during the round); another round must read them.
+    More(Vec<PathBuf>),
+    /// Listed documents could not be read; the build fails and nothing is
+    /// marked full.
+    Failed(Vec<(PathBuf, String)>),
+}
+
 /// The mutable workspace index: parse products plus the live snapshot.
 #[derive(Debug)]
 pub struct WorkspaceIndex {
@@ -58,6 +78,9 @@ pub struct WorkspaceIndex {
     /// Whether the full index has been built: every listed document parsed
     /// and, from then on, kept current file by file.
     full: bool,
+    /// While a full-index build round is reading, the paths whose disk,
+    /// buffer, or list state changed since it began; `None` otherwise.
+    touched: Option<HashSet<PathBuf>>,
     snapshot: Arc<WorkspaceGraph>,
     /// Wiki roots each document's canonical logical path is resolved against
     /// (R-8); empty until the server sets them from the initialize handshake.
@@ -89,6 +112,7 @@ impl WorkspaceIndex {
             open: HashSet::new(),
             stale: HashSet::new(),
             full: false,
+            touched: None,
             snapshot,
             wiki_roots: Vec::new(),
             contexts,
@@ -146,6 +170,7 @@ impl WorkspaceIndex {
     /// Indexes an open buffer's text; the buffer overrides disk until
     /// [`close_buffer`](Self::close_buffer).
     pub fn open_buffer(&mut self, path: &Path, source: &str) -> Invalidation {
+        self.touch(path);
         self.open.insert(path.to_path_buf());
         self.stale.remove(path);
         self.set_document(path, source)
@@ -158,6 +183,7 @@ impl WorkspaceIndex {
         if !self.open.remove(path) {
             return;
         }
+        self.touch(path);
         if self.listed.contains(path) && self.full {
             self.stale.insert(path.to_path_buf());
             self.ensure_parsed(&[path.to_path_buf()]);
@@ -194,6 +220,9 @@ impl WorkspaceIndex {
         }
         changed.extend(vanished);
         changed.sort();
+        for path in &changed {
+            self.touch(path);
+        }
         self.listed = markdown;
         self.yaml = yaml;
         self.listing = Listing::Ready { complete };
@@ -213,6 +242,7 @@ impl WorkspaceIndex {
     ///
     /// Whether the snapshot changed.
     pub fn disk_changed(&mut self, path: &Path) -> bool {
+        self.touch(path);
         let joined = self.listed.insert(path.to_path_buf());
         // An open document is already a graph document, and its buffer
         // stays authoritative.
@@ -248,6 +278,7 @@ impl WorkspaceIndex {
     ///
     /// Whether the snapshot changed.
     pub fn disk_deleted(&mut self, path: &Path) -> bool {
+        self.touch(path);
         let unlisted = self.listed.remove(path);
         self.stale.remove(path);
         if self.open.contains(path) {
@@ -304,6 +335,7 @@ impl WorkspaceIndex {
             if !self.needs_parse(path) {
                 continue;
             }
+            self.touch(path);
             self.stale.remove(path);
             match crate::work_counters::read_to_string(path) {
                 Ok(source) => {
@@ -414,18 +446,66 @@ impl WorkspaceIndex {
             .collect()
     }
 
-    /// Adopts a full-index build's parses (closed documents only; an open
-    /// buffer stays authoritative) and marks the full index built.
-    pub fn adopt_full(&mut self, parsed: BTreeMap<PathBuf, DocumentIndex>) {
-        for (path, index) in parsed {
-            if self.open.contains(&path) || !self.listed.contains(&path) {
-                continue;
-            }
-            self.stale.remove(&path);
-            self.documents.insert(path, index);
+    /// Starts a full-index build round: from now until
+    /// [`finish_full_build`](Self::finish_full_build), every path whose
+    /// state changes is recorded so the round's stale reading of it is
+    /// discarded.
+    ///
+    /// ## Returns
+    ///
+    /// The paths the round must read: the listed documents not yet parsed,
+    /// or stale.
+    pub fn begin_full_build(&mut self) -> Vec<PathBuf> {
+        self.touched = Some(HashSet::new());
+        self.unparsed_paths()
+    }
+
+    /// Reconciles a build round's results with every change received while
+    /// it read, and decides what the build does next.
+    ///
+    /// A parse is adopted only for a path that is still listed, closed,
+    /// unchanged since the round began, and still unparsed; a newer buffer
+    /// or lazy parse always wins. A read failure counts only for such a
+    /// path too: a file deleted or renamed during the round does not fail
+    /// the build.
+    pub fn finish_full_build(
+        &mut self,
+        parsed: BTreeMap<PathBuf, DocumentIndex>,
+        failed: Vec<(PathBuf, String)>,
+    ) -> FullBuildStep {
+        let touched = self.touched.take().unwrap_or_default();
+        let current = |index: &Self, path: &Path| {
+            index.listed.contains(path) && !index.open.contains(path) && !touched.contains(path)
+        };
+        let failed: Vec<(PathBuf, String)> =
+            failed.into_iter().filter(|(path, _)| current(self, path)).collect();
+        if !failed.is_empty() {
+            return FullBuildStep::Failed(failed);
         }
-        self.full = true;
-        self.rebuild();
+        let mut adopted = false;
+        for (path, index) in parsed {
+            if current(self, &path) && self.needs_parse(&path) {
+                self.stale.remove(&path);
+                self.documents.insert(path, index);
+                adopted = true;
+            }
+        }
+        let remaining = self.unparsed_paths();
+        if remaining.is_empty() {
+            self.full = true;
+            self.rebuild();
+            return FullBuildStep::Ready;
+        }
+        if adopted {
+            self.rebuild();
+        }
+        FullBuildStep::More(remaining)
+    }
+
+    /// Ends an in-flight build round without adopting anything (the build
+    /// was cancelled).
+    pub fn abandon_full_build(&mut self) {
+        self.touched = None;
     }
 
     /// Whether the full index has been built.
@@ -450,6 +530,7 @@ impl WorkspaceIndex {
 
     /// Drops a document (deletion), rebuilding the snapshot if it was present.
     pub fn remove_document(&mut self, path: &Path) -> Invalidation {
+        self.touch(path);
         self.listed.remove(path);
         self.open.remove(path);
         self.stale.remove(path);
@@ -516,6 +597,13 @@ impl WorkspaceIndex {
                     .collect::<Vec<_>>()
             })
             .collect()
+    }
+
+    /// Records a state change at `path` for the in-flight build round.
+    fn touch(&mut self, path: &Path) {
+        if let Some(touched) = &mut self.touched {
+            touched.insert(path.to_path_buf());
+        }
     }
 
     fn rebuild(&mut self) {
@@ -789,10 +877,10 @@ mod tests {
         std::fs::write(&a, "# A\n").unwrap();
         let mut index = WorkspaceIndex::new(contexts);
         listed(&mut index, &[&a]);
-        let pending = index.unparsed_paths();
+        let pending = index.begin_full_build();
         assert_eq!(pending, vec![a.clone()]);
         let parsed = pending.iter().map(|path| (path.clone(), index_document(path, "# A\n"))).collect();
-        index.adopt_full(parsed);
+        assert_eq!(index.finish_full_build(parsed, Vec::new()), FullBuildStep::Ready);
         assert!(index.is_full() && index.unparsed_paths().is_empty());
 
         // A watched change and a new file are read at once.
@@ -803,6 +891,84 @@ mod tests {
         assert_eq!(heading_titles(&index, &a), vec!["A changed".to_string()]);
         assert_eq!(heading_titles(&index, &b), vec!["B".to_string()]);
         assert!(index.unparsed_paths().is_empty());
+    }
+
+    /// Parses `paths` as a build round would, from `text`.
+    fn round(paths: &[PathBuf], text: &str) -> BTreeMap<PathBuf, DocumentIndex> {
+        paths.iter().map(|path| (path.clone(), index_document(path, text))).collect()
+    }
+
+    #[test]
+    fn test_a_build_round_discards_what_changed_while_it_read() {
+        let (_temp, root, contexts) = disk_workspace();
+        let [a, b, c, d] = ["a.md", "b.md", "c.md", "d.md"].map(|name| root.join(name));
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&a, &b, &c]);
+
+        let first = index.begin_full_build();
+        assert_eq!(first, vec![a.clone(), b.clone(), c.clone()]);
+        // While the round reads: b changes on disk, c opens with new text,
+        // and d joins the list.
+        index.disk_changed(&b);
+        index.open_buffer(&c, "# C buffer\n");
+        listed(&mut index, &[&a, &b, &c, &d]);
+        let step = index.finish_full_build(round(&first, "# Old\n"), Vec::new());
+        assert_eq!(step, FullBuildStep::More(vec![b.clone(), d.clone()]));
+        assert!(!index.is_full());
+        assert_eq!(heading_titles(&index, &a), vec!["Old".to_string()]);
+        assert_eq!(heading_titles(&index, &c), vec!["C buffer".to_string()]);
+        assert!(!index.contains(&b), "b's stale reading is discarded");
+
+        let second = index.begin_full_build();
+        assert_eq!(second, vec![b.clone(), d.clone()]);
+        assert_eq!(index.finish_full_build(round(&second, "# New\n"), Vec::new()), FullBuildStep::Ready);
+        assert!(index.is_full());
+        assert_eq!(heading_titles(&index, &b), vec!["New".to_string()]);
+        assert_eq!(heading_titles(&index, &c), vec!["C buffer".to_string()]);
+    }
+
+    #[test]
+    fn test_a_build_round_fails_only_for_current_unreadable_files() {
+        let (_temp, root, contexts) = disk_workspace();
+        let [a, gone, bad] = ["a.md", "gone.md", "bad.md"].map(|name| root.join(name));
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&a, &gone, &bad]);
+
+        // A file deleted during the round does not fail the build.
+        let paths = index.begin_full_build();
+        index.disk_deleted(&gone);
+        let failed = vec![(gone.clone(), "not found".to_string())];
+        let parsed = round(&[a.clone(), bad.clone()], "# Fine\n");
+        assert_eq!(index.finish_full_build(parsed, failed), FullBuildStep::Ready);
+        assert!(index.is_full());
+        assert_eq!(paths.len(), 3);
+
+        // A current file that cannot be read fails it, and nothing is adopted.
+        let (_temp, root, contexts) = disk_workspace();
+        let [a, bad] = ["a.md", "bad.md"].map(|name| root.join(name));
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&a, &bad]);
+        index.begin_full_build();
+        let failed = vec![(bad.clone(), "invalid UTF-8".to_string())];
+        let step = index.finish_full_build(round(std::slice::from_ref(&a), "# A\n"), failed.clone());
+        assert_eq!(step, FullBuildStep::Failed(failed));
+        assert!(!index.is_full());
+        assert!(!index.contains(&a));
+        // A later build retries from scratch.
+        assert_eq!(index.begin_full_build(), vec![a.clone(), bad.clone()]);
+    }
+
+    #[test]
+    fn test_an_abandoned_round_records_nothing_more() {
+        let (_temp, root, contexts) = disk_workspace();
+        let a = root.join("a.md");
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&a]);
+        index.begin_full_build();
+        index.abandon_full_build();
+        index.disk_changed(&a);
+        assert!(index.touched.is_none());
+        assert!(!index.is_full());
     }
 
     #[test]

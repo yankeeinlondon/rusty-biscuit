@@ -60,10 +60,15 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   assembles no schema at all (`SchemaOutcome::Ready(None)`): `$schema` and
   trigger payloads cannot resolve without one, and `DarkmatterSchemas::new`
   requires a context.
+- User-facing docs: `darkmatter/docs/lsp/indexing.md` (startup order, file
+  list, on-demand parsing, full index, log lines) and
+  `darkmatter/docs/lsp/configuration.md` (`.dmls.toml`, the `[workspace]`
+  `root`/`include`/`exclude` keys). Update them with any behavior change here.
 - Startup lists files and parses only open buffers. `discover_workspace`
   returns Markdown (`include`/`exclude`) and YAML (`exclude` only) paths,
-  with `require_git(false)`, `.git` skipped, no contents read, and walk errors
-  marking the list incomplete; it runs on a background thread and reaches the
+  with `require_git(false)`, `.git` skipped, symlinks not followed, no
+  contents read, and walk errors marking the list incomplete; it runs on a
+  background thread (progress token `dmls/startup-index`) and reaches the
   dispatch thread as an `Internal` event on the router's `select!`, which owns
   every index mutation. `WorkspaceIndex` holds the list: every listed
   Markdown file is a graph document, unparsed until needed
@@ -71,15 +76,48 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   unchecked). Parse on demand with `prepare_targets` (fragment links, heading
   wiki links, the transclusion closure) or `ensure_parsed`; a disk change
   marks a parse stale (xxHash reuse on re-read, a failed read drops it); open
-  buffers override disk until `close_buffer`. References, rename,
-  `willRenameFiles`, and workspace symbols call
-  `ServerState::ensure_full_index`. Diagnostics that depend on which paths
+  buffers override disk until `close_buffer`. Diagnostics that depend on which paths
   exist are withheld while `WorkspaceGraph::listing()` is `Pending`
-  (`router::listing_gates`). L1 sessions: `LspFixture::initialize` waits for
-  the list through `RunOptions::with_startup_hooks` (`StartupHooks`
-  observer); `start_with_file_list_gate` + `initialize_unlisted` holds it.
-  `workspace/symbol` (`flush_server`) now builds the full index, so a
-  parse-counting test must not use it as a barrier.
+  (`router::listing_gates`).
+- Startup order (one background thread, `router::spawn_startup`): prepare
+  each workspace folder's trigger registry
+  (`OverlayState::prepare_workspace_registries`, a probe document
+  `.dmls-workspace` in the folder) → `Internal::RegistryReady` (logs
+  `schema registry ready`, or `… initialized with failures` when
+  `failed_scopes > 0`) → the file-list walk → `Internal::FileList` (logs
+  `workspace files listed markdown yaml duplicates elapsed_ms`). A re-list
+  (`ServerState::relist`: rescan, config or ignore-file change) logs
+  `workspace rescan complete` with the same fields; a built full index logs
+  `full index built markdown headings links trigger elapsed_ms` (elapsed from
+  the first waiter, including any file-list wait). Every workspace log line
+  carries `workspace=` (`workspace::workspace_identifier`: the client's
+  folder URIs, comma-joined, one line per server). Log string fields with `%`
+  so they print unquoted.
+- The full index (`full_index.rs`, router): references, rename,
+  `willRenameFiles`, and `workspace/symbol` (`Trigger::for_method`; never
+  `prepareRename`) are parked as `Waiter`s with their own `RequestTimings`
+  while `WorkspaceIndex::is_full()` is false. `FullIndexState`
+  (`NotStarted`/`Building(Build)`/`Ready`/`Failed`) holds at most one
+  `Build`, which runs rounds on a thread
+  (`parse_full_index_round`, no index lock); the dispatch thread reconciles
+  each with `finish_full_build`, which drops parses of paths `touch`ed
+  during the round and starts another round until nothing is unparsed. Any
+  current unreadable file fails the build (`RequestFailed`, file named);
+  cancelling the last waiter drops the build (its `Drop` sets the cancel
+  flag); shutdown answers waiters `ServerCancelled`. Diagnostics refresh
+  *before* waiters are answered, so a response stays a barrier. Progress
+  token `dmls/full-index`. A new `WorkspaceIndex` mutator that changes a
+  path's disk, buffer, or list state must call `touch`.
+- L1 sessions: `LspFixture::initialize` waits for the list
+  (`StartupEvent::FileListInstalled`), `initialize_unlisted` for
+  `RegistryReady`; `start_with_file_list_gate` holds the walk and
+  `start_with_full_index_gate` holds each build round after its reads
+  (`wait_for_event(FullIndexRoundRead)`, `release_full_index_round`,
+  `open_full_index_gate`). `workspace/symbol` (`flush_server`) builds the
+  full index, so a parse-counting test must not use it as a barrier, and its
+  response lists a `File` symbol per document beside each heading.
+  Startup's registry preparation publishes a failing trigger file's
+  (unversioned) diagnostic before any open; wait for the versioned one.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
   `arena::locate` takes the first planned candidate when it is a graph
   document (listed or open; no probe), else asks

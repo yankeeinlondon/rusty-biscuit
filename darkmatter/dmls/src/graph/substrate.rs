@@ -87,7 +87,7 @@ pub struct WikiLinkFact {
 
 /// A `::file`/`::code` transclusion fact extracted from one document
 /// (document-relative span). Resolution against the workspace happens at
-/// snapshot assembly; a target that matches an indexed document gets a
+/// snapshot assembly; a target that matches a graph document gets a
 /// `transcludes` edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransclusionFact {

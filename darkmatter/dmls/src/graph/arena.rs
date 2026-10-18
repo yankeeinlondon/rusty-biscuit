@@ -429,8 +429,8 @@ impl WorkspaceGraph {
             }
         }
 
-        // Resolve `::file`/`::code` transclusions to the indexed document's
-        // root, or to an existing unindexed file (`::code ./mod.rs`). A broken
+        // Resolve `::file`/`::code` transclusions to the graph document's
+        // root, or to an existing file outside the graph (`::code ./mod.rs`). A broken
         // path carries no edge; request-time diagnostics report it.
         for (source, doc_id, path) in pending_transclusions {
             match resolver.locate(doc_id, &path) {
@@ -447,7 +447,7 @@ impl WorkspaceGraph {
         }
 
         // Resolve `$schema` (uses_schema) and file uses (uses_file). A value
-        // naming an indexed document resolves to its root, feeding invalidation
+        // naming a graph document resolves to its root, feeding invalidation
         // fan-out; an existing schema file or asset resolves to that file.
         for (source, doc_id, path) in pending_schema_uses {
             edges.push(resolve_file_edge(source, EdgeKind::UsesSchema, doc_id, &path, &mut resolver, &documents));
@@ -793,7 +793,7 @@ impl WorkspaceGraph {
 /// Why an unresolved link target could not be resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkDiagnostic {
-    /// The path names no existing file and no indexed document.
+    /// The path names no existing file and no graph document.
     BrokenPath {
         /// The failure class: [`ResolutionFailure::NoMatch`] when no planned
         /// candidate exists, otherwise why the reference could not be
@@ -897,9 +897,9 @@ impl DocumentContexts for NoContexts {
 /// Where a path reference lands.
 #[derive(Debug, Clone)]
 enum Located {
-    /// An indexed document.
+    /// A graph document (listed or open, parsed or not).
     Document(DocumentId),
-    /// An existing file the graph does not index.
+    /// An existing file that is not a graph document.
     File(PathBuf),
     /// Nothing: the failure class.
     Missing(ResolutionFailure),
@@ -1299,7 +1299,7 @@ mod tests {
         let (node_id, _) = g.file_uses(a).next().expect("one file use");
         let edge = g.outgoing(node_id, EdgeKind::UsesFile).next().expect("one uses_file edge");
         let b_root = g.document(b).unwrap().root;
-        // The `file(...)` value names an indexed document, so it resolves to b's
+        // The `file(...)` value names a graph document, so it resolves to b's
         // root and is visible as an incoming edge (invalidation fan-out).
         assert_eq!(edge.target.node(), Some(b_root));
         assert_eq!(g.incoming(b_root, EdgeKind::UsesFile).count(), 1);

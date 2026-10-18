@@ -63,6 +63,22 @@ pub fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The workspace identifier on DMLS's workspace log lines: the workspace
+/// folders' URIs as the client sent them, comma-separated, or the root URI,
+/// or else the effective root paths.
+pub fn workspace_identifier(params: &InitializeParams, roots: &[PathBuf]) -> String {
+    if let Some(folders) = params.workspace_folders.as_ref()
+        && !folders.is_empty()
+    {
+        return folders.iter().map(|folder| folder.uri.as_str()).collect::<Vec<_>>().join(",");
+    }
+    #[allow(deprecated)]
+    if let Some(root) = params.root_uri.as_ref() {
+        return root.as_str().to_string();
+    }
+    roots.iter().map(|root| root.display().to_string()).collect::<Vec<_>>().join(",")
+}
+
 /// Resolves the R-8 wiki roots from the workspace folders and the optional
 /// `wiki.wiki_root` config override.
 ///

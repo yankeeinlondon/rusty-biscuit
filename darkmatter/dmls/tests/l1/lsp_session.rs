@@ -7554,7 +7554,14 @@ fn a_claimed_unparseable_trigger_envelope_is_diagnosed_at_its_yaml_position() {
         let uri = url::Url::from_file_path(&path).unwrap();
         open(&fixture, uri.as_str(), &envelope);
 
-        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        // Startup's registry preparation already published the closed
+        // file's diagnostic; the open buffer's publication is versioned.
+        let diagnostics = loop {
+            let params = fixture.wait_for_diagnostics_params(uri.as_str());
+            if !params["version"].is_null() {
+                break params["diagnostics"].as_array().cloned().unwrap_or_default();
+            }
+        };
         let trigger: Vec<&Value> = diagnostics
             .iter()
             .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))

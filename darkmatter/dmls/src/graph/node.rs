@@ -222,7 +222,7 @@ pub struct LinkPayload {
 ///
 /// Emitted by the Layer-3 overlay for `::file`/`::code` directives whose target
 /// is a workspace-local path. A `transcludes` edge links this node to the
-/// resolved target document root when the path matches an indexed document; a
+/// resolved target document root when the path matches a graph document; a
 /// non-`.md` target (e.g. `::code ./mod.rs`) or a broken path carries no edge
 /// and is diagnosed at request time.
 #[derive(Debug, Clone, PartialEq, Eq)]

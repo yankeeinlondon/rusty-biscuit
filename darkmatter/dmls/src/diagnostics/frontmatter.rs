@@ -1297,8 +1297,6 @@ fn diagnostic(
     }
 }
 
-/// A zero-width range at the document start (fallback when a span cannot
-/// convert).
 /// The byte span from a claimed trigger envelope's YAML error position to the
 /// end of that line, when the error (directly or inside a trigger load) is
 /// [`SchemaError::TriggerEnvelopeYaml`] with a location.
@@ -1330,6 +1328,8 @@ fn trigger_yaml_span(text: &str, error: &SchemaError) -> Option<std::ops::Range<
     Some(start..line_end)
 }
 
+/// A zero-width range at the document start (fallback when a span cannot
+/// convert).
 fn zero_range() -> Range {
     Range::default()
 }

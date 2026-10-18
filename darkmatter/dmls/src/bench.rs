@@ -1,10 +1,10 @@
 //! `dmls --bench-index <dir>`: the R-6 measurement harness.
 //!
 //! Ships with the first indexer slice so performance budgets are enforced from
-//! day one rather than retrofitted. It runs the exact discovery + parse +
-//! graph-build path the server uses, times each stage, and emits the R-6 JSON
-//! shape (per-stage timings, peak RSS, graph counts) for `--json` or a compact
-//! human summary otherwise.
+//! day one rather than retrofitted. It runs the discovery + parse +
+//! graph-build work of a full-index build, times each stage, and emits the
+//! R-6 JSON shape (per-stage timings, peak RSS, graph counts) for `--json` or
+//! a compact human summary otherwise.
 //!
 //! Discovery runs once; the resulting file list is reused for indexing (there
 //! is no second walk). Each R-6 stage carries its own measurement:
@@ -33,9 +33,9 @@ use crate::graph::{DocumentContexts, WorkspaceGraph};
 use crate::workspace::discover_workspace;
 use crate::workspace::startup::{SilentProgress, collect_indices_from_files};
 
-/// Snapshot generation stamped on the bench-built graph (mirrors the batch
-/// startup path, [`WorkspaceIndex::from_indices`](crate::graph::WorkspaceIndex),
-/// which builds at generation 1).
+/// Snapshot generation stamped on the bench-built graph (mirrors
+/// [`WorkspaceIndex::from_indices`](crate::graph::WorkspaceIndex), which builds
+/// at generation 1).
 const BENCH_GENERATION: u64 = 1;
 
 /// Per-stage wall-clock timings in milliseconds (R-6 stage names).
@@ -142,8 +142,8 @@ pub fn bench_index(root: &Path, contexts: &dyn DocumentContexts) -> BenchReport 
     let report = discover_workspace(&[root.to_path_buf()], &config);
     stages.discover_ms = elapsed_ms(discover_start);
 
-    // Read + parse across the worker pool (the same path the server takes at
-    // startup, so the total reflects real cold-start latency). The per-stage
+    // Read + parse across the worker pool (the pool a full-index build uses,
+    // so the total reflects a real full-index build's latency). The per-stage
     // figures are aggregate CPU time summed across workers.
     let (indices, index_stages) = collect_indices_from_files(&report.files, &SilentProgress);
     stages.read_ms = ms(index_stages.read);
@@ -153,7 +153,7 @@ pub fn bench_index(root: &Path, contexts: &dyn DocumentContexts) -> BenchReport 
     stages.directives_ms = ms(index_stages.directives);
 
     // Graph build → reverse index → snapshot swap, timed as the three R-6
-    // stages the batch startup path runs back to back inside `from_indices`.
+    // stages `from_indices` runs back to back.
     let build_start = Instant::now();
     let assembly = WorkspaceGraph::assemble(&indices, BENCH_GENERATION, &[], contexts);
     stages.graph_build_ms = elapsed_ms(build_start);

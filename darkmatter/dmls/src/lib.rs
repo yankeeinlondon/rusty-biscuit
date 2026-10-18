@@ -17,6 +17,7 @@ pub mod config;
 pub mod context;
 pub mod corpus;
 pub mod diagnostics;
+mod full_index;
 pub mod graph;
 pub mod log_capture;
 pub mod overlay;

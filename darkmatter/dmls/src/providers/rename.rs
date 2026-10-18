@@ -258,7 +258,7 @@ fn apply_file_rename(env: &RenameEnv, file: &FileRename, builder: &mut EditBuild
         return true; // not a file:// rename we can reason about; nothing to do
     };
     let Some(old_doc) = env.graph.document_id(&old_path) else {
-        return true; // the renamed file is not an indexed document
+        return true; // the renamed file is not a graph document
     };
     // Filesystem/index conflict: the destination is already a tracked document.
     if env.graph.document_id(&new_path).is_some() {

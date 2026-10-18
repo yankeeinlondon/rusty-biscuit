@@ -62,12 +62,14 @@ request when any of these happen:
 | Event | What is dropped |
 |---|---|
 | `workspace/didChangeWatchedFiles` names a path | Every entry keyed at an ancestor of the path, plus, for a file inside `.git/`, every entry keyed inside that repository |
-| A save triggers the server-side rescan (clients without a file watcher) and the rescan finds a changed document or package manifest | The same entries as for a watched change at that path |
+| A save triggers the server-side rescan (clients without a file watcher) and the rescan finds a Markdown file that joined or left the file list, a parsed document whose bytes changed, or a changed package manifest | The same entries as for a watched change at that path |
 | `workspace/didChangeConfiguration` | Every entry |
 
-DMLS asks watching clients to report Markdown files, schema YAML, the package
-manifests sniff detects packages by (`Cargo.toml`, `package.json`,
-`pyproject.toml`, `go.mod`), and `.git/config`. Adding a package changes what
+DMLS asks watching clients to report Markdown files (the configured
+`include` globs), every YAML file, the files that change the workspace file
+list (`.gitignore`, `.ignore`, and `.dmls.toml`), the package manifests sniff
+detects packages by (`Cargo.toml`, `package.json`, `pyproject.toml`,
+`go.mod`), and `.git/config`. Adding a package changes what
 `^` finds, so the new manifest alone is enough:
 
 ```text

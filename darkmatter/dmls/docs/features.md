@@ -49,7 +49,9 @@ A full-featured Markdown LSP that stands on its own:
 - **Go-to-definition** — jump from a link or `#anchor` to the heading or file
   it targets.
 - **References / backlinks** — find every place that links to the heading or
-  document under the cursor, sourced from a workspace-wide reverse index.
+  document under the cursor, sourced from a workspace-wide reverse index that
+  is built the first time a feature needs it (see
+  [DMLS Indexing](../../docs/lsp/indexing.md)).
 - **Document symbols** — the heading hierarchy of the current file for the
   outline / breadcrumb view.
 - **Workspace symbols** — fuzzy (subsequence) search for any heading across the
@@ -60,8 +62,9 @@ A full-featured Markdown LSP that stands on its own:
   [File references](./file-references.md).
 - **Folding** — collapse frontmatter, sections, fenced code, block quotes,
   lists, and tables.
-- **Hover** — preview the target of a link without opening it (graph-sourced,
-  no disk read).
+- **Hover** — preview the target of a link without opening it (graph-sourced;
+  an unopened target is read once, the first time a hover or definition needs
+  its headings).
 - **Completion** — link paths, `#`-anchor names within a document, and
   fenced-code language tokens.
 - **Diagnostics** — broken link paths, missing anchors, and duplicate headings
@@ -90,9 +93,10 @@ Darkmatter's **SimplifiedSchema**:
 - **Effective schema** — the Darkmatter base schema, plus any configured
   extension schemas whose globs match the file, plus repository-scoped
   **trigger schemas** (content-triggered envelopes discovered under `schemas/`
-  roots within the workspace boundary — watched for changes, with last-good
-  retention and a file-level diagnostic on a malformed envelope), plus the
-  document's own `$schema`, merged with compose precedence.
+  roots within the workspace boundary — cached until a watched change, with
+  last-good retention and a diagnostic on a malformed envelope, placed at the
+  YAML error when the envelope is not valid YAML), plus the document's own
+  `$schema`, merged with compose precedence.
 - **Completion** — schema keys (required keys marked), enum values, boolish
   scaffolds, `file(...)` paths, `style.*` keys, and advisory `suggest(...)`
   value candidates (including block-sequence items).

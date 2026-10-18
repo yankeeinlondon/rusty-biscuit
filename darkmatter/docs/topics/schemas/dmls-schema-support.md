@@ -82,6 +82,9 @@ A few details worth knowing:
 - a document's trigger registry (its schema-root files classified, its triggers loaded, their payloads resolved) is prepared once and then served from memory to every request, with no file read. A large payload, such as Claudine's, is expanded once instead of on every keystroke, completion, or hover. The registry is prepared again only when DMLS learns that one of its inputs changed:
   - a watched-file event or a save for a schema-root file, a trigger's payload, or a file the payload imports or uses as an example. The file is re-read and compared by content hash, so a save that changed nothing prepares nothing; a file created in or removed from a schema root or one of those files' folders always counts
   - a save-triggered rescan (clients without a file watcher), a configuration change, or a package-manifest change
+- registries are prepared ahead of the requests that need them. At server start, a background thread prepares the registry for each workspace folder's own resolution context first, before it lists the workspace files, so a document directly under a folder is answered from memory from its first request. A document in a package or package area has schema roots of its own; its registry is prepared when a document there first opens, before that document's schema-dependent requests are answered, and the folder's roots are never substituted for its own
+- a YAML file in a schema root that does not parse and does not claim `kind: trigger-schema` is unclassified: it is neither a trigger nor a named schema, and it never breaks trigger discovery for the other files. A file that claims `kind: trigger-schema` but is not valid YAML is a trigger load error, reported on that file as a YAML syntax error at its line and column. A trigger file that fails to load keeps the last good registry serving; a schema root that cannot be read leaves the document without a registry, with a `dm.schema.prepare` error
+- a registry failure is logged when its state changes (a new failure, a different one, or a recovery), not on every request; the log lines are listed in [DMLS Indexing](../../lsp/indexing.md)
 - saving a schema file applies the change even while that file is open in the editor; unsaved edits in an open schema file reach the documents that use it only after the save
 - when a schema fails to load, DMLS keeps the **last good** bundle serving completion and hover rather than flapping to nothing mid-keystroke
 
@@ -126,7 +129,7 @@ Only capabilities that are actually implemented are ever advertised — the capa
 
 ### Diagnostics
 
-Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS computes them on every change (debounced, default 200 ms) and publishes them, including an empty batch when a document becomes clean. Schema diagnostics arrive with precise, source-spanned ranges — value problems range the value, `unknown_key` ranges the offending key, and `missing_required` ranges the parent mapping so it is always visible.
+Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS computes them on every change and publishes them, including an empty batch when a document becomes clean. Schema diagnostics arrive with precise, source-spanned ranges — value problems range the value, `unknown_key` ranges the offending key, and `missing_required` ranges the parent mapping so it is always visible.
 
 | Code                                                           | Meaning                                                                                               |
 |----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
@@ -376,15 +379,7 @@ All four primary editors get the complete schema feature set described above; th
 
 ## Extensibility Through Configuration
 
-DMLS is configured through a **`.dmls.toml`** file at the workspace root (which also doubles as the editor root marker). Configuration has three sources, merged in this precedence:
-
-1. the editor's `workspace/configuration` / `didChangeConfiguration` overlay (highest)
-2. `.dmls.toml` at the workspace root
-3. built-in defaults
-
-Every key is parsed even where its consumer lands in a later phase, so a config written today stays valid as features arrive. Configuration is hot-reloadable: a `didChangeConfiguration` re-reads the file layer, re-merges, and re-publishes diagnostics for all open documents without a restart. A malformed overlay is logged and discarded — bad editor settings can never wedge the server; the last good config keeps serving.
-
-The schema-relevant sections:
+DMLS reads its settings from a **`.dmls.toml`** file in the workspace folder, layered under the editor's settings and over built-in defaults. Every key, the precedence and merge rules, and hot reload are described in [DMLS Configuration](../../lsp/configuration.md). The schema-relevant section is `[schema]`:
 
 ```toml
 [schema]
@@ -398,29 +393,9 @@ strict = false
 [schema.extensions.team]
 path = "schemas/team-prompt.yaml"
 globs = ["prompts/**"]
-
-[style]
-# Strict mode for the style: surface (unknown/deprecated keys).
-strict = false
-
-[symbols]
-# Surface top-level frontmatter keys in the document outline.
-frontmatter = false
-
-[semantic_tokens]
-# Master switch for semantic-token emission (body families today).
-enable = true
-
-[diagnostics]
-# Debounce (ms) for immediate-tier diagnostics after the last edit.
-debounce_ms = 200
-
-[code_actions.categories]
-# Per-category enable/disable overrides; absent categories are enabled.
-"add-missing-key" = true
 ```
 
-The `[schema.extensions.*]` table is the workhorse. Each entry is a **pure-data baseline extension**: point `path` at a SimplifiedSchema YAML file (relative paths resolve against the workspace root) and list `globs` that select the documents it applies to. The path is loaded as a `$schema` reference is, so it names a document schema, never a trigger envelope. The extension's shape merges over the base baseline with compose precedence, and its keys participate in completion and hover exactly like built-in ones — even for documents that declare no `$schema` of their own. Editing an extension's file (or any type it imports) content-hash-invalidates every bundle that matched it, so the change is visible on the next keystroke.
+The `[schema.extensions.*]` table is the workhorse. Each entry is a **pure-data baseline extension**: point `path` at a SimplifiedSchema YAML file (relative paths resolve against the first workspace folder) and list `globs` that select the documents it applies to, matched against the document's path relative to its workspace folder. The path is loaded as a `$schema` reference is, so it names a document schema, never a trigger envelope. The extension's shape merges over the base baseline with compose precedence, and its keys participate in completion and hover exactly like built-in ones — even for documents that declare no `$schema` of their own. Editing an extension's file (or any type it imports) content-hash-invalidates every bundle that matched it, so the change is visible on the next keystroke.
 
 Extensions and trigger schemas are the two data-only ways a tool built on Darkmatter teaches DMLS its document vocabulary without the server ever learning a tool-specific code path. An extension is selected by path globs and a trigger by the frontmatter it matches; both feed diagnostics, completion, and hover. These settings configure only the editor: `md` and other hosts never read `.dmls.toml`.
 

@@ -165,6 +165,10 @@ pub struct LspFixture<'workspace> {
     /// Holds the file-list walk until dropped or sent to, for a fixture
     /// started with [`LspFixture::start_with_file_list_gate`].
     file_list_gate: Option<crossbeam_channel::Sender<()>>,
+    /// Holds each full-index build round's results until sent to (one round
+    /// per message) or dropped, for a fixture started with
+    /// [`LspFixture::start_with_full_index_gate`].
+    full_index_gate: Option<crossbeam_channel::Sender<()>>,
 }
 
 impl<'workspace> LspFixture<'workspace> {
@@ -222,6 +226,47 @@ impl<'workspace> LspFixture<'workspace> {
         fixture
     }
 
+    /// Like [`LspFixture::start`], but each full-index build round, once it
+    /// has read its files, waits for [`LspFixture::release_full_index_round`]
+    /// (or [`LspFixture::open_full_index_gate`]) before the server reconciles
+    /// it, so a test can change the workspace while the round's reading is
+    /// stale.
+    pub fn start_with_full_index_gate(workspace: &'workspace LspWorkspace) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let mut fixture = Self::spawn_with_hooks(
+            workspace,
+            Duration::ZERO,
+            Self::fixture_snapshot(workspace),
+            None,
+            Some(gate_rx),
+        );
+        fixture.full_index_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// Lets one held full-index build round through.
+    pub fn release_full_index_round(&self) {
+        if let Some(gate) = &self.full_index_gate {
+            gate.send(()).expect("full-index gate open");
+        }
+    }
+
+    /// Lets every current and later full-index build round through.
+    pub fn open_full_index_gate(&mut self) {
+        self.full_index_gate = None;
+    }
+
+    /// Waits for the server to report `event`, skipping other startup events.
+    pub fn wait_for_event(&mut self, event: dmls::StartupEvent) {
+        loop {
+            match self.startup_events.recv_timeout(MESSAGE_BOUND) {
+                Ok(seen) if seen == event => return,
+                Ok(_) => {}
+                Err(error) => panic!("no {event:?} within {MESSAGE_BOUND:?}: {error}"),
+            }
+        }
+    }
+
     /// Lets a gated file-list walk run.
     pub fn release_file_list(&mut self) {
         if let Some(gate) = self.file_list_gate.take() {
@@ -232,10 +277,7 @@ impl<'workspace> LspFixture<'workspace> {
     /// Waits until the server has installed the workspace file list and
     /// refreshed open documents' diagnostics against it.
     pub fn wait_for_file_list(&mut self) {
-        match self.startup_events.recv_timeout(MESSAGE_BOUND) {
-            Ok(dmls::StartupEvent::FileListInstalled) => {}
-            Err(error) => panic!("no file list within {MESSAGE_BOUND:?}: {error}"),
-        }
+        self.wait_for_event(dmls::StartupEvent::FileListInstalled);
     }
 
     fn spawn(
@@ -243,7 +285,7 @@ impl<'workspace> LspFixture<'workspace> {
         epilogue_delay: Duration,
         snapshot: RequestSnapshot,
     ) -> Self {
-        Self::spawn_with_gate(workspace, epilogue_delay, snapshot, None)
+        Self::spawn_with_hooks(workspace, epilogue_delay, snapshot, None, None)
     }
 
     fn spawn_with_gate(
@@ -252,8 +294,22 @@ impl<'workspace> LspFixture<'workspace> {
         snapshot: RequestSnapshot,
         gate: Option<crossbeam_channel::Receiver<()>>,
     ) -> Self {
+        Self::spawn_with_hooks(workspace, epilogue_delay, snapshot, gate, None)
+    }
+
+    fn spawn_with_hooks(
+        workspace: &'workspace LspWorkspace,
+        epilogue_delay: Duration,
+        snapshot: RequestSnapshot,
+        file_list_gate: Option<crossbeam_channel::Receiver<()>>,
+        full_index_gate: Option<crossbeam_channel::Receiver<()>>,
+    ) -> Self {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
-        let hooks = dmls::StartupHooks { file_list_gate: gate, observer: Some(events_tx) };
+        let hooks = dmls::StartupHooks {
+            file_list_gate,
+            full_index_gate,
+            observer: Some(events_tx),
+        };
         let (server_side, client_side) = Connection::memory();
         let (outcome_tx, outcome_rx) = mpsc::channel();
         let observations = workspace.observations();
@@ -285,6 +341,7 @@ impl<'workspace> LspFixture<'workspace> {
             server_requests: Vec::new(),
             startup_events: events_rx,
             file_list_gate: None,
+            full_index_gate: None,
         }
     }
 
@@ -377,13 +434,19 @@ impl<'workspace> LspFixture<'workspace> {
         Some(notification.params)
     }
 
-    /// Drains messages until the startup-index `workDoneProgress` `end` arrives,
-    /// guaranteeing the background disk walk has finished. Only usable when the
-    /// client advertised `window.workDoneProgress`.
+    /// Drains messages until the startup file-list walk's `workDoneProgress`
+    /// `end` (token `dmls/startup-index`) arrives, guaranteeing the list is
+    /// installed. Only usable when the client advertised
+    /// `window.workDoneProgress`.
     pub fn wait_for_startup_complete(&mut self) {
+        self.wait_for_progress_end("dmls/startup-index");
+    }
+
+    /// Drains messages until a `workDoneProgress` `end` for `token` arrives.
+    pub fn wait_for_progress_end(&mut self, token: &str) {
         let is_end = |notification: &Notification| {
             notification.method == "$/progress"
-                && notification.params["token"] == json!("dmls/startup-index")
+                && notification.params["token"] == json!(token)
                 && notification.params["value"]["kind"] == json!("end")
         };
         loop {
@@ -408,7 +471,8 @@ impl<'workspace> LspFixture<'workspace> {
         result
     }
 
-    /// Initializes the session without waiting for the file list.
+    /// Initializes the session and waits for the startup trigger registries,
+    /// but not for the file list.
     pub fn initialize_unlisted(&mut self, params: Value) -> Value {
         let response = self.request("initialize", params);
         assert!(
@@ -417,6 +481,7 @@ impl<'workspace> LspFixture<'workspace> {
             response.error
         );
         self.notify("initialized", json!({}));
+        self.wait_for_event(dmls::StartupEvent::RegistryReady);
         response.result.expect("initialize result")
     }
 
@@ -488,6 +553,12 @@ impl<'workspace> LspFixture<'workspace> {
     /// Clean shutdown: the protocol handshake, then the shared bounded teardown.
     pub fn shutdown(mut self) {
         let response = self.request("shutdown", Value::Null);
+        self.exit_after_shutdown(response);
+    }
+
+    /// The teardown of [`LspFixture::shutdown`] for a test that sent the
+    /// `shutdown` request itself and holds its `response`.
+    pub fn exit_after_shutdown(mut self, response: Response) {
         assert!(
             response.error.is_none(),
             "shutdown failed: {:?}",

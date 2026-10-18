@@ -5,8 +5,12 @@ DMLS (`darkmatter/dmls`) is a stdio language server. `run_server` in
 then dispatches every request and notification against one `ServerState`:
 
 - the open documents (the editor's buffers are authoritative over disk)
-- the layered configuration (`.dmls.toml` under `workspace/configuration`)
-- the workspace index and the graph snapshot that readers load
+- the layered configuration (`.dmls.toml` under `workspace/configuration`;
+  see [DMLS Configuration](./configuration.md))
+- the workspace index and the graph snapshot that readers load: the
+  workspace file list, the documents parsed so far, and the full index,
+  built only when a feature needs every document (see
+  [DMLS Indexing](./indexing.md))
 - the provider registry, the ordered chain of providers per capability
 - the diagnostics scheduler and the frontmatter overlay caches
 - the watch mode, which decides how on-disk changes are learned
@@ -122,7 +126,7 @@ An entry is dropped, and rebuilt lazily on the next request, when:
 | Event | Entries dropped |
 |---|---|
 | `workspace/didChangeWatchedFiles` names a path | Every entry keyed at an ancestor of the path, and every entry keyed inside the path's owning directory (the parent of `.git` for a path inside `.git/`, otherwise the path's own directory) |
-| A save in server-rescan mode, where the rescan finds a changed document or package manifest | The same entries, for each changed path |
+| A save in server-rescan mode, where the rescan finds a Markdown file that joined or left the file list, a parsed document whose bytes changed, or a changed package manifest | The same entries, for each changed path |
 | `workspace/didChangeConfiguration` | Every entry, even when the effective configuration is unchanged |
 
 When anything is dropped, the graph is relinked so every reference
@@ -142,7 +146,8 @@ including a schema root that does not exist yet. A client without that
 support, or one that rejects the registration, gets the save fallback
 instead: every save marks the trigger registries stale. A client that
 rejects the workspace registration is switched to server-rescan mode. In server-rescan
-mode (clients without a reliable watcher), each save re-hashes every
+mode (clients without a reliable watcher), each save lists the workspace
+again, re-reads the closed documents already parsed, and re-hashes every
 package manifest under the workspace roots and compares the result with the
 previous scan. The rescan does not read `.git/config`, so a repaired
 `.git/config` is noticed there only through another change below the

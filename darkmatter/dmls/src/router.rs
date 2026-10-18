@@ -16,7 +16,7 @@
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel::{Receiver, Sender};
@@ -56,8 +56,9 @@ use crate::clock::{Clock, SystemClock};
 use crate::config::{ConfigSeverity, ConfigState};
 use crate::context::{DocumentResolution, RepositoryContexts};
 use crate::diagnostics::DiagnosticsScheduler;
-use crate::graph::{WorkspaceGraph, WorkspaceIndex};
-use crate::overlay::OverlayState;
+use crate::full_index::{Build, FullIndexState, Trigger, Waiter};
+use crate::graph::{FullBuildStep, WorkspaceGraph, WorkspaceIndex};
+use crate::overlay::{OverlayState, RegistrySummary};
 use crate::providers::{DocumentContext, ProviderRegistry};
 use crate::request_timing::{
     CompletionEvent, MessageKind, Outcome, RequestTimings, Stage, Wait, document_uri,
@@ -65,12 +66,14 @@ use crate::request_timing::{
 use crate::workspace::snapshot::SharedSnapshot;
 use crate::graph::Listing;
 use crate::workspace::discover::{DiscoveryReport, ListedKind, listed_kind};
-use crate::workspace::startup::{ProgressReporter, SilentProgress, collect_indices_from_files, list_files};
+use crate::workspace::startup::{
+    FullIndexRound, ProgressReporter, list_files, parse_full_index_round,
+};
 use crate::workspace::watch::{
     WatchMode, changed_manifests, coalesce_changes, is_config_file, is_context_input,
     is_ignore_file, scan_manifests, schema_watch_registration, watch_registration,
 };
-use crate::workspace::{DocumentStore, uri_to_file_path, workspace_roots};
+use crate::workspace::{DocumentStore, uri_to_file_path, workspace_identifier, workspace_roots};
 
 /// Fatal server errors (protocol violations, not per-request failures).
 #[derive(Debug, Error)]
@@ -136,22 +139,42 @@ pub struct StartupHooks {
     /// receives a message or disconnects, so a test can observe the server
     /// before the list is ready.
     pub file_list_gate: Option<Receiver<()>>,
-    /// Receives a [`StartupEvent`] after each background result has been
-    /// installed and its diagnostics refreshed.
+    /// When set, every full-index build round waits, after reading its files
+    /// and before handing them to the dispatch thread, until this receives a
+    /// message or disconnects, so a test can change the workspace while the
+    /// round's reading goes stale.
+    pub full_index_gate: Option<Receiver<()>>,
+    /// Receives a [`StartupEvent`] as each background step completes.
     pub observer: Option<Sender<StartupEvent>>,
 }
 
-/// A background startup step whose result the dispatch thread installed.
+/// A background step that completed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupEvent {
+    /// The workspace folders' trigger registries are prepared and the
+    /// registry line is logged. Precedes the file-list walk.
+    RegistryReady,
     /// The workspace file list is installed and open documents' diagnostics
     /// were refreshed against it.
     FileListInstalled,
+    /// A full-index build round finished reading its files (sent from the
+    /// worker, before the [`StartupHooks::full_index_gate`] wait).
+    FullIndexRoundRead,
 }
 
 /// A result background work hands to the dispatch thread, which owns every
 /// index mutation.
 enum Internal {
+    /// Startup prepared the workspace folders' trigger registries.
+    RegistryReady {
+        summary: RegistrySummary,
+        elapsed_ms: u128,
+    },
+    /// A full-index build round finished reading.
+    FullIndexRound {
+        build: u64,
+        round: FullIndexRound,
+    },
     /// The startup file-list walk finished. The dispatch thread ends the
     /// progress once the list is installed, so a client that sees the end
     /// sees diagnostics computed against the list.
@@ -215,17 +238,22 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         WatchMode::ServerRescan => scan_manifests(&roots),
         WatchMode::ClientWatched => HashMap::new(),
     };
+    let overlay = Arc::new(OverlayState::default());
     let (internal_tx, internal_rx) = crossbeam_channel::unbounded();
-    spawn_file_listing(
-        internal_tx,
-        connection.sender.clone(),
-        roots.clone(),
-        config.effective().workspace.clone(),
-        profile.supports_work_done_progress,
-        options.startup.file_list_gate,
-    );
+    spawn_startup(StartupWork {
+        internal: internal_tx.clone(),
+        sender: connection.sender.clone(),
+        roots: roots.clone(),
+        workspace_config: config.effective().workspace.clone(),
+        progress_enabled: profile.supports_work_done_progress,
+        gate: options.startup.file_list_gate,
+        overlay: Arc::clone(&overlay),
+        contexts: Arc::clone(&contexts),
+        clock: Arc::clone(&options.clock),
+    });
 
     let diagnostics = DiagnosticsScheduler::new(connection.sender.clone(), config.effective());
+    let workspace = workspace_identifier(&params, &roots);
     let state = ServerState {
         documents: DocumentStore::new(encoding),
         config,
@@ -235,15 +263,20 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         snapshot,
         registry: ProviderRegistry::with_substrate(),
         diagnostics,
-        overlay: OverlayState::default(),
+        overlay,
         watch_mode,
         contexts,
         manifests,
         schema_watch_fallback: false,
         timings: RequestTimings::start(Arc::clone(&options.clock)),
         clock: options.clock,
+        workspace,
     };
-    let mut router = Router::new(connection, state).with_internal(internal_rx, options.startup.observer);
+    let mut router = Router::new(connection, state).with_internal(
+        (internal_tx, internal_rx),
+        options.startup.observer,
+        options.startup.full_index_gate,
+    );
     router.register_workspace_watchers(false);
     router.run()
 }
@@ -310,27 +343,40 @@ impl WatchLedger {
     }
 }
 
-/// Spawns the background file-list walk, which reads no file contents and
-/// hands its result to the dispatch thread, reporting
-/// `window/workDoneProgress` on the way.
-fn spawn_file_listing(
+/// What the background startup thread needs.
+struct StartupWork {
     internal: Sender<Internal>,
     sender: Sender<Message>,
     roots: Vec<PathBuf>,
     workspace_config: crate::config::WorkspaceConfig,
     progress_enabled: bool,
     gate: Option<Receiver<()>>,
-) {
+    overlay: Arc<OverlayState>,
+    contexts: Arc<RepositoryContexts>,
+    clock: Arc<dyn Clock>,
+}
+
+/// Spawns startup's background work, in order: the workspace folders'
+/// trigger registries, then the file-list walk, which reads no file contents
+/// and reports `window/workDoneProgress`. Each result goes to the dispatch
+/// thread, which logs and installs it.
+fn spawn_startup(work: StartupWork) {
     std::thread::spawn(move || {
-        if let Some(gate) = gate {
+        let started = work.clock.now();
+        work.overlay.prepare_workspace_registries(&work.roots, &work.contexts);
+        let summary = work.overlay.trigger_registry_summary();
+        let elapsed_ms = work.clock.now().saturating_duration_since(started).as_millis();
+        let _ = work.internal.send(Internal::RegistryReady { summary, elapsed_ms });
+
+        if let Some(gate) = work.gate {
             let _ = gate.recv();
         }
-        let reporter = LspProgress::new(sender, progress_enabled);
+        let reporter = LspProgress::new(work.sender, work.progress_enabled, LspProgress::STARTUP_TOKEN);
         reporter.begin("Listing workspace files");
-        let started = std::time::Instant::now();
-        let report = list_files(&roots, &workspace_config);
-        let elapsed_ms = started.elapsed().as_millis();
-        let _ = internal.send(Internal::FileList { report, elapsed_ms, progress: reporter });
+        let started = work.clock.now();
+        let report = list_files(&work.roots, &work.workspace_config);
+        let elapsed_ms = work.clock.now().saturating_duration_since(started).as_millis();
+        let _ = work.internal.send(Internal::FileList { report, elapsed_ms, progress: reporter });
     });
 }
 
@@ -353,7 +399,7 @@ pub struct ServerState {
     /// Push-diagnostics scheduler/publisher.
     pub diagnostics: DiagnosticsScheduler,
     /// Frontmatter overlay caches (last-good AST + effective schema).
-    pub overlay: OverlayState,
+    pub overlay: Arc<OverlayState>,
     /// How this client learns about on-disk changes. `ServerRescan` drives a
     /// save-triggered rescan for unopened files; `ClientWatched` relies on
     /// `didChangeWatchedFiles`.
@@ -370,6 +416,8 @@ pub struct ServerState {
     clock: Arc<dyn Clock>,
     /// The message being dispatched; the router replaces it at each dequeue.
     timings: RequestTimings,
+    /// The workspace identifier every workspace log line carries.
+    workspace: String,
 }
 
 impl ServerState {
@@ -423,6 +471,7 @@ impl ServerState {
             yaml = report.yaml.len(),
             duplicates = report.duplicates.len(),
             elapsed_ms = started.elapsed().as_millis(),
+            workspace = %self.workspace,
             "workspace rescan complete"
         );
         self.install_listing(report)
@@ -468,34 +517,9 @@ impl ServerState {
             .flatten()
     }
 
-    /// Builds the full index (every listed Markdown file parsed) if it does
-    /// not exist yet, for the features that need every document: references,
-    /// rename, file rename, and workspace symbols.
-    ///
-    /// Waits for nothing: when the startup file list has not arrived, the
-    /// workspace is listed here first. The index lock is not held while files
-    /// are read and parsed.
-    fn ensure_full_index(&self) {
-        let (pending, listing) = {
-            let index = self.index.lock().expect("index lock poisoned");
-            if index.is_full() {
-                return;
-            }
-            (index.unparsed_paths(), index.listing())
-        };
-        self.timings.record_wait(Wait::FullIndex);
-        let pending = if listing == Listing::Pending {
-            self.timings.record_wait(Wait::FileList);
-            let report = list_files(&self.roots, &self.config.effective().workspace);
-            self.install_listing(report);
-            self.index.lock().expect("index lock poisoned").unparsed_paths()
-        } else {
-            pending
-        };
-        let (parsed, _timings) = collect_indices_from_files(&pending, &SilentProgress);
-        let mut index = self.index.lock().expect("index lock poisoned");
-        index.adopt_full(parsed);
-        self.snapshot.store(index.snapshot());
+    /// Whether the full index is built (see [`crate::full_index`]).
+    fn index_is_full(&self) -> bool {
+        self.index.lock().expect("index lock poisoned").is_full()
     }
 
     /// Builds a [`DocumentContext`] for an open document and runs `f` against
@@ -788,6 +812,33 @@ impl ServerState {
     }
 }
 
+/// Logs the startup registry line: `schema registry ready`, or
+/// `schema registry initialized with failures` when a prepared registry
+/// failed.
+fn log_registry_ready(summary: &RegistrySummary, elapsed_ms: u128, workspace: &str) {
+    macro_rules! registry_line {
+        ($message:literal) => {
+            tracing::info!(
+                roots = summary.roots,
+                tree_schemas = summary.tree_schemas,
+                scoped_schemas = summary.scoped_schemas,
+                trigger_schemas = summary.trigger_schemas,
+                unclassified = summary.unclassified,
+                failed_triggers = summary.failed_triggers,
+                failed_scopes = summary.failed_scopes,
+                elapsed_ms,
+                workspace = %workspace,
+                $message
+            )
+        };
+    }
+    if summary.failed_scopes > 0 {
+        registry_line!("schema registry initialized with failures");
+    } else {
+        registry_line!("schema registry ready");
+    }
+}
+
 /// Whether a diagnostic is withheld under the file list's `listing` state.
 ///
 /// Until the list is ready, every finding that depends on which paths exist
@@ -822,23 +873,28 @@ fn listing_gates(listing: Listing, diagnostic: &lsp_types::Diagnostic) -> bool {
 struct LspProgress {
     sender: Sender<Message>,
     enabled: bool,
+    token: &'static str,
     last_step: AtomicUsize,
 }
 
 impl LspProgress {
-    const TOKEN: &'static str = "dmls/startup-index";
+    /// The startup file-list walk.
+    const STARTUP_TOKEN: &'static str = "dmls/startup-index";
+    /// A full-index build, across all of its rounds.
+    const FULL_INDEX_TOKEN: &'static str = "dmls/full-index";
 
-    fn new(sender: Sender<Message>, enabled: bool) -> Self {
+    fn new(sender: Sender<Message>, enabled: bool, token: &'static str) -> Self {
         Self {
             sender,
             enabled,
+            token,
             last_step: AtomicUsize::new(usize::MAX),
         }
     }
 
     fn send_progress(&self, value: WorkDoneProgress) {
         let params = ProgressParams {
-            token: NumberOrString::String(Self::TOKEN.to_string()),
+            token: NumberOrString::String(self.token.to_string()),
             value: ProgressParamsValue::WorkDone(value),
         };
         if let Ok(value) = serde_json::to_value(params) {
@@ -856,11 +912,11 @@ impl ProgressReporter for LspProgress {
         // Server-initiated progress requires a create round-trip; the client's
         // response is ignored by the loop.
         let create = WorkDoneProgressCreateParams {
-            token: NumberOrString::String(Self::TOKEN.to_string()),
+            token: NumberOrString::String(self.token.to_string()),
         };
         if let Ok(value) = serde_json::to_value(create) {
             let request = Request::new(
-                RequestId::from("dmls/progress-create".to_string()),
+                RequestId::from(format!("{}/create", self.token)),
                 WorkDoneProgressCreate::METHOD.to_string(),
                 value,
             );
@@ -898,12 +954,12 @@ impl ProgressReporter for LspProgress {
     }
 }
 
-/// Bounded `$/cancelRequest` bookkeeping.
+/// Bounded `$/cancelRequest` bookkeeping for requests not yet dequeued.
 ///
-/// Dispatch is currently synchronous, so a cancellation can only beat its
-/// request when the client misbehaves — but the ledger becomes load-bearing
-/// once indexing moves to the worker pool (Phase 3), and it lets queued
-/// requests be answered `RequestCanceled` without running.
+/// Dispatch is synchronous, so a cancellation can beat its request only when
+/// the client sends it first; the ledger lets such a request be answered
+/// `RequestCanceled` without running. A request waiting for the full index
+/// is cancelled directly instead (see [`crate::full_index`]).
 #[derive(Debug, Default)]
 struct CancelLedger {
     ids: Vec<RequestId>,
@@ -917,6 +973,10 @@ impl CancelLedger {
             self.ids.remove(0);
         }
         self.ids.push(id);
+    }
+
+    fn contains(&self, id: &RequestId) -> bool {
+        self.ids.contains(id)
     }
 
     fn take(&mut self, id: &RequestId) -> bool {
@@ -990,9 +1050,16 @@ pub struct Router {
     refresh: RefreshLedger,
     /// Results from background work, handled between client messages.
     internal: Receiver<Internal>,
+    /// Where full-index build rounds send their results.
+    internal_tx: Option<Sender<Internal>>,
     /// The [`StartupHooks::observer`].
     observer: Option<Sender<StartupEvent>>,
+    /// The [`StartupHooks::full_index_gate`].
+    full_index_gate: Option<Receiver<()>>,
     watches: WatchLedger,
+    full_index: FullIndexState,
+    /// The id the next full-index build gets.
+    next_build: u64,
 }
 
 impl Router {
@@ -1004,18 +1071,25 @@ impl Router {
             cancelled: CancelLedger::default(),
             refresh: RefreshLedger::default(),
             internal: crossbeam_channel::never(),
+            internal_tx: None,
             observer: None,
+            full_index_gate: None,
             watches: WatchLedger::default(),
+            full_index: FullIndexState::NotStarted,
+            next_build: 0,
         }
     }
 
     fn with_internal(
         mut self,
-        internal: Receiver<Internal>,
+        (internal_tx, internal): (Sender<Internal>, Receiver<Internal>),
         observer: Option<Sender<StartupEvent>>,
+        full_index_gate: Option<Receiver<()>>,
     ) -> Self {
         self.internal = internal;
+        self.internal_tx = Some(internal_tx);
         self.observer = observer;
+        self.full_index_gate = full_index_gate;
         self
     }
 
@@ -1037,6 +1111,9 @@ impl Router {
             };
             match message {
                 Message::Request(request) => {
+                    if request.method == lsp_types::request::Shutdown::METHOD {
+                        self.abandon_full_index();
+                    }
                     if self.connection.handle_shutdown(&request)? {
                         return Ok(());
                     }
@@ -1080,7 +1157,7 @@ impl Router {
         send_watch_registration(&self.connection.sender, registration, &id, replace);
     }
 
-    /// Keeps the schema-location watches (ruling 4) equal to the folders the
+    /// Keeps the schema-location watches equal to the folders the
     /// prepared trigger registries read, re-registering when that set
     /// changes. A client without `relativePatternSupport` gets none and is
     /// served by the save-driven fallback.
@@ -1146,25 +1223,258 @@ impl Router {
         if catch_unwind(AssertUnwindSafe(|| self.install_internal(event))).is_err() {
             tracing::error!("background result handler panicked");
         }
+        self.sync_schema_watches();
     }
 
     fn install_internal(&mut self, event: Internal) {
         match event {
+            Internal::RegistryReady { summary, elapsed_ms } => {
+                log_registry_ready(&summary, elapsed_ms, &self.state.workspace);
+                // Preparation may have found a failing trigger file, whose
+                // diagnostic this publishes.
+                self.state.refresh_all_diagnostics();
+                self.notify_observer(StartupEvent::RegistryReady);
+            }
             Internal::FileList { report, elapsed_ms, progress } => {
                 tracing::info!(
                     markdown = report.files.len(),
                     yaml = report.yaml.len(),
                     duplicates = report.duplicates.len(),
                     elapsed_ms,
+                    workspace = %self.state.workspace,
                     "workspace files listed"
                 );
                 self.state.install_listing(report);
                 self.state.refresh_all_diagnostics();
                 progress.end();
-                if let Some(observer) = &self.observer {
-                    let _ = observer.send(StartupEvent::FileListInstalled);
+                self.notify_observer(StartupEvent::FileListInstalled);
+                if matches!(&self.full_index, FullIndexState::Building(build) if build.awaiting_list) {
+                    self.start_full_index_round();
                 }
             }
+            Internal::FullIndexRound { build, round } => self.finish_full_index_round(build, round),
+        }
+    }
+
+    fn notify_observer(&self, event: StartupEvent) {
+        if let Some(observer) = &self.observer {
+            let _ = observer.send(event);
+        }
+    }
+
+    /// Holds a request that needs the full index until the build finishes,
+    /// starting a build when none is running.
+    fn wait_for_full_index(&mut self, request: Request, trigger: Trigger) {
+        let timings = std::mem::replace(
+            &mut self.state.timings,
+            RequestTimings::start(Arc::clone(&self.state.clock)),
+        );
+        timings.record_wait(Wait::FullIndex);
+        let waiter = Waiter { request, timings };
+        if let FullIndexState::Building(build) = &mut self.full_index {
+            if build.awaiting_list {
+                waiter.timings.record_wait(Wait::FileList);
+            }
+            build.waiters.push(waiter);
+            return;
+        }
+        self.next_build += 1;
+        let progress = Arc::new(LspProgress::new(
+            self.connection.sender.clone(),
+            self.state.profile.supports_work_done_progress,
+            LspProgress::FULL_INDEX_TOKEN,
+        ));
+        progress.begin("Building the full index");
+        let awaiting_list = self.state.snapshot.load().listing() == Listing::Pending;
+        if awaiting_list {
+            waiter.timings.record_wait(Wait::FileList);
+        }
+        tracing::debug!(trigger = %trigger.as_str(), awaiting_list, "full index build started");
+        self.full_index = FullIndexState::Building(Build {
+            id: self.next_build,
+            trigger,
+            started: self.state.clock.now(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress,
+            waiters: vec![waiter],
+            awaiting_list,
+        });
+        if !awaiting_list {
+            self.start_full_index_round();
+        }
+    }
+
+    /// Starts the building build's next round on a background thread, which
+    /// reads the unparsed listed files with the index lock released.
+    fn start_full_index_round(&mut self) {
+        let FullIndexState::Building(build) = &mut self.full_index else {
+            return;
+        };
+        build.awaiting_list = false;
+        let files = self.state.index.lock().expect("index lock poisoned").begin_full_build();
+        let Some(internal) = self.internal_tx.clone() else {
+            return;
+        };
+        let id = build.id;
+        let cancel = Arc::clone(&build.cancel);
+        let progress = Arc::clone(&build.progress);
+        let observer = self.observer.clone();
+        let gate = self.full_index_gate.clone();
+        std::thread::spawn(move || {
+            let round = parse_full_index_round(&files, progress.as_ref(), &cancel);
+            if let Some(observer) = observer {
+                let _ = observer.send(StartupEvent::FullIndexRoundRead);
+            }
+            if let Some(gate) = gate {
+                let _ = gate.recv();
+            }
+            let _ = internal.send(Internal::FullIndexRound { build: id, round });
+        });
+    }
+
+    /// Reconciles a round's results and moves the build on: another round,
+    /// ready (answering every waiter), or failed (answering every waiter
+    /// with the error). A round from a cancelled build is discarded.
+    fn finish_full_index_round(&mut self, id: u64, round: FullIndexRound) {
+        let current = matches!(&self.full_index, FullIndexState::Building(build) if build.id == id);
+        if !current || round.cancelled {
+            return;
+        }
+        let step = {
+            let mut index = self.state.index.lock().expect("index lock poisoned");
+            let step = index.finish_full_build(round.parsed, round.failed);
+            self.state.snapshot.store(index.snapshot());
+            step
+        };
+        let failure = match step {
+            FullBuildStep::More(_) => {
+                self.start_full_index_round();
+                return;
+            }
+            FullBuildStep::Ready => None,
+            FullBuildStep::Failed(failed) => Some(failed),
+        };
+        let FullIndexState::Building(mut build) = std::mem::take(&mut self.full_index) else {
+            return;
+        };
+        build.progress.end();
+        let waiters = std::mem::take(&mut build.waiters);
+        match failure {
+            None => {
+                self.log_full_index_built(&build);
+                self.full_index = FullIndexState::Ready;
+                // Every document's headings are known now, so anchor checks
+                // that waited on an unparsed target can run. Published before
+                // the answers, so a client that treats an answer as a barrier
+                // never receives an older publication after it.
+                self.state.refresh_all_diagnostics();
+                for waiter in waiters {
+                    self.state.timings = waiter.timings;
+                    self.answer_request(waiter.request);
+                }
+            }
+            Some(failed) => {
+                let (first, error) = &failed[0];
+                tracing::warn!(
+                    unreadable = failed.len(),
+                    first = %first.display(),
+                    %error,
+                    trigger = %build.trigger.as_str(),
+                    workspace = %self.state.workspace,
+                    "full index build failed"
+                );
+                let message = format!(
+                    "dmls could not build the workspace index: {} could not be read ({error}){}",
+                    first.display(),
+                    match failed.len() {
+                        1 => String::new(),
+                        more => format!(", and {} more file(s)", more - 1),
+                    }
+                );
+                self.full_index = FullIndexState::Failed;
+                for waiter in waiters {
+                    self.answer_waiter(waiter, ErrorCode::RequestFailed, &message, Outcome::Error);
+                }
+            }
+        }
+    }
+
+    /// Logs `full index built` with the index's document, heading, and link
+    /// counts.
+    fn log_full_index_built(&self, build: &Build) {
+        let (markdown, headings, links) = {
+            let index = self.state.index.lock().expect("index lock poisoned");
+            let snapshot = index.snapshot();
+            let mut headings = 0;
+            let mut links = 0;
+            for doc in 0..snapshot.document_count() {
+                let doc = crate::graph::DocumentId(doc as u32);
+                headings += snapshot.headings(doc).count();
+                links += snapshot.links(doc).count() + snapshot.wiki_links(doc).count();
+            }
+            (index.listed().len(), headings, links)
+        };
+        let elapsed_ms = self.state.clock.now().saturating_duration_since(build.started).as_millis();
+        tracing::info!(
+            markdown,
+            headings,
+            links,
+            trigger = %build.trigger.as_str(),
+            elapsed_ms,
+            workspace = %self.state.workspace,
+            "full index built"
+        );
+    }
+
+    /// Answers a waiting request with an error and emits its completion
+    /// event.
+    fn answer_waiter(&mut self, waiter: Waiter, code: ErrorCode, message: &str, outcome: Outcome) {
+        let id = waiter.request.id.clone();
+        self.respond(Response::new_err(id.clone(), code as i32, message.to_string()));
+        CompletionEvent {
+            kind: MessageKind::Request { id: &id },
+            method: &waiter.request.method,
+            uri: document_uri(&waiter.request.params).as_deref(),
+            outcome,
+        }
+        .emit(&waiter.timings);
+    }
+
+    /// Cancels a request waiting for the full index. The build continues for
+    /// any other waiter; a build nobody waits for any more is cancelled and
+    /// never becomes ready.
+    ///
+    /// ## Returns
+    ///
+    /// Whether `id` was waiting.
+    fn cancel_full_index_waiter(&mut self, id: &RequestId) -> bool {
+        let FullIndexState::Building(build) = &mut self.full_index else {
+            return false;
+        };
+        let Some(position) = build.waiters.iter().position(|waiter| waiter.request.id == *id) else {
+            return false;
+        };
+        let waiter = build.waiters.remove(position);
+        if build.waiters.is_empty() {
+            build.progress.end();
+            tracing::debug!(trigger = %build.trigger.as_str(), "full index build cancelled");
+            // Dropping the build stops its workers.
+            self.full_index = FullIndexState::NotStarted;
+            self.state.index.lock().expect("index lock poisoned").abandon_full_build();
+        }
+        self.answer_waiter(waiter, ErrorCode::RequestCanceled, "request was cancelled", Outcome::Cancelled);
+        true
+    }
+
+    /// Stops a running build at shutdown, answering its waiters.
+    fn abandon_full_index(&mut self) {
+        let FullIndexState::Building(mut build) = std::mem::take(&mut self.full_index) else {
+            return;
+        };
+        build.progress.end();
+        self.state.index.lock().expect("index lock poisoned").abandon_full_build();
+        for waiter in std::mem::take(&mut build.waiters) {
+            self.answer_waiter(waiter, ErrorCode::ServerCancelled, "the server is shutting down", Outcome::Cancelled);
         }
     }
 
@@ -1172,8 +1482,23 @@ impl Router {
     /// of taking down the request loop.
     ///
     /// Every path ends in exactly one completion event, emitted after the
-    /// response is sent so the figure covers the send.
+    /// response is sent so the figure covers the send. A request that needs
+    /// the full index while it is not built waits for the build instead (see
+    /// [`crate::full_index`]); its event is emitted when it is answered.
     fn handle_request(&mut self, request: Request) {
+        if let Some(trigger) = Trigger::for_method(&request.method)
+            && !self.cancelled.contains(&request.id)
+            && !self.state.index_is_full()
+        {
+            self.wait_for_full_index(request, trigger);
+            return;
+        }
+        self.answer_request(request);
+    }
+
+    /// Dispatches a request and answers it, under the panic boundary; see
+    /// [`handle_request`](Self::handle_request).
+    fn answer_request(&mut self, request: Request) {
         let id = request.id.clone();
         let method = request.method.clone();
         let uri = document_uri(&request.params);
@@ -1260,7 +1585,6 @@ impl Router {
         let Ok(params) = serde_json::from_value::<WorkspaceSymbolParams>(params) else {
             return invalid_params(id);
         };
-        self.state.ensure_full_index();
         let snapshot = self.state.snapshot.load();
         let symbols = self.state.timings.time(Stage::ProviderChain, || {
             self.state.registry.workspace_symbols(&params.query, snapshot.as_ref())
@@ -1305,7 +1629,6 @@ impl Router {
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
         let include = params.context.include_declaration;
-        self.state.ensure_full_index();
         let locations = self
             .state
             .with_document(&uri, |ctx| match ctx.source_map.lsp_to_byte(position) {
@@ -1467,7 +1790,6 @@ impl Router {
         };
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
-        self.state.ensure_full_index();
         let snapshot = self.state.snapshot.load();
         let env = self.state.rename_env(snapshot.as_ref());
         let renamed = self.state.timings.time(Stage::ProviderChain, || {
@@ -1489,7 +1811,6 @@ impl Router {
         let Ok(params) = serde_json::from_value::<RenameFilesParams>(params) else {
             return invalid_params(id);
         };
-        self.state.ensure_full_index();
         let snapshot = self.state.snapshot.load();
         let env = self.state.rename_env(snapshot.as_ref());
         let edit = self.state.timings.time(Stage::ProviderChain, || {
@@ -1629,7 +1950,9 @@ impl Router {
                     NumberOrString::String(string) => RequestId::from(string),
                 };
                 tracing::debug!(id = %id, "cancelRequest");
-                self.cancelled.record(id);
+                if !self.cancel_full_index_waiter(&id) {
+                    self.cancelled.record(id);
+                }
             }
             Initialized::METHOD => {}
             other => {

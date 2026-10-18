@@ -109,8 +109,8 @@ pub const SCHEMA_WATCH_REGISTRATION_ID: &str = "dmls-watch-schema-inputs";
 
 /// Builds the watcher registration rooted at the folders trigger registries
 /// read: schema-root folders (present or absent) and the folders holding
-/// payload, import, and example files, wherever they live (ruling: one watch
-/// per folder, not per file).
+/// payload, import, and example files, wherever they live (one watch per
+/// folder, not per file).
 ///
 /// Each watch is rooted at the folder's parent with the pattern
 /// `<folder>/*`, so a root folder that does not exist yet is still watched
@@ -184,8 +184,8 @@ pub fn is_context_input(path: &Path) -> bool {
 /// Content hashes of every package manifest under `roots`, for the
 /// server-rescan fallback to detect a manifest change no client reported.
 ///
-/// The walk honors `.gitignore` and skips hidden directories, as workspace
-/// discovery does.
+/// The walk honors `.gitignore` and skips hidden directories. Workspace
+/// discovery, unlike this walk, descends into hidden directories.
 pub fn scan_manifests(roots: &[PathBuf]) -> HashMap<PathBuf, u64> {
     let mut manifests = HashMap::new();
     for root in roots {

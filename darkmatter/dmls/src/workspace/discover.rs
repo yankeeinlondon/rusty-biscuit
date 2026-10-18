@@ -12,9 +12,11 @@
 //! global excludes file, also outside a git repository
 //! (`require_git(false)`). Hidden directories are walked, because folders
 //! such as `.claude/` hold real Markdown, but every directory named `.git` is
-//! skipped. **Symlinks are not followed**, and two listed paths that
-//! canonicalize to the same physical file are reported as duplicates (the
-//! caller logs each) rather than listed twice.
+//! skipped (`filter_entry`). **Symlinks are not followed**: a symlinked
+//! directory is never descended and a symlinked file is never listed. Two
+//! listed paths that canonicalize to the same file (overlapping or aliased
+//! workspace roots) are reported as duplicates (the caller logs each) rather
+//! than listed twice; hard links canonicalize apart and are not detected.
 //!
 //! A walk error does not stop the walk; it marks the list incomplete
 //! ([`DiscoveryReport::is_complete`]), so no caller can mistake absence from
@@ -79,8 +81,9 @@ pub struct DiscoveryReport {
     pub files: Vec<PathBuf>,
     /// Listed YAML files, in walk order.
     pub yaml: Vec<PathBuf>,
-    /// Files skipped because another listed path is the same physical file
-    /// (symlink/hardlink/overlapping-root aliasing) — R-8 gotcha 8.
+    /// Files skipped because another listed path canonicalizes to the same
+    /// file (overlapping or aliased workspace roots; hard links are not
+    /// detected).
     pub duplicates: Vec<PathBuf>,
     /// Walk errors (an unreadable directory, a vanished root). Any error
     /// makes the list incomplete.

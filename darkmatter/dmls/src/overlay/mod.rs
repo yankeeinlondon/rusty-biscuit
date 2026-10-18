@@ -506,6 +506,31 @@ impl OverlayState {
         cache.triggers.watch_folders()
     }
 
+    /// Prepares the trigger registry of each workspace folder's own context,
+    /// so the roots a folder's documents share are classified and their
+    /// payloads loaded before the first schema-dependent request.
+    ///
+    /// A folder is prepared as a document named [`WORKSPACE_PROBE`] inside
+    /// it; no such file is read. A folder whose context cannot be built is
+    /// skipped, since its documents report the context failure. The lock is
+    /// taken per folder, so the dispatch thread is held for one folder at a
+    /// time.
+    pub fn prepare_workspace_registries(
+        &self,
+        workspace_roots: &[PathBuf],
+        contexts: &crate::context::RepositoryContexts,
+    ) {
+        for root in workspace_roots {
+            let probe = root.join(WORKSPACE_PROBE);
+            let resolution = contexts.for_document(&probe);
+            let Ok(context) = resolution.context() else {
+                continue;
+            };
+            let mut cache = self.inner.lock().expect("overlay lock poisoned");
+            let _ = cache.trigger_registry(&probe, workspace_roots, context);
+        }
+    }
+
     /// The schema roots and files the prepared trigger registries searched.
     pub fn trigger_registry_summary(&self) -> RegistrySummary {
         let cache = self.inner.lock().expect("overlay lock poisoned");
@@ -699,6 +724,11 @@ impl OverlayCache {
         self.triggers.lookup(path, &boundary, context)
     }
 }
+
+/// The document name a workspace folder's startup registry is prepared under
+/// (see [`OverlayState::prepare_workspace_registries`]). Only its folder
+/// matters: the registry is the one any document directly in the folder gets.
+pub const WORKSPACE_PROBE: &str = ".dmls-workspace";
 
 /// Content-and-config identity for the schema cache: the document text plus a
 /// signature of the schema configuration (extensions + strict mode).
