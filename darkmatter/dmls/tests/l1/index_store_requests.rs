@@ -40,7 +40,7 @@ struct Store {
 impl Store {
     fn fill(corpus: &Corpus, oracle: &Oracle, location: &StoreLocation) -> Self {
         let roots = corpus.roots();
-        let mut facts = WorkspaceFacts::open(&roots, location, Arc::new(SystemClock));
+        let mut facts = WorkspaceFacts::open(&roots, location, Arc::new(SystemClock), "test");
         let files = oracle.files();
         let report = facts.revalidate(&files, &BTreeMap::new(), &SilentProgress, &AtomicBool::new(false));
         assert!(report.failed.is_empty() && report.missing.is_empty(), "{report:?}");

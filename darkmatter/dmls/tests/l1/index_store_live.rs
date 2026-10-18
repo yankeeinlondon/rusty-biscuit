@@ -75,8 +75,8 @@ fn workspace() -> LspWorkspace {
 }
 
 /// Waits until the server has handled every message sent so far, with a
-/// request that needs neither the full index nor the store (the fixture's
-/// own round trip is `workspace/symbol`, which needs both). Every session
+/// request that does not need the store (the fixture's own round trip is
+/// `workspace/symbol`, which does). Every session
 /// keeps `target.md` open.
 fn settle(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace) {
     let target = uri(&workspace.path().join("target.md"));
@@ -251,8 +251,8 @@ fn before_ready_a_watched_change_touches_only_the_file_list() {
 }
 
 /// R6 after ready, client watching: an event re-reads and upserts exactly
-/// its file (reusing the index's parse of the new bytes), and a deletion
-/// removes the row.
+/// its file with one parse (the closed file's stale index parse is not
+/// re-read, only marked), and a deletion removes the row.
 #[test]
 fn after_ready_a_watched_event_updates_one_row() {
     let workspace = workspace();
@@ -269,7 +269,7 @@ fn after_ready_a_watched_event_updates_one_row() {
     let work = dmls::work_counters::work_counts();
     watched(&mut fixture, &workspace, &other, 2);
     let work = dmls::work_counters::work_counts().since(work);
-    assert_eq!(work.parses, 1, "the index's parse serves the row too: {work:?}");
+    assert_eq!(work.parses, 1, "only the store parses the new bytes: {work:?}");
     let after = rows(&workspace);
     assert_eq!(after["other.md"], hash_of(changed));
     assert_eq!((after["referrer.md"], after["target.md"]), (before["referrer.md"], before["target.md"]));
@@ -288,7 +288,7 @@ fn a_change_during_a_build_round_is_reread_before_ready() {
     let target = workspace.path().join("target.md");
     let other = workspace.path().join("other.md");
     let env = HashMap::from([("DMLS_CACHE_DIR".to_string(), cache_dir(&workspace).to_string_lossy().into_owned())]);
-    let mut fixture = LspFixture::start_with_full_index_gate_and_snapshot(
+    let mut fixture = LspFixture::start_with_index_round_gate_and_snapshot(
         &workspace,
         LspFixture::fixture_snapshot(&workspace).with_env(env),
     );
@@ -305,12 +305,12 @@ fn a_change_during_a_build_round_is_reread_before_ready() {
             "context": { "includeDeclaration": false }
         }),
     );
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
     let changed = "# Other\n\n[t](target.md#target)\n";
     std::fs::write(&other, changed).unwrap();
     fixture.notify("workspace/didChangeWatchedFiles", json!({ "changes": [ { "uri": uri(&other), "type": 2 } ] }));
-    fixture.open_full_index_gate();
-    fixture.release_full_index_round();
+    fixture.open_index_round_gate();
+    fixture.release_index_round();
     let response = fixture.expect_response(id);
     assert!(response.error.is_none(), "{:?}", response.error);
     assert_eq!(rows(&workspace)["other.md"], hash_of(changed));
@@ -381,5 +381,48 @@ fn a_rename_edits_the_new_bytes_of_a_referrer_changed_after_ready() {
     std::fs::write(&referrer, "# Referrer\n\nAdded.\n\nSee [the target](target.md#target).\n").unwrap();
     let renamed = rename_heading(&mut fixture, &target, "Goal");
     assert_eq!(renamed["referrer.md"].iter().map(|(line, _)| *line).collect::<Vec<_>>(), vec![4], "{renamed:?}");
+    fixture.shutdown();
+}
+
+/// Acceptance 1 through the server: a restart over an unchanged workspace
+/// reads and hashes every listed file and parses none of them before the
+/// first references answer, which still includes the never-opened referrer.
+#[test]
+fn a_warm_restart_parses_nothing_before_the_first_references_answer() {
+    let workspace = workspace();
+    let target = workspace.path().join("target.md");
+    let mut fixture = start_cached(&workspace, true);
+    open(&mut fixture, &workspace, &target, TARGET);
+    assert_eq!(references(&mut fixture, &target), vec!["referrer.md".to_string()]);
+    fixture.shutdown();
+
+    let mut fixture = start_cached(&workspace, true);
+    open(&mut fixture, &workspace, &target, TARGET);
+    let before = dmls::work_counters::work_counts();
+    assert_eq!(references(&mut fixture, &target), vec!["referrer.md".to_string()]);
+    let work = dmls::work_counters::work_counts().since(before);
+    assert_eq!(work.parses, 0, "{work:?}");
+    assert_eq!(work.reads, 3, "every listed file is read and hashed once: {work:?}");
+    fixture.shutdown();
+}
+
+/// Acceptance 2 through the server: one file changed between restarts is
+/// the only parse, and its new link is answered.
+#[test]
+fn one_file_changed_between_restarts_is_the_only_parse() {
+    let workspace = workspace();
+    let target = workspace.path().join("target.md");
+    let mut fixture = start_cached(&workspace, true);
+    open(&mut fixture, &workspace, &target, TARGET);
+    assert_eq!(references(&mut fixture, &target), vec!["referrer.md".to_string()]);
+    fixture.shutdown();
+
+    write(&workspace, "other.md", "# Other\n\nNow [a link](target.md#target).\n");
+    let mut fixture = start_cached(&workspace, true);
+    open(&mut fixture, &workspace, &target, TARGET);
+    let before = dmls::work_counters::work_counts();
+    assert_eq!(references(&mut fixture, &target), vec!["other.md".to_string(), "referrer.md".to_string()]);
+    let work = dmls::work_counters::work_counts().since(before);
+    assert_eq!(work.parses, 1, "{work:?}");
     fixture.shutdown();
 }

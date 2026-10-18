@@ -187,7 +187,7 @@ fn a_corrupted_cell_read_through_root_facts_falls_back_to_memory() {
     let file = filled(&fixture);
     tamper(&fixture, "UPDATE headings SET level = 9;");
     let location = StoreLocation::Directory(fixture.base.clone());
-    let (mut facts_source, opened) = RootFacts::open(&fixture.root, &location, Arc::new(SystemClock));
+    let (mut facts_source, opened) = RootFacts::open(&fixture.root, &location, Arc::new(SystemClock), "test");
     assert!(matches!(opened, RootOpened::Store(_)));
     assert!(facts_source.load(std::slice::from_ref(&file)).is_empty());
     assert!(facts_source.in_memory());

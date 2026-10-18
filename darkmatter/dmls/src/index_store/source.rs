@@ -6,6 +6,9 @@
 //! backend and never fails: a store failure switches it to memory for the
 //! rest of the process, with one `warn` per process.
 //!
+//! Every log line here carries the `workspace` field of the server that
+//! opened the root.
+//!
 //! | Failure | Behavior |
 //! | --- | --- |
 //! | corrupt, not a database, format mismatch, root mismatch (at open) | take the exclusive lock, delete, and recreate once; if the lock is held or the delete fails, memory |
@@ -220,13 +223,13 @@ pub fn fallback_warned() -> bool {
     FALLBACK_WARNED.load(Ordering::SeqCst)
 }
 
-fn warn_fallback(reason: &str, detail: &str, path: Option<&Path>) {
+fn warn_fallback(reason: &str, detail: &str, path: Option<&Path>, workspace: &str) {
     if FALLBACK_WARNED.swap(true, Ordering::SeqCst) {
-        tracing::debug!(reason, detail, "index store unavailable, already using memory");
+        tracing::debug!(%reason, %detail, %workspace, "index store unavailable, already using memory");
         return;
     }
     let path = path.map_or_else(String::new, |path| path.display().to_string());
-    tracing::warn!(reason, detail, path = %path, "index store unavailable, using memory");
+    tracing::warn!(%reason, %detail, path = %path, %workspace, "index store unavailable, using memory");
 }
 
 /// How [`RootFacts::open`] ended.
@@ -249,12 +252,15 @@ pub struct RootFacts {
     primary: Option<Box<dyn FactsSource>>,
     memory: MemoryFacts,
     switched: bool,
+    /// The `workspace` field of this root's log lines.
+    workspace: String,
 }
 
 impl RootFacts {
-    /// Opens `root`'s facts at `location`; never fails.
-    pub fn open(root: &Path, location: &StoreLocation, clock: Arc<dyn Clock>) -> (Self, RootOpened) {
-        Self::open_with(root, location, clock, OpenSettings::default())
+    /// Opens `root`'s facts at `location` for the server whose log lines
+    /// carry `workspace`; never fails.
+    pub fn open(root: &Path, location: &StoreLocation, clock: Arc<dyn Clock>, workspace: &str) -> (Self, RootOpened) {
+        Self::open_with(root, location, clock, OpenSettings::default(), workspace)
     }
 
     pub(crate) fn open_with(
@@ -262,34 +268,50 @@ impl RootFacts {
         location: &StoreLocation,
         clock: Arc<dyn Clock>,
         settings: OpenSettings,
+        workspace: &str,
     ) -> (Self, RootOpened) {
         let dir = match location {
             StoreLocation::Directory(dir) => dir,
-            StoreLocation::Disabled => return Self::memory_because("disabled", "DMLS_CACHE_DIR=off", None),
-            StoreLocation::Unavailable(detail) => return Self::memory_because("unavailable", detail, None),
+            StoreLocation::Disabled => return Self::memory_because("disabled", "DMLS_CACHE_DIR=off", None, workspace),
+            StoreLocation::Unavailable(detail) => return Self::memory_because("unavailable", detail, None, workspace),
         };
         let path = store_path(dir, root);
         match StoreFacts::open_with(&path, root, clock, settings) {
             Ok((store, opened)) => {
                 if let Some(failure) = &opened.recreated {
-                    tracing::warn!(path = %path.display(), reason = failure.reason(), "index store recreated");
+                    tracing::warn!(path = %path.display(), reason = %failure.reason(), %workspace, "index store recreated");
                 }
-                let facts = Self::with_source(Box::new(store), Some(path));
+                let created = opened.report.created;
+                tracing::info!(
+                    path = %path.display(),
+                    created,
+                    facts_version = super::FACTS_VERSION,
+                    rows = (!created).then_some(opened.report.rows),
+                    %workspace,
+                    "index store opened"
+                );
+                let facts = Self::with_source(Box::new(store), Some(path), workspace);
                 (facts, RootOpened::Store(opened))
             }
-            Err(failure) => Self::memory_because(failure.reason(), &failure.to_string(), Some(&path)),
+            Err(failure) => Self::memory_because(failure.reason(), &failure.to_string(), Some(&path), workspace),
         }
     }
 
-    fn memory_because(reason: &str, detail: &str, path: Option<&Path>) -> (Self, RootOpened) {
-        warn_fallback(reason, detail, path);
-        let facts = Self { store_path: path.map(Path::to_path_buf), primary: None, memory: MemoryFacts::default(), switched: false };
+    fn memory_because(reason: &str, detail: &str, path: Option<&Path>, workspace: &str) -> (Self, RootOpened) {
+        warn_fallback(reason, detail, path, workspace);
+        let facts = Self {
+            store_path: path.map(Path::to_path_buf),
+            primary: None,
+            memory: MemoryFacts::default(),
+            switched: false,
+            workspace: workspace.to_string(),
+        };
         (facts, RootOpened::Memory(detail.to_string()))
     }
 
     /// Facts backed by `primary` until it fails.
-    pub(crate) fn with_source(primary: Box<dyn FactsSource>, store_path: Option<PathBuf>) -> Self {
-        Self { store_path, primary: Some(primary), memory: MemoryFacts::default(), switched: false }
+    pub(crate) fn with_source(primary: Box<dyn FactsSource>, store_path: Option<PathBuf>, workspace: &str) -> Self {
+        Self { store_path, primary: Some(primary), memory: MemoryFacts::default(), switched: false, workspace: workspace.to_string() }
     }
 
     /// Whether facts now come from memory.
@@ -378,7 +400,7 @@ impl RootFacts {
     /// the failed store can still be read for.
     fn fall_back(&mut self, failure: StoreFailure) {
         let Some(mut primary) = self.primary.take() else { return };
-        warn_fallback(failure.reason(), &failure.to_string(), self.store_path.as_deref());
+        warn_fallback(failure.reason(), &failure.to_string(), self.store_path.as_deref(), &self.workspace);
         let salvaged = primary.hashes().and_then(|hashes| {
             let paths: Vec<PathBuf> = hashes.into_keys().collect();
             primary.load(&paths)
@@ -387,7 +409,7 @@ impl RootFacts {
             Ok(facts) => {
                 self.memory.put(&facts);
             }
-            Err(error) => tracing::debug!(%error, "index store rows could not be salvaged into memory"),
+            Err(error) => tracing::debug!(%error, workspace = %self.workspace, "index store rows could not be salvaged into memory"),
         }
         self.switched = true;
     }

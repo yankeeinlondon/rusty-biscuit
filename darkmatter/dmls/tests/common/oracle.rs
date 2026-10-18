@@ -11,8 +11,8 @@
 //! way.
 //!
 //! The oracle owns its own sequential read and parse loop (`index_document`
-//! per listed file) and does not use the production full-index build, which
-//! the index store replaces.
+//! per listed file). It is the only place a graph over every listed file is
+//! built; production answers from the index store.
 //!
 //! [`Corpus::materialize`] copies the static corpus under
 //! `tests/fixtures/index_store_corpus/` into a fresh temporary directory and
@@ -191,8 +191,8 @@ fn symbol_kind_number(kind: SymbolKind) -> i64 {
 }
 
 /// One graph over every listed Markdown file of the workspace `roots`, built
-/// the way the server builds its full index: the same discovery, config,
-/// wiki roots, and per-repository contexts.
+/// with the server's discovery, config, wiki roots, and per-repository
+/// contexts.
 pub struct Oracle {
     roots: Vec<PathBuf>,
     config: ConfigState,

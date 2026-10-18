@@ -100,7 +100,7 @@ fn a_write_error_mid_fill_keeps_salvaged_rows_and_the_facts_being_written() {
     // Call 0 (the first upsert) succeeds; every later call fails, the
     // salvage reads after the failing upsert included.
     let (faulty, _calls) = FaultyFacts::new(memory, 1, StoreFailure::Unavailable("disk full".into()));
-    let mut root = RootFacts::with_source(Box::new(faulty), None);
+    let mut root = RootFacts::with_source(Box::new(faulty), None, "test");
     root.upsert(&[facts("/ws/c.md", "[b](b.md)\n")]);
     assert!(!root.in_memory());
     root.upsert(&[facts("/ws/d.md", "[[b]]\n")]);
@@ -150,7 +150,7 @@ fn a_readable_store_that_fails_a_write_is_salvaged_into_memory() {
             self.0.scan_headings()
         }
     }
-    let mut root = RootFacts::with_source(Box::new(WriteFails(store)), Some(path));
+    let mut root = RootFacts::with_source(Box::new(WriteFails(store)), Some(path), "test");
     let report = root.upsert(&[facts("/ws/d.md", "[[b]]\n")]);
     assert_eq!(report.written, 1);
     assert!(root.in_memory());
@@ -168,7 +168,7 @@ fn a_readable_store_that_fails_a_write_is_salvaged_into_memory() {
 #[test]
 fn memory_persists_for_later_requests_and_warns_once() {
     let (faulty, calls) = FaultyFacts::new(MemoryFacts::default(), 0, StoreFailure::Corrupt("bad row".into()));
-    let mut root = RootFacts::with_source(Box::new(faulty), None);
+    let mut root = RootFacts::with_source(Box::new(faulty), None, "test");
     assert!(root.candidates_for(Path::new("/ws/b.md")).is_empty());
     let after_switch = calls.load(Ordering::SeqCst);
     root.upsert(&[facts("/ws/a.md", "[b](b.md)\n")]);
@@ -178,7 +178,7 @@ fn memory_persists_for_later_requests_and_warns_once() {
     assert_eq!(calls.load(Ordering::SeqCst), after_switch, "the failed backend is never asked again");
     // A second root failing in the same process does not warn again.
     let (faulty, _) = FaultyFacts::new(MemoryFacts::default(), 0, StoreFailure::Busy("locked".into()));
-    let mut other = RootFacts::with_source(Box::new(faulty), None);
+    let mut other = RootFacts::with_source(Box::new(faulty), None, "test");
     other.hashes();
     assert!(other.in_memory());
     logs_assert(|lines| match count_warns(lines, "index store unavailable, using memory") {
@@ -193,7 +193,7 @@ fn a_corrupt_store_is_recreated_once() {
     let (_dir, root, location) = fixture();
     let path = store_path(store_dir(&location), &root);
     std::fs::write(&path, b"this is not a database, just garbage bytes long enough").unwrap();
-    let (mut facts_source, opened) = RootFacts::open(&root, &location, clock());
+    let (mut facts_source, opened) = RootFacts::open(&root, &location, clock(), "test");
     let RootOpened::Store(StoreOpened { report, recreated: Some(StoreFailure::Corrupt(_)) }) = opened else {
         panic!("expected a recreated store, got {opened:?}");
     };
@@ -213,12 +213,12 @@ fn a_corrupt_store_another_process_holds_falls_back_to_memory() {
     let garbage = b"this is not a database, just garbage bytes long enough";
     std::fs::write(&path, garbage).unwrap();
     let holder = StoreLock::shared(&lock_path(&path), Duration::ZERO).unwrap();
-    let (facts_source, opened) = RootFacts::open(&root, &location, clock());
+    let (facts_source, opened) = RootFacts::open(&root, &location, clock(), "test");
     assert!(matches!(opened, RootOpened::Memory(_)), "{opened:?}");
     assert!(facts_source.in_memory());
     assert_eq!(std::fs::read(&path).unwrap(), garbage, "the held store is never deleted");
     drop(holder);
-    assert!(logs_contain("reason=\"in-use\""));
+    assert!(logs_contain("reason=in-use"));
     assert!(!logs_contain("index store recreated"));
 }
 
@@ -232,7 +232,7 @@ fn a_store_recorded_for_another_root_is_refilled() {
         let (mut store, _) = IndexStore::open(&path, &other_root, clock()).unwrap();
         store.upsert_batch(&[facts("/elsewhere/a.md", "# A\n")]).unwrap();
     }
-    let (mut facts_source, opened) = RootFacts::open(&root, &location, clock());
+    let (mut facts_source, opened) = RootFacts::open(&root, &location, clock(), "test");
     let RootOpened::Store(StoreOpened { recreated: Some(StoreFailure::RootMismatch { stored }), .. }) = opened else {
         panic!("expected a refill, got {opened:?}");
     };
@@ -248,14 +248,14 @@ fn a_wal_switch_busy_past_its_bound_uses_memory_and_never_recreates() {
     let holder = rusqlite::Connection::open(&path).unwrap();
     holder.execute_batch("CREATE TABLE held (x INTEGER); BEGIN EXCLUSIVE; INSERT INTO held VALUES (1);").unwrap();
     let settings = OpenSettings { wal_retry: Duration::from_millis(50), busy_timeout: Duration::ZERO, ..OpenSettings::default() };
-    let (facts_source, opened) = RootFacts::open_with(&root, &location, clock(), settings);
+    let (facts_source, opened) = RootFacts::open_with(&root, &location, clock(), settings, "test");
     let RootOpened::Memory(detail) = opened else { panic!("expected memory, got {opened:?}") };
     assert!(detail.contains("WAL switch still busy"), "{detail}");
     assert!(facts_source.in_memory());
     holder.execute_batch("COMMIT").unwrap();
     let rows: i64 = holder.query_row("SELECT count(*) FROM held", [], |row| row.get(0)).unwrap();
     assert_eq!(rows, 1, "the holder's database was not recreated");
-    assert!(logs_contain("reason=\"busy\""));
+    assert!(logs_contain("reason=busy"));
     assert!(!logs_contain("index store recreated"));
 }
 
@@ -265,12 +265,12 @@ fn disabled_location_uses_memory_and_creates_no_file() {
     let dir = tempfile::tempdir().unwrap();
     let location = StoreLocation::prepare(Some(std::ffi::OsStr::new("OFF")), Some(dir.path().to_path_buf()));
     assert_eq!(location, StoreLocation::Disabled);
-    let (mut facts_source, opened) = RootFacts::open(dir.path(), &location, clock());
+    let (mut facts_source, opened) = RootFacts::open(dir.path(), &location, clock(), "test");
     assert!(matches!(opened, RootOpened::Memory(_)));
     facts_source.upsert(&[facts("/ws/a.md", "# A\n")]);
     assert_eq!(facts_source.scan_headings().len(), 1);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "no store file or directory");
-    assert!(logs_contain("reason=\"disabled\""));
+    assert!(logs_contain("reason=disabled"));
 }
 
 #[test]

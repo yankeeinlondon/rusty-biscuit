@@ -1,13 +1,14 @@
-//! Level-1 sessions for the on-demand full index: references, rename, file
-//! rename, and workspace symbols build it once on first use, concurrent
-//! callers share the build, and cancellation, unreadable files, and changes
-//! received during the build never leave a partial or stale ready index.
+//! Level-1 sessions for the on-demand index build: references, rename, file
+//! rename, and workspace symbols revalidate the index store once on first
+//! use, concurrent callers share the build, and cancellation, unreadable
+//! files, and changes received during the build never leave a partial or
+//! stale ready store.
 //!
-//! Parse counts come from `dmls::work_counters`, which are process-wide;
-//! nextest runs each test in its own process. A session started with
-//! [`LspFixture::start_with_full_index_gate`] holds each build round after it
-//! has read its files, so a test can change the workspace while that reading
-//! is stale.
+//! Parse and read counts come from `dmls::work_counters`, which are
+//! process-wide; nextest runs each test in its own process. A session started
+//! with [`LspFixture::start_with_index_round_gate`] holds each build round
+//! after its store pass has read its files, so a test can change the
+//! workspace while that reading is stale.
 
 use crate::common;
 
@@ -130,11 +131,12 @@ fn parses_during(body: impl FnOnce()) -> usize {
     work_counts().since(before).parses
 }
 
-/// Each request that needs the full index builds it once, on first use: the
-/// first parses exactly the unparsed listed documents, a repeat parses
-/// nothing, and the answer includes a referrer that was never opened.
+/// Each request that needs the index store fills it once, on first use: the
+/// first parses exactly the closed listed documents (the open one's buffer
+/// is reused), a repeat parses nothing, and the answer includes a referrer
+/// that was never opened.
 #[test]
-fn the_first_references_request_builds_the_full_index_once() {
+fn the_first_references_request_fills_the_store_once() {
     let workspace = workspace_with_referrer(5);
     let target = uri(&workspace.path().join("target.md"));
     let mut fixture = LspFixture::start(&workspace);
@@ -153,7 +155,7 @@ fn the_first_references_request_builds_the_full_index_once() {
 }
 
 #[test]
-fn the_first_rename_builds_the_full_index_once_and_edits_a_never_opened_referrer() {
+fn the_first_rename_fills_the_store_once_and_edits_a_never_opened_referrer() {
     let workspace = workspace_with_referrer(3);
     let target = uri(&workspace.path().join("target.md"));
     let mut fixture = LspFixture::start(&workspace);
@@ -184,7 +186,7 @@ fn the_first_rename_builds_the_full_index_once_and_edits_a_never_opened_referrer
 }
 
 #[test]
-fn the_first_workspace_symbols_request_builds_the_full_index_once() {
+fn the_first_workspace_symbols_request_fills_the_store_once() {
     let workspace = workspace_with_referrer(2);
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(workspace.path(), false));
@@ -201,7 +203,7 @@ fn the_first_workspace_symbols_request_builds_the_full_index_once() {
 }
 
 #[test]
-fn the_first_file_rename_builds_the_full_index_and_rewrites_a_never_opened_wiki_referrer() {
+fn the_first_file_rename_fills_the_store_and_rewrites_a_never_opened_wiki_referrer() {
     let workspace = workspace_with_referrer(1);
     write(&workspace, "wiki-referrer.md", "# Wiki\n\nSee [[target]].\n");
     let target = workspace.path().join("target.md");
@@ -219,21 +221,21 @@ fn the_first_file_rename_builds_the_full_index_and_rewrites_a_never_opened_wiki_
 }
 
 /// Requests that arrive while the build runs wait on that build: the
-/// workspace is parsed once, and both are answered from the complete index.
+/// workspace is parsed once, and both are answered from the ready store.
 /// The build reports `workDoneProgress` under its own token.
 #[test]
 fn simultaneous_callers_share_one_build() {
     let workspace = workspace_with_referrer(4);
     let target = uri(&workspace.path().join("target.md"));
-    let mut fixture = LspFixture::start_with_full_index_gate(&workspace);
+    let mut fixture = LspFixture::start_with_index_round_gate(&workspace);
     fixture.initialize(initialize_params(workspace.path(), true));
     open_settled(&mut fixture, &target, TARGET);
 
     let before = work_counts();
     fixture.send_request_with_id(RequestId::from(101), "textDocument/references", references_params(&target));
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
     fixture.send_request_with_id(RequestId::from(102), "workspace/symbol", symbols_params());
-    fixture.release_full_index_round();
+    fixture.release_index_round();
     let references = fixture.expect_response(RequestId::from(101));
     let symbols = fixture.expect_response(RequestId::from(102));
     assert_eq!(work_counts().since(before).parses, 5, "one build parsed each closed document once");
@@ -242,12 +244,12 @@ fn simultaneous_callers_share_one_build() {
     assert!(
         fixture.buffered_server_requests().iter().any(|request| {
             request.method == "window/workDoneProgress/create"
-                && request.params["token"] == json!("dmls/full-index")
+                && request.params["token"] == json!("dmls/index")
         }),
         "{:?}",
         fixture.buffered_server_requests()
     );
-    fixture.wait_for_progress_end("dmls/full-index");
+    fixture.wait_for_progress_end("dmls/index");
     fixture.shutdown();
 }
 
@@ -257,52 +259,52 @@ fn simultaneous_callers_share_one_build() {
 fn cancelling_one_waiter_leaves_the_shared_build_running() {
     let workspace = workspace_with_referrer(2);
     let target = uri(&workspace.path().join("target.md"));
-    let mut fixture = LspFixture::start_with_full_index_gate(&workspace);
+    let mut fixture = LspFixture::start_with_index_round_gate(&workspace);
     fixture.initialize(initialize_params(workspace.path(), false));
     open_settled(&mut fixture, &target, TARGET);
 
     fixture.send_request_with_id(RequestId::from(201), "textDocument/references", references_params(&target));
     fixture.send_request_with_id(RequestId::from(202), "workspace/symbol", symbols_params());
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
     fixture.notify("$/cancelRequest", json!({ "id": 201 }));
     // Answered while the round is still held.
     let cancelled = fixture.expect_response(RequestId::from(201));
     assert_eq!(cancelled.error.map(|error| error.code), Some(REQUEST_CANCELED));
-    fixture.release_full_index_round();
+    fixture.release_index_round();
     let symbols = fixture.expect_response(RequestId::from(202));
     assert_eq!(symbol_names(&symbols).len(), 4);
     fixture.shutdown();
 }
 
 /// A build whose only waiter cancels is abandoned and never becomes ready:
-/// the next request builds again, from scratch.
+/// the next request builds again, reading every file again. The rows the
+/// abandoned round wrote are a cache keyed on each file's bytes, so the
+/// retry reuses them instead of parsing.
 #[test]
 fn cancelling_the_last_waiter_abandons_the_build_and_a_later_request_retries() {
     let workspace = workspace_with_referrer(2);
     let target = uri(&workspace.path().join("target.md"));
-    let mut fixture = LspFixture::start_with_full_index_gate(&workspace);
+    let mut fixture = LspFixture::start_with_index_round_gate(&workspace);
     fixture.initialize(initialize_params(workspace.path(), false));
     open_settled(&mut fixture, &target, TARGET);
 
     fixture.send_request_with_id(RequestId::from(301), "textDocument/references", references_params(&target));
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
     fixture.notify("$/cancelRequest", json!({ "id": 301 }));
     let cancelled = fixture.expect_response(RequestId::from(301));
     assert_eq!(cancelled.error.map(|error| error.code), Some(REQUEST_CANCELED));
     // The abandoned round's results reach the server and are discarded.
-    fixture.release_full_index_round();
+    fixture.release_index_round();
 
     let before = work_counts();
     fixture.send_request_with_id(RequestId::from(302), "textDocument/references", references_params(&target));
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
-    fixture.release_full_index_round();
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
+    fixture.release_index_round();
     let references = fixture.expect_response(RequestId::from(302));
     assert_eq!(referrer_files(&references), vec!["referrer.md".to_string()]);
-    assert_eq!(
-        work_counts().since(before).parses,
-        3,
-        "the retry read every closed document again: nothing of the abandoned build was kept"
-    );
+    let work = work_counts().since(before);
+    assert_eq!(work.reads, 4, "the retry read every listed file again: {work:?}");
+    assert_eq!(work.parses, 0, "and reused the abandoned round's rows: {work:?}");
     assert_eq!(parses_during(|| {
         fixture.request("textDocument/references", references_params(&target));
     }), 0);
@@ -311,7 +313,7 @@ fn cancelling_the_last_waiter_abandons_the_build_and_a_later_request_retries() {
 
 /// A listed file that cannot be read fails the build: every waiter gets an
 /// error naming the file, rename issues no partial edit, and once the file
-/// is readable a later request builds the index.
+/// is readable a later request fills the store.
 #[test]
 fn an_unreadable_listed_file_fails_the_build_and_a_later_request_retries() {
     let workspace = workspace_with_referrer(1);
@@ -343,7 +345,7 @@ fn an_unreadable_listed_file_fails_the_build_and_a_later_request_retries() {
 }
 
 /// Disk edits, deletions, and buffer opens received while a round's reading
-/// goes stale are reconciled before the index is ready.
+/// goes stale are reconciled before the store is ready.
 #[test]
 fn edits_and_deletes_during_a_build_never_reach_the_ready_index() {
     let workspace = LspWorkspace::new();
@@ -351,17 +353,17 @@ fn edits_and_deletes_during_a_build_never_reach_the_ready_index() {
     let deleted = write(&workspace, "deleted.md", "# Deleted\n");
     let opened = write(&workspace, "opened.md", "# Disk title\n");
     write(&workspace, "steady.md", "# Steady\n");
-    let mut fixture = LspFixture::start_with_full_index_gate(&workspace);
+    let mut fixture = LspFixture::start_with_index_round_gate(&workspace);
     fixture.initialize(initialize_params(workspace.path(), false));
 
     fixture.send_request_with_id(RequestId::from(401), "workspace/symbol", symbols_params());
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
     std::fs::write(&edited, "# New title\n").unwrap();
     std::fs::remove_file(&deleted).unwrap();
     watched(&fixture, &[(&edited, 2), (&deleted, 3)]);
     open(&fixture, &uri(&opened), "# Buffer title\n");
-    fixture.open_full_index_gate();
-    fixture.release_full_index_round();
+    fixture.open_index_round_gate();
+    fixture.release_index_round();
 
     let symbols = symbol_names(&fixture.expect_response(RequestId::from(401)));
     assert_eq!(
@@ -376,22 +378,22 @@ fn edits_and_deletes_during_a_build_never_reach_the_ready_index() {
 }
 
 /// A workspace file rename received during a build leaves no trace of the
-/// old path and the new path's contents in the ready index.
+/// old path, and the new path's contents are in the ready store.
 #[test]
 fn a_file_rename_during_a_build_cannot_leave_a_stale_snapshot() {
     let workspace = LspWorkspace::new();
     let old = write(&workspace, "old-name.md", "# Moving\n");
     write(&workspace, "steady.md", "# Steady\n");
-    let mut fixture = LspFixture::start_with_full_index_gate(&workspace);
+    let mut fixture = LspFixture::start_with_index_round_gate(&workspace);
     fixture.initialize(initialize_params(workspace.path(), false));
 
     fixture.send_request_with_id(RequestId::from(501), "workspace/symbol", symbols_params());
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
     let new = workspace.path().join("new-name.md");
     std::fs::rename(&old, &new).unwrap();
     watched(&fixture, &[(&old, 3), (&new, 1)]);
-    fixture.open_full_index_gate();
-    fixture.release_full_index_round();
+    fixture.open_index_round_gate();
+    fixture.release_index_round();
 
     let symbols = symbol_names(&fixture.expect_response(RequestId::from(501)));
     assert_eq!(
@@ -405,7 +407,7 @@ fn a_file_rename_during_a_build_cannot_leave_a_stale_snapshot() {
 }
 
 /// A request that arrives before the file list waits for it, then for the
-/// build, and is answered from the complete index.
+/// build, and is answered from the ready store.
 #[test]
 fn a_request_before_the_file_list_waits_for_it_and_the_build() {
     let workspace = workspace_with_referrer(1);
@@ -424,31 +426,31 @@ fn a_request_before_the_file_list_waits_for_it_and_the_build() {
 #[test]
 fn shutdown_during_a_build_answers_its_waiters() {
     let workspace = workspace_with_referrer(1);
-    let mut fixture = LspFixture::start_with_full_index_gate(&workspace);
+    let mut fixture = LspFixture::start_with_index_round_gate(&workspace);
     fixture.initialize(initialize_params(workspace.path(), false));
 
     fixture.send_request_with_id(RequestId::from(701), "workspace/symbol", symbols_params());
-    fixture.wait_for_event(StartupEvent::FullIndexRoundRead);
+    fixture.wait_for_event(StartupEvent::IndexRoundRead);
     fixture.send_request_with_id(RequestId::from(702), "shutdown", Value::Null);
     let waiter = fixture.expect_response(RequestId::from(701));
     assert_eq!(waiter.error.map(|error| error.code), Some(-32802), "ServerCancelled");
     let shutdown = fixture.expect_response(RequestId::from(702));
-    fixture.open_full_index_gate();
+    fixture.open_index_round_gate();
     fixture.exit_after_shutdown(shutdown);
 }
 
 /// Bytes that are not UTF-8: the deterministic read-failure seam.
 const UNREADABLE: [u8; 4] = [0xff, 0xfe, 0x00, 0x80];
 
-/// How a ready full index loses a readable document.
+/// How a ready store loses a readable document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Transition {
     /// A watched change makes the closed referrer unreadable.
     WatchedModification,
     /// A watched creation adds an unreadable Markdown file.
     WatchedCreation,
-    /// A save-driven rescan (no client watcher) finds the closed referrer
-    /// unreadable.
+    /// A save-driven rescan (no client watcher) with the closed referrer
+    /// made unreadable on disk, which no event reports.
     RescanOnSave,
     /// The referrer's buffer closes over unreadable disk bytes.
     BufferClose,
@@ -457,7 +459,7 @@ enum Transition {
     Relist,
 }
 
-/// A request that needs the full index.
+/// A request that needs the index store.
 #[derive(Debug, Clone, Copy)]
 enum Consumer {
     References,
@@ -466,7 +468,7 @@ enum Consumer {
     WorkspaceSymbols,
 }
 
-/// A session over `target.md` (open) and `referrer.md` whose full index is
+/// A session over `target.md` (open) and `referrer.md` whose store is
 /// ready, after `transition` has made one listed file unreadable.
 ///
 /// ## Returns
@@ -539,9 +541,9 @@ fn consume(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace, consumer: Con
     }
 }
 
-/// Every consumer of the full index fails, with the first build's error
+/// Every consumer of the index store fails, with the first build's error
 /// naming the unreadable file and no partial result, after each way a ready
-/// index can lose a readable document.
+/// store can learn that a listed document became unreadable.
 macro_rules! readiness_withdrawn {
     ($($name:ident: $transition:ident, $consumer:ident;)*) => {$(
         #[test]
@@ -550,7 +552,7 @@ macro_rules! readiness_withdrawn {
             let (mut fixture, unreadable) = ready_then(&workspace, Transition::$transition);
             let response = consume(&mut fixture, &workspace, Consumer::$consumer);
             assert!(response.result.is_none(), "no partial result: {:?}", response.result);
-            let error = response.error.expect("the index is incomplete");
+            let error = response.error.expect("the store is not ready");
             assert_eq!(error.code, REQUEST_FAILED);
             assert!(error.message.contains(unreadable), "{}", error.message);
             fixture.shutdown();
@@ -559,29 +561,27 @@ macro_rules! readiness_withdrawn {
 }
 
 readiness_withdrawn! {
-    a_ready_index_after_a_watched_modification_fails_references: WatchedModification, References;
-    a_ready_index_after_a_watched_modification_fails_heading_rename: WatchedModification, HeadingRename;
-    a_ready_index_after_a_watched_modification_fails_file_rename: WatchedModification, FileRename;
-    a_ready_index_after_a_watched_modification_fails_workspace_symbols: WatchedModification, WorkspaceSymbols;
-    a_ready_index_after_a_watched_creation_fails_references: WatchedCreation, References;
-    a_ready_index_after_a_watched_creation_fails_heading_rename: WatchedCreation, HeadingRename;
-    a_ready_index_after_a_watched_creation_fails_file_rename: WatchedCreation, FileRename;
-    a_ready_index_after_a_watched_creation_fails_workspace_symbols: WatchedCreation, WorkspaceSymbols;
-    a_ready_index_after_a_save_rescan_fails_references: RescanOnSave, References;
-    a_ready_index_after_a_save_rescan_fails_heading_rename: RescanOnSave, HeadingRename;
-    a_ready_index_after_a_save_rescan_fails_file_rename: RescanOnSave, FileRename;
-    a_ready_index_after_a_save_rescan_fails_workspace_symbols: RescanOnSave, WorkspaceSymbols;
-    a_ready_index_after_a_buffer_close_fails_references: BufferClose, References;
-    a_ready_index_after_a_buffer_close_fails_heading_rename: BufferClose, HeadingRename;
-    a_ready_index_after_a_buffer_close_fails_file_rename: BufferClose, FileRename;
-    a_ready_index_after_a_buffer_close_fails_workspace_symbols: BufferClose, WorkspaceSymbols;
-    a_ready_index_after_a_relist_fails_references: Relist, References;
-    a_ready_index_after_a_relist_fails_heading_rename: Relist, HeadingRename;
-    a_ready_index_after_a_relist_fails_file_rename: Relist, FileRename;
-    a_ready_index_after_a_relist_fails_workspace_symbols: Relist, WorkspaceSymbols;
+    a_ready_store_after_a_watched_modification_fails_references: WatchedModification, References;
+    a_ready_store_after_a_watched_modification_fails_heading_rename: WatchedModification, HeadingRename;
+    a_ready_store_after_a_watched_modification_fails_file_rename: WatchedModification, FileRename;
+    a_ready_store_after_a_watched_modification_fails_workspace_symbols: WatchedModification, WorkspaceSymbols;
+    a_ready_store_after_a_watched_creation_fails_references: WatchedCreation, References;
+    a_ready_store_after_a_watched_creation_fails_heading_rename: WatchedCreation, HeadingRename;
+    a_ready_store_after_a_watched_creation_fails_file_rename: WatchedCreation, FileRename;
+    a_ready_store_after_a_watched_creation_fails_workspace_symbols: WatchedCreation, WorkspaceSymbols;
+    a_ready_store_after_a_save_rescan_fails_heading_rename: RescanOnSave, HeadingRename;
+    a_ready_store_after_a_save_rescan_fails_file_rename: RescanOnSave, FileRename;
+    a_ready_store_after_a_buffer_close_fails_references: BufferClose, References;
+    a_ready_store_after_a_buffer_close_fails_heading_rename: BufferClose, HeadingRename;
+    a_ready_store_after_a_buffer_close_fails_file_rename: BufferClose, FileRename;
+    a_ready_store_after_a_buffer_close_fails_workspace_symbols: BufferClose, WorkspaceSymbols;
+    a_ready_store_after_a_relist_fails_references: Relist, References;
+    a_ready_store_after_a_relist_fails_heading_rename: Relist, HeadingRename;
+    a_ready_store_after_a_relist_fails_file_rename: Relist, FileRename;
+    a_ready_store_after_a_relist_fails_workspace_symbols: Relist, WorkspaceSymbols;
 }
 
-/// Restoring the bytes and sending another change retries the parse: the
+/// Restoring the bytes and sending another change retries the read: the
 /// referrer is back in references and in the rename's edits, and nothing is
 /// read again for the next request.
 #[test]
@@ -605,26 +605,37 @@ fn a_repaired_file_after_readiness_is_read_again_and_complete_answers_return() {
     fixture.shutdown();
 }
 
-/// The save-driven rescan retries a listed file whose read failed once the
-/// index was built.
+/// In fallback watch mode a save re-reads only the saved file and the files
+/// it knows changed, so a referrer made unreadable on disk with no event
+/// keeps its row: references and workspace symbols answer from it. Every
+/// rename re-reads every file first, so it finds the referrer unreadable and
+/// fails, and after a repair it edits the referrer.
 #[test]
-fn a_save_rescan_retries_a_file_that_failed_after_readiness() {
+fn in_fallback_mode_an_unannounced_unreadable_file_fails_only_renames() {
     let workspace = workspace_with_referrer(1);
     let (mut fixture, _) = ready_then(&workspace, Transition::RescanOnSave);
     let target = uri(&workspace.path().join("target.md"));
-    assert!(consume(&mut fixture, &workspace, Consumer::References).error.is_some());
+    let references = consume(&mut fixture, &workspace, Consumer::References);
+    assert_eq!(referrer_files(&references), vec!["referrer.md".to_string()], "the referrer's old row answers");
+    let symbols = consume(&mut fixture, &workspace, Consumer::WorkspaceSymbols);
+    assert!(symbol_names(&symbols).contains(&("referrer.md".to_string(), "Referrer".to_string())));
+    for consumer in [Consumer::HeadingRename, Consumer::FileRename] {
+        let error = consume(&mut fixture, &workspace, consumer).error.expect("the rename's own pass fails");
+        assert_eq!(error.code, REQUEST_FAILED);
+        assert!(error.message.contains("referrer.md"), "{}", error.message);
+    }
 
     std::fs::write(workspace.path().join("referrer.md"), REFERRER).unwrap();
     fixture.notify("textDocument/didSave", json!({ "textDocument": { "uri": target } }));
-    let references = fixture.request("textDocument/references", references_params(&target));
-    assert_eq!(referrer_files(&references), vec!["referrer.md".to_string()]);
+    let edit = fixture.request("textDocument/rename", rename_params(&target)).result.unwrap();
+    assert!(edit.to_string().contains("referrer.md"), "{edit}");
     fixture.shutdown();
 }
 
 /// An unreadable file that is then deleted leaves the list: it is absent,
-/// not unreadable, and the index is complete again.
+/// not unreadable, and the store is ready again.
 #[test]
-fn deleting_a_file_that_failed_after_readiness_completes_the_index() {
+fn deleting_a_file_that_failed_after_readiness_makes_the_store_ready_again() {
     let workspace = workspace_with_referrer(1);
     let (mut fixture, _) = ready_then(&workspace, Transition::WatchedCreation);
     let created = workspace.path().join("binary.md");

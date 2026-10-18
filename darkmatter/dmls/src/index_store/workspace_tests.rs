@@ -40,7 +40,7 @@ impl Fixture {
 
     /// A process start: the stores opened afresh.
     fn open(&self) -> WorkspaceFacts {
-        WorkspaceFacts::open(std::slice::from_ref(&self.root), &self.location, Arc::new(SystemClock))
+        WorkspaceFacts::open(std::slice::from_ref(&self.root), &self.location, Arc::new(SystemClock), "test")
     }
 
     fn store_dir(&self) -> &Path {
@@ -267,7 +267,7 @@ fn a_file_under_nested_roots_has_a_row_in_each_store() {
     let inner = fixture.write("nested/inner.md", "# Inner\n");
     let outer = fixture.write("outer.md", "# Outer\n");
     let roots = vec![fixture.root.clone(), nested.clone()];
-    let open = || WorkspaceFacts::open(&roots, &fixture.location, Arc::new(SystemClock));
+    let open = || WorkspaceFacts::open(&roots, &fixture.location, Arc::new(SystemClock), "test");
     let mut facts = open();
     let files = [inner.clone(), outer.clone()];
     revalidate(&mut facts, &files);
@@ -333,7 +333,7 @@ fn a_store_failure_after_ready_switches_to_memory_without_losing_written_facts()
     let (store, _) = StoreFacts::open(&path, &fixture.root, Arc::new(SystemClock)).unwrap();
     let broken = Arc::new(AtomicBool::new(false));
     let backend = Breakable { inner: store, broken: Arc::clone(&broken) };
-    let root = RootFacts::with_source(Box::new(backend), Some(path));
+    let root = RootFacts::with_source(Box::new(backend), Some(path), "test");
     let mut facts = WorkspaceFacts::from_roots(vec![(fixture.root.clone(), root)]);
     let roots = std::slice::from_ref(&fixture.root);
     revalidate(&mut facts, &files);
@@ -365,7 +365,7 @@ fn a_store_failure_after_ready_switches_to_memory_without_losing_written_facts()
 fn disabled_stores_keep_facts_in_memory() {
     let fixture = Fixture::new();
     let files = chain(&fixture, 3);
-    let mut facts = WorkspaceFacts::open(std::slice::from_ref(&fixture.root), &StoreLocation::Disabled, Arc::new(SystemClock));
+    let mut facts = WorkspaceFacts::open(std::slice::from_ref(&fixture.root), &StoreLocation::Disabled, Arc::new(SystemClock), "test");
     let (report, _) = revalidate(&mut facts, &files);
     assert_eq!(report.reparsed, 3);
     assert_eq!(facts.request_documents(&files, []).len(), 3);

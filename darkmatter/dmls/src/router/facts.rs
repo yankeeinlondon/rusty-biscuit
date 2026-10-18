@@ -3,7 +3,7 @@
 //!
 //! The facts open on the first build round, never at startup, and each
 //! round's store pass runs on that round's thread
-//! ([`crate::full_index::FactsPlan`]). On the dispatch thread:
+//! ([`crate::index_build::FactsPlan`]). On the dispatch thread:
 //!
 //! | Facts state | A changed Markdown file |
 //! | --- | --- |
@@ -12,9 +12,8 @@
 //! | ready, client watching | re-read, re-hashed, and its row upserted or deleted at once |
 //! | ready, fallback watch mode | held until the next save, which re-reads the saved file and these |
 //!
-//! A pass that finds a file's bytes differ from the workspace index's disk
-//! parse tells the index, so the full index never answers from bytes the
-//! store has already seen replaced.
+//! A changed file is one a watched event, a relist, or a rescan reported, or
+//! an open document that closed (its disk bytes become authoritative again).
 //!
 //! References, heading rename, and file rename are answered from a graph
 //! built for the request over the store's candidates
@@ -145,13 +144,8 @@ impl ServerState {
         self.refresh_facts(&paths);
     }
 
-    /// Re-reads `paths` into the facts and tells the workspace index about
-    /// any whose bytes changed.
-    ///
-    /// ## Returns
-    ///
-    /// Whether the workspace index changed.
-    pub(super) fn refresh_facts(&self, paths: &[PathBuf]) -> bool {
+    /// Re-reads `paths` into the facts.
+    pub(super) fn refresh_facts(&self, paths: &[PathBuf]) {
         // Rows exist only for listed files; a path that left the list is
         // re-read only to delete its row when it is gone from disk.
         let (paths, known) = {
@@ -165,44 +159,16 @@ impl ServerState {
             (paths, known)
         };
         if paths.is_empty() {
-            return false;
+            return;
         }
-        let paths = paths.as_slice();
         let report = {
             let mut facts = self.facts.lock().expect("facts lock poisoned");
             let Some(facts) = facts.as_mut() else {
-                return false;
+                return;
             };
-            facts.refresh(paths, &known)
+            facts.refresh(&paths, &known)
         };
         log_refresh(&report);
-        self.bridge_to_index(&report)
-    }
-
-    /// Tells the workspace index about every file `report` read whose bytes
-    /// differ from the index's disk parse of it, publishing a new snapshot
-    /// when that changed anything.
-    ///
-    /// ## Returns
-    ///
-    /// Whether the workspace index changed.
-    pub(super) fn bridge_to_index(&self, report: &PassReport) -> bool {
-        let mut index = self.index.lock().expect("index lock poisoned");
-        let mut changed = false;
-        for (path, hash) in &report.hashes {
-            if index.disk_parse(path).is_some_and(|parse| parse.content_hash != *hash) {
-                changed |= index.disk_changed(path);
-            }
-        }
-        for path in &report.missing {
-            if index.disk_parse(path).is_some() {
-                changed |= index.disk_deleted(path);
-            }
-        }
-        if changed {
-            self.snapshot.store(index.snapshot());
-        }
-        changed
     }
 
     /// The rename freshness rule: before a rename of `targets` (the
@@ -212,11 +178,7 @@ impl ServerState {
     /// its edit lands on its current text. It runs before the request graph
     /// is built: an edit computed from a stale parse is dropped, not
     /// corrected, when the old text is no longer at its span.
-    ///
-    /// ## Returns
-    ///
-    /// Whether the workspace index changed.
-    pub(super) fn refresh_rename_referrers(&self, targets: &[PathBuf]) -> bool {
+    pub(super) fn refresh_rename_referrers(&self, targets: &[PathBuf]) {
         let candidates = {
             let index = self.index.lock().expect("index lock poisoned");
             let mut facts = self.facts.lock().expect("facts lock poisoned");
@@ -231,7 +193,7 @@ impl ServerState {
             .into_iter()
             .filter(|path| crate::workspace::file_path_to_uri(path).is_none_or(|uri| !self.documents.is_open(&uri)))
             .collect();
-        self.refresh_facts(&paths)
+        self.refresh_facts(&paths);
     }
 
     /// The graph a references, heading-rename, or file-rename request about

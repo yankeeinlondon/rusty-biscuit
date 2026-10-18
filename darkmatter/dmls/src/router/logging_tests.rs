@@ -177,7 +177,7 @@ fn a_fast_hover_logs_one_debug_request_complete_with_its_stages() {
         "trigger_registry_ms=0".to_string(),
         "provider_chain_ms=0".to_string(),
         "waited_for_file_list=false".to_string(),
-        "waited_for_full_index=false".to_string(),
+        "waited_for_index=false".to_string(),
     ] {
         assert!(line.contains(&field), "missing {field}: {line}");
     }

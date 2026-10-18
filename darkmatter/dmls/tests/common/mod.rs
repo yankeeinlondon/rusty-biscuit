@@ -167,10 +167,10 @@ pub struct LspFixture<'workspace> {
     /// Holds the file-list walk until dropped or sent to, for a fixture
     /// started with [`LspFixture::start_with_file_list_gate`].
     file_list_gate: Option<crossbeam_channel::Sender<()>>,
-    /// Holds each full-index build round's results until sent to (one round
+    /// Holds each index build round's results until sent to (one round
     /// per message) or dropped, for a fixture started with
-    /// [`LspFixture::start_with_full_index_gate`].
-    full_index_gate: Option<crossbeam_channel::Sender<()>>,
+    /// [`LspFixture::start_with_index_round_gate`].
+    index_round_gate: Option<crossbeam_channel::Sender<()>>,
     /// Holds each trigger-registry job until sent to (one job per message)
     /// or dropped, for a fixture started with
     /// [`LspFixture::start_with_registry_gate`].
@@ -234,24 +234,24 @@ impl<'workspace> LspFixture<'workspace> {
         fixture
     }
 
-    /// Like [`LspFixture::start`], but each full-index build round, once it
-    /// has read its files, waits for [`LspFixture::release_full_index_round`]
-    /// (or [`LspFixture::open_full_index_gate`]) before the server reconciles
+    /// Like [`LspFixture::start`], but each index build round, once its
+    /// store pass has read its files, waits for [`LspFixture::release_index_round`]
+    /// (or [`LspFixture::open_index_round_gate`]) before the server reconciles
     /// it, so a test can change the workspace while the round's reading is
     /// stale.
-    pub fn start_with_full_index_gate(workspace: &'workspace LspWorkspace) -> Self {
-        Self::start_with_full_index_gate_and_snapshot(workspace, Self::fixture_snapshot(workspace))
+    pub fn start_with_index_round_gate(workspace: &'workspace LspWorkspace) -> Self {
+        Self::start_with_index_round_gate_and_snapshot(workspace, Self::fixture_snapshot(workspace))
     }
 
-    /// [`LspFixture::start_with_full_index_gate`] with the server's request
+    /// [`LspFixture::start_with_index_round_gate`] with the server's request
     /// snapshot supplied by the test.
-    pub fn start_with_full_index_gate_and_snapshot(
+    pub fn start_with_index_round_gate_and_snapshot(
         workspace: &'workspace LspWorkspace,
         snapshot: RequestSnapshot,
     ) -> Self {
         let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
         let mut fixture = Self::spawn_with_hooks(workspace, Duration::ZERO, snapshot, None, Some(gate_rx));
-        fixture.full_index_gate = Some(gate_tx);
+        fixture.index_round_gate = Some(gate_tx);
         fixture
     }
 
@@ -313,16 +313,16 @@ impl<'workspace> LspFixture<'workspace> {
         self.server_thread.as_ref().expect("server running").thread().id()
     }
 
-    /// Lets one held full-index build round through.
-    pub fn release_full_index_round(&self) {
-        if let Some(gate) = &self.full_index_gate {
-            gate.send(()).expect("full-index gate open");
+    /// Lets one held index build round through.
+    pub fn release_index_round(&self) {
+        if let Some(gate) = &self.index_round_gate {
+            gate.send(()).expect("index round gate open");
         }
     }
 
-    /// Lets every current and later full-index build round through.
-    pub fn open_full_index_gate(&mut self) {
-        self.full_index_gate = None;
+    /// Lets every current and later index build round through.
+    pub fn open_index_round_gate(&mut self) {
+        self.index_round_gate = None;
     }
 
     /// Waits for the server to report `event`, skipping other startup events.
@@ -396,9 +396,9 @@ impl<'workspace> LspFixture<'workspace> {
         epilogue_delay: Duration,
         snapshot: RequestSnapshot,
         file_list_gate: Option<crossbeam_channel::Receiver<()>>,
-        full_index_gate: Option<crossbeam_channel::Receiver<()>>,
+        index_round_gate: Option<crossbeam_channel::Receiver<()>>,
     ) -> Self {
-        Self::spawn_with_all_hooks(workspace, epilogue_delay, snapshot, file_list_gate, full_index_gate, None)
+        Self::spawn_with_all_hooks(workspace, epilogue_delay, snapshot, file_list_gate, index_round_gate, None)
     }
 
     fn spawn_with_all_hooks(
@@ -406,13 +406,13 @@ impl<'workspace> LspFixture<'workspace> {
         epilogue_delay: Duration,
         snapshot: RequestSnapshot,
         file_list_gate: Option<crossbeam_channel::Receiver<()>>,
-        full_index_gate: Option<crossbeam_channel::Receiver<()>>,
+        index_round_gate: Option<crossbeam_channel::Receiver<()>>,
         registry_gate: Option<crossbeam_channel::Receiver<()>>,
     ) -> Self {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         let hooks = dmls::StartupHooks {
             file_list_gate,
-            full_index_gate,
+            index_round_gate,
             registry_gate,
             observer: Some(events_tx),
         };
@@ -447,7 +447,7 @@ impl<'workspace> LspFixture<'workspace> {
             server_requests: Vec::new(),
             startup_events: events_rx,
             file_list_gate: None,
-            full_index_gate: None,
+            index_round_gate: None,
             registry_gate: None,
             registry_jobs: 0,
         }
@@ -610,7 +610,7 @@ impl<'workspace> LspFixture<'workspace> {
     }
 
     /// [`LspFixture::flush_server`] with `method` as the round trip, for a
-    /// test that must not pay for `workspace/symbol`'s full index.
+    /// test that must not pay for `workspace/symbol`'s index build.
     pub fn flush_server_with(&mut self, method: &str, params: Value) {
         loop {
             let response = self.request(method, params.clone());

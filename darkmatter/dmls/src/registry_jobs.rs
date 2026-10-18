@@ -26,7 +26,7 @@ use crossbeam_channel::Sender;
 use lsp_server::RequestId;
 use lsp_types::Uri;
 
-use crate::full_index::Waiter;
+use crate::index_build::Waiter;
 use crate::overlay::RegistryNeed;
 use crate::router::StartupEvent;
 

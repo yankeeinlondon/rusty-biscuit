@@ -1,7 +1,7 @@
 //! Level-1 sessions for the startup and index log lines: the schema
 //! registry line (and its failure variant), the file-list and rescan lines,
-//! and the full-index line, each with its fields for a fixture whose counts
-//! are known.
+//! and the index store's revalidation line, each with its fields for a
+//! fixture whose counts are known.
 //!
 //! Each test installs a process-wide capturing subscriber, because the lines
 //! come from DMLS's dispatch thread; nextest runs each test in its own
@@ -73,7 +73,7 @@ fn known_workspace(workspace: &LspWorkspace) {
 }
 
 #[test]
-fn startup_and_full_index_lines_carry_the_fixture_counts() {
+fn startup_and_revalidation_lines_carry_the_fixture_counts() {
     let logs = CapturedLogs::global();
     let workspace = LspWorkspace::new();
     known_workspace(&workspace);
@@ -102,15 +102,16 @@ fn startup_and_full_index_lines_carry_the_fixture_counts() {
         "duplicates=0".into(),
         format!("workspace={id}"),
     ]);
-    assert!(logs.matching("full index built").is_empty(), "startup builds no full index");
+    assert!(logs.matching("index store").is_empty(), "startup opens no store: {:#?}", logs.lines());
 
     let response = fixture.request("workspace/symbol", json!({ "query": "" }));
     assert!(response.error.is_none(), "{:?}", response.error);
-    // Headings: A, Section, B, C. Links: two Markdown links and one wiki link.
-    assert_line(&logs, "full index built", &[
+    // A first fill: every listed file is parsed and written.
+    assert_line(&logs, "index store revalidated", &[
         "markdown=3".into(),
-        "headings=4".into(),
-        "links=3".into(),
+        "unchanged=0".into(),
+        "reparsed=3".into(),
+        "removed=0".into(),
         "trigger=workspace-symbols".into(),
         format!("workspace={id}"),
     ]);

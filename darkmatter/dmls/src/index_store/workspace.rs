@@ -43,7 +43,7 @@ use crate::workspace::startup::ProgressReporter;
 
 use super::facts::FileFacts;
 use super::location::{STALE_STORE_AGE, StoreLocation, sweep_stale_stores};
-use super::source::{RootFacts, RootOpened};
+use super::source::RootFacts;
 use super::store::BATCH_SIZE;
 
 /// Set once this process has swept its store directory.
@@ -66,8 +66,6 @@ pub struct PassReport {
     pub failed: Vec<(PathBuf, String)>,
     /// Requested files that are missing on disk.
     pub missing: Vec<PathBuf>,
-    /// The hash of each file's bytes as read by this pass.
-    pub hashes: Vec<(PathBuf, u64)>,
     /// Whether the pass stopped early because `cancel` was set. The rows it
     /// wrote are correct, but it read only some files.
     pub cancelled: bool,
@@ -86,28 +84,37 @@ pub struct WorkspaceFacts {
 }
 
 impl WorkspaceFacts {
-    /// Opens the facts of every root at `location`. The first open in a
-    /// process also sweeps the store directory of stores untouched for
-    /// [`STALE_STORE_AGE`], after this workspace's own stores are open and
-    /// therefore locked and fresh. Never fails: a root whose store cannot be
-    /// used keeps its facts in memory.
-    pub fn open(roots: &[PathBuf], location: &StoreLocation, clock: Arc<dyn Clock>) -> Self {
+    /// Opens the facts of every root at `location`, for the server whose
+    /// log lines carry `workspace`. The first open in a process also sweeps
+    /// the store directory of stores untouched for [`STALE_STORE_AGE`], after
+    /// this workspace's own stores are open and therefore locked and fresh.
+    /// Never fails: a root whose store cannot be used keeps its facts in
+    /// memory.
+    pub fn open(roots: &[PathBuf], location: &StoreLocation, clock: Arc<dyn Clock>, workspace: &str) -> Self {
         let roots = roots
             .iter()
-            .map(|root| {
-                let (facts, opened) = RootFacts::open(root, location, Arc::clone(&clock));
-                if let RootOpened::Store(opened) = &opened {
-                    tracing::debug!(root = %root.display(), created = opened.report.created, rows = opened.report.rows, "index store open");
-                }
-                (root.clone(), facts)
-            })
+            .map(|root| (root.clone(), RootFacts::open(root, location, Arc::clone(&clock), workspace).0))
             .collect();
         if let StoreLocation::Directory(dir) = location
             && !SWEPT.swap(true, Ordering::SeqCst)
         {
+            let started = std::time::Instant::now();
             match sweep_stale_stores(dir, STALE_STORE_AGE, SystemTime::now()) {
-                Ok(report) => tracing::debug!(?report, "index store sweep"),
-                Err(error) => tracing::debug!(%error, dir = %dir.display(), "index store sweep failed"),
+                Ok(report) if report.removed > 0 => tracing::info!(
+                    removed = report.removed,
+                    skipped_in_use = report.skipped_in_use,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    %workspace,
+                    "index store sweep"
+                ),
+                Ok(report) => tracing::debug!(
+                    removed = report.removed,
+                    skipped_in_use = report.skipped_in_use,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    %workspace,
+                    "index store sweep"
+                ),
+                Err(error) => tracing::debug!(%error, dir = %dir.display(), %workspace, "index store sweep failed"),
             }
         }
         Self::from_roots(roots)
@@ -344,7 +351,6 @@ impl WorkspaceFacts {
                 }
                 Outcome::Read { hash, facts } => {
                     report.read += 1;
-                    report.hashes.push((job.path.clone(), hash));
                     self.verified.insert(job.path.clone(), hash);
                     let Some(facts) = facts else {
                         report.unchanged += 1;

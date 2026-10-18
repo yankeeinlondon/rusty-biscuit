@@ -11,30 +11,19 @@
 //!
 //! Parsing is lazy. Every listed Markdown file is a graph document, but a
 //! closed one is parsed only when a feature needs its contents
-//! ([`WorkspaceIndex::prepare_targets`], [`WorkspaceIndex::ensure_parsed`]),
-//! or when the full index is built. A disk change to a parsed closed document
-//! marks it stale: the prior parse and hash are kept, and the next need
-//! re-reads the file and reuses the parse when the hash is unchanged. Open
-//! buffers override disk until they close.
-//!
-//! The full index is built in rounds off the index lock
-//! ([`WorkspaceIndex::begin_full_build`], [`WorkspaceIndex::finish_full_build`]).
-//! Every path whose disk, buffer, or list state changes while a round reads
-//! is recorded, and the round's parse of it is discarded; the build becomes
-//! full only when a round leaves nothing unparsed.
-//!
-//! Once built, the index is kept current file by file, but it is full only
-//! while every listed document has a current parse
-//! ([`WorkspaceIndex::is_full`]). A listed file that cannot be read loses its
-//! parse, which withdraws completeness until a later read succeeds or the
-//! file leaves the list.
+//! ([`WorkspaceIndex::prepare_targets`], [`WorkspaceIndex::ensure_parsed`]).
+//! A disk change to a parsed closed document marks it stale: the prior parse
+//! and hash are kept, and the next need re-reads the file and reuses the
+//! parse when the hash is unchanged. Open buffers override disk until they
+//! close. Workspace-wide answers (references, renames, workspace symbols)
+//! never read this index's closed documents; they come from the index store
+//! ([`crate::index_store::WorkspaceFacts`]).
 //!
 //! A referenced target need not be listed: a Markdown file that an open
 //! document's link or transclusion resolves to (excluded from discovery, or
 //! outside every workspace folder) is parsed on the same terms and kept as a
 //! [dependency](super::DocumentRecord::dependency). Dependencies are never
-//! part of the file list, so they neither count toward nor contribute to the
-//! full index.
+//! part of the file list.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -61,20 +50,6 @@ pub enum Invalidation {
     },
 }
 
-/// What a full-index build does after a round; see
-/// [`WorkspaceIndex::finish_full_build`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FullBuildStep {
-    /// Every listed document is parsed; the index is full.
-    Ready,
-    /// Documents remain unparsed (they changed, were opened, closed, or
-    /// listed during the round); another round must read them.
-    More(Vec<PathBuf>),
-    /// Listed documents could not be read; the build fails and nothing is
-    /// marked full.
-    Failed(Vec<(PathBuf, String)>),
-}
-
 /// The mutable workspace index: parse products plus the live snapshot.
 #[derive(Debug)]
 pub struct WorkspaceIndex {
@@ -94,13 +69,6 @@ pub struct WorkspaceIndex {
     /// [dependency](Self::is_dependency) while it stays parsed, unlisted,
     /// and closed.
     unlisted_reads: BTreeSet<PathBuf>,
-    /// Whether a full-index build has completed. From then on every change
-    /// is read at once, keeping the index current file by file; whether it
-    /// is complete is [`is_full`](Self::is_full).
-    built: bool,
-    /// While a full-index build round is reading, the paths whose disk,
-    /// buffer, or list state changed since it began; `None` otherwise.
-    touched: Option<HashSet<PathBuf>>,
     snapshot: Arc<WorkspaceGraph>,
     /// Wiki roots each document's canonical logical path is resolved against
     /// (R-8); empty until the server sets them from the initialize handshake.
@@ -133,8 +101,6 @@ impl WorkspaceIndex {
             open: HashSet::new(),
             stale: HashSet::new(),
             unlisted_reads: BTreeSet::new(),
-            built: false,
-            touched: None,
             snapshot,
             wiki_roots: Vec::new(),
             contexts,
@@ -147,21 +113,6 @@ impl WorkspaceIndex {
     pub fn set_wiki_roots(&mut self, wiki_roots: Vec<PathBuf>) {
         self.wiki_roots = wiki_roots;
         self.rebuild();
-    }
-
-    /// Builds a fully indexed workspace from a batch of already-parsed
-    /// documents (workers parse in parallel, the result assembles once).
-    pub fn from_indices(
-        indices: BTreeMap<PathBuf, DocumentIndex>,
-        contexts: Arc<dyn DocumentContexts>,
-    ) -> Self {
-        let mut index = Self::new(contexts);
-        index.listed = indices.keys().cloned().collect();
-        index.documents = indices;
-        index.listing = Listing::Ready { complete: true };
-        index.built = true;
-        index.rebuild();
-        index
     }
 
     /// The current immutable snapshot (cheap `Arc` clone for readers).
@@ -192,23 +143,16 @@ impl WorkspaceIndex {
     /// Indexes an open buffer's text; the buffer overrides disk until
     /// [`close_buffer`](Self::close_buffer).
     pub fn open_buffer(&mut self, path: &Path, source: &str) -> Invalidation {
-        self.touch(path);
         self.open.insert(path.to_path_buf());
         self.stale.remove(path);
         self.set_document(path, source)
     }
 
     /// Restores the disk view of a closed buffer: a listed document becomes
-    /// unparsed again (or is re-read from disk once the full index exists),
-    /// and an unsaved-only or unlisted document leaves the index.
+    /// unparsed again, and an unsaved-only or unlisted document leaves the
+    /// index.
     pub fn close_buffer(&mut self, path: &Path) {
         if !self.open.remove(path) {
-            return;
-        }
-        self.touch(path);
-        if self.listed.contains(path) && self.built {
-            self.stale.insert(path.to_path_buf());
-            self.ensure_parsed(&[path.to_path_buf()]);
             return;
         }
         if self.documents.remove(path).is_some() {
@@ -220,9 +164,8 @@ impl WorkspaceIndex {
     ///
     /// Paths that left the list lose their parse unless an open buffer holds
     /// them. A walk reads no contents, so documents that stayed keep their
-    /// parse; once the full index is built, every unparsed listed path (one
-    /// that joined, or one whose earlier read failed) is read. The snapshot
-    /// is rebuilt once.
+    /// parse and documents that joined stay unparsed. The snapshot is
+    /// rebuilt once.
     ///
     /// ## Returns
     ///
@@ -243,31 +186,20 @@ impl WorkspaceIndex {
         }
         changed.extend(vanished);
         changed.sort();
-        for path in &changed {
-            self.touch(path);
-        }
         self.listed = markdown;
         self.yaml = yaml;
         self.listing = Listing::Ready { complete };
-        // A built index stays current: parse every unparsed listed document,
-        // which covers what joined and retries what failed (that rebuilds).
-        let reparsed = self.built && !self.ensure_parsed(&self.unparsed_paths()).is_empty();
-        if !reparsed {
-            self.rebuild();
-        }
+        self.rebuild();
         changed
     }
 
     /// Records a created or changed Markdown file from a watched event: it
-    /// joins the list, and a parsed closed copy is marked stale. Once the
-    /// full index is built the file is read at once, parsed or not, so a
-    /// file whose earlier read failed is retried.
+    /// joins the list, and a parsed closed copy is marked stale.
     ///
     /// ## Returns
     ///
     /// Whether the snapshot changed.
     pub fn disk_changed(&mut self, path: &Path) -> bool {
-        self.touch(path);
         let joined = self.listed.insert(path.to_path_buf());
         // An open document is already a graph document, and its buffer
         // stays authoritative.
@@ -277,9 +209,6 @@ impl WorkspaceIndex {
         let parsed = self.documents.contains_key(path);
         if parsed {
             self.stale.insert(path.to_path_buf());
-        }
-        if self.built && self.needs_parse(path) && !self.ensure_parsed(&[path.to_path_buf()]).is_empty() {
-            return true;
         }
         if joined {
             self.rebuild();
@@ -303,7 +232,6 @@ impl WorkspaceIndex {
     ///
     /// Whether the snapshot changed.
     pub fn disk_deleted(&mut self, path: &Path) -> bool {
-        self.touch(path);
         let unlisted = self.listed.remove(path);
         self.stale.remove(path);
         self.unlisted_reads.remove(path);
@@ -321,24 +249,20 @@ impl WorkspaceIndex {
     }
 
     /// Re-reads every parsed closed document (a rescan cannot say which
-    /// changed), re-parsing only those whose bytes changed. Once the full
-    /// index is built, every unparsed listed document is read too, so a file
-    /// whose earlier read failed is retried.
+    /// changed), re-parsing only those whose bytes changed. Unparsed
+    /// documents stay unparsed.
     ///
     /// ## Returns
     ///
     /// The paths whose parse changed.
     pub fn recheck_parsed(&mut self) -> Vec<PathBuf> {
-        let mut paths: Vec<PathBuf> = self
+        let paths: Vec<PathBuf> = self
             .documents
             .keys()
             .filter(|path| !self.open.contains(*path))
             .cloned()
             .collect();
         self.stale.extend(paths.iter().cloned());
-        if self.built {
-            paths.extend(self.unparsed_paths());
-        }
         self.ensure_parsed(&paths)
     }
 
@@ -415,8 +339,8 @@ impl WorkspaceIndex {
     ///
     /// A re-read whose xxHash equals the stored parse's reuses that parse. A
     /// failed read drops the old parse, so stale headings are never served:
-    /// a listed document stays listed, unparsed, and the full index is no
-    /// longer [full](Self::is_full); a dependency leaves the graph.
+    /// a listed document stays listed and unparsed; a dependency leaves the
+    /// graph.
     ///
     /// ## Returns
     ///
@@ -427,7 +351,6 @@ impl WorkspaceIndex {
             if !self.needs_parse(path) {
                 continue;
             }
-            self.touch(path);
             self.stale.remove(path);
             if !self.listed.contains(path) {
                 self.unlisted_reads.insert(path.clone());
@@ -540,88 +463,6 @@ impl WorkspaceIndex {
         (heading_targets, transcluded)
     }
 
-    /// The listed documents not yet parsed, or stale: what a full-index
-    /// build must read.
-    pub fn unparsed_paths(&self) -> Vec<PathBuf> {
-        self.listed
-            .iter()
-            .filter(|path| self.needs_parse(path))
-            .cloned()
-            .collect()
-    }
-
-    /// Starts a full-index build round: from now until
-    /// [`finish_full_build`](Self::finish_full_build), every path whose
-    /// state changes is recorded so the round's stale reading of it is
-    /// discarded.
-    ///
-    /// ## Returns
-    ///
-    /// The paths the round must read: the listed documents not yet parsed,
-    /// or stale.
-    pub fn begin_full_build(&mut self) -> Vec<PathBuf> {
-        self.touched = Some(HashSet::new());
-        self.unparsed_paths()
-    }
-
-    /// Reconciles a build round's results with every change received while
-    /// it read, and decides what the build does next.
-    ///
-    /// A parse is adopted only for a path that is still listed, closed,
-    /// unchanged since the round began, and still unparsed; a newer buffer
-    /// or lazy parse always wins. A read failure counts only for such a
-    /// path too: a file deleted or renamed during the round does not fail
-    /// the build.
-    pub fn finish_full_build(
-        &mut self,
-        parsed: BTreeMap<PathBuf, DocumentIndex>,
-        failed: Vec<(PathBuf, String)>,
-    ) -> FullBuildStep {
-        let touched = self.touched.take().unwrap_or_default();
-        let current = |index: &Self, path: &Path| {
-            index.listed.contains(path) && !index.open.contains(path) && !touched.contains(path)
-        };
-        let failed: Vec<(PathBuf, String)> =
-            failed.into_iter().filter(|(path, _)| current(self, path)).collect();
-        if !failed.is_empty() {
-            return FullBuildStep::Failed(failed);
-        }
-        let mut adopted = false;
-        for (path, index) in parsed {
-            if current(self, &path) && self.needs_parse(&path) {
-                self.stale.remove(&path);
-                self.documents.insert(path, index);
-                adopted = true;
-            }
-        }
-        let remaining = self.unparsed_paths();
-        if remaining.is_empty() {
-            self.built = true;
-            self.rebuild();
-            return FullBuildStep::Ready;
-        }
-        if adopted {
-            self.rebuild();
-        }
-        FullBuildStep::More(remaining)
-    }
-
-    /// Ends an in-flight build round without adopting anything (the build
-    /// was cancelled).
-    pub fn abandon_full_build(&mut self) {
-        self.touched = None;
-    }
-
-    /// Whether the full index is complete: built, and every listed document
-    /// still has a current parse (an open buffer counts). A listed file whose
-    /// read failed after the build makes this `false` until it is read again,
-    /// so a request that needs the index runs a build round, which retries
-    /// the file and fails the way a first build does if it still cannot be
-    /// read.
-    pub fn is_full(&self) -> bool {
-        self.built && self.listed.iter().all(|path| !self.needs_parse(path))
-    }
-
     /// The file list's state.
     pub fn listing(&self) -> Listing {
         self.listing
@@ -639,7 +480,6 @@ impl WorkspaceIndex {
 
     /// Drops a document (deletion), rebuilding the snapshot if it was present.
     pub fn remove_document(&mut self, path: &Path) -> Invalidation {
-        self.touch(path);
         self.listed.remove(path);
         self.open.remove(path);
         self.stale.remove(path);
@@ -722,13 +562,6 @@ impl WorkspaceIndex {
                     .collect::<Vec<_>>()
             })
             .collect()
-    }
-
-    /// Records a state change at `path` for the in-flight build round.
-    fn touch(&mut self, path: &Path) {
-        if let Some(touched) = &mut self.touched {
-            touched.insert(path.to_path_buf());
-        }
     }
 
     fn rebuild(&mut self) {
@@ -823,18 +656,6 @@ mod tests {
         let snapshot = index.snapshot();
         assert!(snapshot.document_id(&old).is_none());
         assert!(snapshot.document_id(&new).is_some());
-    }
-
-    #[test]
-    fn test_from_indices_batch_startup() {
-        let mut indices = BTreeMap::new();
-        for name in ["a", "b", "c"] {
-            let path = abs(&format!("/w/{name}.md"));
-            indices.insert(path.clone(), index_document(&path, "# H\n"));
-        }
-        let index = WorkspaceIndex::from_indices(indices, Arc::new(workspace_contexts()));
-        assert_eq!(index.len(), 3);
-        assert_eq!(index.snapshot().document_count(), 3);
     }
 
     /// A real directory, canonicalized so graph paths and resolved
@@ -991,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unlisted_markdown_targets_become_dependencies_outside_the_full_index() {
+    fn test_unlisted_markdown_targets_become_dependencies() {
         let (_temp, root, contexts) = disk_workspace();
         let files = [
             ("source.md", "[a](target.md#beta) [[target]]\n\n::file ./target.md\n::code ./mod.rs\n"),
@@ -1005,8 +826,6 @@ mod tests {
         let mut index = WorkspaceIndex::new(contexts);
         listed(&mut index, &[&source]);
         index.open_buffer(&source, files[0].1);
-        index.begin_full_build();
-        assert_eq!(index.finish_full_build(BTreeMap::new(), Vec::new()), FullBuildStep::Ready);
 
         let before = crate::work_counters::work_counts();
         assert!(index.prepare_targets(&source));
@@ -1014,7 +833,6 @@ mod tests {
         assert_eq!((work.parses, work.reads), (1, 1), "target.md only, never mod.rs: {work:?}");
         assert!(index.is_dependency(&target));
         assert_eq!(index.dependencies().collect::<Vec<_>>(), vec![&target]);
-        assert!(index.is_full(), "a dependency never makes the listed index incomplete");
 
         let snapshot = index.snapshot();
         let target_doc = snapshot.document_id(&target).unwrap();
@@ -1042,7 +860,6 @@ mod tests {
         std::fs::remove_file(&target).unwrap();
         assert_eq!(index.recheck_dependencies(), vec![target.clone()]);
         assert!(!index.contains(&target));
-        assert!(index.is_full());
 
         // A creation re-resolves the source's references to it; joining the
         // list then turns the dependency into a listed document.
@@ -1075,167 +892,55 @@ mod tests {
     }
 
     #[test]
-    fn test_full_index_stays_current_file_by_file() {
+    fn test_watched_changes_and_relists_read_nothing_until_a_need() {
         let (_temp, root, contexts) = disk_workspace();
         let (a, b) = (root.join("a.md"), root.join("b.md"));
         std::fs::write(&a, "# A\n").unwrap();
         let mut index = WorkspaceIndex::new(contexts);
         listed(&mut index, &[&a]);
-        let pending = index.begin_full_build();
-        assert_eq!(pending, vec![a.clone()]);
-        let parsed = pending.iter().map(|path| (path.clone(), index_document(path, "# A\n"))).collect();
-        assert_eq!(index.finish_full_build(parsed, Vec::new()), FullBuildStep::Ready);
-        assert!(index.is_full() && index.unparsed_paths().is_empty());
+        index.ensure_parsed(std::slice::from_ref(&a));
 
-        // A watched change and a new file are read at once.
+        let before = crate::work_counters::work_counts();
         std::fs::write(&a, "# A changed\n").unwrap();
         std::fs::write(&b, "# B\n").unwrap();
-        assert!(index.disk_changed(&a));
-        assert!(index.disk_changed(&b));
+        assert!(!index.disk_changed(&a), "a stale mark keeps the snapshot");
+        assert!(index.disk_changed(&b), "a joined file is a new graph document");
+        listed(&mut index, &[&a, &b]);
+        assert_eq!(crate::work_counters::work_counts().since(before).reads, 0);
+        assert!(index.needs_parse(&a) && index.needs_parse(&b));
+        assert_eq!(heading_titles(&index, &a), vec!["A".to_string()], "the stale parse is kept until a need");
+
+        index.ensure_parsed(&[a.clone(), b.clone()]);
         assert_eq!(heading_titles(&index, &a), vec!["A changed".to_string()]);
         assert_eq!(heading_titles(&index, &b), vec!["B".to_string()]);
-        assert!(index.unparsed_paths().is_empty());
-    }
-
-    /// Builds the full index over `paths` (each readable) and asserts it is
-    /// full.
-    fn built(index: &mut WorkspaceIndex, paths: &[&PathBuf]) {
-        listed(index, paths);
-        let pending = index.begin_full_build();
-        let parsed = pending
-            .iter()
-            .map(|path| (path.clone(), index_document(path, &std::fs::read_to_string(path).unwrap())))
-            .collect();
-        assert_eq!(index.finish_full_build(parsed, Vec::new()), FullBuildStep::Ready);
-        assert!(index.is_full());
     }
 
     const UNREADABLE: [u8; 4] = [0xff, 0xfe, 0x00, 0x80];
 
     #[test]
-    fn test_a_read_failure_after_the_build_withdraws_completeness_until_a_reread_succeeds() {
+    fn test_a_failed_read_drops_the_parse_and_a_rescan_never_reads_an_unparsed_file() {
         let (_temp, root, contexts) = disk_workspace();
-        let [a, b, c] = ["a.md", "b.md", "c.md"].map(|name| root.join(name));
+        let [a, b] = ["a.md", "b.md"].map(|name| root.join(name));
         std::fs::write(&a, "# A\n").unwrap();
         std::fs::write(&b, "# B\n").unwrap();
         let mut index = WorkspaceIndex::new(contexts);
-        built(&mut index, &[&a, &b]);
+        listed(&mut index, &[&a, &b]);
+        index.ensure_parsed(std::slice::from_ref(&a));
 
-        // Watched change: the parse is dropped and the index is not full.
+        // Rescan: the parsed file is found unreadable and loses its parse;
+        // the unparsed one is not read.
         std::fs::write(&a, UNREADABLE).unwrap();
-        assert!(index.disk_changed(&a));
-        assert!(!index.contains(&a) && !index.is_full());
-        assert_eq!(index.unparsed_paths(), vec![a.clone()]);
-        // A repair and another change retry the listed, unparsed file.
-        std::fs::write(&a, "# A again\n").unwrap();
-        assert!(index.disk_changed(&a));
-        assert!(index.is_full());
-        assert_eq!(heading_titles(&index, &a), vec!["A again".to_string()]);
+        let before = crate::work_counters::work_counts();
+        assert_eq!(index.recheck_parsed(), vec![a.clone()]);
+        assert_eq!(crate::work_counters::work_counts().since(before).reads, 1);
+        assert!(!index.contains(&a) && !index.contains(&b));
+        assert!(index.listed().contains(&a), "an unreadable file stays listed");
 
-        // Rescan: a parsed file found unreadable, then retried.
+        // Closing a buffer over unreadable disk bytes leaves it unparsed.
+        index.open_buffer(&b, "# Buffer\n");
         std::fs::write(&b, UNREADABLE).unwrap();
-        assert_eq!(index.recheck_parsed(), vec![b.clone()]);
-        assert!(!index.is_full());
-        std::fs::write(&b, "# B again\n").unwrap();
-        assert_eq!(index.recheck_parsed(), vec![b.clone()]);
-        assert!(index.is_full());
-
-        // A relisted, unreadable new file; the next relist retries it.
-        std::fs::write(&c, UNREADABLE).unwrap();
-        listed(&mut index, &[&a, &b, &c]);
-        assert!(!index.is_full());
-        std::fs::write(&c, "# C\n").unwrap();
-        listed(&mut index, &[&a, &b, &c]);
-        assert!(index.is_full());
-
-        // Closing a buffer over unreadable disk bytes.
-        index.open_buffer(&a, "# Buffer\n");
-        std::fs::write(&a, UNREADABLE).unwrap();
-        assert!(index.is_full(), "an open buffer is a current parse");
-        index.close_buffer(&a);
-        assert!(!index.contains(&a) && !index.is_full());
-
-        // A file that leaves the list is not unreadable.
-        assert!(index.disk_deleted(&a));
-        assert!(index.is_full());
-    }
-
-    /// Parses `paths` as a build round would, from `text`.
-    fn round(paths: &[PathBuf], text: &str) -> BTreeMap<PathBuf, DocumentIndex> {
-        paths.iter().map(|path| (path.clone(), index_document(path, text))).collect()
-    }
-
-    #[test]
-    fn test_a_build_round_discards_what_changed_while_it_read() {
-        let (_temp, root, contexts) = disk_workspace();
-        let [a, b, c, d] = ["a.md", "b.md", "c.md", "d.md"].map(|name| root.join(name));
-        let mut index = WorkspaceIndex::new(contexts);
-        listed(&mut index, &[&a, &b, &c]);
-
-        let first = index.begin_full_build();
-        assert_eq!(first, vec![a.clone(), b.clone(), c.clone()]);
-        // While the round reads: b changes on disk, c opens with new text,
-        // and d joins the list.
-        index.disk_changed(&b);
-        index.open_buffer(&c, "# C buffer\n");
-        listed(&mut index, &[&a, &b, &c, &d]);
-        let step = index.finish_full_build(round(&first, "# Old\n"), Vec::new());
-        assert_eq!(step, FullBuildStep::More(vec![b.clone(), d.clone()]));
-        assert!(!index.is_full());
-        assert_eq!(heading_titles(&index, &a), vec!["Old".to_string()]);
-        assert_eq!(heading_titles(&index, &c), vec!["C buffer".to_string()]);
-        assert!(!index.contains(&b), "b's stale reading is discarded");
-
-        let second = index.begin_full_build();
-        assert_eq!(second, vec![b.clone(), d.clone()]);
-        assert_eq!(index.finish_full_build(round(&second, "# New\n"), Vec::new()), FullBuildStep::Ready);
-        assert!(index.is_full());
-        assert_eq!(heading_titles(&index, &b), vec!["New".to_string()]);
-        assert_eq!(heading_titles(&index, &c), vec!["C buffer".to_string()]);
-    }
-
-    #[test]
-    fn test_a_build_round_fails_only_for_current_unreadable_files() {
-        let (_temp, root, contexts) = disk_workspace();
-        let [a, gone, bad] = ["a.md", "gone.md", "bad.md"].map(|name| root.join(name));
-        let mut index = WorkspaceIndex::new(contexts);
-        listed(&mut index, &[&a, &gone, &bad]);
-
-        // A file deleted during the round does not fail the build.
-        let paths = index.begin_full_build();
-        index.disk_deleted(&gone);
-        let failed = vec![(gone.clone(), "not found".to_string())];
-        let parsed = round(&[a.clone(), bad.clone()], "# Fine\n");
-        assert_eq!(index.finish_full_build(parsed, failed), FullBuildStep::Ready);
-        assert!(index.is_full());
-        assert_eq!(paths.len(), 3);
-
-        // A current file that cannot be read fails it, and nothing is adopted.
-        let (_temp, root, contexts) = disk_workspace();
-        let [a, bad] = ["a.md", "bad.md"].map(|name| root.join(name));
-        let mut index = WorkspaceIndex::new(contexts);
-        listed(&mut index, &[&a, &bad]);
-        index.begin_full_build();
-        let failed = vec![(bad.clone(), "invalid UTF-8".to_string())];
-        let step = index.finish_full_build(round(std::slice::from_ref(&a), "# A\n"), failed.clone());
-        assert_eq!(step, FullBuildStep::Failed(failed));
-        assert!(!index.is_full());
-        assert!(!index.contains(&a));
-        // A later build retries from scratch.
-        assert_eq!(index.begin_full_build(), vec![a.clone(), bad.clone()]);
-    }
-
-    #[test]
-    fn test_an_abandoned_round_records_nothing_more() {
-        let (_temp, root, contexts) = disk_workspace();
-        let a = root.join("a.md");
-        let mut index = WorkspaceIndex::new(contexts);
-        listed(&mut index, &[&a]);
-        index.begin_full_build();
-        index.abandon_full_build();
-        index.disk_changed(&a);
-        assert!(index.touched.is_none());
-        assert!(!index.is_full());
+        index.close_buffer(&b);
+        assert!(!index.contains(&b) && index.needs_parse(&b));
     }
 
     #[test]

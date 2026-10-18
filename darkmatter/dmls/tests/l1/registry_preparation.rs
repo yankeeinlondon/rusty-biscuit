@@ -275,7 +275,7 @@ macro_rules! waits_for_its_registry {
             let plain = plain_uri(&workspace);
             let mut fixture = LspFixture::start_with_registry_gate(&workspace);
             fixture.initialize(watched_params(workspace.path()));
-            // Builds the full index first, so references wait only for the
+            // Fills the index store first, so references wait only for the
             // registry.
             fixture.round_trip();
             open(&fixture, &plain, "markdown", PLAIN);

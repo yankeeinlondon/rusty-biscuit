@@ -25,8 +25,12 @@ OPTIONS:
     --log-level <LEVEL>   Log filter (error|warn|info|debug|trace, or any
                           RUST_LOG-style directive); overrides RUST_LOG
     --log-file <PATH>     Append logs to PATH instead of stderr
-    --bench-index <DIR>   Index DIR and print R-6 stage timings, then exit
-                          (add --json for the machine-readable shape)
+    --bench-index <DIR>   Benchmark the index store over DIR, then exit: a
+                          cold fill into a temporary store, then (in a fresh
+                          process) a warm restart answering references,
+                          rename, and workspace symbols
+    --bench-target <FILE> With --bench-index, the document the requests are
+                          about (default: DIR/README.md, else the first file)
     --json                With --bench-index, emit JSON instead of a summary
     --gen-corpus <TIER> <DIR>
                           Write a deterministic synthetic corpus (tiny-100,
@@ -44,6 +48,10 @@ struct CliArgs {
     log_file: Option<PathBuf>,
     config: Option<PathBuf>,
     bench_index: Option<PathBuf>,
+    bench_target: Option<PathBuf>,
+    /// The warm half of `--bench-index` over this store directory: the
+    /// fresh process the bench re-runs itself as. Not in the usage text.
+    bench_warm: Option<PathBuf>,
     json: bool,
     gen_corpus: Option<(String, PathBuf)>,
 }
@@ -69,6 +77,8 @@ impl CliArgs {
                 "--log-file" => parsed.log_file = Some(PathBuf::from(take_value()?)),
                 "--config" => parsed.config = Some(PathBuf::from(take_value()?)),
                 "--bench-index" => parsed.bench_index = Some(PathBuf::from(take_value()?)),
+                "--bench-target" => parsed.bench_target = Some(PathBuf::from(take_value()?)),
+                BENCH_WARM_FLAG => parsed.bench_warm = Some(PathBuf::from(take_value()?)),
                 "--json" => parsed.json = true,
                 "--gen-corpus" => {
                     let tier = take_value()?;
@@ -140,7 +150,7 @@ fn main() -> ExitCode {
         }
     };
     if let Some(dir) = &args.bench_index {
-        return run_bench_index(dir, args.json, snapshot);
+        return run_bench_index(&args, dir, snapshot);
     }
 
     let (connection, io_threads) = Connection::stdio();
@@ -164,21 +174,71 @@ fn main() -> ExitCode {
     }
 }
 
-/// Runs `--bench-index`: index a directory and print timings, then exit.
+/// The internal flag that runs only the warm half of `--bench-index`.
+const BENCH_WARM_FLAG: &str = "--bench-warm";
+
+/// Runs `--bench-index`: the cold half here, the warm half in a fresh
+/// process (so its peak resident set excludes the cold fill), then prints
+/// the report and exits.
 ///
 /// Bench output goes to stdout (there is no LSP session in this mode).
-fn run_bench_index(dir: &Path, json: bool, snapshot: RequestSnapshot) -> ExitCode {
+fn run_bench_index(args: &CliArgs, dir: &Path, snapshot: RequestSnapshot) -> ExitCode {
     if !dir.is_dir() {
         eprintln!("error: --bench-index path is not a directory: {}", dir.display());
         return ExitCode::from(2);
     }
-    let report = dmls::bench_index(dir, &dmls::context::RepositoryContexts::new(snapshot));
-    if json {
+    let contexts = dmls::context::RepositoryContexts::new(snapshot);
+    if let Some(store_dir) = &args.bench_warm {
+        return match dmls::bench::bench_warm(dir, &contexts, store_dir, args.bench_target.as_deref()) {
+            Ok(warm) => {
+                println!("{}", serde_json::to_string(&warm).expect("WarmReport serializes"));
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let store_dir = std::env::temp_dir().join(format!("dmls-bench-{}", std::process::id()));
+    let report = bench_in_two_processes(args, dir, &store_dir);
+    let _ = std::fs::remove_dir_all(&store_dir);
+    let report = match report {
+        Ok(report) => report,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if args.json {
         println!("{}", report.to_json());
     } else {
         println!("{}", report.to_summary());
     }
     ExitCode::SUCCESS
+}
+
+fn bench_in_two_processes(args: &CliArgs, dir: &Path, store_dir: &Path) -> Result<dmls::BenchReport, String> {
+    let (files, cold) = dmls::bench::bench_cold(dir, store_dir);
+    let exe = std::env::current_exe().map_err(|error| format!("cannot find the dmls binary: {error}"))?;
+    let mut command = std::process::Command::new(exe);
+    command.arg("--bench-index").arg(dir).arg(BENCH_WARM_FLAG).arg(store_dir);
+    if let Some(target) = &args.bench_target {
+        command.arg("--bench-target").arg(target);
+    }
+    if let Some(level) = &args.log_level {
+        command.arg("--log-level").arg(level);
+    }
+    let output = command
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .output()
+        .map_err(|error| format!("cannot run the warm half: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("the warm half failed: {}", output.status));
+    }
+    let warm = serde_json::from_slice(&output.stdout).map_err(|error| format!("the warm half's report: {error}"))?;
+    Ok(dmls::BenchReport { root: dir.to_path_buf(), files, cold, warm })
 }
 
 /// Runs `--gen-corpus`: materialize a synthetic corpus tier, then exit.
@@ -253,6 +313,16 @@ mod tests {
         let args = parse(&["--bench-index", "/tmp/vault", "--json"]).unwrap();
         assert_eq!(args.bench_index, Some(PathBuf::from("/tmp/vault")));
         assert!(args.json);
+        assert_eq!((args.bench_target, args.bench_warm), (None, None));
+    }
+
+    #[test]
+    fn test_parse_bench_target_and_the_warm_half_flag() {
+        let args = parse(&["--bench-index", "/tmp/vault", "--bench-target=docs/a.md", BENCH_WARM_FLAG, "/tmp/stores"]).unwrap();
+        assert_eq!(args.bench_target, Some(PathBuf::from("docs/a.md")));
+        assert_eq!(args.bench_warm, Some(PathBuf::from("/tmp/stores")));
+        assert!(parse(&["--bench-target"]).is_err(), "a value is required");
+        assert!(!USAGE.contains(BENCH_WARM_FLAG), "the warm-half flag is internal");
     }
 
     #[test]

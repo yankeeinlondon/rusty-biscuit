@@ -9,17 +9,20 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod bench_index;
 mod claudine_schema_discovery;
 mod content_policy_baseline;
 mod context_construction_guard;
 mod core_schema_types;
 mod entry_point_parity;
 mod formatting_transaction;
-mod full_index;
+mod full_index_removal_guard;
+mod index_build;
 mod index_store_concurrency;
 mod index_store_facts;
 mod index_store_keys;
 mod index_store_live;
+mod index_store_log_lines;
 mod index_store_open;
 mod index_store_oracle;
 mod index_store_requests;

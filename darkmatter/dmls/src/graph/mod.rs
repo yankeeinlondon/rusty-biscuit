@@ -31,7 +31,7 @@ pub use arena::{
     WorkspaceGraph, is_markdown_path,
 };
 pub use edge::{Edge, EdgeId, EdgeKind, EdgeTarget};
-pub use invalidate::{FullBuildStep, Invalidation, WorkspaceIndex};
+pub use invalidate::{Invalidation, WorkspaceIndex};
 pub use key_index::KeyIndex;
 pub use node::{
     FileRefPayload, FrontmatterKeyPayload, HeadingPayload, LinkPayload, LinkTarget, Node, NodeId,

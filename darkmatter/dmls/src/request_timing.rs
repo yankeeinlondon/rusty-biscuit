@@ -65,7 +65,8 @@ impl Stage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wait {
     FileList,
-    FullIndex,
+    /// The index build: the index store revalidated in this process.
+    Index,
     /// Its document's trigger registry, prepared off the dispatch thread.
     TriggerRegistry,
 }
@@ -103,7 +104,7 @@ pub struct RequestTimings {
     started: Instant,
     stages: Mutex<[Option<Duration>; 4]>,
     waited_for_file_list: AtomicBool,
-    waited_for_full_index: AtomicBool,
+    waited_for_index: AtomicBool,
     waited_for_trigger_registry: AtomicBool,
 }
 
@@ -116,7 +117,7 @@ impl RequestTimings {
             started,
             stages: Mutex::new([None; 4]),
             waited_for_file_list: AtomicBool::new(false),
-            waited_for_full_index: AtomicBool::new(false),
+            waited_for_index: AtomicBool::new(false),
             waited_for_trigger_registry: AtomicBool::new(false),
         }
     }
@@ -141,7 +142,7 @@ impl RequestTimings {
     pub fn record_wait(&self, wait: Wait) {
         let flag = match wait {
             Wait::FileList => &self.waited_for_file_list,
-            Wait::FullIndex => &self.waited_for_full_index,
+            Wait::Index => &self.waited_for_index,
             Wait::TriggerRegistry => &self.waited_for_trigger_registry,
         };
         flag.store(true, Ordering::Relaxed);
@@ -155,7 +156,7 @@ impl RequestTimings {
     pub fn waited(&self, wait: Wait) -> bool {
         match wait {
             Wait::FileList => self.waited_for_file_list.load(Ordering::Relaxed),
-            Wait::FullIndex => self.waited_for_full_index.load(Ordering::Relaxed),
+            Wait::Index => self.waited_for_index.load(Ordering::Relaxed),
             Wait::TriggerRegistry => self.waited_for_trigger_registry.load(Ordering::Relaxed),
         }
     }
@@ -174,7 +175,7 @@ impl std::fmt::Debug for RequestTimings {
         }
         debug
             .field("waited_for_file_list", &self.waited(Wait::FileList))
-            .field("waited_for_full_index", &self.waited(Wait::FullIndex))
+            .field("waited_for_index", &self.waited(Wait::Index))
             .field("waited_for_trigger_registry", &self.waited(Wait::TriggerRegistry))
             .finish()
     }
@@ -216,7 +217,7 @@ macro_rules! completion_event {
             trigger_registry_ms = $timings.stage(Stage::TriggerRegistry).map(millis),
             provider_chain_ms = $timings.stage(Stage::ProviderChain).map(millis),
             waited_for_file_list = $timings.waited(Wait::FileList),
-            waited_for_full_index = $timings.waited(Wait::FullIndex),
+            waited_for_index = $timings.waited(Wait::Index),
             waited_for_trigger_registry = $timings.waited(Wait::TriggerRegistry),
             $message
         )
@@ -327,7 +328,7 @@ mod tests {
             "outcome=\"ok\"",
             "elapsed_ms=1234",
             "waited_for_file_list=false",
-            "waited_for_full_index=false",
+            "waited_for_index=false",
         ] {
             assert!(line.contains(field), "missing {field}: {line}");
         }
@@ -384,7 +385,7 @@ mod tests {
             "trigger_registry_ms=300",
             "provider_chain_ms=50",
             "waited_for_file_list=true",
-            "waited_for_full_index=false",
+            "waited_for_index=false",
         ] {
             assert!(line.contains(field), "missing {field}: {line}");
         }
