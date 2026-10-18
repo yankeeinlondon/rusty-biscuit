@@ -1,12 +1,12 @@
-//! Startup workspace indexing on a small worker pool.
+//! Workspace listing and full-index parsing on a small worker pool.
 //!
-//! Discovery hands a file list to a fixed pool of worker threads (crossbeam
-//! channels, no async runtime — AD-3) that read and parse in parallel; results
-//! assemble into one immutable snapshot. Progress is reported through the
+//! Server startup only lists files ([`list_files`]); Markdown is parsed when
+//! a feature needs it. A full-index build hands the list to a fixed pool of
+//! worker threads (crossbeam channels, no async runtime — AD-3) that read and
+//! parse in parallel ([`collect_indices_from_files`]); results assemble into
+//! one immutable snapshot. Progress is reported through the
 //! [`ProgressReporter`] seam so the protocol loop can drive
-//! `window/workDoneProgress` while tests use a silent collector. The first
-//! progress signal is emitted *before* the walk so the ≤250 ms
-//! first-notification budget (R-6) does not wait on discovery.
+//! `window/workDoneProgress` while tests use a silent collector.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -116,19 +116,27 @@ pub fn collect_indices(
     reporter: &dyn ProgressReporter,
 ) -> BTreeMap<PathBuf, DocumentIndex> {
     reporter.begin("Indexing workspace");
-    let report = discover_workspace(roots, config);
-    for duplicate in &report.duplicates {
-        tracing::warn!("skipping duplicate physical file {}", duplicate.display());
-    }
+    let report = list_files(roots, config);
     let (indices, _timings) = parallel_index(&report.files, reporter);
     reporter.end();
     indices
 }
 
-/// Discovers a workspace without indexing (for callers that only need the file
-/// list, e.g. the rescan fallback).
-pub fn discover(roots: &[PathBuf], config: &WorkspaceConfig) -> DiscoveryReport {
-    discover_workspace(roots, config)
+/// Lists a workspace's files without reading them, logging each duplicate
+/// physical file at `warn` and an incomplete walk at `warn`.
+pub fn list_files(roots: &[PathBuf], config: &WorkspaceConfig) -> DiscoveryReport {
+    let report = discover_workspace(roots, config);
+    for duplicate in &report.duplicates {
+        tracing::warn!("skipping duplicate physical file {}", duplicate.display());
+    }
+    if !report.is_complete() {
+        tracing::warn!(
+            errors = report.errors.len(),
+            first_error = report.errors.first().map(String::as_str).unwrap_or_default(),
+            "workspace discovery incomplete"
+        );
+    }
+    report
 }
 
 /// Reads and parses `files` across a worker pool, reporting progress and

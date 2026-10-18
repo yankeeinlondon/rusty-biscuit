@@ -1,5 +1,5 @@
-//! Process-wide counts of the file reads, content hashes, and Markdown
-//! document parses DMLS performs.
+//! Process-wide counts of the file reads, content hashes, Markdown document
+//! parses, schema-root enumerations, and trigger-registry scans DMLS performs.
 //!
 //! A work counter, like [`crate::context::context_build_count`]: a test takes
 //! [`work_counts`] before and after the code under test and asserts the delta
@@ -7,10 +7,13 @@
 //! The counts are process-wide, which nextest's process-per-test model keeps
 //! private to one test.
 //!
-//! Every DMLS file read, content hash, and document parse goes through
-//! [`read`], [`read_to_string`], [`hash_bytes`], and [`record_parse`]. Not
-//! counted: reads the darkmatter library performs on DMLS's behalf, and hashes
-//! that only build an in-memory cache key.
+//! Every DMLS file read, content hash, document parse, schema-root directory
+//! enumeration, and trigger-registry scan goes through [`read`],
+//! [`read_to_string`], [`hash_bytes`], [`record_parse`], [`record_enumeration`],
+//! and [`record_registry_scan`]. Not counted: reads the darkmatter library
+//! performs on DMLS's behalf (a registry scan's payload resolution among
+//! them, which is why scans are counted), and hashes that only build an
+//! in-memory cache key.
 
 use std::io;
 use std::path::Path;
@@ -19,6 +22,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static READS: AtomicUsize = AtomicUsize::new(0);
 static HASHES: AtomicUsize = AtomicUsize::new(0);
 static PARSES: AtomicUsize = AtomicUsize::new(0);
+static ENUMERATIONS: AtomicUsize = AtomicUsize::new(0);
+static REGISTRY_SCANS: AtomicUsize = AtomicUsize::new(0);
 
 /// A snapshot of the process's work counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -29,6 +34,10 @@ pub struct WorkCounts {
     pub hashes: usize,
     /// Markdown documents parsed into a document index.
     pub parses: usize,
+    /// Schema-root directories listed.
+    pub enumerations: usize,
+    /// Trigger-registry scans (root classification and payload resolution).
+    pub registry_scans: usize,
 }
 
 impl WorkCounts {
@@ -38,6 +47,8 @@ impl WorkCounts {
             reads: self.reads - earlier.reads,
             hashes: self.hashes - earlier.hashes,
             parses: self.parses - earlier.parses,
+            enumerations: self.enumerations - earlier.enumerations,
+            registry_scans: self.registry_scans - earlier.registry_scans,
         }
     }
 }
@@ -48,6 +59,8 @@ pub fn work_counts() -> WorkCounts {
         reads: READS.load(Ordering::SeqCst),
         hashes: HASHES.load(Ordering::SeqCst),
         parses: PARSES.load(Ordering::SeqCst),
+        enumerations: ENUMERATIONS.load(Ordering::SeqCst),
+        registry_scans: REGISTRY_SCANS.load(Ordering::SeqCst),
     }
 }
 
@@ -74,6 +87,16 @@ pub(crate) fn record_parse() {
     PARSES.fetch_add(1, Ordering::SeqCst);
 }
 
+/// Counts one schema-root directory listing.
+pub(crate) fn record_enumeration() {
+    ENUMERATIONS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Counts one trigger-registry scan.
+pub(crate) fn record_registry_scan() {
+    REGISTRY_SCANS.fetch_add(1, Ordering::SeqCst);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +111,11 @@ mod tests {
         let _ = read_to_string(&dir.path().join("missing.md"));
         assert_eq!(hash_bytes(&bytes), biscuit_hash::xx_hash_bytes(b"# A\n"));
         record_parse();
-        assert_eq!(work_counts().since(before), WorkCounts { reads: 2, hashes: 1, parses: 1 });
+        record_enumeration();
+        record_registry_scan();
+        assert_eq!(
+            work_counts().since(before),
+            WorkCounts { reads: 2, hashes: 1, parses: 1, enumerations: 1, registry_scans: 1 }
+        );
     }
 }

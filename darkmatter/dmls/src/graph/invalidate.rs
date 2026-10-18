@@ -1,20 +1,29 @@
 //! Content-hash invalidation and immutable snapshot swap.
 //!
-//! [`WorkspaceIndex`] owns the per-document parse products (the source of
-//! truth) and the current immutable [`WorkspaceGraph`] snapshot. A change
-//! re-parses one document, compares its xxHash against the stored one, and
-//! *only* rebuilds a fresh snapshot when the content actually changed —
-//! keystrokes that don't alter bytes (or a save with no edits) are free. Each
-//! rebuilt snapshot carries an incremented generation so superseded async work
-//! (diagnostics, indexing) can be discarded (AD-3).
+//! [`WorkspaceIndex`] owns the workspace file list, the per-document parse
+//! products (the source of truth), and the current immutable
+//! [`WorkspaceGraph`] snapshot. A change re-parses one document, compares its
+//! xxHash against the stored one, and *only* rebuilds a fresh snapshot when
+//! the content actually changed — keystrokes that don't alter bytes (or a
+//! save with no edits) are free. Each rebuilt snapshot carries an incremented
+//! generation so superseded async work (diagnostics, indexing) can be
+//! discarded (AD-3).
+//!
+//! Parsing is lazy. Every listed Markdown file is a graph document, but a
+//! closed one is parsed only when a feature needs its contents
+//! ([`WorkspaceIndex::prepare_targets`], [`WorkspaceIndex::ensure_parsed`]),
+//! or when the full index is built. A disk change to a parsed closed document
+//! marks it stale: the prior parse and hash are kept, and the next need
+//! re-reads the file and reuses the parse when the hash is unchanged. Open
+//! buffers override disk until they close.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::arena::{DocumentContexts, WorkspaceGraph};
+use super::arena::{DocumentContexts, Listing, WorkspaceGraph};
 use super::edge::EdgeKind;
-use super::node::NodeId;
+use super::node::{LinkTarget, NodeId, WikiResolution};
 use super::substrate::{DocumentIndex, index_document};
 
 /// The result of applying a document change.
@@ -35,7 +44,20 @@ pub enum Invalidation {
 /// The mutable workspace index: parse products plus the live snapshot.
 #[derive(Debug)]
 pub struct WorkspaceIndex {
+    /// Parsed documents: open buffers and disk parses.
     documents: BTreeMap<PathBuf, DocumentIndex>,
+    /// The listed Markdown files; each is a graph document, parsed or not.
+    listed: BTreeSet<PathBuf>,
+    /// The listed YAML files (never graph documents).
+    yaml: BTreeSet<PathBuf>,
+    listing: Listing,
+    /// Documents whose contents come from an open buffer.
+    open: HashSet<PathBuf>,
+    /// Disk parses a change has made stale; re-read on the next need.
+    stale: HashSet<PathBuf>,
+    /// Whether the full index has been built: every listed document parsed
+    /// and, from then on, kept current file by file.
+    full: bool,
     snapshot: Arc<WorkspaceGraph>,
     /// Wiki roots each document's canonical logical path is resolved against
     /// (R-8); empty until the server sets them from the initialize handshake.
@@ -51,9 +73,22 @@ impl WorkspaceIndex {
     /// `contexts`.
     pub fn new(contexts: Arc<dyn DocumentContexts>) -> Self {
         let documents = BTreeMap::new();
-        let snapshot = Arc::new(WorkspaceGraph::build(&documents, 0, contexts.as_ref()));
+        let snapshot = Arc::new(WorkspaceGraph::build_listed(
+            &documents,
+            &BTreeSet::new(),
+            Listing::Pending,
+            0,
+            &[],
+            contexts.as_ref(),
+        ));
         Self {
             documents,
+            listed: BTreeSet::new(),
+            yaml: BTreeSet::new(),
+            listing: Listing::Pending,
+            open: HashSet::new(),
+            stale: HashSet::new(),
+            full: false,
             snapshot,
             wiki_roots: Vec::new(),
             contexts,
@@ -68,42 +103,19 @@ impl WorkspaceIndex {
         self.rebuild();
     }
 
-    /// Builds an index from a batch of already-parsed documents (the startup
-    /// path: workers parse in parallel, the result assembles once).
+    /// Builds a fully indexed workspace from a batch of already-parsed
+    /// documents (workers parse in parallel, the result assembles once).
     pub fn from_indices(
         indices: BTreeMap<PathBuf, DocumentIndex>,
         contexts: Arc<dyn DocumentContexts>,
     ) -> Self {
-        let mut index = Self {
-            documents: indices,
-            snapshot: Arc::new(WorkspaceGraph::build(&BTreeMap::new(), 0, contexts.as_ref())),
-            wiki_roots: Vec::new(),
-            contexts,
-            generation: 1,
-        };
+        let mut index = Self::new(contexts);
+        index.listed = indices.keys().cloned().collect();
+        index.documents = indices;
+        index.listing = Listing::Ready { complete: true };
+        index.full = true;
         index.rebuild();
         index
-    }
-
-    /// Adopts disk-derived documents that are not already present, rebuilding
-    /// the snapshot once.
-    ///
-    /// Startup indexing runs concurrently with the first `didOpen`s: any
-    /// document already indexed (from an open buffer, the authority over disk)
-    /// is kept; only missing paths are adopted. A no-op merge does not bump the
-    /// generation.
-    pub fn adopt_missing(&mut self, indices: BTreeMap<PathBuf, DocumentIndex>) {
-        use std::collections::btree_map::Entry;
-        let mut adopted = 0;
-        for (path, index) in indices {
-            if let Entry::Vacant(slot) = self.documents.entry(path) {
-                slot.insert(index);
-                adopted += 1;
-            }
-        }
-        if adopted > 0 {
-            self.rebuild();
-        }
     }
 
     /// The current immutable snapshot (cheap `Arc` clone for readers).
@@ -131,48 +143,184 @@ impl WorkspaceIndex {
         Invalidation::Reindexed { dependents }
     }
 
-    /// Reconciles the index against a fresh disk scan for the server-side
-    /// rescan fallback (clients without reliable file watching).
+    /// Indexes an open buffer's text; the buffer overrides disk until
+    /// [`close_buffer`](Self::close_buffer).
+    pub fn open_buffer(&mut self, path: &Path, source: &str) -> Invalidation {
+        self.open.insert(path.to_path_buf());
+        self.stale.remove(path);
+        self.set_document(path, source)
+    }
+
+    /// Restores the disk view of a closed buffer: a listed document becomes
+    /// unparsed again (or is re-read from disk once the full index exists),
+    /// and an unsaved-only or unlisted document leaves the index.
+    pub fn close_buffer(&mut self, path: &Path) {
+        if !self.open.remove(path) {
+            return;
+        }
+        if self.listed.contains(path) && self.full {
+            self.stale.insert(path.to_path_buf());
+            self.ensure_parsed(&[path.to_path_buf()]);
+            return;
+        }
+        if self.documents.remove(path).is_some() {
+            self.rebuild();
+        }
+    }
+
+    /// Replaces the file list with a fresh walk's result.
     ///
-    /// Adopts created and content-changed files (xxHash compare), drops files
-    /// that vanished from disk, and never touches an open buffer — the client
-    /// buffer stays authoritative over disk (`open_paths` names those buffers,
-    /// which may not exist on disk yet). The snapshot is rebuilt once if
-    /// anything changed.
+    /// Paths that left the list lose their parse unless an open buffer holds
+    /// them. A walk reads no contents, so documents that stayed keep their
+    /// parse; once the full index exists, paths that joined are parsed. The
+    /// snapshot is rebuilt once.
     ///
     /// ## Returns
     ///
-    /// The created, changed, and vanished paths. Non-empty exactly when the
-    /// snapshot was rebuilt, so the caller knows to refresh diagnostics.
-    pub fn reconcile_disk(
+    /// The paths that joined or left the Markdown list.
+    pub fn install_listing(
         &mut self,
-        disk: BTreeMap<PathBuf, DocumentIndex>,
-        open_paths: &HashSet<PathBuf>,
+        markdown: BTreeSet<PathBuf>,
+        yaml: BTreeSet<PathBuf>,
+        complete: bool,
     ) -> Vec<PathBuf> {
-        let mut changed = Vec::new();
-        let mut on_disk: HashSet<PathBuf> = HashSet::with_capacity(disk.len());
-        for (path, fresh) in disk {
-            on_disk.insert(path.clone());
-            if open_paths.contains(&path) {
-                continue;
-            }
-            match self.documents.get(&path) {
-                Some(existing) if existing.content_hash == fresh.content_hash => {}
-                _ => {
-                    changed.push(path.clone());
-                    self.documents.insert(path, fresh);
-                }
+        let mut changed: Vec<PathBuf> = markdown.difference(&self.listed).cloned().collect();
+        let vanished: Vec<PathBuf> = self.listed.difference(&markdown).cloned().collect();
+        for path in &vanished {
+            if !self.open.contains(path) {
+                self.documents.remove(path);
+                self.stale.remove(path);
             }
         }
-        let vanished: Vec<PathBuf> = self
+        changed.extend(vanished);
+        changed.sort();
+        self.listed = markdown;
+        self.yaml = yaml;
+        self.listing = Listing::Ready { complete };
+        // A full index stays full: parse what joined (that rebuilds).
+        let reparsed = self.full && !self.ensure_parsed(&changed).is_empty();
+        if !reparsed {
+            self.rebuild();
+        }
+        changed
+    }
+
+    /// Records a created or changed Markdown file from a watched event: it
+    /// joins the list, and a parsed closed copy is marked stale (re-read at
+    /// once when the full index exists).
+    ///
+    /// ## Returns
+    ///
+    /// Whether the snapshot changed.
+    pub fn disk_changed(&mut self, path: &Path) -> bool {
+        let joined = self.listed.insert(path.to_path_buf());
+        // An open document is already a graph document, and its buffer
+        // stays authoritative.
+        if self.open.contains(path) {
+            return false;
+        }
+        let parsed = self.documents.contains_key(path);
+        if parsed {
+            self.stale.insert(path.to_path_buf());
+        }
+        if self.full && (parsed || joined) && !self.ensure_parsed(&[path.to_path_buf()]).is_empty() {
+            return true;
+        }
+        if joined {
+            self.rebuild();
+        }
+        joined
+    }
+
+    /// Records a listed YAML file's creation (`present`) or deletion.
+    pub fn yaml_changed(&mut self, path: &Path, present: bool) {
+        if present {
+            self.yaml.insert(path.to_path_buf());
+        } else {
+            self.yaml.remove(path);
+        }
+    }
+
+    /// Drops a deleted Markdown file from the list and the index, unless an
+    /// open buffer holds it.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the snapshot changed.
+    pub fn disk_deleted(&mut self, path: &Path) -> bool {
+        let unlisted = self.listed.remove(path);
+        self.stale.remove(path);
+        if self.open.contains(path) {
+            if unlisted {
+                self.rebuild();
+            }
+            return unlisted;
+        }
+        let dropped = self.documents.remove(path).is_some();
+        if unlisted || dropped {
+            self.rebuild();
+        }
+        unlisted || dropped
+    }
+
+    /// Re-reads every parsed closed document (a rescan cannot say which
+    /// changed), re-parsing only those whose bytes changed.
+    ///
+    /// ## Returns
+    ///
+    /// The paths whose parse changed.
+    pub fn recheck_parsed(&mut self) -> Vec<PathBuf> {
+        let parsed: Vec<PathBuf> = self
             .documents
             .keys()
-            .filter(|path| !on_disk.contains(*path) && !open_paths.contains(*path))
+            .filter(|path| !self.open.contains(*path))
             .cloned()
             .collect();
-        for path in vanished {
-            self.documents.remove(&path);
-            changed.push(path);
+        self.stale.extend(parsed.iter().cloned());
+        self.ensure_parsed(&parsed)
+    }
+
+    /// Whether `path` is a document that must be read before its contents
+    /// are known: unparsed or stale, and not an open buffer.
+    pub fn needs_parse(&self, path: &Path) -> bool {
+        !self.open.contains(path)
+            && (self.stale.contains(path)
+                || (self.listed.contains(path) && !self.documents.contains_key(path)))
+    }
+
+    /// Reads and parses each of `paths` that [needs it](Self::needs_parse),
+    /// rebuilding the snapshot once.
+    ///
+    /// A re-read whose xxHash equals the stored parse's reuses that parse. A
+    /// failed read drops the old parse, so stale headings are never served;
+    /// the document stays listed, unparsed.
+    ///
+    /// ## Returns
+    ///
+    /// The paths whose parse changed.
+    pub fn ensure_parsed(&mut self, paths: &[PathBuf]) -> Vec<PathBuf> {
+        let mut changed = Vec::new();
+        for path in paths {
+            if !self.needs_parse(path) {
+                continue;
+            }
+            self.stale.remove(path);
+            match crate::work_counters::read_to_string(path) {
+                Ok(source) => {
+                    let hash = crate::work_counters::hash_bytes(source.as_bytes());
+                    if self.documents.get(path).is_some_and(|existing| existing.content_hash == hash) {
+                        continue;
+                    }
+                    self.documents.insert(path.clone(), index_document(path, &source));
+                    changed.push(path.clone());
+                }
+                Err(error) => {
+                    tracing::debug!("unreadable target {}: {error}", path.display());
+                    if self.documents.remove(path).is_some() {
+                        changed.push(path.clone());
+                    }
+                }
+            }
         }
         if !changed.is_empty() {
             self.rebuild();
@@ -180,8 +328,131 @@ impl WorkspaceIndex {
         changed
     }
 
+    /// Parses what the open document at `path` needs from the documents it
+    /// references: the targets of its fragment links and heading wiki links
+    /// (their headings), and its `::file`/`::code` transclusion closure
+    /// (followed outward with a visited set, for cycle detection).
+    ///
+    /// ## Returns
+    ///
+    /// Whether any parse changed, so the snapshot was rebuilt.
+    pub fn prepare_targets(&mut self, path: &Path) -> bool {
+        let mut changed = false;
+        let mut visited: HashSet<PathBuf> = HashSet::new();
+        let mut frontier = vec![path.to_path_buf()];
+        let mut first = true;
+        while let Some(current) = frontier.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            let (headings, transcluded) = self.target_paths(&current, first);
+            first = false;
+            let wanted: Vec<PathBuf> = headings
+                .iter()
+                .chain(&transcluded)
+                .filter(|target| self.needs_parse(target))
+                .cloned()
+                .collect();
+            if !wanted.is_empty() {
+                changed |= !self.ensure_parsed(&wanted).is_empty();
+            }
+            frontier.extend(transcluded);
+        }
+        changed
+    }
+
+    /// The documents `path` needs headings from (only when `headings` is
+    /// asked for) and the documents it transcludes, from the current
+    /// snapshot.
+    fn target_paths(&self, path: &Path, headings: bool) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        let snapshot = &self.snapshot;
+        let Some(doc) = snapshot.document_id(path) else {
+            return (Vec::new(), Vec::new());
+        };
+        let document_of = |node: NodeId| {
+            let node = snapshot.node(node)?;
+            snapshot.document(node.document).map(|record| record.path.clone())
+        };
+        let mut heading_targets = Vec::new();
+        if headings {
+            for (node_id, node) in snapshot.links(doc) {
+                let fragment = node.as_link().is_some_and(|link| {
+                    matches!(link.target, LinkTarget::RelativePath { fragment: Some(_), .. })
+                });
+                if !fragment {
+                    continue;
+                }
+                for edge in snapshot.outgoing(node_id, EdgeKind::References) {
+                    heading_targets.extend(edge.target.node().and_then(document_of));
+                }
+            }
+            for (_, node) in snapshot.wiki_links(doc) {
+                if let Some(wiki) = node.as_wiki_link()
+                    && wiki.heading.is_some()
+                    && let WikiResolution::Resolved(target) = wiki.resolution
+                {
+                    heading_targets.extend(document_of(target));
+                }
+            }
+        }
+        let mut transcluded = Vec::new();
+        for (node_id, _) in snapshot.transclusions(doc) {
+            for edge in snapshot.outgoing(node_id, EdgeKind::Transcludes) {
+                transcluded.extend(edge.target.node().and_then(document_of));
+            }
+        }
+        (heading_targets, transcluded)
+    }
+
+    /// The listed documents not yet parsed, or stale: what a full-index
+    /// build must read.
+    pub fn unparsed_paths(&self) -> Vec<PathBuf> {
+        self.listed
+            .iter()
+            .filter(|path| self.needs_parse(path))
+            .cloned()
+            .collect()
+    }
+
+    /// Adopts a full-index build's parses (closed documents only; an open
+    /// buffer stays authoritative) and marks the full index built.
+    pub fn adopt_full(&mut self, parsed: BTreeMap<PathBuf, DocumentIndex>) {
+        for (path, index) in parsed {
+            if self.open.contains(&path) || !self.listed.contains(&path) {
+                continue;
+            }
+            self.stale.remove(&path);
+            self.documents.insert(path, index);
+        }
+        self.full = true;
+        self.rebuild();
+    }
+
+    /// Whether the full index has been built.
+    pub fn is_full(&self) -> bool {
+        self.full
+    }
+
+    /// The file list's state.
+    pub fn listing(&self) -> Listing {
+        self.listing
+    }
+
+    /// The listed Markdown files.
+    pub fn listed(&self) -> &BTreeSet<PathBuf> {
+        &self.listed
+    }
+
+    /// The listed YAML files.
+    pub fn listed_yaml(&self) -> &BTreeSet<PathBuf> {
+        &self.yaml
+    }
+
     /// Drops a document (deletion), rebuilding the snapshot if it was present.
     pub fn remove_document(&mut self, path: &Path) -> Invalidation {
+        self.listed.remove(path);
+        self.open.remove(path);
+        self.stale.remove(path);
         if self.documents.remove(path).is_none() {
             return Invalidation::Unchanged;
         }
@@ -196,17 +467,17 @@ impl WorkspaceIndex {
         self.rebuild();
     }
 
-    /// Whether a document is indexed.
+    /// Whether a document is parsed.
     pub fn contains(&self, path: &Path) -> bool {
         self.documents.contains_key(path)
     }
 
-    /// Number of indexed documents.
+    /// Number of parsed documents.
     pub fn len(&self) -> usize {
         self.documents.len()
     }
 
-    /// Whether no documents are indexed.
+    /// Whether no documents are parsed.
     pub fn is_empty(&self) -> bool {
         self.documents.is_empty()
     }
@@ -249,8 +520,10 @@ impl WorkspaceIndex {
 
     fn rebuild(&mut self) {
         self.generation += 1;
-        self.snapshot = Arc::new(WorkspaceGraph::build_with_roots(
+        self.snapshot = Arc::new(WorkspaceGraph::build_listed(
             &self.documents,
+            &self.listed,
+            self.listing,
             self.generation,
             &self.wiki_roots,
             self.contexts.as_ref(),
@@ -337,79 +610,227 @@ mod tests {
         assert_eq!(index.snapshot().document_count(), 3);
     }
 
-    fn disk_scan(entries: &[(&str, &str)]) -> BTreeMap<PathBuf, DocumentIndex> {
-        entries
-            .iter()
-            .map(|(path, source)| {
-                let path = abs(path);
-                let index = index_document(&path, source);
-                (path, index)
-            })
+    /// A real directory, canonicalized so graph paths and resolved
+    /// candidates agree, with contexts resolving inside it.
+    fn disk_workspace() -> (tempfile::TempDir, PathBuf, Arc<dyn DocumentContexts>) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(temp.path()).unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            root.clone(),
+            None,
+            std::collections::HashMap::new(),
+        );
+        (temp, root, Arc::new(crate::context::FixedContext(context)))
+    }
+
+    fn listed(index: &mut WorkspaceIndex, paths: &[&PathBuf]) -> Vec<PathBuf> {
+        index.install_listing(paths.iter().map(|path| (*path).clone()).collect(), BTreeSet::new(), true)
+    }
+
+    fn heading_titles(index: &WorkspaceIndex, path: &Path) -> Vec<String> {
+        let snapshot = index.snapshot();
+        let Some(doc) = snapshot.document_id(path) else {
+            return Vec::new();
+        };
+        snapshot
+            .headings(doc)
+            .filter_map(|(_, node)| node.as_heading().map(|heading| heading.title.clone()))
             .collect()
     }
 
     #[test]
-    fn test_reconcile_disk_adopts_created_and_changed_drops_deleted() {
-        let mut index = WorkspaceIndex::new(Arc::new(workspace_contexts()));
-        let a = abs("/w/a.md");
-        index.set_document(&a, "# A\n");
-        let before = index.generation();
+    fn test_listed_documents_are_unparsed_graph_documents() {
+        let (_temp, root, contexts) = disk_workspace();
+        let a = root.join("a.md");
+        std::fs::write(&a, "# A\n").unwrap();
+        let mut index = WorkspaceIndex::new(contexts);
+        assert_eq!(index.snapshot().listing(), Listing::Pending);
+        let before = crate::work_counters::work_counts();
 
-        // b.md is new, a.md changed; both are adopted and the snapshot rebuilds.
-        let changed =
-            index.reconcile_disk(disk_scan(&[("/w/a.md", "# A2\n"), ("/w/b.md", "# B\n")]), &HashSet::new());
-        assert_eq!(changed, vec![abs("/w/a.md"), abs("/w/b.md")]);
-        assert!(index.generation() > before);
-        assert!(index.contains(&abs("/w/b.md")));
+        assert_eq!(listed(&mut index, &[&a]), vec![a.clone()]);
+
+        assert_eq!(crate::work_counters::work_counts().since(before).reads, 0);
         let snapshot = index.snapshot();
-        let a_id = snapshot.document_id(&a).unwrap();
-        assert_eq!(
-            snapshot.headings(a_id).next().unwrap().1.as_heading().unwrap().title,
-            "A2"
-        );
-
-        // A scan missing a.md (and no open buffers) drops it.
-        let changed = index.reconcile_disk(disk_scan(&[("/w/b.md", "# B\n")]), &HashSet::new());
-        assert_eq!(changed, vec![a.clone()]);
-        assert!(!index.contains(&a));
-        assert!(index.contains(&abs("/w/b.md")));
+        let record = snapshot.document(snapshot.document_id(&a).unwrap()).unwrap();
+        assert!(!record.parsed);
+        assert_eq!(record.content_hash, 0);
+        assert_eq!(snapshot.listing(), Listing::Ready { complete: true });
+        assert!(index.needs_parse(&a));
     }
 
     #[test]
-    fn test_reconcile_disk_no_change_is_free() {
-        let mut index = WorkspaceIndex::new(Arc::new(workspace_contexts()));
-        index.set_document(&abs("/w/a.md"), "# A\n");
-        let generation = index.generation();
-        // The same bytes on disk → no rebuild, generation frozen.
-        let changed = index.reconcile_disk(disk_scan(&[("/w/a.md", "# A\n")]), &HashSet::new());
-        assert!(changed.is_empty());
-        assert_eq!(index.generation(), generation);
+    fn test_install_listing_adopts_created_drops_vanished_and_keeps_open_buffers() {
+        let (_temp, root, contexts) = disk_workspace();
+        let (a, b, open) = (root.join("a.md"), root.join("b.md"), root.join("open.md"));
+        let mut index = WorkspaceIndex::new(contexts);
+        index.open_buffer(&open, "# Buffer edit\n");
+        listed(&mut index, &[&a, &open]);
+
+        // b.md joins, a.md leaves; the open buffer survives a list without it.
+        let changed = listed(&mut index, &[&b]);
+        assert_eq!(changed, vec![a.clone(), b.clone(), open.clone()]);
+        let snapshot = index.snapshot();
+        assert!(snapshot.document_id(&a).is_none());
+        assert!(snapshot.document_id(&b).is_some());
+        assert_eq!(heading_titles(&index, &open), vec!["Buffer edit".to_string()]);
+
+        // The same list again changes nothing.
+        assert!(listed(&mut index, &[&b]).is_empty());
     }
 
     #[test]
-    fn test_reconcile_disk_never_touches_open_buffers() {
-        let mut index = WorkspaceIndex::new(Arc::new(workspace_contexts()));
-        let open = abs("/w/open.md");
-        // The open buffer holds unsaved edits; disk still has the old bytes.
-        index.set_document(&open, "# Buffer edit\n");
-        let mut open_paths = HashSet::new();
-        open_paths.insert(open.clone());
+    fn test_ensure_parsed_reuses_an_unchanged_parse_and_never_serves_a_failed_read() {
+        let (_temp, root, contexts) = disk_workspace();
+        let a = root.join("a.md");
+        std::fs::write(&a, "# First\n").unwrap();
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&a]);
 
-        // A scan whose disk copy differs and that omits the open buffer entirely
-        // must neither overwrite nor drop it.
-        let changed = index.reconcile_disk(disk_scan(&[("/w/open.md", "# Stale disk\n")]), &open_paths);
-        assert!(changed.is_empty());
+        let before = crate::work_counters::work_counts();
+        assert_eq!(index.ensure_parsed(std::slice::from_ref(&a)), vec![a.clone()]);
+        assert_eq!(crate::work_counters::work_counts().since(before).parses, 1);
+        assert_eq!(heading_titles(&index, &a), vec!["First".to_string()]);
+
+        // Parsed and current: nothing is read.
+        let before = crate::work_counters::work_counts();
+        assert!(index.ensure_parsed(std::slice::from_ref(&a)).is_empty());
+        assert_eq!(crate::work_counters::work_counts().since(before).reads, 0);
+
+        // A watched change marks it stale; unchanged bytes reuse the parse.
+        assert!(!index.disk_changed(&a));
+        assert!(index.needs_parse(&a));
+        let before = crate::work_counters::work_counts();
+        assert!(index.ensure_parsed(std::slice::from_ref(&a)).is_empty());
+        let work = crate::work_counters::work_counts().since(before);
+        assert_eq!((work.reads, work.parses), (1, 0));
+
+        // Changed bytes re-parse.
+        std::fs::write(&a, "# Second\n").unwrap();
+        index.disk_changed(&a);
+        assert_eq!(index.ensure_parsed(std::slice::from_ref(&a)), vec![a.clone()]);
+        assert_eq!(heading_titles(&index, &a), vec!["Second".to_string()]);
+
+        // A failed read drops the old headings; the file stays listed.
+        std::fs::remove_file(&a).unwrap();
+        index.disk_changed(&a);
+        assert_eq!(index.ensure_parsed(std::slice::from_ref(&a)), vec![a.clone()]);
+        assert!(heading_titles(&index, &a).is_empty());
         let snapshot = index.snapshot();
-        let id = snapshot.document_id(&open).unwrap();
-        assert_eq!(
-            snapshot.headings(id).next().unwrap().1.as_heading().unwrap().title,
-            "Buffer edit"
-        );
+        assert!(!snapshot.document(snapshot.document_id(&a).unwrap()).unwrap().parsed);
 
-        // An empty scan (buffer never saved to disk) still keeps the buffer.
-        let changed = index.reconcile_disk(BTreeMap::new(), &open_paths);
-        assert!(changed.is_empty());
-        assert!(index.contains(&open));
+        // Deletion removes it.
+        assert!(index.disk_deleted(&a));
+        assert!(index.snapshot().document_id(&a).is_none());
+    }
+
+    #[test]
+    fn test_prepare_targets_parses_fragment_targets_and_the_transclusion_closure_only() {
+        let (_temp, root, contexts) = disk_workspace();
+        let files = [
+            ("source.md", "[plain](plain.md) [anchor](anchored.md#part)\n\n::file ./inner.md\n"),
+            ("plain.md", "# Plain\n"),
+            ("anchored.md", "# Part\n"),
+            ("inner.md", "::file ./deep.md\n"),
+            ("deep.md", "# Deep\n"),
+            ("unrelated.md", "# Unrelated\n"),
+        ];
+        let paths: Vec<PathBuf> = files.iter().map(|(name, _)| root.join(name)).collect();
+        for (name, text) in files {
+            std::fs::write(root.join(name), text).unwrap();
+        }
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &paths.iter().collect::<Vec<_>>());
+        let source = &paths[0];
+        index.open_buffer(source, files[0].1);
+
+        let before = crate::work_counters::work_counts();
+        assert!(index.prepare_targets(source));
+        assert_eq!(crate::work_counters::work_counts().since(before).parses, 3);
+        for (path, parsed) in paths.iter().zip([true, false, true, true, true, false]) {
+            assert_eq!(index.contains(path), parsed, "{}", path.display());
+        }
+        // The anchor now resolves to the target's heading.
+        let snapshot = index.snapshot();
+        let doc = snapshot.document_id(source).unwrap();
+        let (anchor, _) = snapshot.links(doc).nth(1).unwrap();
+        let target = snapshot.outgoing(anchor, EdgeKind::References).next().unwrap();
+        let heading = snapshot.node(target.target.node().unwrap()).unwrap();
+        assert_eq!(heading.as_heading().unwrap().title, "Part");
+
+        // A second preparation reads nothing.
+        let before = crate::work_counters::work_counts();
+        assert!(!index.prepare_targets(source));
+        assert_eq!(crate::work_counters::work_counts().since(before).reads, 0);
+    }
+
+    #[test]
+    fn test_close_restores_the_disk_view_or_drops_an_unsaved_buffer() {
+        let (_temp, root, contexts) = disk_workspace();
+        let (saved, unsaved) = (root.join("saved.md"), root.join("unsaved.md"));
+        std::fs::write(&saved, "# Disk\n").unwrap();
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&saved]);
+        index.open_buffer(&saved, "# Buffer\n");
+        index.open_buffer(&unsaved, "# Unsaved\n");
+        assert_eq!(heading_titles(&index, &saved), vec!["Buffer".to_string()]);
+
+        index.close_buffer(&saved);
+        index.close_buffer(&unsaved);
+        assert!(index.snapshot().document_id(&unsaved).is_none());
+        assert!(index.needs_parse(&saved));
+        index.ensure_parsed(std::slice::from_ref(&saved));
+        assert_eq!(heading_titles(&index, &saved), vec!["Disk".to_string()]);
+    }
+
+    #[test]
+    fn test_full_index_stays_current_file_by_file() {
+        let (_temp, root, contexts) = disk_workspace();
+        let (a, b) = (root.join("a.md"), root.join("b.md"));
+        std::fs::write(&a, "# A\n").unwrap();
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&a]);
+        let pending = index.unparsed_paths();
+        assert_eq!(pending, vec![a.clone()]);
+        let parsed = pending.iter().map(|path| (path.clone(), index_document(path, "# A\n"))).collect();
+        index.adopt_full(parsed);
+        assert!(index.is_full() && index.unparsed_paths().is_empty());
+
+        // A watched change and a new file are read at once.
+        std::fs::write(&a, "# A changed\n").unwrap();
+        std::fs::write(&b, "# B\n").unwrap();
+        assert!(index.disk_changed(&a));
+        assert!(index.disk_changed(&b));
+        assert_eq!(heading_titles(&index, &a), vec!["A changed".to_string()]);
+        assert_eq!(heading_titles(&index, &b), vec!["B".to_string()]);
+        assert!(index.unparsed_paths().is_empty());
+    }
+
+    #[test]
+    fn test_unparsed_targets_leave_anchors_unchecked() {
+        let (_temp, root, contexts) = disk_workspace();
+        let (source, target) = (root.join("source.md"), root.join("target.md"));
+        std::fs::write(&target, "# Real\n").unwrap();
+        let mut index = WorkspaceIndex::new(contexts);
+        listed(&mut index, &[&target]);
+        index.open_buffer(&source, "[x](target.md#missing) [[target#missing]]\n");
+        let snapshot = index.snapshot();
+        let doc = snapshot.document_id(&source).unwrap();
+        let target_root = snapshot.document(snapshot.document_id(&target).unwrap()).unwrap().root;
+        let (link, _) = snapshot.links(doc).next().unwrap();
+        let edge = snapshot.outgoing(link, EdgeKind::References).next().unwrap();
+        assert_eq!(edge.target.node(), Some(target_root));
+        let (_, wiki) = snapshot.wiki_links(doc).next().unwrap();
+        assert_eq!(wiki.as_wiki_link().unwrap().resolution, WikiResolution::Resolved(target_root));
+
+        // Once parsed, the missing anchor no longer resolves.
+        index.prepare_targets(&source);
+        let snapshot = index.snapshot();
+        let doc = snapshot.document_id(&source).unwrap();
+        let (link, _) = snapshot.links(doc).next().unwrap();
+        let edge = snapshot.outgoing(link, EdgeKind::References).next().unwrap();
+        assert!(edge.target.node().is_none());
+        let (_, wiki) = snapshot.wiki_links(doc).next().unwrap();
+        assert!(!matches!(wiki.as_wiki_link().unwrap().resolution, WikiResolution::Resolved(_)));
     }
 
     #[test]

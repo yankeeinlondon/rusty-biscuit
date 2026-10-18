@@ -646,6 +646,7 @@ mod tests {
             supports_snippets: false,
             client_watches_files: false,
             needs_watch_fallback: false,
+            supports_relative_watch_patterns: false,
             supports_file_operations: false,
             supports_workspace_configuration: false,
             supports_semantic_tokens: false,

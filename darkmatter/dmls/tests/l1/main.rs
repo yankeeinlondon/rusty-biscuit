@@ -34,5 +34,6 @@ mod suggest_constraint_phase1;
 mod test_layout;
 mod undeclared_property;
 mod union_item_editor;
+mod workspace_file_list;
 mod workspace_formatting_settings;
 mod zed_extension_contract;

@@ -4,9 +4,11 @@
 //! frontmatter *meaning*: a position-aware [`FrontmatterAst`] and the layered
 //! effective schema assembled for the document. [`OverlayState`] owns the
 //! cross-request state the design's FrontmatterAst policy needs — a per-document
-//! last-good tree (so completion/hover survive a mid-keystroke YAML error) and a
+//! last-good tree (so completion/hover survive a mid-keystroke YAML error), a
 //! per-document effective-schema cache (so the jsonschema compile is paid once
-//! per edit, not once per request).
+//! per edit, not once per request), and the trigger-registry cache
+//! ([`registry`]), which serves each document's triggers from memory until a
+//! watched change, save, rescan, or configuration change invalidates them.
 //!
 //! A [`DocumentOverlay`] is the per-request snapshot handed to providers through
 //! [`DocumentContext`](crate::providers::DocumentContext); no provider ever
@@ -17,6 +19,7 @@ pub mod doc_links;
 pub mod expressions;
 pub mod frontmatter;
 pub mod named_types;
+pub mod registry;
 pub mod schema;
 pub mod shell;
 pub mod suggestions;
@@ -37,7 +40,6 @@ use darkmatter::markdown::schemas::{
     SchemaError, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
     SuggestionLintProblem, parse_standalone_schema_document,
 };
-use darkmatter::markdown::schemas::triggers::{TriggerRegistry, scan as scan_triggers};
 use lsp_types::Uri;
 
 use crate::config::DmlsConfig;
@@ -47,6 +49,7 @@ pub use frontmatter::{
     YamlParseError, format_dotted,
 };
 pub use named_types::NamedTypeCatalog;
+pub use registry::{RegistrySummary, RootFileClass};
 pub use schema::{
     FrontmatterSchemaValue, MetaSchemaKind, SchemaAuthoringState, SchemaBundle,
 };
@@ -151,15 +154,9 @@ struct OverlayCache {
     last_good_text: HashMap<String, String>,
     /// Last successfully parsed standalone schema model per document URI.
     standalone_last_good: HashMap<String, Arc<StandaloneSchemaDocument>>,
-    /// Last transactionally loaded registry for each document walk within a
-    /// boundary. A failed rescan leaves the previous value installed.
-    trigger_registries: HashMap<(PathBuf, PathBuf), TriggerRegistry>,
-    /// Current failed transactional scan per discovery scope. This state is
-    /// independent of `trigger_registries` so failure ownership can change
-    /// without discarding the last-good registry.
-    trigger_load_errors: HashMap<(PathBuf, PathBuf), TriggerLoadError>,
-    /// Diagnostic ownership changes waiting for the router to publish them.
-    trigger_diagnostic_transitions: Vec<TriggerDiagnosticTransition>,
+    /// Each document's trigger registry, its failure state, and the
+    /// diagnostic ownership changes waiting for the router to publish them.
+    triggers: registry::TriggerRegistries,
     /// Cached effective schema per document URI, invalidated by content hash,
     /// configuration, trigger registry, or the document's context.
     schema: HashMap<String, CachedSchema>,
@@ -167,12 +164,6 @@ struct OverlayCache {
     /// invalidated by content hash, the document's context, or a change to
     /// any file it imports.
     standalone_resolution: HashMap<String, CachedStandalone>,
-}
-
-#[derive(Clone)]
-struct TriggerLoadError {
-    path: PathBuf,
-    error: Arc<SchemaError>,
 }
 
 /// A trigger-load diagnostic that must be published or cleared.
@@ -363,12 +354,7 @@ impl OverlayState {
                             cache.trigger_registry(path, workspace_roots, context)
                         });
                     }
-                    if let Some(error) = cache
-                        .trigger_load_errors
-                        .values()
-                        .find(|failure| failure.path == path)
-                        .map(|failure| Arc::clone(&failure.error))
-                    {
+                    if let Some(error) = cache.triggers.load_error_for(path) {
                         return Some(DocumentOverlay {
                             ast: None,
                             stale: false,
@@ -494,7 +480,36 @@ impl OverlayState {
     /// Takes trigger-load diagnostic ownership changes since the last refresh.
     pub fn take_trigger_diagnostic_transitions(&self) -> Vec<TriggerDiagnosticTransition> {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
-        std::mem::take(&mut cache.trigger_diagnostic_transitions)
+        cache.triggers.take_transitions()
+    }
+
+    /// Marks stale every trigger registry a change at one of `paths` can
+    /// affect: a watched-file event or a saved YAML file. Each known file is
+    /// re-read and compared with its recorded xxHash first, so an unchanged
+    /// file invalidates nothing.
+    pub fn invalidate_trigger_inputs(&self, paths: &[PathBuf]) {
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.invalidate_paths(paths);
+    }
+
+    /// Marks every trigger registry stale: a server rescan, a configuration
+    /// change, or a package-manifest change.
+    pub fn invalidate_all_trigger_registries(&self) {
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.invalidate_all();
+    }
+
+    /// The folders the prepared trigger registries read from, for
+    /// schema-location watches.
+    pub fn trigger_watch_folders(&self) -> std::collections::BTreeSet<PathBuf> {
+        let cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.watch_folders()
+    }
+
+    /// The schema roots and files the prepared trigger registries searched.
+    pub fn trigger_registry_summary(&self) -> RegistrySummary {
+        let cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.summary()
     }
 }
 
@@ -527,10 +542,8 @@ impl OverlayCache {
                 return FrontmatterSchema::new(SchemaOutcome::Failed(error));
             }
         };
-        let registry_key = registry
-            .as_ref()
-            .map(|registry| xx_hash_bytes(format!("{registry:?}").as_bytes()))
-            .unwrap_or_default();
+        let registry_key = registry.as_ref().map_or(0, |installed| installed.version);
+        let registry = registry.map(|installed| installed.registry);
         // File values, `$schema` references, schema roots, and `$path`
         // verdicts all depend on the context, so the key carries its full
         // identity (repository, `cwd`, tree root and origin, home,
@@ -553,6 +566,10 @@ impl OverlayCache {
             .as_ref()
             .map(|registry| registry.roots.search_paths().to_vec())
             .unwrap_or_default();
+        let registry_files: Vec<PathBuf> = registry
+            .as_ref()
+            .map(|registry| registry.dependencies().map(Path::to_path_buf).collect())
+            .unwrap_or_default();
         let outcome = match schema::assemble(
             path,
             text,
@@ -574,7 +591,12 @@ impl OverlayCache {
                     suggestions::reference_lints(&schema, base_dir, None, &schema_roots, context)
                 }),
         );
-        let deps = collect_dep_hashes(&outcome, &named_types);
+        // The registry tracks its envelopes and payload files, and a change to
+        // one installs a new registry version, so this cache does not re-read
+        // them.
+        let registry_files: std::collections::HashSet<&Path> =
+            registry_files.iter().map(PathBuf::as_path).collect();
+        let deps = collect_dep_hashes(&outcome, &named_types, &registry_files);
         let schema = FrontmatterSchema {
             outcome,
             named_types,
@@ -660,61 +682,21 @@ impl OverlayCache {
         resolved
     }
 
-    /// The document's trigger registry. A trigger-file load error keeps the
-    /// last-good registry (the file is likely mid-edit, and its own diagnostic
-    /// reports the error); a schema-root I/O error is returned instead, since
-    /// any registry would silently lack that root's triggers and bare names.
+    /// The document's trigger registry, from the registry cache. A
+    /// trigger-file load error keeps the last-good registry (the file is
+    /// likely mid-edit, and its own diagnostic reports the error); a
+    /// schema-root I/O error is returned instead, since any registry would
+    /// silently lack that root's triggers and bare names.
     fn trigger_registry(
         &mut self,
         path: &Path,
         workspace_roots: &[PathBuf],
         context: &FileResolutionContext,
-    ) -> Result<Option<TriggerRegistry>, Arc<SchemaError>> {
+    ) -> Result<Option<registry::InstalledRegistry>, Arc<SchemaError>> {
         let Some(boundary) = schema::trigger_boundary(path, workspace_roots) else {
             return Ok(None);
         };
-        let document_dir = path.parent().unwrap_or(path).to_path_buf();
-        let key = (boundary.clone(), document_dir);
-        // The schema roots are the document's: its package, package area,
-        // and tree root.
-        match scan_triggers(&context.for_source(path)) {
-            Ok(registry) => {
-                self.trigger_registries.insert(key.clone(), registry.clone());
-                if let Some(previous) = self.trigger_load_errors.remove(&key) {
-                    self.trigger_diagnostic_transitions.push(TriggerDiagnosticTransition {
-                        path: previous.path,
-                        error: None,
-                    });
-                }
-                Ok(Some(registry))
-            }
-            Err(error @ SchemaError::Io { .. }) => Err(Arc::new(error)),
-            Err(error) => {
-                tracing::warn!(path = %path.display(), %error, "retaining last-good trigger registry");
-                if let SchemaError::TriggerLoad { path, .. } = &error {
-                    let failure = TriggerLoadError {
-                        path: path.clone(),
-                        error: Arc::new(error),
-                    };
-                    let previous = self.trigger_load_errors.insert(key.clone(), failure.clone());
-                    if let Some(old) = previous.as_ref().filter(|old| old.path != failure.path) {
-                        self.trigger_diagnostic_transitions.push(TriggerDiagnosticTransition {
-                            path: old.path.clone(),
-                            error: None,
-                        });
-                    }
-                    if previous.as_ref().is_none_or(|old| {
-                        old.path != failure.path || old.error.to_string() != failure.error.to_string()
-                    }) {
-                        self.trigger_diagnostic_transitions.push(TriggerDiagnosticTransition {
-                            path: failure.path,
-                            error: Some(failure.error),
-                        });
-                    }
-                }
-                Ok(self.trigger_registries.get(&key).cloned())
-            }
-        }
+        self.triggers.lookup(path, &boundary, context)
     }
 }
 
@@ -729,13 +711,19 @@ fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
 /// can detect a content change. Covers the effective schema's dependencies
 /// (imports, examples, referenced `$schema` file), the extension-baseline
 /// files, and the files the named-type catalog read, which may name the same
-/// file — dedup by path so each file is hashed once. A failed assembly has no
+/// file — dedup by path so each file is hashed once. The trigger envelopes and
+/// payload files in `registry_files` are left out: the registry cache tracks
+/// them. A failed assembly has no
 /// bundle, so its edges come from the files its error names: without them a
 /// fix made in an imported file would never clear the cached failure. A
 /// dependency that cannot be read is omitted — `assemble` already read every
 /// one, so an unreadable one is a transient race, and omitting it forces a
 /// fresh assembly on the next lookup rather than trusting a stale bundle.
-fn collect_dep_hashes(outcome: &SchemaOutcome, named_types: &NamedTypeCatalog) -> Vec<(PathBuf, u64)> {
+fn collect_dep_hashes(
+    outcome: &SchemaOutcome,
+    named_types: &NamedTypeCatalog,
+    registry_files: &std::collections::HashSet<&Path>,
+) -> Vec<(PathBuf, u64)> {
     let mut paths: Vec<PathBuf> = match outcome {
         SchemaOutcome::Ready(Some(bundle)) => bundle
             .effective
@@ -748,6 +736,7 @@ fn collect_dep_hashes(outcome: &SchemaOutcome, named_types: &NamedTypeCatalog) -
         SchemaOutcome::Failed(error) => error_dependencies(error),
     };
     paths.extend(named_types.dependencies().cloned());
+    paths.retain(|path| !registry_files.contains(path.as_path()));
     hash_files(paths.iter())
 }
 
@@ -1683,6 +1672,7 @@ mod tests {
             "kind: trigger-schema\nmatch: {}\n",
         )
         .unwrap();
+        state.invalidate_trigger_inputs(&[root.join("schemas/prompt.trigger.yaml")]);
         let retained = state
             .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
@@ -1693,6 +1683,57 @@ mod tests {
                 .valid,
             "a malformed envelope edit must retain the last-good registry"
         );
+    }
+
+    #[test]
+    fn repeated_overlay_builds_skip_the_registry_but_keep_schema_freshness() {
+        use crate::work_counters::work_counts;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        write_trigger_fixture(&root);
+        let local = root.join("local.yaml");
+        std::fs::write(&local, "$schema:\n  owner: string(required)\n").unwrap();
+        let path = root.join("doc.md");
+        let text = "---\nprompt: hello\n$schema: ./local.yaml\n---\n\nbody\n";
+        let state = OverlayState::default();
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let roots = [root.clone()];
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let missing = |overlay: &DocumentOverlay| -> Vec<String> {
+            let bundle = ready_bundle(overlay);
+            bundle
+                .effective
+                .validate(&bundle.frontmatter_json)
+                .problems
+                .into_iter()
+                .map(|problem| problem.message)
+                .collect()
+        };
+        let build = || {
+            state
+                .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &resolution)
+                .unwrap()
+        };
+        let first = missing(&build());
+        assert!(first.iter().any(|message| message.contains("model")), "trigger payload: {first:?}");
+        assert!(first.iter().any(|message| message.contains("owner")), "document schema: {first:?}");
+
+        let before = work_counts();
+        for _ in 0..3 {
+            build();
+        }
+        let work = work_counts().since(before);
+        // Only the document's own `$schema` file is re-hashed per build; the
+        // trigger payload and the schema roots are not touched.
+        assert_eq!((work.registry_scans, work.enumerations, work.reads), (0, 0, 3), "{work:?}");
+
+        // The document's `$schema` file keeps its read-on-lookup freshness: an
+        // edit with no watched event still re-assembles.
+        std::fs::write(&local, "$schema:\n  reviewer: string(required)\n").unwrap();
+        let edited = missing(&build());
+        assert!(edited.iter().any(|message| message.contains("reviewer")), "{edited:?}");
+        assert!(edited.iter().any(|message| message.contains("model")), "{edited:?}");
     }
 
     #[test]
@@ -1728,6 +1769,7 @@ mod tests {
             "$schema:\n  - model: string(required)\n  - title: string(required)\n",
         )
         .unwrap();
+        state.invalidate_trigger_inputs(&[root.join("schemas/prompt.yaml")]);
 
         let retained = state
             .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
@@ -1783,6 +1825,7 @@ mod tests {
         );
 
         std::fs::remove_file(&a_payload).unwrap();
+        state.invalidate_trigger_inputs(std::slice::from_ref(&a_payload));
         let failed_a = state
             .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
@@ -1793,6 +1836,7 @@ mod tests {
 
         std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
         std::fs::remove_file(&b_payload).unwrap();
+        state.invalidate_trigger_inputs(&[a_payload.clone(), b_payload.clone()]);
         let failed_b = state
             .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();

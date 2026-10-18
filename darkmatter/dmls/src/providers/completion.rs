@@ -112,18 +112,7 @@ fn anchor_completions(
     path_part: &str,
     anchor_partial: &str,
 ) -> Vec<CompletionItem> {
-    let target_doc = if path_part.is_empty() {
-        Some(doc_id)
-    } else {
-        // The first planned candidate the index holds: headings are known
-        // only for indexed documents.
-        ctx.file_context().ok().and_then(|context| {
-            reference_candidates(context, path_part)
-                .iter()
-                .find_map(|candidate| ctx.graph.document_id(candidate))
-        })
-    };
-    let Some(target_doc) = target_doc else {
+    let Some(target_doc) = anchor_target(ctx, doc_id, path_part) else {
         return Vec::new();
     };
     let start = offset - anchor_partial.len();
@@ -134,6 +123,29 @@ fn anchor_completions(
             item(ctx, start, offset, &slug, &slug, CompletionItemKind::REFERENCE, Some(title))
         })
         .collect()
+}
+
+/// The document an anchor after `path_part` names (`path_part` empty → the
+/// current document): the first planned candidate that is a graph document.
+fn anchor_target(ctx: &DocumentContext, doc_id: DocumentId, path_part: &str) -> Option<DocumentId> {
+    if path_part.is_empty() {
+        return Some(doc_id);
+    }
+    ctx.file_context().ok().and_then(|context| {
+        reference_candidates(context, path_part)
+            .iter()
+            .find_map(|candidate| ctx.graph.document_id(candidate))
+    })
+}
+
+/// The document whose headings an anchor completion at `offset` offers, when
+/// the cursor is after `#` in an open link destination.
+pub(crate) fn heading_target(ctx: &DocumentContext, offset: usize) -> Option<DocumentId> {
+    let doc_id = ctx.doc_id?;
+    let line_start = ctx.text[..offset].rfind('\n').map(|index| index + 1).unwrap_or(0);
+    let dest = link_destination_partial(&ctx.text[line_start..offset])?;
+    let hash = dest.rfind('#')?;
+    anchor_target(ctx, doc_id, &dest[..hash])
 }
 
 /// `(slug, title)` for every heading in `document`.

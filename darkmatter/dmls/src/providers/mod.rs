@@ -472,3 +472,38 @@ fn dedup_locations(locations: Vec<Location>) -> Vec<Location> {
     }
     out
 }
+
+/// The document a heading completion at `offset` reads headings from: the
+/// target of an anchor in an open link destination, or of a wiki heading
+/// fragment.
+pub(crate) fn completion_heading_target(ctx: &DocumentContext, offset: usize) -> Option<std::path::PathBuf> {
+    let document = completion::heading_target(ctx, offset).or_else(|| wiki::heading_target(ctx, offset))?;
+    ctx.graph.document(document).map(|record| record.path.clone())
+}
+
+/// The document the link, wiki link, or transclusion at `offset` in the
+/// document at `path` lands on, read from the graph's resolved edges.
+pub(crate) fn reference_target_at(
+    graph: &WorkspaceGraph,
+    path: &Path,
+    offset: usize,
+) -> Option<std::path::PathBuf> {
+    use crate::graph::EdgeKind;
+    let document = graph.document_id(path)?;
+    let references = graph
+        .links(document)
+        .chain(graph.wiki_links(document))
+        .map(|(id, node)| (id, node, EdgeKind::References));
+    let transclusions = graph
+        .transclusions(document)
+        .map(|(id, node)| (id, node, EdgeKind::Transcludes));
+    references
+        .chain(transclusions)
+        .filter(|(_, node, _)| node.span.contains(&offset))
+        .find_map(|(id, _, kind)| {
+            graph.outgoing(id, kind).find_map(|edge| {
+                let target = graph.node(edge.target.node()?)?;
+                graph.document(target.document).map(|record| record.path.clone())
+            })
+        })
+}

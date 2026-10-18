@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
     Cancel, DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles,
@@ -59,12 +59,16 @@ use crate::diagnostics::DiagnosticsScheduler;
 use crate::graph::{WorkspaceGraph, WorkspaceIndex};
 use crate::overlay::OverlayState;
 use crate::providers::{DocumentContext, ProviderRegistry};
-use crate::request_timing::{CompletionEvent, MessageKind, Outcome, RequestTimings, Stage, document_uri};
+use crate::request_timing::{
+    CompletionEvent, MessageKind, Outcome, RequestTimings, Stage, Wait, document_uri,
+};
 use crate::workspace::snapshot::SharedSnapshot;
-use crate::workspace::startup::{ProgressReporter, SilentProgress, collect_indices};
+use crate::graph::Listing;
+use crate::workspace::discover::{DiscoveryReport, ListedKind, listed_kind};
+use crate::workspace::startup::{ProgressReporter, SilentProgress, collect_indices_from_files, list_files};
 use crate::workspace::watch::{
-    WatchMode, changed_manifests, coalesce_changes, is_context_input, scan_manifests,
-    watch_registration,
+    WatchMode, changed_manifests, coalesce_changes, is_config_file, is_context_input,
+    is_ignore_file, scan_manifests, schema_watch_registration, watch_registration,
 };
 use crate::workspace::{DocumentStore, uri_to_file_path, workspace_roots};
 
@@ -96,12 +100,19 @@ pub struct RunOptions {
     pub snapshot: RequestSnapshot,
     /// The monotonic clock request timing reads (the slow-request log).
     pub clock: Arc<dyn Clock>,
+    /// Test seams over startup's background work.
+    pub startup: StartupHooks,
 }
 
 impl RunOptions {
     /// Options with no `--config` override, timed by the system clock.
     pub fn new(snapshot: RequestSnapshot) -> Self {
-        Self { config_path: None, snapshot, clock: Arc::new(SystemClock) }
+        Self {
+            config_path: None,
+            snapshot,
+            clock: Arc::new(SystemClock),
+            startup: StartupHooks::default(),
+        }
     }
 
     /// Replaces the clock request timing reads.
@@ -109,6 +120,46 @@ impl RunOptions {
         self.clock = clock;
         self
     }
+
+    /// Replaces the startup test seams.
+    pub fn with_startup_hooks(mut self, hooks: StartupHooks) -> Self {
+        self.startup = hooks;
+        self
+    }
+}
+
+/// Test seams over the server's background startup work. The binary uses
+/// the default: no gate, no observer.
+#[derive(Debug, Default)]
+pub struct StartupHooks {
+    /// When set, the workspace file-list walk starts only after this
+    /// receives a message or disconnects, so a test can observe the server
+    /// before the list is ready.
+    pub file_list_gate: Option<Receiver<()>>,
+    /// Receives a [`StartupEvent`] after each background result has been
+    /// installed and its diagnostics refreshed.
+    pub observer: Option<Sender<StartupEvent>>,
+}
+
+/// A background startup step whose result the dispatch thread installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupEvent {
+    /// The workspace file list is installed and open documents' diagnostics
+    /// were refreshed against it.
+    FileListInstalled,
+}
+
+/// A result background work hands to the dispatch thread, which owns every
+/// index mutation.
+enum Internal {
+    /// The startup file-list walk finished. The dispatch thread ends the
+    /// progress once the list is installed, so a client that sees the end
+    /// sees diagnostics computed against the list.
+    FileList {
+        report: DiscoveryReport,
+        elapsed_ms: u128,
+        progress: LspProgress,
+    },
 }
 
 /// Performs the `initialize` handshake and runs the router until `exit`.
@@ -158,20 +209,20 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
     };
 
     let watch_mode = WatchMode::for_profile(&profile);
-    register_watchers(&connection.sender, watch_mode, config.effective());
     // The rescan fallback learns of a manifest change by comparing scans, so
     // it needs a baseline from startup.
     let manifests = match watch_mode {
         WatchMode::ServerRescan => scan_manifests(&roots),
         WatchMode::ClientWatched => HashMap::new(),
     };
-    spawn_startup_index(
+    let (internal_tx, internal_rx) = crossbeam_channel::unbounded();
+    spawn_file_listing(
+        internal_tx,
         connection.sender.clone(),
         roots.clone(),
         config.effective().workspace.clone(),
-        Arc::clone(&index),
-        snapshot.clone(),
         profile.supports_work_done_progress,
+        options.startup.file_list_gate,
     );
 
     let diagnostics = DiagnosticsScheduler::new(connection.sender.clone(), config.effective());
@@ -188,24 +239,41 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         watch_mode,
         contexts,
         manifests,
+        schema_watch_fallback: false,
         timings: RequestTimings::start(Arc::clone(&options.clock)),
         clock: options.clock,
     };
-    Router::new(connection, state).run()
+    let mut router = Router::new(connection, state).with_internal(internal_rx, options.startup.observer);
+    router.register_workspace_watchers(false);
+    router.run()
 }
 
-/// Registers dynamic file watchers for a [`WatchMode::ClientWatched`] client.
-///
-/// A [`WatchMode::ServerRescan`] client (no reliable watcher — e.g. Neovim on
-/// Linux) is served by [`ServerState::rescan_workspace`] on save instead, so it
-/// needs no registration.
-fn register_watchers(sender: &Sender<Message>, watch_mode: WatchMode, config: &crate::DmlsConfig) {
-    if watch_mode != WatchMode::ClientWatched {
-        return;
+/// Sends a `client/registerCapability` for one watcher registration under
+/// `request_id`, replacing an earlier registration with the same id first
+/// (`client/unregisterCapability`) when `replace` is set. Fire-and-forget:
+/// the router reads the client's answer only to detect a rejection.
+fn send_watch_registration(
+    sender: &Sender<Message>,
+    registration: lsp_types::Registration,
+    request_id: &str,
+    replace: bool,
+) {
+    if replace {
+        let params = lsp_types::UnregistrationParams {
+            unregisterations: vec![lsp_types::Unregistration {
+                id: registration.id.clone(),
+                method: registration.method.clone(),
+            }],
+        };
+        if let Ok(value) = serde_json::to_value(params) {
+            let request = Request::new(
+                RequestId::from(format!("{request_id}/unregister")),
+                lsp_types::request::UnregisterCapability::METHOD.to_string(),
+                value,
+            );
+            let _ = sender.send(Message::Request(request));
+        }
     }
-    let Some(registration) = watch_registration(&config.workspace) else {
-        return;
-    };
     let params = RegistrationParams {
         registrations: vec![registration],
     };
@@ -213,32 +281,56 @@ fn register_watchers(sender: &Sender<Message>, watch_mode: WatchMode, config: &c
         return;
     };
     let request = Request::new(
-        RequestId::from("dmls/register-watchers".to_string()),
+        RequestId::from(request_id.to_string()),
         RegisterCapability::METHOD.to_string(),
         value,
     );
-    // Fire-and-forget: the client's response is ignored by the loop.
     let _ = sender.send(Message::Request(request));
 }
 
-/// Spawns the background startup indexer (worker pool inside), publishing a
-/// snapshot when done and reporting `window/workDoneProgress` on the way.
-fn spawn_startup_index(
+/// The watcher registrations DMLS has sent, so a client rejection can switch
+/// the affected inputs to the save-driven fallback.
+#[derive(Debug, Default)]
+struct WatchLedger {
+    /// Outstanding workspace-watcher registration request ids.
+    workspace: HashSet<RequestId>,
+    /// Outstanding schema-location registration request ids.
+    schema: HashSet<RequestId>,
+    /// The folders the last schema-location registration watches.
+    schema_folders: std::collections::BTreeSet<PathBuf>,
+    /// Whether a schema-location registration was ever sent.
+    schema_registered: bool,
+    next: u64,
+}
+
+impl WatchLedger {
+    fn issue(&mut self, prefix: &str) -> String {
+        self.next += 1;
+        format!("dmls/{prefix}/{}", self.next)
+    }
+}
+
+/// Spawns the background file-list walk, which reads no file contents and
+/// hands its result to the dispatch thread, reporting
+/// `window/workDoneProgress` on the way.
+fn spawn_file_listing(
+    internal: Sender<Internal>,
     sender: Sender<Message>,
     roots: Vec<PathBuf>,
     workspace_config: crate::config::WorkspaceConfig,
-    index: Arc<Mutex<WorkspaceIndex>>,
-    snapshot: SharedSnapshot,
     progress_enabled: bool,
+    gate: Option<Receiver<()>>,
 ) {
     std::thread::spawn(move || {
+        if let Some(gate) = gate {
+            let _ = gate.recv();
+        }
         let reporter = LspProgress::new(sender, progress_enabled);
-        let discovered = collect_indices(&roots, &workspace_config, &reporter);
-        let mut guard = index.lock().expect("index lock poisoned");
-        // Open buffers already in the index win over disk versions.
-        guard.adopt_missing(discovered);
-        snapshot.store(guard.snapshot());
-        tracing::info!(documents = guard.len(), "startup index complete");
+        reporter.begin("Listing workspace files");
+        let started = std::time::Instant::now();
+        let report = list_files(&roots, &workspace_config);
+        let elapsed_ms = started.elapsed().as_millis();
+        let _ = internal.send(Internal::FileList { report, elapsed_ms, progress: reporter });
     });
 }
 
@@ -270,6 +362,10 @@ pub struct ServerState {
     pub contexts: Arc<RepositoryContexts>,
     /// Package-manifest hashes from the last scan, for [`WatchMode::ServerRescan`].
     manifests: HashMap<PathBuf, u64>,
+    /// Schema inputs outside the workspace globs have no watcher (the client
+    /// cannot root one at a folder, or rejected it), so every save marks the
+    /// trigger registries stale.
+    schema_watch_fallback: bool,
     /// The clock every message's [`RequestTimings`] reads.
     clock: Arc<dyn Clock>,
     /// The message being dispatched; the router replaces it at each dequeue.
@@ -284,7 +380,121 @@ impl ServerState {
             return;
         };
         let mut index = self.index.lock().expect("index lock poisoned");
-        index.set_document(&path, text);
+        index.open_buffer(&path, text);
+        self.snapshot.store(index.snapshot());
+    }
+
+    /// Restores the disk view of a closed buffer in the workspace index.
+    fn close_buffer(&self, uri: &Uri) {
+        let Some(path) = uri_to_file_path(uri) else {
+            return;
+        };
+        let mut index = self.index.lock().expect("index lock poisoned");
+        index.close_buffer(&path);
+        self.snapshot.store(index.snapshot());
+    }
+
+    /// Installs a file-list walk's result in the workspace index.
+    ///
+    /// ## Returns
+    ///
+    /// The Markdown paths that joined or left the list.
+    fn install_listing(&self, report: DiscoveryReport) -> Vec<PathBuf> {
+        let complete = report.is_complete();
+        let markdown = report.files.into_iter().collect();
+        let yaml = report.yaml.into_iter().collect();
+        let mut index = self.index.lock().expect("index lock poisoned");
+        let changed = index.install_listing(markdown, yaml, complete);
+        self.snapshot.store(index.snapshot());
+        changed
+    }
+
+    /// Lists the workspace again on the dispatch thread (a rescan, or a
+    /// discovery configuration or ignore-file change) and installs the list.
+    ///
+    /// ## Returns
+    ///
+    /// The Markdown paths that joined or left the list.
+    fn relist(&self) -> Vec<PathBuf> {
+        let started = std::time::Instant::now();
+        let report = list_files(&self.roots, &self.config.effective().workspace);
+        tracing::info!(
+            markdown = report.files.len(),
+            yaml = report.yaml.len(),
+            duplicates = report.duplicates.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "workspace rescan complete"
+        );
+        self.install_listing(report)
+    }
+
+    /// Parses what the open document at `uri` needs from the documents it
+    /// references (see [`WorkspaceIndex::prepare_targets`]), publishing a new
+    /// snapshot when anything was read.
+    fn prepare_document(&self, uri: &Uri) {
+        let Some(path) = uri_to_file_path(uri) else {
+            return;
+        };
+        let mut index = self.index.lock().expect("index lock poisoned");
+        if index.prepare_targets(&path) {
+            self.snapshot.store(index.snapshot());
+        }
+    }
+
+    /// Parses one referenced document whose headings a request needs (a
+    /// hover preview, a definition, a heading completion), unless it is
+    /// already parsed and current.
+    fn prepare_target(&self, target: Option<PathBuf>) {
+        let Some(target) = target else {
+            return;
+        };
+        let mut index = self.index.lock().expect("index lock poisoned");
+        if !index.ensure_parsed(&[target]).is_empty() {
+            self.snapshot.store(index.snapshot());
+        }
+    }
+
+    /// The document a request at `position` in `uri` points into: the
+    /// target of the link, wiki link, or transclusion under the cursor, or
+    /// the document an anchor completion there names.
+    fn target_at(&self, uri: &Uri, position: lsp_types::Position) -> Option<PathBuf> {
+        let path = uri_to_file_path(uri)?;
+        let offset = self.documents.get(uri)?.source_map().lsp_to_byte(position)?;
+        let snapshot = self.snapshot.load();
+        if let Some(target) = crate::providers::reference_target_at(&snapshot, &path, offset) {
+            return Some(target);
+        }
+        self.with_document(uri, |ctx| crate::providers::completion_heading_target(ctx, offset))
+            .flatten()
+    }
+
+    /// Builds the full index (every listed Markdown file parsed) if it does
+    /// not exist yet, for the features that need every document: references,
+    /// rename, file rename, and workspace symbols.
+    ///
+    /// Waits for nothing: when the startup file list has not arrived, the
+    /// workspace is listed here first. The index lock is not held while files
+    /// are read and parsed.
+    fn ensure_full_index(&self) {
+        let (pending, listing) = {
+            let index = self.index.lock().expect("index lock poisoned");
+            if index.is_full() {
+                return;
+            }
+            (index.unparsed_paths(), index.listing())
+        };
+        self.timings.record_wait(Wait::FullIndex);
+        let pending = if listing == Listing::Pending {
+            self.timings.record_wait(Wait::FileList);
+            let report = list_files(&self.roots, &self.config.effective().workspace);
+            self.install_listing(report);
+            self.index.lock().expect("index lock poisoned").unparsed_paths()
+        } else {
+            pending
+        };
+        let (parsed, _timings) = collect_indices_from_files(&pending, &SilentProgress);
+        let mut index = self.index.lock().expect("index lock poisoned");
+        index.adopt_full(parsed);
         self.snapshot.store(index.snapshot());
     }
 
@@ -368,11 +578,23 @@ impl ServerState {
 
     /// Recomputes and publishes diagnostics for one open document (empty when
     /// it is unknown, which clears the client's markers).
+    ///
+    /// The document's referenced targets are parsed first, as far as its
+    /// diagnostics need them. Until the file list is ready, findings that
+    /// depend on which paths exist are withheld (see [`listing_gates`]); the
+    /// list's arrival refreshes every open document.
     fn refresh_diagnostics(&self, uri: &Uri) {
         let version = self.documents.get(uri).map(|doc| doc.version());
+        if self.documents.is_open(uri) {
+            self.prepare_document(uri);
+        }
+        let listing = self.snapshot.load().listing();
         let diagnostics = self
             .with_document(uri, |ctx| self.registry.diagnostics(ctx))
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|diagnostic| !listing_gates(listing, diagnostic))
+            .collect();
         self.diagnostics.publish(uri.clone(), version, diagnostics);
     }
 
@@ -423,52 +645,37 @@ impl ServerState {
         }
     }
 
-    /// The filesystem paths of all currently open buffers (buffer authoritative
-    /// over disk during a rescan).
-    fn open_document_paths(&self) -> HashSet<PathBuf> {
-        self.documents
-            .open_uris()
-            .iter()
-            .filter_map(uri_to_file_path)
-            .collect()
-    }
-
     /// Rescans the workspace from disk and reconciles the index for
     /// [`WatchMode::ServerRescan`] clients (no reliable file watcher).
     ///
     /// This is the save-driven fallback that keeps unopened files current for
-    /// clients like Neovim on Linux: it re-runs discovery, reads and re-hashes
-    /// the discovered files on the worker pool, and adopts created/changed and
-    /// drops deleted files (open buffers stay authoritative). It reads disk but
-    /// never composes, executes, or fetches — the same passive contract as
-    /// startup indexing.
+    /// clients like Neovim on Linux: it lists the workspace again (adopting
+    /// created and dropping deleted files), then re-reads and re-hashes the
+    /// closed documents already parsed, re-parsing only those whose bytes
+    /// changed. Unparsed files stay unparsed. Open buffers stay
+    /// authoritative. It reads disk but never composes, executes, or fetches.
     ///
     /// The scan also re-hashes every package manifest, and a document or
     /// manifest it finds changed drops the cached contexts above it, as a
-    /// watched event would.
+    /// watched event would. Every trigger registry is marked stale, since the
+    /// scan cannot tell which schema-root files changed.
     ///
     /// ## Returns
     ///
     /// The changed document and manifest paths.
     fn rescan_workspace(&mut self) -> Vec<PathBuf> {
-        let discovered = collect_indices(
-            &self.roots,
-            &self.config.effective().workspace,
-            &SilentProgress,
-        );
-        let open_paths = self.open_document_paths();
-        let mut changed = {
+        let mut changed = self.relist();
+        {
             let mut index = self.index.lock().expect("index lock poisoned");
-            let changed = index.reconcile_disk(discovered, &open_paths);
-            if !changed.is_empty() {
-                self.snapshot.store(index.snapshot());
-            }
-            changed
-        };
+            changed.extend(index.recheck_parsed());
+            self.snapshot.store(index.snapshot());
+        }
         let manifests = scan_manifests(&self.roots);
         changed.extend(changed_manifests(&self.manifests, &manifests));
         self.manifests = manifests;
         self.invalidate_contexts(changed.iter().map(PathBuf::as_path));
+        // The rescan cannot say which schema-root files changed.
+        self.overlay.invalidate_all_trigger_registries();
         changed
     }
 
@@ -477,16 +684,18 @@ impl ServerState {
     /// settings change takes effect without a server restart.
     ///
     /// Beyond storing the new settings, this recomputes the wiki resolution
-    /// roots (`wiki.wiki_root`) and rebuilds the graph against them, re-discovers
-    /// and reconciles the workspace against the new discovery globs
-    /// (`workspace.include`/`exclude`), and re-publishes diagnostics for every
+    /// roots (`wiki.wiki_root`) and rebuilds the graph against them, lists
+    /// the workspace again against the new discovery globs
+    /// (`workspace.include`/`exclude`, without reading files), and
+    /// re-publishes diagnostics for every
     /// open document. Schema-extension activation (`schema.extensions`) flows
     /// through the overlay's content-and-config-keyed schema cache, so it
     /// re-assembles on the diagnostics refresh by construction. Every cached
-    /// file-resolution context is dropped, even when the effective config is
-    /// unchanged, and rebuilt on the next request. Nothing else runs when the
-    /// effective config is unchanged, and the expensive re-discovery runs only
-    /// when the `workspace` section actually changed.
+    /// file-resolution context is dropped and every trigger registry marked
+    /// stale, even when the effective config is unchanged, and both are
+    /// rebuilt on the next request. Nothing else runs when the
+    /// effective config is unchanged, and the re-listing runs only when the
+    /// `workspace` section actually changed.
     ///
     /// ## Returns
     ///
@@ -495,9 +704,22 @@ impl ServerState {
     /// connection) sends the refresh. The new config already applies to every
     /// later request regardless of this signal.
     fn reload_config(&mut self, settings: serde_json::Value) -> bool {
+        self.update_config(|config| config.apply_client_settings(settings))
+    }
+
+    /// [`reload_config`](Self::reload_config) for a change to the config
+    /// file on disk (a watched `.dmls.toml`).
+    fn reload_config_file(&mut self) -> bool {
+        self.update_config(ConfigState::reload)
+    }
+
+    /// Applies `update` to the configuration and re-derives what depends on
+    /// it; see [`reload_config`](Self::reload_config).
+    fn update_config(&mut self, update: impl FnOnce(&mut ConfigState)) -> bool {
         let contexts_dropped = self.contexts.clear();
+        self.overlay.invalidate_all_trigger_registries();
         let before = self.config.effective().clone();
-        self.config.apply_client_settings(settings);
+        update(&mut self.config);
         let after = self.config.effective();
         if *after == before {
             if contexts_dropped {
@@ -512,21 +734,20 @@ impl ServerState {
         let wiki_roots = (after.wiki.wiki_root != before.wiki.wiki_root).then(|| {
             crate::workspace::resolve_wiki_roots(&self.roots, after.wiki.wiki_root.as_deref())
         });
-        let discovered = (after.workspace != before.workspace)
-            .then(|| collect_indices(&self.roots, &after.workspace, &SilentProgress));
-        let open_paths = self.open_document_paths();
+        let workspace_changed = after.workspace != before.workspace;
 
+        // Each of these rebuilds the graph, which also re-resolves every
+        // reference against the fresh contexts.
+        let mut rebuilt = false;
+        if workspace_changed {
+            self.relist();
+            rebuilt = true;
+        }
         {
             let mut index = self.index.lock().expect("index lock poisoned");
-            // Each of these rebuilds the graph, which also re-resolves every
-            // reference against the fresh contexts.
-            let mut rebuilt = false;
             if let Some(wiki_roots) = wiki_roots {
                 index.set_wiki_roots(wiki_roots);
                 rebuilt = true;
-            }
-            if let Some(discovered) = discovered {
-                rebuilt |= !index.reconcile_disk(discovered, &open_paths).is_empty();
             }
             if contexts_dropped && !rebuilt {
                 index.relink();
@@ -540,24 +761,58 @@ impl ServerState {
         refresh_semantic_tokens
     }
 
-    /// Applies a coalesced on-disk change: read + re-index, or drop.
+    /// Applies a coalesced on-disk change to the file list and index.
+    ///
+    /// A Markdown file the walk would list joins the list; a parsed closed
+    /// copy is marked stale rather than re-read (the full index, once built,
+    /// re-reads it at once). A deletion drops it. YAML files only update the
+    /// list. Paths the walk would not list are ignored.
     fn apply_disk_change(&self, path: &Path, kind: FileChangeType) {
         let mut index = self.index.lock().expect("index lock poisoned");
-        match kind {
-            FileChangeType::DELETED => {
-                index.remove_document(path);
+        let changed = if kind == FileChangeType::DELETED {
+            index.yaml_changed(path, false);
+            index.disk_deleted(path)
+        } else {
+            match listed_kind(&self.roots, &self.config.effective().workspace, path) {
+                Some(ListedKind::Markdown) => index.disk_changed(path),
+                Some(ListedKind::Yaml) => {
+                    index.yaml_changed(path, true);
+                    false
+                }
+                None => false,
             }
-            _ => match std::fs::read_to_string(path) {
-                Ok(source) => {
-                    index.set_document(path, &source);
-                }
-                Err(error) => {
-                    tracing::debug!("watched change unreadable {}: {error}", path.display());
-                    return;
-                }
-            },
+        };
+        if changed {
+            self.snapshot.store(index.snapshot());
         }
-        self.snapshot.store(index.snapshot());
+    }
+}
+
+/// Whether a diagnostic is withheld under the file list's `listing` state.
+///
+/// Until the list is ready, every finding that depends on which paths exist
+/// waits: broken and missing-anchor links, broken transclusions, and wiki
+/// links that do not resolve to one file. An incomplete list keeps
+/// withholding the wiki findings, because wiki resolution is decided by the
+/// list alone; the others are decided by disk.
+fn listing_gates(listing: Listing, diagnostic: &lsp_types::Diagnostic) -> bool {
+    use crate::diagnostics::codes::code;
+    let Some(NumberOrString::String(code)) = &diagnostic.code else {
+        return false;
+    };
+    let wiki = [code::WIKI_UNRESOLVED_TARGET, code::WIKI_AMBIGUOUS_TARGET, code::WIKI_HEADING_MISSING];
+    match listing {
+        Listing::Pending => [
+            code::BROKEN_PATH,
+            code::MISSING_ANCHOR,
+            code::TRANSCLUSION_BROKEN_PATH,
+            code::TRANSCLUSION_CYCLE,
+        ]
+        .iter()
+        .chain(&wiki)
+        .any(|gated| gated == code),
+        Listing::Ready { complete: false } => wiki.contains(&code.as_str()),
+        Listing::Ready { complete: true } => false,
     }
 }
 
@@ -733,6 +988,11 @@ pub struct Router {
     state: ServerState,
     cancelled: CancelLedger,
     refresh: RefreshLedger,
+    /// Results from background work, handled between client messages.
+    internal: Receiver<Internal>,
+    /// The [`StartupHooks::observer`].
+    observer: Option<Sender<StartupEvent>>,
+    watches: WatchLedger,
 }
 
 impl Router {
@@ -743,17 +1003,38 @@ impl Router {
             state,
             cancelled: CancelLedger::default(),
             refresh: RefreshLedger::default(),
+            internal: crossbeam_channel::never(),
+            observer: None,
+            watches: WatchLedger::default(),
         }
+    }
+
+    fn with_internal(
+        mut self,
+        internal: Receiver<Internal>,
+        observer: Option<Sender<StartupEvent>>,
+    ) -> Self {
+        self.internal = internal;
+        self.observer = observer;
+        self
     }
 
     /// Runs until `shutdown`/`exit` (Ok) or a protocol-fatal error.
     pub fn run(mut self) -> Result<(), ServerError> {
         loop {
-            let message = self
-                .connection
-                .receiver
-                .recv()
-                .map_err(|_| ServerError::ChannelClosed)?;
+            let message = crossbeam_channel::select! {
+                recv(self.connection.receiver) -> message => {
+                    message.map_err(|_| ServerError::ChannelClosed)?
+                }
+                recv(self.internal) -> event => {
+                    match event {
+                        Ok(event) => self.handle_internal(event),
+                        // The background worker is gone; stop selecting on it.
+                        Err(_) => self.internal = crossbeam_channel::never(),
+                    }
+                    continue;
+                }
+            };
             match message {
                 Message::Request(request) => {
                     if self.connection.handle_shutdown(&request)? {
@@ -772,9 +1053,116 @@ impl Router {
                 Message::Response(response) => {
                     // Retire an outstanding refresh (logging a client rejection);
                     // an untracked id keeps the original ignore behavior.
-                    if !self.refresh.consume(&response) {
+                    if !self.refresh.consume(&response) && !self.consume_watch_response(&response) {
                         tracing::debug!(id = %response.id, "ignoring client response");
                     }
+                }
+            }
+            self.sync_schema_watches();
+        }
+    }
+
+    /// Registers the workspace watchers for a [`WatchMode::ClientWatched`]
+    /// client (`replace` after a discovery-configuration change).
+    ///
+    /// A [`WatchMode::ServerRescan`] client (no reliable watcher — e.g.
+    /// Neovim on Linux) is served by [`ServerState::rescan_workspace`] on save
+    /// instead, so it needs no registration.
+    fn register_workspace_watchers(&mut self, replace: bool) {
+        if self.state.watch_mode != WatchMode::ClientWatched {
+            return;
+        }
+        let Some(registration) = watch_registration(&self.state.config.effective().workspace) else {
+            return;
+        };
+        let id = self.watches.issue("register-watchers");
+        self.watches.workspace.insert(RequestId::from(id.clone()));
+        send_watch_registration(&self.connection.sender, registration, &id, replace);
+    }
+
+    /// Keeps the schema-location watches (ruling 4) equal to the folders the
+    /// prepared trigger registries read, re-registering when that set
+    /// changes. A client without `relativePatternSupport` gets none and is
+    /// served by the save-driven fallback.
+    fn sync_schema_watches(&mut self) {
+        if self.state.watch_mode != WatchMode::ClientWatched || self.state.schema_watch_fallback {
+            return;
+        }
+        if !self.state.profile.supports_relative_watch_patterns {
+            tracing::debug!("client cannot root watchers at a folder; schema inputs use the save fallback");
+            self.state.schema_watch_fallback = true;
+            return;
+        }
+        let folders = self.state.overlay.trigger_watch_folders();
+        if folders == self.watches.schema_folders {
+            return;
+        }
+        let Some(registration) =
+            schema_watch_registration(folders.iter().map(PathBuf::as_path))
+        else {
+            return;
+        };
+        let replace = self.watches.schema_registered;
+        let id = self.watches.issue("register-schema-watchers");
+        self.watches.schema.insert(RequestId::from(id.clone()));
+        self.watches.schema_registered = true;
+        self.watches.schema_folders = folders;
+        send_watch_registration(&self.connection.sender, registration, &id, replace);
+    }
+
+    /// Retires a watcher-registration response. A rejected workspace
+    /// registration switches the server to [`WatchMode::ServerRescan`]; a
+    /// rejected schema-location registration switches schema inputs to the
+    /// save-driven fallback.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the response answered a watcher registration.
+    fn consume_watch_response(&mut self, response: &Response) -> bool {
+        let rejected = response.error.as_ref().map(|error| error.message.clone());
+        if self.watches.workspace.remove(&response.id) {
+            if let Some(message) = rejected {
+                tracing::warn!(%message, "client rejected file watchers; rescanning on save instead");
+                self.state.watch_mode = WatchMode::ServerRescan;
+                self.state.manifests = scan_manifests(&self.state.roots);
+            }
+            return true;
+        }
+        if self.watches.schema.remove(&response.id) {
+            if let Some(message) = rejected {
+                tracing::warn!(%message, "client rejected schema-location watchers; rescanning schemas on save instead");
+                self.state.schema_watch_fallback = true;
+            }
+            return true;
+        }
+        // An unregistration's answer carries no state.
+        response.id.to_string().contains("/unregister")
+    }
+
+    /// Installs a background result. Runs on the dispatch thread, between
+    /// client messages, like any notification.
+    fn handle_internal(&mut self, event: Internal) {
+        self.state.timings = RequestTimings::start(Arc::clone(&self.state.clock));
+        if catch_unwind(AssertUnwindSafe(|| self.install_internal(event))).is_err() {
+            tracing::error!("background result handler panicked");
+        }
+    }
+
+    fn install_internal(&mut self, event: Internal) {
+        match event {
+            Internal::FileList { report, elapsed_ms, progress } => {
+                tracing::info!(
+                    markdown = report.files.len(),
+                    yaml = report.yaml.len(),
+                    duplicates = report.duplicates.len(),
+                    elapsed_ms,
+                    "workspace files listed"
+                );
+                self.state.install_listing(report);
+                self.state.refresh_all_diagnostics();
+                progress.end();
+                if let Some(observer) = &self.observer {
+                    let _ = observer.send(StartupEvent::FileListInstalled);
                 }
             }
         }
@@ -872,6 +1260,7 @@ impl Router {
         let Ok(params) = serde_json::from_value::<WorkspaceSymbolParams>(params) else {
             return invalid_params(id);
         };
+        self.state.ensure_full_index();
         let snapshot = self.state.snapshot.load();
         let symbols = self.state.timings.time(Stage::ProviderChain, || {
             self.state.registry.workspace_symbols(&params.query, snapshot.as_ref())
@@ -885,6 +1274,7 @@ impl Router {
         };
         let position = params.text_document_position_params.position;
         let uri = params.text_document_position_params.text_document.uri;
+        self.state.prepare_target(self.state.target_at(&uri, position));
         let locations = self
             .state
             .with_document(&uri, |ctx| match ctx.source_map.lsp_to_byte(position) {
@@ -915,6 +1305,7 @@ impl Router {
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
         let include = params.context.include_declaration;
+        self.state.ensure_full_index();
         let locations = self
             .state
             .with_document(&uri, |ctx| match ctx.source_map.lsp_to_byte(position) {
@@ -960,6 +1351,7 @@ impl Router {
         };
         let position = params.text_document_position_params.position;
         let uri = params.text_document_position_params.text_document.uri;
+        self.state.prepare_target(self.state.target_at(&uri, position));
         let hover = self
             .state
             .with_document(&uri, |ctx| {
@@ -1008,6 +1400,7 @@ impl Router {
         };
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
+        self.state.prepare_target(self.state.target_at(&uri, position));
         let items = self
             .state
             .with_document(&uri, |ctx| match ctx.source_map.lsp_to_byte(position) {
@@ -1074,6 +1467,7 @@ impl Router {
         };
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
+        self.state.ensure_full_index();
         let snapshot = self.state.snapshot.load();
         let env = self.state.rename_env(snapshot.as_ref());
         let renamed = self.state.timings.time(Stage::ProviderChain, || {
@@ -1095,6 +1489,7 @@ impl Router {
         let Ok(params) = serde_json::from_value::<RenameFilesParams>(params) else {
             return invalid_params(id);
         };
+        self.state.ensure_full_index();
         let snapshot = self.state.snapshot.load();
         let env = self.state.rename_env(snapshot.as_ref());
         let edit = self.state.timings.time(Stage::ProviderChain, || {
@@ -1162,6 +1557,7 @@ impl Router {
                 if let Err(error) = self.state.documents.close(&uri) {
                     tracing::warn!("{error}");
                 }
+                self.state.close_buffer(&uri);
                 self.state.overlay.forget(&uri);
                 // Clear the closed document's markers, then refresh the rest
                 // (its links may have propped up another document's validity).
@@ -1182,6 +1578,21 @@ impl Router {
                 // here — a `ClientWatched` client gets that from
                 // `didChangeWatchedFiles`, so it skips the scan.
                 tracing::debug!(uri = params.text_document.uri.as_str(), "didSave");
+                // Trigger registries read schema files from disk, so saving one
+                // (open or not) is an input change; unsaved edits are not.
+                if let Some(path) = uri_to_file_path(&params.text_document.uri)
+                    && matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
+                {
+                    self.state.overlay.invalidate_trigger_inputs(&[path]);
+                    if self.state.watch_mode == WatchMode::ClientWatched {
+                        self.state.refresh_all_diagnostics();
+                    }
+                }
+                if self.state.watch_mode == WatchMode::ClientWatched && self.state.schema_watch_fallback {
+                    // No watcher covers schema inputs outside the workspace.
+                    self.state.overlay.invalidate_all_trigger_registries();
+                    self.state.refresh_all_diagnostics();
+                }
                 if self.state.watch_mode == WatchMode::ServerRescan {
                     self.state.rescan_workspace();
                     // Schema-root YAML is intentionally outside Markdown
@@ -1197,11 +1608,9 @@ impl Router {
                     return;
                 };
                 tracing::debug!("didChangeConfiguration");
+                let workspace = self.state.config.effective().workspace.clone();
                 let refresh = self.state.reload_config(params.settings);
-                show_config_diagnostics(&self.connection.sender, &self.state.config);
-                if refresh {
-                    self.send_semantic_tokens_refresh();
-                }
+                self.after_config_change(&workspace, refresh);
             }
             DidChangeWatchedFiles::METHOD => {
                 let Some(params) =
@@ -1226,6 +1635,19 @@ impl Router {
             other => {
                 tracing::debug!(method = other, "ignoring notification");
             }
+        }
+    }
+
+    /// Publishes config diagnostics, re-registers the workspace watchers
+    /// when the discovery globs changed from `workspace`, and requests a
+    /// semantic-token refresh when `refresh` says so.
+    fn after_config_change(&mut self, workspace: &crate::config::WorkspaceConfig, refresh: bool) {
+        show_config_diagnostics(&self.connection.sender, &self.state.config);
+        if self.state.config.effective().workspace != *workspace {
+            self.register_workspace_watchers(true);
+        }
+        if refresh {
+            self.send_semantic_tokens_refresh();
         }
     }
 
@@ -1258,9 +1680,13 @@ impl Router {
 
     /// Applies coalesced `didChangeWatchedFiles` events to the workspace index.
     ///
-    /// Every event drops the cached contexts above its path. A context input
-    /// (a package manifest or `.git` file) does nothing else; a document
-    /// change is re-indexed unless the document is open.
+    /// Every event drops the cached contexts above its path and invalidates
+    /// the trigger registries it affects (every registry, for a context
+    /// input, which can move a schema root). A context input (a package
+    /// manifest or `.git` file) does nothing else. A config file or ignore
+    /// file change re-lists the workspace (the config file also reloads the
+    /// configuration). Any other change updates the file list unless the
+    /// document is open; see [`ServerState::apply_disk_change`].
     fn apply_watched_changes(&mut self, params: DidChangeWatchedFilesParams) {
         let events = params.changes.into_iter().filter_map(|event| {
             uri_to_file_path(&event.uri).map(|path| (path, event.typ))
@@ -1268,8 +1694,24 @@ impl Router {
         let changes = coalesce_changes(events);
         self.state
             .invalidate_contexts(changes.iter().map(|change| change.path.as_path()));
+        // A manifest can add, remove, or move a schema root of any document.
+        if changes.iter().any(|change| is_context_input(&change.path)) {
+            self.state.overlay.invalidate_all_trigger_registries();
+        } else {
+            let paths: Vec<PathBuf> = changes.iter().map(|change| change.path.clone()).collect();
+            self.state.overlay.invalidate_trigger_inputs(&paths);
+        }
+        // A discovery input rebuilds the list (and, for the config file,
+        // everything the configuration shapes).
+        if changes.iter().any(|change| is_config_file(&change.path)) {
+            let workspace = self.state.config.effective().workspace.clone();
+            let refresh = self.state.reload_config_file();
+            self.after_config_change(&workspace, refresh);
+        } else if changes.iter().any(|change| is_ignore_file(&change.path)) {
+            self.state.relist();
+        }
         for change in changes {
-            if is_context_input(&change.path) {
+            if is_context_input(&change.path) || is_config_file(&change.path) || is_ignore_file(&change.path) {
                 continue;
             }
             // An open buffer is authoritative over disk; skip its watch events.

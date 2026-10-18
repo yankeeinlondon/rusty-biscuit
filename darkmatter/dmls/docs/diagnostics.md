@@ -143,7 +143,7 @@ the biscuit-file failure class (`InvalidReference`, `MissingContext`,
 | Code | Meaning |
 |------|---------|
 | `dm.links.broken_path` | A link path matched no existing file and no open document, resolving `&`, `^`, `@`, `~`, and relative paths as `md compose` does. A file outside the workspace folder is not broken. |
-| `dm.links.missing_anchor` | The link resolved to an indexed document, but its `#fragment` anchor does not exist there. Fragments on unindexed files are not checked. |
+| `dm.links.missing_anchor` | The link resolved to a workspace document, but its `#fragment` anchor does not exist there. The target is parsed for the check; fragments on files outside the workspace file list are not checked. |
 | `dm.links.duplicate_heading` | Two or more headings generate the same GitHub anchor slug (carries `relatedInformation` linking the twins). |
 
 ### Layer 1 — Wiki links (`source: darkmatter.wiki`)

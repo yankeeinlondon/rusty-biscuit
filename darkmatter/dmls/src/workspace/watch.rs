@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use lsp_types::{
-    DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher, GlobPattern,
-    Registration, WatchKind,
+    DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher, GlobPattern, OneOf,
+    Registration, RelativePattern, WatchKind,
 };
 
 use crate::capabilities::ClientProfile;
@@ -42,11 +42,13 @@ impl WatchMode {
 /// The registration id DMLS uses for its watcher registration.
 pub const WATCH_REGISTRATION_ID: &str = "dmls-watch-workspace";
 
-/// Builds the dynamic watcher registration for the configured include globs.
+/// Builds the dynamic watcher registration for the workspace: the configured
+/// include globs, every YAML file, the discovery inputs, and the context
+/// inputs. An empty `include` drops only the Markdown globs.
 ///
 /// ## Returns
 ///
-/// `None` when there is nothing to watch (no include patterns).
+/// `None` when the registration cannot be serialized.
 pub fn watch_registration(config: &WorkspaceConfig) -> Option<Registration> {
     let mut watchers: Vec<_> = config
         .include
@@ -57,14 +59,15 @@ pub fn watch_registration(config: &WorkspaceConfig) -> Option<Registration> {
             kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
         })
         .collect();
-    // Trigger envelopes and their payload/import/example files live in schema
-    // roots and can affect Markdown documents even though they are not part of
-    // workspace document discovery.
-    watchers.extend(["**/schemas/*.yaml", "**/schemas/*.yml"].map(|pattern| {
-        FileSystemWatcher {
-            glob_pattern: GlobPattern::String(pattern.to_string()),
-            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-        }
+    // YAML is listed whatever `include` says, and schema-root files, which
+    // shape every document, are YAML; the discovery inputs (ignore files and
+    // the config file) rebuild the file list.
+    let globs = ["**/*.yaml".to_string(), "**/*.yml".to_string()]
+        .into_iter()
+        .chain(DISCOVERY_INPUT_NAMES.iter().map(|name| format!("**/{name}")));
+    watchers.extend(globs.map(|pattern| FileSystemWatcher {
+        glob_pattern: GlobPattern::String(pattern),
+        kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
     }));
     // Context inputs: a package manifest changes `^` resolution, and a
     // repository's `.git/config` decides whether discovery succeeds. Neither
@@ -79,6 +82,84 @@ pub fn watch_registration(config: &WorkspaceConfig) -> Option<Registration> {
         method: "workspace/didChangeWatchedFiles".to_string(),
         register_options: Some(serde_json::to_value(options).ok()?),
     })
+}
+
+/// File names whose change rebuilds the workspace file list: the ignore
+/// files the walk honors and the DMLS config file. (`.git/info/exclude` sits
+/// inside `.git`, which is never watched as a document; a change to it takes
+/// effect on the next rescan or restart.)
+pub const DISCOVERY_INPUT_NAMES: &[&str] = &[".gitignore", ".ignore", crate::config::CONFIG_FILE_NAME];
+
+/// Whether `path` is an ignore file the walk honors.
+pub fn is_ignore_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| matches!(name, ".gitignore" | ".ignore"))
+}
+
+/// Whether `path` is a DMLS config file.
+pub fn is_config_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == crate::config::CONFIG_FILE_NAME)
+}
+
+/// The registration id DMLS uses for its schema-location watchers.
+pub const SCHEMA_WATCH_REGISTRATION_ID: &str = "dmls-watch-schema-inputs";
+
+/// Builds the watcher registration rooted at the folders trigger registries
+/// read: schema-root folders (present or absent) and the folders holding
+/// payload, import, and example files, wherever they live (ruling: one watch
+/// per folder, not per file).
+///
+/// Each watch is rooted at the folder's parent with the pattern
+/// `<folder>/*`, so a root folder that does not exist yet is still watched
+/// for the files whose creation adds it. Requires the client's
+/// `relativePatternSupport`.
+///
+/// ## Returns
+///
+/// `None` when there is no folder to watch.
+pub fn schema_watch_registration<'a>(folders: impl IntoIterator<Item = &'a Path>) -> Option<Registration> {
+    let watchers: Vec<FileSystemWatcher> = folders
+        .into_iter()
+        .filter_map(|folder| {
+            let parent = folder.parent()?;
+            let name = folder.file_name()?.to_str()?;
+            let base_uri = crate::workspace::file_path_to_uri(parent)?;
+            Some(FileSystemWatcher {
+                glob_pattern: GlobPattern::Relative(RelativePattern {
+                    base_uri: OneOf::Right(base_uri),
+                    pattern: format!("{}/*", escape_glob(name)),
+                }),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            })
+        })
+        .collect();
+    if watchers.is_empty() {
+        return None;
+    }
+    let options = DidChangeWatchedFilesRegistrationOptions { watchers };
+    Some(Registration {
+        id: SCHEMA_WATCH_REGISTRATION_ID.to_string(),
+        method: "workspace/didChangeWatchedFiles".to_string(),
+        register_options: Some(serde_json::to_value(options).ok()?),
+    })
+}
+
+/// Escapes LSP glob metacharacters in a literal path segment.
+fn escape_glob(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for character in segment.chars() {
+        if matches!(character, '*' | '?' | '[' | ']' | '{' | '}') {
+            out.push('[');
+            out.push(character);
+            out.push(']');
+        } else {
+            out.push(character);
+        }
+    }
+    out
 }
 
 /// The watcher globs for context inputs: `**/<name>` for each package
@@ -221,8 +302,9 @@ mod tests {
         assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
         let options: DidChangeWatchedFilesRegistrationOptions =
             serde_json::from_value(registration.register_options.unwrap()).unwrap();
-        // Markdown, YAML schema roots, four package manifests, `.git/config`.
-        assert_eq!(options.watchers.len(), 9);
+        // Markdown (2), YAML (2), discovery inputs (3), four package
+        // manifests, `.git/config`.
+        assert_eq!(options.watchers.len(), 12);
         let globs: Vec<String> = options
             .watchers
             .iter()
@@ -235,10 +317,13 @@ mod tests {
             assert!(globs.contains(&format!("**/{name}")), "{name} watched: {globs:?}");
         }
         assert!(globs.contains(&"**/.git/config".to_string()), "{globs:?}");
+        for glob in ["**/*.yaml", "**/*.yml", "**/.gitignore", "**/.ignore", "**/.dmls.toml"] {
+            assert!(globs.contains(&glob.to_string()), "{glob} watched: {globs:?}");
+        }
     }
 
     #[test]
-    fn test_registration_none_without_includes() {
+    fn test_empty_include_keeps_yaml_and_schema_watches() {
         let config = WorkspaceConfig {
             include: Vec::new(),
             ..WorkspaceConfig::default()
@@ -246,7 +331,48 @@ mod tests {
         let registration = watch_registration(&config).unwrap();
         let options: DidChangeWatchedFilesRegistrationOptions =
             serde_json::from_value(registration.register_options.unwrap()).unwrap();
-        assert_eq!(options.watchers.len(), 7);
+        assert_eq!(options.watchers.len(), 10);
+        assert!(options.watchers.iter().any(|watcher| {
+            matches!(&watcher.glob_pattern, GlobPattern::String(glob) if glob == "**/*.yaml")
+        }));
+    }
+
+    #[test]
+    fn test_schema_watch_registration_roots_each_folder_at_its_parent() {
+        let temp = tempfile::tempdir().unwrap();
+        let schemas = temp.path().join("schemas");
+        let payloads = temp.path().join("odd[name]");
+        let registration =
+            schema_watch_registration([schemas.as_path(), payloads.as_path()]).unwrap();
+        assert_eq!(registration.id, SCHEMA_WATCH_REGISTRATION_ID);
+        let options: DidChangeWatchedFilesRegistrationOptions =
+            serde_json::from_value(registration.register_options.unwrap()).unwrap();
+        let patterns: Vec<(String, String)> = options
+            .watchers
+            .iter()
+            .map(|watcher| match &watcher.glob_pattern {
+                GlobPattern::Relative(relative) => match &relative.base_uri {
+                    OneOf::Right(uri) => (uri.as_str().to_string(), relative.pattern.clone()),
+                    OneOf::Left(folder) => (folder.uri.as_str().to_string(), relative.pattern.clone()),
+                },
+                GlobPattern::String(glob) => (String::new(), glob.clone()),
+            })
+            .collect();
+        let base = crate::workspace::file_path_to_uri(temp.path()).unwrap().as_str().to_string();
+        assert_eq!(
+            patterns,
+            vec![(base.clone(), "schemas/*".to_string()), (base, "odd[[]name[]]/*".to_string())]
+        );
+        assert!(schema_watch_registration(std::iter::empty()).is_none());
+    }
+
+    #[test]
+    fn test_discovery_inputs_are_ignore_and_config_files() {
+        assert!(is_ignore_file(Path::new("/w/.gitignore")));
+        assert!(is_ignore_file(Path::new("/w/docs/.ignore")));
+        assert!(!is_ignore_file(Path::new("/w/.gitignore.md")));
+        assert!(is_config_file(Path::new("/w/.dmls.toml")));
+        assert!(!is_config_file(Path::new("/w/dmls.toml")));
     }
 
     #[test]

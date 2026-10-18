@@ -159,6 +159,12 @@ pub struct LspFixture<'workspace> {
     /// pushes `workspace/semanticTokens/refresh`, progress-create, and watcher
     /// registrations fire-and-forget).
     server_requests: Vec<Request>,
+    /// Startup events the server reports once each background result is
+    /// installed ([`dmls::StartupHooks::observer`]).
+    startup_events: crossbeam_channel::Receiver<dmls::StartupEvent>,
+    /// Holds the file-list walk until dropped or sent to, for a fixture
+    /// started with [`LspFixture::start_with_file_list_gate`].
+    file_list_gate: Option<crossbeam_channel::Sender<()>>,
 }
 
 impl<'workspace> LspFixture<'workspace> {
@@ -200,19 +206,62 @@ impl<'workspace> LspFixture<'workspace> {
         Self::spawn(workspace, epilogue_delay, Self::fixture_snapshot(workspace))
     }
 
+    /// Like [`LspFixture::start`], but the server's workspace file-list walk
+    /// waits until [`LspFixture::release_file_list`], so a test can observe
+    /// the server before the list is ready. Initialize it with
+    /// [`LspFixture::initialize_unlisted`].
+    pub fn start_with_file_list_gate(workspace: &'workspace LspWorkspace) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::bounded(1);
+        let mut fixture = Self::spawn_with_gate(
+            workspace,
+            Duration::ZERO,
+            Self::fixture_snapshot(workspace),
+            Some(gate_rx),
+        );
+        fixture.file_list_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// Lets a gated file-list walk run.
+    pub fn release_file_list(&mut self) {
+        if let Some(gate) = self.file_list_gate.take() {
+            let _ = gate.send(());
+        }
+    }
+
+    /// Waits until the server has installed the workspace file list and
+    /// refreshed open documents' diagnostics against it.
+    pub fn wait_for_file_list(&mut self) {
+        match self.startup_events.recv_timeout(MESSAGE_BOUND) {
+            Ok(dmls::StartupEvent::FileListInstalled) => {}
+            Err(error) => panic!("no file list within {MESSAGE_BOUND:?}: {error}"),
+        }
+    }
+
     fn spawn(
         workspace: &'workspace LspWorkspace,
         epilogue_delay: Duration,
         snapshot: RequestSnapshot,
     ) -> Self {
+        Self::spawn_with_gate(workspace, epilogue_delay, snapshot, None)
+    }
+
+    fn spawn_with_gate(
+        workspace: &'workspace LspWorkspace,
+        epilogue_delay: Duration,
+        snapshot: RequestSnapshot,
+        gate: Option<crossbeam_channel::Receiver<()>>,
+    ) -> Self {
+        let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks { file_list_gate: gate, observer: Some(events_tx) };
         let (server_side, client_side) = Connection::memory();
         let (outcome_tx, outcome_rx) = mpsc::channel();
         let observations = workspace.observations();
         let worker_observations = Arc::clone(&observations);
         let workspace_root: PathBuf = workspace.path().to_path_buf();
         let server_thread = std::thread::spawn(move || {
-            let result = dmls::run_server(server_side, dmls::RunOptions::new(snapshot))
-                .map_err(|error| error.to_string());
+            let options = dmls::RunOptions::new(snapshot).with_startup_hooks(hooks);
+            let result = dmls::run_server(server_side, options).map_err(|error| error.to_string());
             if !epilogue_delay.is_zero() {
                 std::thread::sleep(epilogue_delay);
             }
@@ -234,6 +283,8 @@ impl<'workspace> LspFixture<'workspace> {
             next_id: 0,
             notifications: Vec::new(),
             server_requests: Vec::new(),
+            startup_events: events_rx,
+            file_list_gate: None,
         }
     }
 
@@ -349,7 +400,16 @@ impl<'workspace> LspFixture<'workspace> {
         }
     }
 
+    /// Initializes the session and waits for the workspace file list, so
+    /// every later diagnostic is computed against it.
     pub fn initialize(&mut self, params: Value) -> Value {
+        let result = self.initialize_unlisted(params);
+        self.wait_for_file_list();
+        result
+    }
+
+    /// Initializes the session without waiting for the file list.
+    pub fn initialize_unlisted(&mut self, params: Value) -> Value {
         let response = self.request("initialize", params);
         assert!(
             response.error.is_none(),

@@ -9,7 +9,7 @@
 //! the multi-edge-kind graph outright rather than overlaying a second index on
 //! a two-edge-kind model.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, ResolutionFailure};
@@ -43,6 +43,27 @@ pub struct DocumentRecord {
     pub canonical: Vec<String>,
     /// Owning wiki root index, or [`WikiDoc::NO_ROOT`] when outside every root.
     pub workspace_id: usize,
+    /// Whether the document's contents were parsed. An unparsed document is
+    /// a file-list entry: it has a root node (links and wiki links land on
+    /// it) but no headings or outgoing references yet, and
+    /// `content_hash` is 0.
+    pub parsed: bool,
+}
+
+/// Whether the workspace file list behind a snapshot is ready.
+///
+/// Diagnostics that depend on which paths exist wait for
+/// [`Listing::Ready`]; an incomplete list never proves a target missing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Listing {
+    /// The startup walk has not finished.
+    Pending,
+    /// The walk finished. `complete` is false when part of the workspace
+    /// could not be listed.
+    Ready {
+        /// Every directory was listed.
+        complete: bool,
+    },
 }
 
 /// An immutable workspace graph snapshot.
@@ -57,6 +78,7 @@ pub struct WorkspaceGraph {
     /// Documents whose canonical logical paths collide under case-fold/NFC —
     /// the R-8 `wiki.portability-collision` set (each maps to its twins).
     portability: HashMap<DocumentId, Vec<DocumentId>>,
+    listing: Listing,
     generation: u64,
 }
 
@@ -76,6 +98,7 @@ pub(crate) struct GraphAssembly {
     by_path: HashMap<PathBuf, DocumentId>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
+    listing: Listing,
     generation: u64,
 }
 
@@ -109,6 +132,26 @@ impl WorkspaceGraph {
         Self::finalize(Self::assemble(indices, generation, wiki_roots, contexts))
     }
 
+    /// Assembles a snapshot over parsed documents plus `unparsed` file-list
+    /// entries (each a document with a root node and no contents), under the
+    /// file list's `listing` state.
+    ///
+    /// [`build`](Self::build) and [`build_with_roots`](Self::build_with_roots)
+    /// are this with no unparsed entries and a complete listing.
+    pub fn build_listed(
+        indices: &BTreeMap<PathBuf, DocumentIndex>,
+        unparsed: &BTreeSet<PathBuf>,
+        listing: Listing,
+        generation: u64,
+        wiki_roots: &[PathBuf],
+        contexts: &dyn DocumentContexts,
+    ) -> Self {
+        let mut assembly =
+            Self::assemble_listed(indices, unparsed, generation, wiki_roots, contexts);
+        assembly.listing = listing;
+        Self::finalize(assembly)
+    }
+
     /// Node/edge assembly pass: mints every node and resolves every edge,
     /// deferring reverse-index and key-index construction to [`finalize`].
     ///
@@ -124,6 +167,29 @@ impl WorkspaceGraph {
         wiki_roots: &[PathBuf],
         contexts: &dyn DocumentContexts,
     ) -> GraphAssembly {
+        Self::assemble_listed(indices, &BTreeSet::new(), generation, wiki_roots, contexts)
+    }
+
+    /// [`assemble`](Self::assemble) over parsed documents plus unparsed
+    /// file-list entries, all assigned ids in one path-sorted order.
+    fn assemble_listed(
+        indices: &BTreeMap<PathBuf, DocumentIndex>,
+        unparsed: &BTreeSet<PathBuf>,
+        generation: u64,
+        wiki_roots: &[PathBuf],
+        contexts: &dyn DocumentContexts,
+    ) -> GraphAssembly {
+        let mut entries: Vec<(&PathBuf, Option<&DocumentIndex>)> = indices
+            .iter()
+            .map(|(path, index)| (path, Some(index)))
+            .chain(
+                unparsed
+                    .iter()
+                    .filter(|path| !indices.contains_key(*path))
+                    .map(|path| (path, None)),
+            )
+            .collect();
+        entries.sort_by(|left, right| left.0.cmp(right.0));
         let mut nodes: Vec<Node> = Vec::new();
         let mut documents: Vec<DocumentRecord> = Vec::new();
         let mut by_path: HashMap<PathBuf, DocumentId> = HashMap::new();
@@ -149,7 +215,7 @@ impl WorkspaceGraph {
         // nodes exist.
         let mut heading_nodes: Vec<(NodeId, NodeId)> = Vec::new();
 
-        for (position, (path, index)) in indices.iter().enumerate() {
+        for (position, (path, index)) in entries.into_iter().enumerate() {
             let doc_id = DocumentId(position as u32);
             by_path.insert(path.clone(), doc_id);
             let (workspace_id, canonical) = document_wiki_meta(path, wiki_roots);
@@ -163,11 +229,16 @@ impl WorkspaceGraph {
             });
             documents.push(DocumentRecord {
                 path: path.clone(),
-                content_hash: index.content_hash,
+                content_hash: index.map_or(0, |index| index.content_hash),
                 root,
                 canonical,
                 workspace_id,
+                parsed: index.is_some(),
             });
+            let Some(index) = index else {
+                headings_by_doc.insert(doc_id, Vec::new());
+                continue;
+            };
 
             let mut doc_headings: Vec<(NodeId, String, String)> = Vec::new();
             for heading in &index.headings {
@@ -339,6 +410,7 @@ impl WorkspaceGraph {
             })
             .collect();
         let doc_roots: Vec<NodeId> = documents.iter().map(|record| record.root).collect();
+        let parsed: Vec<bool> = documents.iter().map(|record| record.parsed).collect();
         for (source, doc_id, fact) in pending_wiki {
             let (resolution, info) = resolve_wiki_link(
                 &fact,
@@ -346,6 +418,7 @@ impl WorkspaceGraph {
                 &wiki_docs,
                 &doc_roots,
                 &headings_by_doc,
+                &parsed,
             );
             for target in wiki_edge_targets(&resolution) {
                 edges.push(Edge::to_node(source, EdgeKind::References, target));
@@ -400,6 +473,7 @@ impl WorkspaceGraph {
             by_path,
             nodes,
             edges,
+            listing: Listing::Ready { complete: true },
             generation,
         }
     }
@@ -416,6 +490,7 @@ impl WorkspaceGraph {
             by_path,
             nodes,
             edges,
+            listing,
             generation,
         } = assembly;
         let reverse = ReverseIndex::build(&edges);
@@ -435,6 +510,7 @@ impl WorkspaceGraph {
             reverse,
             keys,
             portability,
+            listing,
             generation,
         }
     }
@@ -442,6 +518,11 @@ impl WorkspaceGraph {
     /// The snapshot generation.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// The state of the file list behind this snapshot.
+    pub fn listing(&self) -> Listing {
+        self.listing
     }
 
     /// Number of documents.
@@ -751,15 +832,19 @@ fn resolve_link(
                 Some(Located::File(file)) => return LinkResolution::File(file),
                 Some(Located::Missing(_)) | None => return LinkResolution::Unresolved,
             };
+            let Some(record) = resolver.documents.get(target_doc.0 as usize) else {
+                return LinkResolution::Unresolved;
+            };
             match fragment {
+                // An unparsed target's headings are unknown, so its anchor is
+                // not checked; the link lands on the document until a feature
+                // needs the target parsed.
+                Some(_) if !record.parsed => LinkResolution::Node(record.root),
                 Some(slug) => match heading_by_slug.get(&(target_doc, slug.clone())) {
                     Some(node) => LinkResolution::Node(*node),
                     None => LinkResolution::Unresolved,
                 },
-                None => match resolver.documents.get(target_doc.0 as usize) {
-                    Some(record) => LinkResolution::Node(record.root),
-                    None => LinkResolution::Unresolved,
-                },
+                None => LinkResolution::Node(record.root),
             }
         }
     }
@@ -937,6 +1022,7 @@ fn resolve_wiki_link(
     wiki_docs: &[WikiDoc],
     doc_roots: &[NodeId],
     headings_by_doc: &HashMap<DocumentId, Vec<(NodeId, String, String)>>,
+    parsed_docs: &[bool],
 ) -> (WikiResolution, Option<WikiInfo>) {
     if fact.unsupported {
         return (WikiResolution::Unsupported, None);
@@ -986,6 +1072,9 @@ fn resolve_wiki_link(
             let base_info = percent_info.or(confusing);
             match &fact.heading {
                 None => (WikiResolution::Resolved(file_root), base_info),
+                // An unparsed target's headings are unknown: the link lands on
+                // the file until a feature needs the target parsed.
+                Some(_) if !parsed_docs[index] => (WikiResolution::Resolved(file_root), base_info),
                 Some(heading) => {
                     resolve_in_document(target_doc, file_root, heading, headings_by_doc, base_info)
                 }

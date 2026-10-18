@@ -131,20 +131,22 @@ its `data`, so a client never has to parse the message:
 The classes are biscuit-file's `ResolutionFailure` variants: `InvalidReference`,
 `MissingContext`, `NoMatch`, `Io`, and `UnsupportedRemote`.
 
-## Indexed documents and the disk
+## Workspace documents and the disk
 
 The workspace graph resolves links, transclusions, and file uses with the
-same answer composition gives. When the first planned candidate is an indexed
-document, it resolves there without touching the disk. Otherwise the graph
-asks the file resolver, so an existing file DMLS never indexed is still a
+same answer composition gives. When the first planned candidate is a
+workspace document (a Markdown file in the workspace file list, or an open
+buffer), it resolves there without touching the disk. Otherwise the graph
+asks the file resolver, so an existing file outside the list is still a
 target. For example, with only `repo/docs/` open, `[t](&target.md)` links to
 `repo/target.md`, go-to-definition opens it, and no `dm.links.broken_path` is
 reported. When no file exists, a later candidate that is an open, unsaved
 buffer still counts.
 
-The index is used only for headings: a `#fragment` is checked against an
-indexed document, and is left unchecked on a file outside the index. Features
-that report a single target, such as directive links and transclusion
+A `#fragment` is checked against a workspace document, which is parsed the
+first time an open document's link or heading completion needs its headings.
+A `#fragment` on a file outside the list is never checked. Features that report
+a single target, such as directive links and transclusion
 diagnostics, probe the filesystem the way composition does. The
 create-missing-file code action creates the file at the first planned
 candidate, where `md compose` would look first.

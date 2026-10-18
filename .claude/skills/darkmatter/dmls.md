@@ -60,13 +60,34 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   assembles no schema at all (`SchemaOutcome::Ready(None)`): `$schema` and
   trigger payloads cannot resolve without one, and `DarkmatterSchemas::new`
   requires a context.
+- Startup lists files and parses only open buffers. `discover_workspace`
+  returns Markdown (`include`/`exclude`) and YAML (`exclude` only) paths,
+  with `require_git(false)`, `.git` skipped, no contents read, and walk errors
+  marking the list incomplete; it runs on a background thread and reaches the
+  dispatch thread as an `Internal` event on the router's `select!`, which owns
+  every index mutation. `WorkspaceIndex` holds the list: every listed
+  Markdown file is a graph document, unparsed until needed
+  (`DocumentRecord::parsed == false`, root node only, anchors to it
+  unchecked). Parse on demand with `prepare_targets` (fragment links, heading
+  wiki links, the transclusion closure) or `ensure_parsed`; a disk change
+  marks a parse stale (xxHash reuse on re-read, a failed read drops it); open
+  buffers override disk until `close_buffer`. References, rename,
+  `willRenameFiles`, and workspace symbols call
+  `ServerState::ensure_full_index`. Diagnostics that depend on which paths
+  exist are withheld while `WorkspaceGraph::listing()` is `Pending`
+  (`router::listing_gates`). L1 sessions: `LspFixture::initialize` waits for
+  the list through `RunOptions::with_startup_hooks` (`StartupHooks`
+  observer); `start_with_file_list_gate` + `initialize_unlisted` holds it.
+  `workspace/symbol` (`flush_server`) now builds the full index, so a
+  parse-counting test must not use it as a barrier.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
-  `arena::locate` takes the first planned candidate when it is indexed (no
-  probe), else asks `context::resolve_reference`, else, only on a clean
-  `NoMatch`, a later indexed candidate (an unsaved buffer); an `Io` probe
-  failure stays a broken path. An existing unindexed file is
-  `EdgeTarget::File`, never a broken link; the index decides headings, never
-  existence, and anchors on unindexed files are not checked. Tests use `context::test_support`
+  `arena::locate` takes the first planned candidate when it is a graph
+  document (listed or open; no probe), else asks
+  `context::resolve_reference`, else, only on a clean `NoMatch`, a later
+  graph-document candidate (an unsaved buffer); an `Io` probe failure stays a
+  broken path. An existing file outside the list is `EdgeTarget::File`, never
+  a broken link; the list decides graph documents, never existence, and
+  anchors on files outside it are not checked. Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
   real `RepositoryContexts`; empty graphs use `NoContexts`
@@ -77,6 +98,14 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   are watched (`watch::context_input_globs`, from sniff's
   `PACKAGE_MANIFEST_FILE_NAMES`) but never indexed (`is_context_input`).
   Rescan mode diffs `scan_manifests` fingerprints; config reload clears all.
+  The workspace registration also watches `**/*.yaml|yml` and the discovery
+  inputs (`.gitignore`, `.ignore`, `.dmls.toml`: re-list). Schema-location
+  watches (`schema_watch_registration`, one `<parent>` + `<folder>/*` per
+  folder in `OverlayState::trigger_watch_folders`) are re-synced after every
+  message when the client has `relativePatternSupport`; without it, or on a
+  rejected registration, `schema_watch_fallback` makes every save mark the
+  registries stale. A rejected workspace registration switches to
+  `ServerRescan`.
 - The overlay schema cache key includes
   `darkmatter::markdown::compose::file_resolution_context_identity(context)`
   (the same exhaustive encoding the compose graph identity uses: source,
@@ -84,25 +113,40 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   environment, magic and vault roots, tree root and origin) plus the
   resolution's `generation()`, so the same text under another context (a
   different `^` root or `SCHEMAS_DIR`) re-assembles and a rebuilt context
-  re-validates file values. Never hand-roll a context hash in DMLS. A test
-  that needs a cache miss must vary the context with no trigger registry in
-  play (the registry's `Debug` also enters the key and masks the context
-  term), as `overlay::tests::schema_cache_keys_on_the_package_root` does.
+  re-validates file values. Never hand-roll a context hash in DMLS. The
+  trigger registry enters the key as its install `version`, and the
+  registry's envelopes and payload files are left out of the cache's
+  re-hashed dependencies (the registry cache tracks them).
 - `dmls/tests/l1/schema_roots_parity.rs` is the `md` vs DMLS parity gate for
   schema roots, applied triggers, bare-name `$schema`, and `$path`
   definition errors; DMLS shows missing required properties only with
   `[schema] strict = true`.
 - `context_build_count()` is a process-wide work counter; L1 tests assert
   deltas (nextest runs one test per process). `work_counters::work_counts()`
-  does the same for DMLS file reads, content hashes, and Markdown document
-  parses; route every new DMLS read/hash through its `read`/`read_to_string`/
-  `hash_bytes` helpers. Timing that decides behavior reads a `clock::Clock`
+  does the same for DMLS file reads, content hashes, Markdown document
+  parses, schema-root enumerations, and trigger-registry scans; route every
+  new DMLS read/hash through its `read`/`read_to_string`/`hash_bytes`
+  helpers. Timing that decides behavior reads a `clock::Clock`
   (`ManualClock` in tests). `log_capture::CapturedLogs` captures formatted
   `tracing` lines: `scoped` sees only the calling thread, `global` sees every
   thread (once per process). A test that runs `run_server` on its own thread
   wraps it in `tracing::dispatcher::with_default(&logs.dispatch(), ..)`
   instead (see `router/logging_tests.rs`); `initialized` never reaches
   dispatch, since `lsp_server`'s handshake consumes it.
+- Trigger registries (`overlay/registry.rs`) are cached per document path
+  and served with no I/O until invalidated. Root contents (listing, text,
+  xxHash, classification) are shared across documents and fed to the
+  library through `triggers::scan_with_source`, so a registry always equals
+  `triggers::scan`. Invalidation enters only through
+  `OverlayState::invalidate_trigger_inputs` (watched events, any YAML
+  `didSave`, including an open buffer) and
+  `invalidate_all_trigger_registries` (rescan, config reload, manifest
+  change). A test that edits a schema file on disk must send one of those,
+  or the edit is invisible by design. Failure logging and trigger-file
+  diagnostics share one transition record per (workspace boundary,
+  document folder): `warn` when new, `debug` on a repeat, `info` on
+  recovery; a cold failure logs `trigger registry unavailable`. Root I/O
+  errors (including a non-UTF-8 root file) never serve last-good data.
 - Request timing (`request_timing`): the router starts a `RequestTimings` on
   `ServerState` at each dequeue and emits exactly one `CompletionEvent` per
   request or notification (`slow request`/`slow notification` at `warn` from

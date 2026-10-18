@@ -810,6 +810,78 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     fixture.shutdown();
 }
 
+/// The diagnostics last published for `uri` once the server is idle.
+fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
+    fixture.flush_server();
+    let mut latest = fixture.wait_for_diagnostics_params(uri);
+    while let Some(params) = fixture.take_buffered_diagnostics(uri) {
+        latest = params;
+    }
+    latest["diagnostics"].as_array().cloned().unwrap_or_default()
+}
+
+fn requires_model(diagnostics: &[Value]) -> bool {
+    diagnostics.iter().any(|diagnostic| {
+        diagnostic["code"] == json!("dm.schema.missing_required")
+            && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+    })
+}
+
+#[test]
+fn saving_an_open_trigger_buffer_updates_consumers_and_unsaved_edits_do_not() {
+    let workspace = LspWorkspace::new();
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    let envelope_path = schemas.join("prompt.trigger.yaml");
+    let document_path = workspace.path().join("prompt.md");
+    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let retargeted = "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: prompt.yaml\n";
+    let document = "---\nprompt: hello\n---\n\nBody\n";
+    std::fs::write(&envelope_path, envelope).unwrap();
+    std::fs::write(schemas.join("prompt.yaml"), "$schema:\n  model: string(required)\n").unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_initialize_params(workspace.path()));
+    let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    open(&fixture, document_uri.as_str(), document);
+    assert!(requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": {
+            "uri": envelope_uri.as_str(), "languageId": "yaml", "version": 1, "text": envelope
+        } }),
+    );
+
+    // An unsaved edit of the open envelope does not reach its consumers.
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": envelope_uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": retargeted }]
+        }),
+    );
+    assert!(
+        requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())),
+        "an unsaved schema edit must not change consuming documents"
+    );
+
+    // Saving it does, with no watched-file event.
+    std::fs::write(&envelope_path, retargeted).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": envelope_uri.as_str() } }),
+    );
+    assert!(
+        !requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())),
+        "saving the open envelope must refresh its consumers"
+    );
+
+    fixture.shutdown();
+}
+
 fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");

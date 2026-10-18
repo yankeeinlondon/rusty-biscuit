@@ -93,20 +93,27 @@ flowchart TD
 
 | Consumer | How it resolves | Touches disk? |
 |---|---|---|
-| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is an **indexed** document; otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not indexed |
+| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **workspace document** (a Markdown file in the workspace file list, or an open buffer); otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not a workspace document |
 | Single-target features (directive links, definition and hover, transclusion diagnostics, frontmatter navigation, the create-missing-file action) | `resolve_reference`: the first planned candidate that exists, else the first candidate as the place a new file would go | Yes, as composition does |
-| Anchor completion | The first planned candidate that is an indexed document | No |
+| Anchor completion | The first planned candidate that is a workspace document | Reads that one document if it has not been parsed |
 
-The index decides where headings live, never whether a file exists. A graph
-edge lands on an indexed document's node, on an existing file the index does
-not hold (`EdgeTarget::File`: above the workspace folder, in `HOME`, under a
-magic root, or not Markdown), or stays unresolved. For example, with only
-`repo/docs/` open, `[t](../target.md)` links to `repo/target.md` and is not
-broken. A `#fragment` on an unindexed file is not checked, because its
-headings were never read; it is neither resolved to a heading nor reported
-missing. A link to an open, unsaved buffer still resolves, unless a place
-searched before it could not be checked (permission denied, a symlink loop):
-that link stays broken with the `Io` failure class, as `md compose` would fail.
+The file list decides which workspace documents exist as graph nodes, never
+whether a file exists. A graph edge lands on a workspace document's node, on
+an existing file outside the list (`EdgeTarget::File`: above the workspace
+folder, in `HOME`, under a magic root, or not Markdown), or stays
+unresolved. For example, with only `repo/docs/` open, `[t](../target.md)`
+links to `repo/target.md` and is not broken.
+
+A workspace document that is not open is parsed only when a feature needs
+its contents: a `#fragment` link or `[[note#heading]]` from an open document
+(to check the anchor), heading completion, hover, or definition on a link to
+it, and the `::file`/`::code` chain followed outward from an open document
+(for cycle detection). Until then its `#fragment`s are neither resolved to a
+heading nor reported missing. A `#fragment` on a file outside the list is
+never checked. A link to an open, unsaved buffer still resolves, unless a
+place searched before it could not be checked (permission denied, a symlink
+loop): that link stays broken with the `Io` failure class, as `md compose`
+would fail.
 
 ### Invalidation
 
@@ -122,11 +129,19 @@ When anything is dropped, the graph is relinked so every reference
 re-resolves, and diagnostics are re-published for every open document.
 
 Clients that watch files are asked to report, besides the configured
-document globs and schema YAML, every package manifest sniff detects packages
-by (`PACKAGE_MANIFEST_FILE_NAMES`: `Cargo.toml`, `package.json`,
-`pyproject.toml`, `go.mod`) and `**/.git/config`
+document globs, every YAML file (`**/*.yaml`, `**/*.yml`, even when
+`workspace.include` is empty), the discovery inputs `.gitignore`, `.ignore`,
+and `.dmls.toml` (a change re-lists the workspace), every package manifest
+sniff detects packages by (`PACKAGE_MANIFEST_FILE_NAMES`: `Cargo.toml`,
+`package.json`, `pyproject.toml`, `go.mod`), and `**/.git/config`
 ([`watch.rs`](../../dmls/src/workspace/watch.rs)). These context inputs
-only drop contexts; they are never indexed as documents. In server-rescan
+only drop contexts; they are never indexed as documents. A client that
+supports watchers rooted at a folder (`relativePatternSupport`) is also
+asked to watch each folder the trigger registries read, wherever it lives,
+including a schema root that does not exist yet. A client without that
+support, or one that rejects the registration, gets the save fallback
+instead: every save marks the trigger registries stale. A client that
+rejects the workspace registration is switched to server-rescan mode. In server-rescan
 mode (clients without a reliable watcher), each save re-hashes every
 package manifest under the workspace roots and compares the result with the
 previous scan. The rescan does not read `.git/config`, so a repaired

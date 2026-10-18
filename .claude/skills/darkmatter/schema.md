@@ -445,7 +445,9 @@ For grammar or schema changes, cover:
   package, package area, `base_dir()`, `SCHEMAS_DIR`, `~/schemas`, each with a
   `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
   `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
-  states; DMLS and `md` share them through `triggers::scan(&ctx)`.
+  states; DMLS and `md` share them through `triggers::scan(&ctx)` (DMLS
+  calls `scan_with_source`, the same scan over its cached root contents;
+  `enumerate_root_files` is the one root listing).
 - `for_document` is fallible: only `NotFound`/`NotADirectory` (and the
   package/area/tree symlink policy) make a root `Absent`. Any other metadata
   failure (e.g. `PermissionDenied` on an ancestor) is `SchemaError::Io`

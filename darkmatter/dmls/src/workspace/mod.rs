@@ -1,6 +1,6 @@
-//! Workspace state: open documents, on-disk discovery, the worker-pool
-//! startup indexer, watch handling, and the shared snapshot the protocol loop
-//! reads from.
+//! Workspace state: open documents, the on-disk file list, the worker-pool
+//! full-index parser, watch handling, and the shared snapshot the protocol
+//! loop reads from.
 
 pub mod discover;
 pub mod documents;

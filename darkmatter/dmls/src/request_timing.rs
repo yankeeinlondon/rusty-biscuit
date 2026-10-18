@@ -10,7 +10,7 @@
 //! A request is measured from dequeue to sending its response; a notification
 //! has no response and is measured through its handler's completion. Work the
 //! handler hands to another thread (debounced diagnostics publishing, the
-//! startup index) is not part of either figure.
+//! startup file-list walk) is not part of either figure.
 //!
 //! ## Stage nesting
 //!
