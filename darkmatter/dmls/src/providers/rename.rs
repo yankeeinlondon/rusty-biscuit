@@ -39,12 +39,14 @@ use crate::wiki::{self, Match, ParseOutcome, WikiDoc, shortest_unique_suffix};
 use crate::workspace::{DocumentStore, file_path_to_uri, resolve_wiki_roots};
 
 /// Everything the rename providers need beyond the request payload: the open
-/// buffers, the current graph snapshot, config/profile, workspace roots, and the
+/// buffers, the graph to answer from, config/profile, workspace roots, and the
 /// negotiated encoding (for building source maps of closed documents).
 pub struct RenameEnv<'a> {
     /// Open-buffer store (authoritative over disk).
     pub documents: &'a DocumentStore,
-    /// The current workspace graph snapshot.
+    /// The graph to answer from: the server's request graph over the index
+    /// store's candidates, whose wiki universe is the whole file list, or
+    /// the live snapshot for `prepareRename`.
     pub graph: &'a WorkspaceGraph,
     /// Effective configuration.
     pub config: &'a DmlsConfig,

@@ -812,6 +812,12 @@ impl WorkspaceGraph {
         &self.wiki.universe
     }
 
+    /// [`wiki_universe`](Self::wiki_universe), shared: what a request-scoped
+    /// graph over a few of these documents resolves wiki links against.
+    pub fn shared_wiki_universe(&self) -> Arc<WikiUniverse> {
+        Arc::clone(&self.wiki.universe)
+    }
+
     /// `document`'s slot in [`wiki_universe`](Self::wiki_universe).
     pub fn wiki_slot(&self, document: DocumentId) -> Option<usize> {
         self.wiki.document_slots.get(document.0 as usize).copied()

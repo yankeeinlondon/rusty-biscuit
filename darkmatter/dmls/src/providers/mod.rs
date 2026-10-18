@@ -58,7 +58,8 @@ pub struct DocumentContext<'a> {
     pub text: &'a str,
     /// Byte ↔ position map for this `(uri, version)`.
     pub source_map: &'a SourceMap,
-    /// The current workspace graph snapshot.
+    /// The graph to answer from: the live snapshot, or for references a
+    /// request graph over the index store's candidates.
     pub graph: &'a WorkspaceGraph,
     /// This document's id in `graph`, if indexed.
     pub doc_id: Option<DocumentId>,
@@ -102,7 +103,7 @@ pub trait Provider: Send + Sync {
     }
 
     /// Workspace-wide symbols matching `query`.
-    fn workspace_symbols(&self, query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
+    fn workspace_symbols(&self, query: &str, documents: &[symbols::SymbolDocument]) -> Vec<WorkspaceSymbol> {
         Vec::new()
     }
 
@@ -163,8 +164,8 @@ impl Provider for SubstrateProvider {
         symbols::document_symbols(ctx)
     }
 
-    fn workspace_symbols(&self, query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
-        symbols::workspace_symbols(query, graph)
+    fn workspace_symbols(&self, query: &str, documents: &[symbols::SymbolDocument]) -> Vec<WorkspaceSymbol> {
+        symbols::workspace_symbols(query, documents)
     }
 
     fn definition(&self, ctx: &DocumentContext, offset: usize) -> Vec<Location> {
@@ -391,8 +392,8 @@ impl ProviderRegistry {
     }
 
     /// Workspace symbols: union across providers, capped.
-    pub fn workspace_symbols(&self, query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
-        let mut merged = self.collect("workspaceSymbol", |p| p.workspace_symbols(query, graph));
+    pub fn workspace_symbols(&self, query: &str, documents: &[symbols::SymbolDocument]) -> Vec<WorkspaceSymbol> {
+        let mut merged = self.collect("workspaceSymbol", |p| p.workspace_symbols(query, documents));
         merged.truncate(WORKSPACE_SYMBOL_CAP);
         merged
     }
@@ -488,7 +489,7 @@ pub(crate) fn completion_heading_target(ctx: &DocumentContext, offset: usize) ->
 /// The document the link, wiki link, or transclusion at `offset` in the
 /// document at `path` lands on, read from the graph's resolved edges: a
 /// graph document, or a Markdown file outside the graph.
-pub(crate) fn reference_target_at(
+pub fn reference_target_at(
     graph: &WorkspaceGraph,
     path: &Path,
     offset: usize,

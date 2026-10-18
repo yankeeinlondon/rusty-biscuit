@@ -43,6 +43,7 @@ use dmls::context::RepositoryContexts;
 use dmls::graph::{WorkspaceGraph, index_document};
 use dmls::wiki::WikiUniverse;
 use dmls::providers::rename::{RenameEnv, RenameError};
+use dmls::providers::symbols::SymbolDocument;
 use dmls::providers::{DocumentContext, ProviderRegistry};
 use dmls::source_map::{PositionEncoding, SourceMap};
 use dmls::workspace::{
@@ -319,6 +320,17 @@ impl Oracle {
     /// if `path` were open with its disk text: heading backlinks, link
     /// targets, wiki backlinks, and DSL transcluded-by.
     pub fn references(&self, path: &Path, position: Position, include_declaration: bool) -> Vec<OracleLocation> {
+        self.references_over(&self.graph, path, position, include_declaration)
+    }
+
+    /// [`Oracle::references`] answered from `graph` instead of the full graph.
+    pub fn references_over(
+        &self,
+        graph: &WorkspaceGraph,
+        path: &Path,
+        position: Position,
+        include_declaration: bool,
+    ) -> Vec<OracleLocation> {
         let text = self.text(path);
         let uri = file_path_to_uri(path).expect("absolute document path");
         let source_map = self.source_map(path, text);
@@ -328,8 +340,8 @@ impl Oracle {
             path,
             text,
             source_map: &source_map,
-            graph: &self.graph,
-            doc_id: self.graph.document_id(path),
+            graph,
+            doc_id: graph.document_id(path),
             config: self.config.effective(),
             profile: &self.profile,
             // No references provider reads the frontmatter overlay, and
@@ -347,14 +359,34 @@ impl Oracle {
     ///
     /// The provider's [`RenameError`] (not on a heading, or ambiguous).
     pub fn rename(&self, path: &Path, position: Position, new_name: &str) -> Result<Vec<OracleEdit>, RenameError> {
+        self.rename_over(&self.graph, path, position, new_name)
+    }
+
+    /// [`Oracle::rename`] answered from `graph`.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Oracle::rename`].
+    pub fn rename_over(
+        &self,
+        graph: &WorkspaceGraph,
+        path: &Path,
+        position: Position,
+        new_name: &str,
+    ) -> Result<Vec<OracleEdit>, RenameError> {
         let uri = file_path_to_uri(path).expect("absolute document path");
-        dmls::providers::rename::rename(&self.rename_env(), &uri, position, new_name)
+        dmls::providers::rename::rename(&self.rename_env(graph), &uri, position, new_name)
             .map(|edit| normalize_workspace_edit(&edit))
     }
 
     /// `workspace/willRenameFiles` for `(old, new)` path pairs; `None` when
     /// the provider declines (nothing to edit, or an unsafe rename).
     pub fn will_rename_files(&self, renames: &[(PathBuf, PathBuf)]) -> Option<Vec<OracleEdit>> {
+        self.will_rename_files_over(&self.graph, renames)
+    }
+
+    /// [`Oracle::will_rename_files`] answered from `graph`.
+    pub fn will_rename_files_over(&self, graph: &WorkspaceGraph, renames: &[(PathBuf, PathBuf)]) -> Option<Vec<OracleEdit>> {
         let files: Vec<FileRename> = renames
             .iter()
             .map(|(old, new)| FileRename {
@@ -362,7 +394,7 @@ impl Oracle {
                 new_uri: file_path_to_uri(new).expect("absolute new path").as_str().to_string(),
             })
             .collect();
-        dmls::providers::rename::will_rename_files(&self.rename_env(), &files)
+        dmls::providers::rename::will_rename_files(&self.rename_env(graph), &files)
             .map(|edit| normalize_workspace_edit(&edit))
     }
 
@@ -371,6 +403,11 @@ impl Oracle {
     /// ambiguous candidates that are documents of the graph, so a scoped
     /// graph lists fewer of them by design.
     pub fn wiki_diagnostics(&self, path: &Path) -> Vec<(u32, String, String)> {
+        self.wiki_diagnostics_over(&self.graph, path)
+    }
+
+    /// [`Oracle::wiki_diagnostics`] judged in `graph`.
+    pub fn wiki_diagnostics_over(&self, graph: &WorkspaceGraph, path: &Path) -> Vec<(u32, String, String)> {
         let text = self.text(path);
         let uri = file_path_to_uri(path).expect("absolute document path");
         let source_map = self.source_map(path, text);
@@ -380,8 +417,8 @@ impl Oracle {
             path,
             text,
             source_map: &source_map,
-            graph: &self.graph,
-            doc_id: self.graph.document_id(path),
+            graph,
+            doc_id: graph.document_id(path),
             config: self.config.effective(),
             profile: &self.profile,
             overlay: None,
@@ -404,13 +441,43 @@ impl Oracle {
 
     /// `workspace/symbol` for `query` (after the registry's cap).
     pub fn workspace_symbols(&self, query: &str) -> Vec<OracleSymbol> {
-        normalize_symbols(self.registry.workspace_symbols(query, &self.graph))
+        self.workspace_symbols_over(&dmls::providers::symbols::graph_symbol_documents(&self.graph), query)
     }
 
-    fn rename_env(&self) -> RenameEnv<'_> {
+    /// [`Oracle::workspace_symbols`] over `documents` instead of the full
+    /// graph's.
+    pub fn workspace_symbols_over(&self, documents: &[SymbolDocument], query: &str) -> Vec<OracleSymbol> {
+        normalize_symbols(self.registry.workspace_symbols(query, documents))
+    }
+
+    /// The contexts every document resolves through.
+    pub fn contexts(&self) -> &RepositoryContexts {
+        &self.contexts
+    }
+
+    /// The file list's wiki universe under the configured wiki roots: what
+    /// the server's snapshot supplies to a request graph.
+    pub fn file_list_universe(&self) -> WikiUniverse {
+        let wiki_roots = resolve_wiki_roots(&self.roots, self.config.effective().wiki.wiki_root.as_deref());
+        WikiUniverse::new(self.texts.keys().cloned(), &wiki_roots)
+    }
+
+    /// The position of byte `offset` in the listed file `path`.
+    pub fn position_at(&self, path: &Path, offset: usize) -> Position {
+        let text = self.text(path);
+        self.source_map(path, text).byte_to_lsp(offset).expect("offset inside the text")
+    }
+
+    /// The byte offset of `position` in the listed file `path`.
+    pub fn offset_at(&self, path: &Path, position: Position) -> usize {
+        let text = self.text(path);
+        self.source_map(path, text).lsp_to_byte(position).expect("position inside the text")
+    }
+
+    fn rename_env<'a>(&'a self, graph: &'a WorkspaceGraph) -> RenameEnv<'a> {
         RenameEnv {
             documents: &self.documents,
-            graph: &self.graph,
+            graph,
             config: self.config.effective(),
             profile: &self.profile,
             roots: &self.roots,

@@ -240,14 +240,17 @@ impl<'workspace> LspFixture<'workspace> {
     /// it, so a test can change the workspace while the round's reading is
     /// stale.
     pub fn start_with_full_index_gate(workspace: &'workspace LspWorkspace) -> Self {
+        Self::start_with_full_index_gate_and_snapshot(workspace, Self::fixture_snapshot(workspace))
+    }
+
+    /// [`LspFixture::start_with_full_index_gate`] with the server's request
+    /// snapshot supplied by the test.
+    pub fn start_with_full_index_gate_and_snapshot(
+        workspace: &'workspace LspWorkspace,
+        snapshot: RequestSnapshot,
+    ) -> Self {
         let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
-        let mut fixture = Self::spawn_with_hooks(
-            workspace,
-            Duration::ZERO,
-            Self::fixture_snapshot(workspace),
-            None,
-            Some(gate_rx),
-        );
+        let mut fixture = Self::spawn_with_hooks(workspace, Duration::ZERO, snapshot, None, Some(gate_rx));
         fixture.full_index_gate = Some(gate_tx);
         fixture
     }

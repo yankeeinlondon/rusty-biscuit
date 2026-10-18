@@ -49,6 +49,10 @@ impl FactsSource for FaultyFacts {
         self.gate()?;
         self.inner.remove_missing()
     }
+    fn remove_paths(&mut self, paths: &[PathBuf]) -> Result<usize, StoreFailure> {
+        self.gate()?;
+        self.inner.remove_paths(paths)
+    }
     fn candidates_for(&mut self, target: &Path) -> Result<Vec<PathBuf>, StoreFailure> {
         self.gate()?;
         self.inner.candidates_for(target)
@@ -135,6 +139,9 @@ fn a_readable_store_that_fails_a_write_is_salvaged_into_memory() {
         }
         fn remove_missing(&mut self) -> Result<usize, StoreFailure> {
             self.0.remove_missing()
+        }
+        fn remove_paths(&mut self, paths: &[PathBuf]) -> Result<usize, StoreFailure> {
+            self.0.remove_paths(paths)
         }
         fn candidates_for(&mut self, target: &Path) -> Result<Vec<PathBuf>, StoreFailure> {
             self.0.candidates_for(target)

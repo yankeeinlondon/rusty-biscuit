@@ -39,6 +39,8 @@ pub trait FactsSource: Send + std::fmt::Debug {
     fn upsert(&mut self, facts: &[FileFacts]) -> Result<UpsertReport, StoreFailure>;
     /// Drops the facts of files missing on disk; returns how many.
     fn remove_missing(&mut self) -> Result<usize, StoreFailure>;
+    /// Drops the facts of those `paths` missing on disk; returns how many.
+    fn remove_paths(&mut self, paths: &[PathBuf]) -> Result<usize, StoreFailure>;
     /// Files holding a candidate key of `target`, sorted by path.
     fn candidates_for(&mut self, target: &Path) -> Result<Vec<PathBuf>, StoreFailure>;
     /// Every file with its headings, sorted by path.
@@ -116,6 +118,9 @@ impl FactsSource for StoreFacts {
     fn remove_missing(&mut self) -> Result<usize, StoreFailure> {
         self.store.remove_missing()
     }
+    fn remove_paths(&mut self, paths: &[PathBuf]) -> Result<usize, StoreFailure> {
+        self.store.remove_paths(paths)
+    }
     fn candidates_for(&mut self, target: &Path) -> Result<Vec<PathBuf>, StoreFailure> {
         self.store.candidates_for(target)
     }
@@ -157,6 +162,13 @@ impl MemoryFacts {
         before - self.0.len()
     }
 
+    fn drop_paths(&mut self, paths: &[PathBuf]) -> usize {
+        paths
+            .iter()
+            .filter(|path| super::store::is_missing(path) && self.0.remove(*path).is_some())
+            .count()
+    }
+
     fn candidates(&self, target: &Path) -> Vec<PathBuf> {
         let keys = target_keys(target);
         let mut out: Vec<PathBuf> = self
@@ -188,6 +200,9 @@ impl FactsSource for MemoryFacts {
     }
     fn remove_missing(&mut self) -> Result<usize, StoreFailure> {
         Ok(self.drop_missing())
+    }
+    fn remove_paths(&mut self, paths: &[PathBuf]) -> Result<usize, StoreFailure> {
+        Ok(self.drop_paths(paths))
     }
     fn candidates_for(&mut self, target: &Path) -> Result<Vec<PathBuf>, StoreFailure> {
         Ok(self.candidates(target))
@@ -327,6 +342,16 @@ impl RootFacts {
             }
         }
         self.memory.drop_missing()
+    }
+
+    pub fn remove_paths(&mut self, paths: &[PathBuf]) -> usize {
+        if let Some(primary) = self.primary.as_mut() {
+            match primary.remove_paths(paths) {
+                Ok(removed) => return removed,
+                Err(failure) => self.fall_back(failure),
+            }
+        }
+        self.memory.drop_paths(paths)
     }
 
     pub fn candidates_for(&mut self, target: &Path) -> Vec<PathBuf> {

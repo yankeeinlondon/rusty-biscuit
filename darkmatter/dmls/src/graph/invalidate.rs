@@ -658,6 +658,21 @@ impl WorkspaceIndex {
         self.rebuild();
     }
 
+    /// The parse of every open buffer, saved or not.
+    pub fn open_buffers(&self) -> impl Iterator<Item = &DocumentIndex> {
+        self.open.iter().filter_map(|path| self.documents.get(path))
+    }
+
+    /// `path`'s disk parse: `None` when it is unparsed or an open buffer
+    /// holds it. A stale parse is returned too; its hash tells whether it
+    /// still matches the bytes.
+    pub fn disk_parse(&self, path: &Path) -> Option<&DocumentIndex> {
+        if self.open.contains(path) {
+            return None;
+        }
+        self.documents.get(path)
+    }
+
     /// Whether a document is parsed.
     pub fn contains(&self, path: &Path) -> bool {
         self.documents.contains_key(path)

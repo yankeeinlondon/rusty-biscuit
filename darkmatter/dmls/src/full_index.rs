@@ -1,7 +1,9 @@
 //! The on-demand full index: its build states and the requests waiting on it.
 //!
 //! Find references, heading rename, `workspace/willRenameFiles`, and
-//! workspace symbols need every Markdown document's contents. The first such
+//! workspace symbols are answered from the index store
+//! ([`crate::index_store::WorkspaceFacts`]), which needs every Markdown
+//! document read once in this process; each build round fills it. The first such
 //! request starts one background build; every request that needs the index
 //! while it builds waits on the same build. The router owns this state on
 //! the dispatch thread, which keeps answering edits, cancellation, and
@@ -24,8 +26,11 @@
 //! A build runs in rounds ([`WorkspaceIndex::begin_full_build`],
 //! [`WorkspaceIndex::finish_full_build`]): a round reads the unparsed listed
 //! files with the index lock released, and the dispatch thread then adopts
-//! only what nothing changed meanwhile. A build becomes ready when a round
-//! leaves nothing unparsed.
+//! only what nothing changed meanwhile. Each round also runs an index-store
+//! pass ([`FactsPlan`]; see [`crate::index_store::WorkspaceFacts`]), and a
+//! build becomes ready when a round leaves nothing unparsed and no Markdown
+//! file changed while its store pass read. A ready index whose store is not
+//! ready, and in fallback watch mode every rename, starts a build again.
 //!
 //! [`WorkspaceIndex::begin_full_build`]: crate::graph::WorkspaceIndex::begin_full_build
 //! [`WorkspaceIndex::finish_full_build`]: crate::graph::WorkspaceIndex::finish_full_build
@@ -102,6 +107,20 @@ pub(crate) struct Build {
     /// Whether the build waits for the startup file list before its first
     /// round.
     pub awaiting_list: bool,
+    /// What the next round's index-store pass reads.
+    pub facts: FactsPlan,
+}
+
+/// The files a build round's index-store pass reads (see
+/// [`crate::index_store::WorkspaceFacts`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FactsPlan {
+    /// Every listed Markdown file, deleting rows for missing paths: a
+    /// build's first round, and any round after a store switched to memory.
+    Full,
+    /// Only these paths: the Markdown files that changed while the previous
+    /// round read. Empty when only the full index needs another round.
+    Paths(Vec<std::path::PathBuf>),
 }
 
 impl Drop for Build {
@@ -159,6 +178,7 @@ mod tests {
             progress: Arc::new(crate::workspace::startup::SilentProgress),
             waiters: Vec::new(),
             awaiting_list: false,
+            facts: FactsPlan::Full,
         };
         drop(build);
         assert!(cancel.load(Ordering::SeqCst));

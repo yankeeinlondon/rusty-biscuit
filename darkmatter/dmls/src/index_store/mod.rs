@@ -15,6 +15,8 @@
 //! - [`lock`]: the liveness lock beside each store
 //! - [`store`]: [`IndexStore`], the SQLite layout and its reads and writes
 //! - [`source`]: [`FactsSource`] and the failure ladder
+//! - [`workspace`]: [`WorkspaceFacts`], every root's facts kept equal to
+//!   disk (revalidation, ready, live updates, the open-buffer overlay)
 
 pub mod facts;
 pub mod failure;
@@ -23,6 +25,7 @@ pub mod location;
 pub mod lock;
 pub mod source;
 pub mod store;
+pub mod workspace;
 
 pub use facts::FileFacts;
 pub use failure::StoreFailure;
@@ -30,6 +33,7 @@ pub use location::{STALE_STORE_AGE, StoreLocation, SweepReport, lock_path, root_
 pub use lock::StoreLock;
 pub use source::{FactsSource, MemoryFacts, RootFacts, RootOpened, StoreFacts, StoreOpened};
 pub use store::{IndexStore, OpenReport, UpsertReport};
+pub use workspace::{PassReport, WorkspaceFacts};
 
 /// The table layout's version, recorded in each store's `meta` table.
 pub const STORE_FORMAT: u32 = 1;

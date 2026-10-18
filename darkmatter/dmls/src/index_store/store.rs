@@ -218,6 +218,37 @@ impl IndexStore {
         Ok(missing.len())
     }
 
+    /// Deletes the rows of those `paths` that are missing on disk, the
+    /// per-file form of [`remove_missing`](Self::remove_missing).
+    ///
+    /// ## Returns
+    ///
+    /// The number of rows deleted.
+    pub fn remove_paths(&mut self, paths: &[PathBuf]) -> Result<usize, StoreFailure> {
+        let missing: Vec<&PathBuf> = paths.iter().filter(|path| is_missing(path)).collect();
+        if missing.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut removed = 0;
+        for path in missing {
+            // A path that is not UTF-8 can never have been written.
+            let Ok(path) = path_text(path) else { continue };
+            let id = tx
+                .prepare_cached("SELECT id FROM files WHERE path = ?1")?
+                .query_row([&path], |row| row.get::<_, i64>(0))
+                .optional()?;
+            if let Some(id) = id {
+                delete_children(&tx, id)?;
+                tx.execute("DELETE FROM files WHERE id = ?1", [id])?;
+                removed += 1;
+            }
+        }
+        tx.commit()?;
+        self.touch_if_due()?;
+        Ok(removed)
+    }
+
     /// Every stored file and its row hash.
     pub fn hashes(&self) -> Result<HashMap<PathBuf, u64>, StoreFailure> {
         self.touch_if_due()?;

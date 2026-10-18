@@ -56,8 +56,9 @@ use crate::clock::{Clock, SystemClock};
 use crate::config::{ConfigSeverity, ConfigState};
 use crate::context::{DocumentResolution, RepositoryContexts};
 use crate::diagnostics::DiagnosticsScheduler;
-use crate::full_index::{Build, FullIndexState, Trigger, Waiter};
+use crate::full_index::{Build, FactsPlan, FullIndexState, Trigger, Waiter};
 use crate::graph::{FullBuildStep, WorkspaceGraph, WorkspaceIndex};
+use crate::index_store::{PassReport, WorkspaceFacts};
 use crate::overlay::{OverlayState, RegistryNeed, RegistrySummary};
 use crate::providers::{DocumentContext, ProviderRegistry};
 use crate::registry_jobs::{PendingRegistries, RegistryJob, RegistryJobKind};
@@ -75,6 +76,8 @@ use crate::workspace::watch::{
     is_ignore_file, scan_manifests, schema_watch_registration, watch_registration,
 };
 use crate::workspace::{DocumentStore, uri_to_file_path, workspace_identifier, workspace_roots};
+
+mod facts;
 
 /// Fatal server errors (protocol violations, not per-request failures).
 #[derive(Debug, Error)]
@@ -203,10 +206,12 @@ enum Internal {
         path: Option<PathBuf>,
         thread: std::thread::ThreadId,
     },
-    /// A full-index build round finished reading.
+    /// A full-index build round finished reading, and its index-store pass
+    /// finished writing.
     FullIndexRound {
         build: u64,
         round: FullIndexRound,
+        facts: PassReport,
     },
     /// The startup file-list walk finished. The dispatch thread ends the
     /// progress once the list is installed, so a client that sees the end
@@ -254,6 +259,7 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         &roots,
         config.effective().wiki.wiki_root.as_deref(),
     );
+    let store_inputs = facts::StoreInputs::from_snapshot(&options.snapshot);
     let contexts = Arc::new(RepositoryContexts::new(options.snapshot));
     let index = Arc::new(Mutex::new(WorkspaceIndex::new(
         Arc::clone(&contexts) as Arc<dyn crate::graph::DocumentContexts>
@@ -320,6 +326,9 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         timings: RequestTimings::start(Arc::clone(&options.clock)),
         clock: options.clock,
         workspace,
+        facts: Arc::new(Mutex::new(None)),
+        facts_events: std::cell::RefCell::new(facts::FactsEvents::default()),
+        store_inputs,
     };
     let mut router = Router::new(connection, state).with_internal(
         (internal_tx, internal_rx),
@@ -501,6 +510,10 @@ fn spawn_registry_worker(work: RegistryWorker) -> Sender<RegistryJob> {
     jobs_tx
 }
 
+/// The rename requests, which re-read the files they edit and, in fallback
+/// watch mode, revalidate the index store first.
+const RENAMES: &[&str] = &[Rename::METHOD, WillRenameFiles::METHOD];
+
 /// The request methods whose handlers build a document's overlay, and so
 /// wait for its trigger registry.
 const SCHEMA_DEPENDENT: &[&str] = &[
@@ -559,6 +572,13 @@ pub struct ServerState {
     timings: RequestTimings,
     /// The workspace identifier every workspace log line carries.
     workspace: String,
+    /// Every root's stored facts, opened by the first build round and
+    /// written by build rounds' threads (see [`facts`]).
+    facts: Arc<Mutex<Option<WorkspaceFacts>>>,
+    /// Changes the facts have not applied yet.
+    facts_events: std::cell::RefCell<facts::FactsEvents>,
+    /// Where the stores live, from the request snapshot.
+    store_inputs: facts::StoreInputs,
 }
 
 impl ServerState {
@@ -615,9 +635,13 @@ impl ServerState {
         }
         let markdown = report.files.into_iter().collect();
         let yaml = report.yaml.into_iter().collect();
-        let mut index = self.index.lock().expect("index lock poisoned");
-        let changed = index.install_listing(markdown, yaml, complete);
-        self.snapshot.store(index.snapshot());
+        let changed = {
+            let mut index = self.index.lock().expect("index lock poisoned");
+            let changed = index.install_listing(markdown, yaml, complete);
+            self.snapshot.store(index.snapshot());
+            changed
+        };
+        self.facts_changed(changed.iter().cloned());
         changed
     }
 
@@ -681,6 +705,22 @@ impl ServerState {
             .flatten()
     }
 
+    /// The documents a references request at `position` in `uri` is about:
+    /// the document itself (a heading under the cursor) and the target of
+    /// the link, wiki link, or transclusion under the cursor.
+    fn reference_targets(&self, uri: &Uri, position: lsp_types::Position) -> Vec<PathBuf> {
+        let Some(path) = uri_to_file_path(uri) else {
+            return Vec::new();
+        };
+        let snapshot = self.snapshot.load();
+        let target = self
+            .documents
+            .get(uri)
+            .and_then(|open| open.source_map().lsp_to_byte(position))
+            .and_then(|offset| crate::providers::reference_target_at(&snapshot, &path, offset));
+        std::iter::once(path).chain(target).collect()
+    }
+
     /// The folders holding parsed Markdown dependencies, which the
     /// schema-location watches also cover.
     fn dependency_folders(&self) -> Vec<PathBuf> {
@@ -710,10 +750,21 @@ impl ServerState {
     /// it. Returns `None` when the document is not open, or is neither a
     /// `file:` nor an `untitled:` document.
     fn with_document<R>(&self, uri: &Uri, f: impl FnOnce(&DocumentContext) -> R) -> Option<R> {
+        let snapshot = self.snapshot.load();
+        self.with_document_over(uri, snapshot.as_ref(), f)
+    }
+
+    /// [`with_document`](Self::with_document) over `graph` in place of the
+    /// live snapshot (a request graph).
+    fn with_document_over<R>(
+        &self,
+        uri: &Uri,
+        graph: &WorkspaceGraph,
+        f: impl FnOnce(&DocumentContext) -> R,
+    ) -> Option<R> {
         let open = self.documents.get(uri)?;
         let (path, resolution) = self.document_resolution(uri)?;
-        let snapshot = self.snapshot.load();
-        let doc_id = snapshot.document_id(&path);
+        let doc_id = graph.document_id(&path);
         let overlay = self.timings.time(Stage::OverlayBuild, || {
             self.overlay.for_document_timed(
                 uri,
@@ -730,7 +781,7 @@ impl ServerState {
             path: &path,
             text: open.text(),
             source_map: open.source_map().as_ref(),
-            graph: snapshot.as_ref(),
+            graph,
             doc_id,
             config: self.config.effective(),
             profile: &self.profile,
@@ -823,7 +874,8 @@ impl ServerState {
     }
 
     /// Builds the environment the rename providers need beyond the request
-    /// payload (open buffers, snapshot, config/profile, roots, encoding).
+    /// payload (open buffers, the request graph, config/profile, roots,
+    /// encoding).
     fn rename_env<'a>(
         &'a self,
         graph: &'a WorkspaceGraph,
@@ -1288,6 +1340,9 @@ pub struct Router {
     full_index: FullIndexState,
     /// The id the next full-index build gets.
     next_build: u64,
+    /// Renames whose build just revalidated the index store for them, in
+    /// fallback watch mode (see [`Router::needs_full_index`]).
+    revalidated: HashSet<RequestId>,
 }
 
 impl Router {
@@ -1305,6 +1360,7 @@ impl Router {
             watches: WatchLedger::default(),
             full_index: FullIndexState::NotStarted,
             next_build: 0,
+            revalidated: HashSet::new(),
         }
     }
 
@@ -1489,7 +1545,7 @@ impl Router {
                     self.start_full_index_round();
                 }
             }
-            Internal::FullIndexRound { build, round } => self.finish_full_index_round(build, round),
+            Internal::FullIndexRound { build, round, facts } => self.finish_full_index_round(build, round, facts),
         }
     }
 
@@ -1530,6 +1586,7 @@ impl Router {
             progress,
             waiters: vec![waiter],
             awaiting_list,
+            facts: FactsPlan::Full,
         });
         if !awaiting_list {
             self.start_full_index_round();
@@ -1537,13 +1594,27 @@ impl Router {
     }
 
     /// Starts the building build's next round on a background thread, which
-    /// reads the unparsed listed files with the index lock released.
+    /// reads the unparsed listed files with the index lock released, then
+    /// runs the round's index-store pass (opening the stores on the first
+    /// round in the process), reusing the round's parses.
     fn start_full_index_round(&mut self) {
         let FullIndexState::Building(build) = &mut self.full_index else {
             return;
         };
         build.awaiting_list = false;
-        let files = self.state.index.lock().expect("index lock poisoned").begin_full_build();
+        let plan = std::mem::replace(&mut build.facts, FactsPlan::Paths(Vec::new()));
+        let (files, facts_files, buffers) = {
+            let mut index = self.state.index.lock().expect("index lock poisoned");
+            let facts_files = match &plan {
+                FactsPlan::Full => index.listed().iter().cloned().collect(),
+                FactsPlan::Paths(paths) => paths.clone(),
+            };
+            // An open buffer whose bytes equal the file's is a parse of
+            // those bytes; the pass reuses it rather than parsing again.
+            let buffers: Vec<_> = index.open_buffers().cloned().collect();
+            (index.begin_full_build(), facts_files, buffers)
+        };
+        self.state.facts_events.borrow_mut().begin_round();
         let Some(internal) = self.internal_tx.clone() else {
             return;
         };
@@ -1552,40 +1623,90 @@ impl Router {
         let progress = Arc::clone(&build.progress);
         let observer = self.observer.clone();
         let gate = self.full_index_gate.clone();
+        let facts = Arc::clone(&self.state.facts);
+        let inputs = self.state.store_inputs.clone();
+        let roots = self.state.store_roots();
+        let clock = Arc::clone(&self.state.clock);
         std::thread::spawn(move || {
             let round = parse_full_index_round(&files, progress.as_ref(), &cancel);
+            let mut known = round.parsed.clone();
+            known.extend(buffers.into_iter().map(|buffer| (buffer.path.clone(), buffer)));
+            let pass = if round.cancelled {
+                PassReport { cancelled: true, ..PassReport::default() }
+            } else {
+                let mut facts = facts.lock().expect("facts lock poisoned");
+                if facts.as_ref().is_none_or(|facts| !facts.roots().eq(roots.iter().map(PathBuf::as_path))) {
+                    *facts = Some(WorkspaceFacts::open(&roots, &inputs.location(), clock));
+                }
+                let facts = facts.as_mut().expect("facts just opened");
+                match plan {
+                    FactsPlan::Full => facts.revalidate(&facts_files, &known, progress.as_ref(), &cancel),
+                    FactsPlan::Paths(_) if facts_files.is_empty() => PassReport::default(),
+                    FactsPlan::Paths(_) => facts.refresh(&facts_files, &known),
+                }
+            };
             if let Some(observer) = observer {
                 let _ = observer.send(StartupEvent::FullIndexRoundRead);
             }
             if let Some(gate) = gate {
                 let _ = gate.recv();
             }
-            let _ = internal.send(Internal::FullIndexRound { build: id, round });
+            let _ = internal.send(Internal::FullIndexRound { build: id, round, facts: pass });
         });
     }
 
     /// Reconciles a round's results and moves the build on: another round,
     /// ready (answering every waiter), or failed (answering every waiter
     /// with the error). A round from a cancelled build is discarded.
-    fn finish_full_index_round(&mut self, id: u64, round: FullIndexRound) {
+    ///
+    /// The index-store pass needs another round when a Markdown file changed
+    /// while it read (that round re-reads only those) or when a store
+    /// switched to memory (that round re-reads everything). A listed file the
+    /// pass could not read fails the build like the full index's own reads,
+    /// unless it changed meanwhile.
+    fn finish_full_index_round(&mut self, id: u64, round: FullIndexRound, facts: PassReport) {
         let current = matches!(&self.full_index, FullIndexState::Building(build) if build.id == id);
-        if !current || round.cancelled {
+        if !current || round.cancelled || facts.cancelled {
             return;
         }
-        let step = {
+        let touched = self.state.facts_events.borrow_mut().finish_round();
+        self.state.bridge_to_index(&facts);
+        let (step, facts_failed) = {
             let mut index = self.state.index.lock().expect("index lock poisoned");
             let step = index.finish_full_build(round.parsed, round.failed);
             self.state.snapshot.store(index.snapshot());
-            step
+            let listed = index.listed();
+            let unreadable = facts
+                .failed
+                .iter()
+                .cloned()
+                .chain(facts.missing.iter().map(|path| (path.clone(), "the file is missing".to_string())))
+                .filter(|(path, _)| listed.contains(path) && !touched.contains(path));
+            (step, unreadable.collect::<Vec<_>>())
         };
+        let more = matches!(step, FullBuildStep::More(_));
         let failure = match step {
-            FullBuildStep::More(_) => {
+            FullBuildStep::Failed(failed) => Some(failed),
+            _ if !facts_failed.is_empty() => Some(facts_failed),
+            _ => None,
+        };
+        if failure.is_none() {
+            let next = if facts.switched {
+                Some(FactsPlan::Full)
+            } else if !touched.is_empty() {
+                Some(FactsPlan::Paths(touched.into_iter().collect()))
+            } else {
+                None
+            };
+            if more || next.is_some() {
+                if let FullIndexState::Building(build) = &mut self.full_index {
+                    build.facts = next.unwrap_or(FactsPlan::Paths(Vec::new()));
+                }
                 self.start_full_index_round();
                 return;
             }
-            FullBuildStep::Ready => None,
-            FullBuildStep::Failed(failed) => Some(failed),
-        };
+        }
+        self.state.facts_events.borrow_mut().end_build();
         let FullIndexState::Building(mut build) = std::mem::take(&mut self.full_index) else {
             return;
         };
@@ -1593,6 +1714,9 @@ impl Router {
         let waiters = std::mem::take(&mut build.waiters);
         match failure {
             None => {
+                if let Some(facts) = self.state.facts.lock().expect("facts lock poisoned").as_mut() {
+                    facts.mark_ready();
+                }
                 self.log_full_index_built(&build);
                 self.full_index = FullIndexState::Ready;
                 // Every document's headings are known now, so anchor checks
@@ -1601,6 +1725,9 @@ impl Router {
                 // never receives an older publication after it.
                 self.state.refresh_all_diagnostics();
                 for waiter in waiters {
+                    if RENAMES.contains(&waiter.request.method.as_str()) {
+                        self.revalidated.insert(waiter.request.id.clone());
+                    }
                     self.proceed(waiter);
                 }
             }
@@ -1696,6 +1823,7 @@ impl Router {
             // Dropping the build stops its workers.
             self.full_index = FullIndexState::NotStarted;
             self.state.index.lock().expect("index lock poisoned").abandon_full_build();
+            self.state.facts_events.borrow_mut().end_build();
         }
         self.answer_waiter(waiter, ErrorCode::RequestCanceled, "request was cancelled", Outcome::Cancelled);
         true
@@ -1748,6 +1876,7 @@ impl Router {
         };
         build.progress.end();
         self.state.index.lock().expect("index lock poisoned").abandon_full_build();
+        self.state.facts_events.borrow_mut().end_build();
         for waiter in std::mem::take(&mut build.waiters) {
             self.answer_waiter(waiter, ErrorCode::ServerCancelled, "the server is shutting down", Outcome::Cancelled);
         }
@@ -1776,7 +1905,7 @@ impl Router {
     fn proceed(&mut self, waiter: Waiter) {
         if !self.cancelled.contains(&waiter.request.id) {
             if let Some(trigger) = Trigger::for_method(&waiter.request.method)
-                && !self.state.index_is_full()
+                && self.needs_full_index(&waiter.request)
             {
                 self.wait_for_full_index(waiter, trigger);
                 return;
@@ -1789,6 +1918,23 @@ impl Router {
         }
         self.state.timings = waiter.timings;
         self.answer_request(waiter.request);
+    }
+
+    /// Whether a request that needs the full index must wait for a build:
+    /// one is running, the index is not full, the index store is not ready,
+    /// or (in fallback watch mode, where no event reports a file changed
+    /// outside the editor) it is a rename that has not had its own
+    /// revalidation yet.
+    fn needs_full_index(&mut self, request: &Request) -> bool {
+        if matches!(self.full_index, FullIndexState::Building(_)) {
+            return true;
+        }
+        if !self.state.index_is_full() || !self.state.facts_ready() {
+            return true;
+        }
+        self.state.watch_mode == WatchMode::ServerRescan
+            && RENAMES.contains(&request.method.as_str())
+            && !self.revalidated.remove(&request.id)
     }
 
     /// The trigger registry a schema-dependent request's document needs
@@ -1890,9 +2036,9 @@ impl Router {
         let Ok(params) = serde_json::from_value::<WorkspaceSymbolParams>(params) else {
             return invalid_params(id);
         };
-        let snapshot = self.state.snapshot.load();
         let symbols = self.state.timings.time(Stage::ProviderChain, || {
-            self.state.registry.workspace_symbols(&params.query, snapshot.as_ref())
+            let documents = self.state.symbol_documents();
+            self.state.registry.workspace_symbols(&params.query, &documents)
         });
         Response::new_ok(id, WorkspaceSymbolResponse::Nested(symbols))
     }
@@ -1934,9 +2080,10 @@ impl Router {
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
         let include = params.context.include_declaration;
+        let graph = self.state.request_graph(&self.state.reference_targets(&uri, position));
         let locations = self
             .state
-            .with_document(&uri, |ctx| match ctx.source_map.lsp_to_byte(position) {
+            .with_document_over(&uri, &graph, |ctx| match ctx.source_map.lsp_to_byte(position) {
                 Some(offset) => self.state.registry.references(ctx, offset, include),
                 None => Vec::new(),
             })
@@ -2095,8 +2242,10 @@ impl Router {
         };
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
-        let snapshot = self.state.snapshot.load();
-        let env = self.state.rename_env(snapshot.as_ref());
+        let targets: Vec<PathBuf> = uri_to_file_path(&uri).into_iter().collect();
+        self.state.refresh_rename_referrers(&targets);
+        let graph = self.state.request_graph(&targets);
+        let env = self.state.rename_env(&graph);
         let renamed = self.state.timings.time(Stage::ProviderChain, || {
             crate::providers::rename::rename(&env, &uri, position, &params.new_name)
         });
@@ -2116,8 +2265,14 @@ impl Router {
         let Ok(params) = serde_json::from_value::<RenameFilesParams>(params) else {
             return invalid_params(id);
         };
-        let snapshot = self.state.snapshot.load();
-        let env = self.state.rename_env(snapshot.as_ref());
+        let renamed: Vec<PathBuf> = params
+            .files
+            .iter()
+            .filter_map(|file| file.old_uri.parse::<Uri>().ok().as_ref().and_then(uri_to_file_path))
+            .collect();
+        self.state.refresh_rename_referrers(&renamed);
+        let graph = self.state.request_graph(&renamed);
+        let env = self.state.rename_env(&graph);
         let edit = self.state.timings.time(Stage::ProviderChain, || {
             crate::providers::rename::will_rename_files(&env, &params.files)
         });
@@ -2224,7 +2379,12 @@ impl Router {
                     self.state.refresh_all_diagnostics();
                 }
                 if self.state.watch_mode == WatchMode::ServerRescan {
+                    // The relist reports what joined or left the list; the
+                    // index store then re-reads those and the saved file.
                     self.state.rescan_workspace();
+                    if let Some(saved) = uri_to_file_path(&params.text_document.uri) {
+                        self.state.facts_saved(&saved);
+                    }
                     // Schema-root YAML is intentionally outside Markdown
                     // workspace discovery, but a save is also the watcher-less
                     // trigger-registry rescan boundary.
@@ -2347,6 +2507,11 @@ impl Router {
         } else if changes.iter().any(|change| is_ignore_file(&change.path)) {
             self.state.relist();
         }
+        let facts_paths: Vec<PathBuf> = changes
+            .iter()
+            .filter(|change| !is_context_input(&change.path) && !is_config_file(&change.path) && !is_ignore_file(&change.path))
+            .map(|change| change.path.clone())
+            .collect();
         for change in changes {
             if is_context_input(&change.path) || is_config_file(&change.path) || is_ignore_file(&change.path) {
                 continue;
@@ -2360,6 +2525,10 @@ impl Router {
             tracing::debug!(path = %change.path.display(), "watched change");
             self.state.apply_disk_change(&change.path, change.kind);
         }
+        // After the index, so its parse of the new bytes serves the row. Rows
+        // hold disk state, so an open document's disk change reaches the
+        // store even though its buffer stays authoritative.
+        self.state.facts_changed(facts_paths);
         // A disk change can flip an open document's link validity.
         self.state.refresh_all_diagnostics();
     }
