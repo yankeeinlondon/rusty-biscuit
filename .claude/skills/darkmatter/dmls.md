@@ -181,7 +181,8 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   equivalence tests are `tests/l1/wiki_universe_equivalence.rs`
   (`Oracle::scoped`, `UniverseScope`).
 - `index_store` (persistent per-file facts behind references, rename, and
-  workspace symbols; **not yet wired into the server**): `FileFacts` is the
+  workspace symbols, which now answer from it; the full index is still built
+  as their gate until it is removed): `FileFacts` is the
   R1 row (`from_index`/`into_index`, unstored fields empty), `keys` derives
   over-approximating candidate keys (joined key for `./`/`../`, joined plus
   file-name key for bare paths, file-name key for wiki and root-prefixed
@@ -198,6 +199,44 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (`tests/l1/index_store_facts.rs`, regenerate with `DMLS_UPDATE_GOLDEN=1`)
   refuses to regenerate without the bump. Tests: `tests/l1/index_store_*.rs`
   and the ladder's unit tests in `src/index_store/source_tests.rs`.
+- Store wiring: `WorkspaceFacts` (`index_store/workspace.rs`) holds one
+  `RootFacts` per effective root plus the hash of every file read in this
+  process. `revalidate` (full pass, deletes missing rows) and `refresh` (a
+  few paths) read and hash in parallel and re-parse only rows that differ,
+  reusing any supplied parse whose hash matches the bytes (the build round's
+  parses and open buffers, so the dependency's parse counts are unchanged);
+  `request_documents` overlays buffers and never writes. Ready =
+  `mark_ready` after a round with no touched paths, same roots, every listed
+  path verified; a store switch withdraws it. The router side is
+  `router/facts.rs`: `StoreInputs` takes `DMLS_CACHE_DIR` and
+  `biscuit_file::user_cache_dir_from(env, home)` from the request snapshot
+  (no ambient read; the fixture snapshot's home puts test stores under the
+  workspace), each build round runs a `FactsPlan` pass on its thread
+  (`Full` first, then `Paths(touched)`; `Full` again after a switch), events
+  after ready refresh at once (client watching) or wait for the next save
+  (fallback), and `bridge_to_index` tells `WorkspaceIndex` about any read
+  whose hash differs from its disk parse. Every rename first refreshes its
+  closed target and closed candidates (`refresh_rename_referrers`, before the
+  graph is built: a stale span would make the provider drop the edit); in
+  fallback mode a rename waits for its own full pass (`Router::revalidated`).
+  Session tests: `tests/l1/index_store_live.rs`; set `DMLS_CACHE_DIR` in the
+  snapshot env.
+- Store-backed requests: `WorkspaceFacts::candidates_for(targets, listed)`
+  (union over roots, listed paths only, once per path),
+  `request_graph(targets, listed, overlay, universe, contexts)` (candidates +
+  listed targets + overlay into `build_with_roots`, universe = the live
+  snapshot's `shared_wiki_universe()`), and `symbol_documents(listed,
+  overlay)` (stored headings, no graph). Router: `ServerState::request_graph`
+  (overlay = open buffers + unlisted targets' `disk_parse`),
+  `reference_targets` (document + `providers::reference_target_at`),
+  `with_document_over(uri, graph, f)`. `Provider::workspace_symbols` takes
+  `&[SymbolDocument]` (`(path, Vec<HeadingFact>)`);
+  `symbols::graph_symbol_documents` adapts a graph (the oracle uses it).
+  Equivalence with the oracle at every corpus probe:
+  `tests/l1/index_store_requests.rs` (`Oracle::*_over(graph, ...)`); restart,
+  two-root, nested-root sessions: `index_store_sessions.rs`; spawned binary:
+  `index_store_stdio.rs`. A `../` link out of a workspace folder resolves only
+  inside a repository (no store involved); give a cross-root fixture a `.git`.
 - Invalidation: every watched path calls `invalidate_contexts`, which drops
   ancestor-keyed entries (plus folder keys inside the repository for a
   `.git/` path), then `relink`s the graph. Package manifests and `.git/config`

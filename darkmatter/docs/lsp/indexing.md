@@ -149,7 +149,7 @@ prerequisite, if any:
 | Any request on an open document (formatting, folding, symbols, completion, hover, …) | the document's trigger registry, when it is not prepared yet or a change made it stale; the registry worker prepares it while the request waits (see [Preparing registries off the dispatch thread](#preparing-registries-off-the-dispatch-thread)). Never the file list |
 | Hover, definition, and completion on a link | also the target under the cursor, parsed on the spot (see [Referenced targets](#referenced-targets)) |
 | Broken-link, transclusion, and wiki-link diagnostics | the file list (see [Diagnostics that wait for the list](#diagnostics-that-wait-for-the-list)) |
-| Find references, rename, `workspace/willRenameFiles`, workspace symbols | the full index (see [The full index](#the-full-index)) |
+| Find references, rename, `workspace/willRenameFiles`, workspace symbols | the full index and the index store (see [The full index](#the-full-index) and [The index store](#the-index-store)) |
 | `textDocument/prepareRename` | nothing; it checks only the local rename target |
 
 ### Preparing registries off the dispatch thread
@@ -535,7 +535,12 @@ stateDiagram-v2
     Building --> NotStarted: the last waiting request is cancelled
     Failed --> Building: the next request retries
     Ready --> Building: a request, while a listed file has no current parse
+    Ready --> Building: a request, while the index store is not ready
+    Ready --> Building: a rename, in fallback watch mode
 ```
+
+Each round also runs an [index store](#the-index-store) pass, so a build is
+ready only when both the full index and the store are.
 
 - **Shared build.** A request that arrives while the index builds waits on
   the same build. Waiters are answered in arrival order.
@@ -602,6 +607,122 @@ clients get no progress messages.
 it, then prints stage timings and exits. It measures the full index, not
 startup. Pass an absolute path; a relative one fails to build a resolution
 context.
+
+## The index store
+
+DMLS also keeps a persistent **index store**: one SQLite file per effective
+workspace root holding each Markdown file's headings, links, wiki links,
+transclusions, and content hash. It is only a cache of what the files say;
+it is always safe to delete. The code is
+[`index_store/`](../../dmls/src/index_store/) and
+[`router/facts.rs`](../../dmls/src/router/facts.rs).
+
+The store answers references, rename, file rename, and workspace symbols.
+Those requests still wait for the full index to be built (see
+[The full index](#the-full-index)), but they read their answer from the
+store.
+
+### Answering a request from the store
+
+The store **narrows** and a graph **decides**. For a references, heading
+rename, or file rename request, DMLS asks every root's store which files
+hold a *candidate key* of the request's target: a key derived from one
+link that names the file it probably points at. It then builds a small
+graph over those candidates, the target, and every open buffer, and runs
+the same providers over it that a graph over every file would run. A
+candidate whose link turns out to point elsewhere simply resolves to
+nothing.
+
+```mermaid
+sequenceDiagram
+    participant E as Editor
+    participant D as DMLS
+    participant S as stores (one per root)
+    participant G as request graph
+    E->>D: references on "## Setup" in a.md
+    D->>S: candidates of a.md, every root
+    S-->>D: notes/b.md, docs/c.md (each once)
+    D->>G: build over b.md, c.md, a.md, open buffers
+    G-->>D: b.md links a.md#setup; c.md links another a.md
+    D-->>E: one location, in notes/b.md
+```
+
+For example, with both `a.md` and `docs/a.md` in the workspace, if
+`notes/b.md` contains `[setup](../a.md#setup)` and `docs/c.md` contains
+`[setup](a.md#setup)`, both are candidates for `a.md`,
+because a bare `a.md` might also be read from the repository root. Only the
+graph knows `docs/c.md` means `docs/a.md`, so only `notes/b.md` is answered.
+
+- **Which document a request is about.** References: the open document
+  and the target of the link, wiki link, or transclusion under the cursor.
+  Heading rename: the heading's document. File rename: each renamed file.
+- **Wiki links are judged against every listed file**, not only the graph's
+  documents. `[[topic]]` with `alpha/topic.md` and `beta/topic.md` listed is
+  still ambiguous when neither file is a candidate, and a file rename picks
+  the same wiki spelling a graph over every file would.
+- **Open buffers win.** An open buffer's text replaces its row in the graph,
+  saved or not.
+- **Files outside the file list are not candidates.** A row another DMLS
+  process wrote for a file this one does not list is ignored. A target
+  outside the list that DMLS already read (a referenced dependency) is
+  still in the graph.
+- **Multiple roots.** Every root's store is asked and the candidates are
+  merged, so a file rename in one root edits links in another. A file under
+  two nested roots has a row in each store but appears once in every
+  answer.
+- **Workspace symbols build no graph.** They read every listed file's stored
+  headings (an open buffer's headings in place of its row) and emit each
+  document's title (its first level-1 heading, else its first heading, else
+  its file name) and every heading that matches the query.
+
+The graph is dropped after the request. When the stores are off or
+unusable, the same requests answer from facts kept in memory.
+
+### Where the stores live
+
+| `DMLS_CACHE_DIR` in the server's environment | Store directory |
+| --- | --- |
+| unset or empty | `<user cache dir>/darkmatter/dmls/`: `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux, `%LOCALAPPDATA%` on Windows |
+| an absolute path | that directory, created when missing |
+| `off` (any case) | no store; facts are kept in memory |
+| a relative path, or a file | no store; facts are kept in memory, with one `warn` |
+
+A store that cannot be opened, is corrupt (and cannot be recreated), or fails
+while in use switches that root to memory for the rest of the process. The
+requests keep answering; a cache problem never fails a request.
+
+### Filling and staying current
+
+The first references, rename, file-rename, or workspace-symbols request
+reads and hashes every listed Markdown file and re-parses only the files
+whose hash differs from their row, or that have none. A restart with
+unchanged files therefore parses nothing for the store. Rows of files
+missing on disk are deleted. There is no size-and-mtime shortcut: a stale
+row would hide a new link from a rename.
+
+After that, rows follow disk changes:
+
+| Situation | What a changed Markdown file does |
+| --- | --- |
+| no build has run yet | only the file list changes; the first build reads everything |
+| a build is running | the next round re-reads it |
+| client watching (`didChangeWatchedFiles`) | its event re-reads it and updates or deletes its row |
+| fallback watch mode (no watcher) | a save re-reads the saved file and the files that joined or left the list; every other change waits |
+
+Open buffers never write rows; a row always holds the bytes on disk.
+
+**Renames re-read first.** In fallback watch mode, where no event reports a
+file changed outside the editor, every heading rename and file rename runs a
+build first that re-reads every listed file, so a file that gained a link to
+the target since the last save is edited too. In every mode, a rename then
+re-reads its target and every closed candidate referrer (see
+[Answering a request from the store](#answering-a-request-from-the-store))
+and re-parses any whose bytes changed, before it computes an edit, so each
+edit lands on the file's current text.
+
+For example, `notes/b.md` links to `a.md#setup`, and an external tool
+inserts two lines at the top of `notes/b.md` without an event. Renaming the
+`Setup` heading edits the link at its new line, not the old one.
 
 ## Log lines
 
