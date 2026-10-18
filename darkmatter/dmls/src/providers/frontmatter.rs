@@ -891,7 +891,7 @@ fn file_path_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
     };
     let start = offset - partial.len();
     let mut out = Vec::new();
-    for record in ctx.graph.documents() {
+    for record in ctx.graph.documents().iter().filter(|record| !record.dependency) {
         if record.path == ctx.path {
             continue;
         }

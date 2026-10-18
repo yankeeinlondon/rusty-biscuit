@@ -663,9 +663,15 @@ impl BlockError for MarkdownError {
                 description,
                 // The preparation source is preserved for `Error::source()`
                 // programmatic recovery; the styled block renders `summary`
-                // and `problems` only.
-                source: _,
-            } => blocks::schema_validation_failed_block(path, problems, summary, description),
+                // and `problems`, and reads the source only for its hint.
+                source,
+            } => {
+                let hint = source
+                    .as_deref()
+                    .and_then(|source| source.downcast_ref::<crate::markdown::schemas::SchemaError>())
+                    .and_then(crate::markdown::schemas::SchemaError::preparation_hint);
+                blocks::schema_validation_failed_block(path, problems, summary, description, hint)
+            }
             MarkdownError::CallerFileClassificationChanged { property } => {
                 blocks::caller_file_classification_changed_block(property)
             }

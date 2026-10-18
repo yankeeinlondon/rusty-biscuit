@@ -168,6 +168,7 @@ mod ternary_integration;
 mod test_layout;
 mod transcluded_shell_failure;
 mod tree_features_characterization;
+mod trigger_envelope_claim;
 mod unknown_identifier_warning;
 mod url_root_identity;
 mod yaml_block_parity;

@@ -332,7 +332,12 @@ explicitly inherit `lifecycle::cancellation::CancellationToken` scopes. Keep
 terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
 allows terminal actions to finish after cancellation while preserving repeat
 interrupt grace. Lifecycle shell exact/template dispatch shares task shells'
-owned process trees.
+owned process trees, except on Unix while Claudine holds its terminal's
+foreground (`task/shell.rs::holds_terminal_foreground`): an inherited-terminal
+child in a group of its own is stopped by `SIGTTIN`/`SIGTTOU` forever (a
+nested `claudine compose` from `shell: just commit` hung this way), so it runs
+in Claudine's group and only the direct child is terminated on cancellation.
+Regression: `cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs`.
 Container events use
 `lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
 precedes static preflight, nested preparation is just in time. Retry preserves

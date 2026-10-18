@@ -21,7 +21,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use biscuit_hash::xx_hash_bytes;
 use darkmatter::markdown::compose::directives_api::{
     DirectiveKind, DirectiveOption, scan_darkmatter_directives,
 };
@@ -88,7 +87,7 @@ pub struct WikiLinkFact {
 
 /// A `::file`/`::code` transclusion fact extracted from one document
 /// (document-relative span). Resolution against the workspace happens at
-/// snapshot assembly; a target that matches an indexed document gets a
+/// snapshot assembly; a target that matches a graph document gets a
 /// `transcludes` edge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransclusionFact {
@@ -210,8 +209,9 @@ pub fn index_document(path: &Path, source: &str) -> DocumentIndex {
 pub fn index_document_timed(path: &Path, source: &str) -> (DocumentIndex, IndexTimings) {
     let mut timings = IndexTimings::default();
 
+    crate::work_counters::record_parse();
     let stage = Instant::now();
-    let content_hash = xx_hash_bytes(source.as_bytes());
+    let content_hash = crate::work_counters::hash_bytes(source.as_bytes());
     timings.hash += stage.elapsed();
 
     // Body base: everything after the frontmatter block. A fence mismatch or

@@ -427,7 +427,8 @@
   `unicode-normalization` for NFC so a vault resolves identically across OSes.
   Semantic authorities: `darkmatter` (lib),
   `biscuit-file` (`file-reference` feature, default features off), and
-  `biscuit-hash` (xxHash content-hash identity for graph invalidation). See
+  `biscuit-hash` (xxHash content-hash identity for graph invalidation).
+  `rusqlite` (`bundled`) holds the persistent per-file facts store. See
   [`darkmatter/docs/dependencies.md`](./darkmatter/docs/dependencies.md).
 - `darkmatter/dmls/zed-dmls-cli` (`zed-dmls-cli`) stages the Zed extension in
   a stable per-user data directory and diagnoses the native binary, dev
@@ -457,7 +458,7 @@ This is a Rust workspace with the following modules:
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
-- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
+- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash, rusqlite bundled)
 - `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
@@ -1438,7 +1439,7 @@ This is a Rust workspace with the following modules:
 
 - [rusqlite](https://github.com/rusqlite/rusqlite) _v0.31_ [📄](https://docs.rs/rusqlite)
 
-    _Ergonomic SQLite bindings for Rust used by Claudine's local reporting index._
+    _Ergonomic SQLite bindings for Rust used by Claudine's local reporting index, biscuit-icon's icon cache, and DMLS's per-file facts store._
 
     _Tags: database, sqlite, embedded_
 

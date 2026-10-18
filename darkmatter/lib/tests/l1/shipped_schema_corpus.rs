@@ -612,6 +612,8 @@ fn shipped_schema_artifacts_parse_passively() {
         );
         let document: YamlValue = serde_yaml_ng::from_str(&artifact.source)
             .unwrap_or_else(|error| panic!("{label} is not YAML: {error}"));
+        let trigger = parse_trigger_envelope_from_str(&artifact.source);
+        assert!(trigger.is_ok(), "{label}: trigger classification failed: {trigger:?}");
         let outcome = standalone_outcome(&artifact.source, &artifact.path);
         let phantom = phantom_dir.join(&artifact.file);
         assert_eq!(

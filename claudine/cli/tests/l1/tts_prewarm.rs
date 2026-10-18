@@ -474,7 +474,7 @@ fn deferred_sequence(site: &str, stack: Option<&str>) -> String {
             if site == "serial" {
                 "    - name: group\n      group:\n          max_parallel: 1\n          tasks:\n              - name: member\n                prompt: doc.md\n"
             } else {
-                "    - name: group\n      group:\n          max_parallel: 1\n          tasks:\n              - name: member\n                prompt: doc.md\n"
+                "    - name: group\n      group:\n          tasks:\n              - name: member\n                prompt: doc.md\n"
             },
             "                ",
         ),

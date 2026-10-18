@@ -470,12 +470,13 @@ bench-compare name:
     @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
     @cargo bench -p {{ LIBRARY }} --benches -- --baseline {{ name }}
 
-# bench the DMLS workspace indexer against a deterministic synthetic corpus.
+# bench the DMLS index store (cold fill, then a warm restart answering
+# references, rename, and symbols) against a deterministic synthetic corpus.
 # The tier is generated once under the gitignored root target/ and reused; the
 # generator is seeded (byte-identical run to run), so `rm -rf` it to refresh.
 # darkmatter-5k (default) is DSL-dense (directives/$schema/interpolation edges);
 # bench vault-5k for a same-size plain-Markdown/wiki control to isolate DSL cost.
-# Usage: `just bench-dmls [tier] [--json]`
+# Usage: `just bench-dmls [tier] [--json] [--bench-target <file>]`
 # tiers: tiny-100 | small-1k | vault-5k | dense-5k | darkmatter-5k (default) | pathological-1k | large-20k
 bench-dmls tier="darkmatter-5k" *args="":
     #!/usr/bin/env bash

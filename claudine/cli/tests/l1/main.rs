@@ -101,6 +101,8 @@ mod level1_dry_run_pty;
 #[cfg(unix)]
 mod level1_inline_compose_mismatch_pty;
 #[cfg(unix)]
+mod level1_lifecycle_shell_terminal_pty;
+#[cfg(unix)]
 mod level1_provided_partial_file_pty;
 #[cfg(unix)]
 mod level1_provider_overlay_home;

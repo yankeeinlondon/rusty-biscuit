@@ -445,7 +445,11 @@ For grammar or schema changes, cover:
   package, package area, `base_dir()`, `SCHEMAS_DIR`, `~/schemas`, each with a
   `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
   `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
-  states; DMLS and `md` share them through `triggers::scan(&ctx)`.
+  states; DMLS and `md` share them through `triggers::scan(&ctx)` (DMLS
+  calls `scan_with_source`, the same scan over its cached root contents;
+  `enumerate_root_files` is the one root listing). DMLS prepares workspace
+  registries at startup and serves them from memory until an input changes;
+  see [dmls.md](dmls.md) and `darkmatter/docs/lsp/indexing.md`.
 - `for_document` is fallible: only `NotFound`/`NotADirectory` (and the
   package/area/tree symlink policy) make a root `Absent`. Any other metadata
   failure (e.g. `PermissionDenied` on an ancestor) is `SchemaError::Io`
@@ -453,6 +457,17 @@ For grammar or schema changes, cover:
   and bare-name lookup never falls through to a less local root. DMLS turns
   that `Io` scan error into `SchemaOutcome::Failed` instead of keeping its
   last-good registry (last-good is only for trigger-file load errors).
+- `parse_trigger_envelope_from_str` is the one envelope classifier (discovery,
+  embedded bundles, DMLS authoring, payload-cycle checks); never add a
+  caller-side pre-check. Unparseable YAML is `Ok(None)` unless a provable
+  column-0 `kind: trigger-schema` line claims it (`claims_envelope` skips lines
+  inside multi-line quoted or block scalars and open flow collections), then
+  `SchemaError::TriggerEnvelopeYaml { message, line, column }` (column in
+  characters, BOM excluded) with a YAML hint, wrapped in `TriggerLoad` by
+  filesystem discovery and `EmbeddedTriggerLoad` for bundles; `TriggerMatch`
+  stays for grammar and shape errors. A malformed flow mapping is therefore unclaimed. BOM and
+  CRLF are normalized before parsing (libyaml rejects BOM + CRLF as two
+  documents). Tests: `lib/tests/l1/trigger_envelope_claim.rs`.
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and

@@ -58,7 +58,8 @@ pub struct DocumentContext<'a> {
     pub text: &'a str,
     /// Byte ↔ position map for this `(uri, version)`.
     pub source_map: &'a SourceMap,
-    /// The current workspace graph snapshot.
+    /// The graph to answer from: the live snapshot, or for references a
+    /// request graph over the index store's candidates.
     pub graph: &'a WorkspaceGraph,
     /// This document's id in `graph`, if indexed.
     pub doc_id: Option<DocumentId>,
@@ -102,7 +103,7 @@ pub trait Provider: Send + Sync {
     }
 
     /// Workspace-wide symbols matching `query`.
-    fn workspace_symbols(&self, query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
+    fn workspace_symbols(&self, query: &str, documents: &[symbols::SymbolDocument]) -> Vec<WorkspaceSymbol> {
         Vec::new()
     }
 
@@ -163,8 +164,8 @@ impl Provider for SubstrateProvider {
         symbols::document_symbols(ctx)
     }
 
-    fn workspace_symbols(&self, query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
-        symbols::workspace_symbols(query, graph)
+    fn workspace_symbols(&self, query: &str, documents: &[symbols::SymbolDocument]) -> Vec<WorkspaceSymbol> {
+        symbols::workspace_symbols(query, documents)
     }
 
     fn definition(&self, ctx: &DocumentContext, offset: usize) -> Vec<Location> {
@@ -391,8 +392,8 @@ impl ProviderRegistry {
     }
 
     /// Workspace symbols: union across providers, capped.
-    pub fn workspace_symbols(&self, query: &str, graph: &WorkspaceGraph) -> Vec<WorkspaceSymbol> {
-        let mut merged = self.collect("workspaceSymbol", |p| p.workspace_symbols(query, graph));
+    pub fn workspace_symbols(&self, query: &str, documents: &[symbols::SymbolDocument]) -> Vec<WorkspaceSymbol> {
+        let mut merged = self.collect("workspaceSymbol", |p| p.workspace_symbols(query, documents));
         merged.truncate(WORKSPACE_SYMBOL_CAP);
         merged
     }
@@ -471,4 +472,48 @@ fn dedup_locations(locations: Vec<Location>) -> Vec<Location> {
         }
     }
     out
+}
+
+/// The document a heading completion at `offset` reads headings from: the
+/// target of an anchor in an open link destination (a graph document, or a
+/// Markdown file resolution finds outside the graph), or of a wiki heading
+/// fragment (a wiki candidate only).
+pub(crate) fn completion_heading_target(ctx: &DocumentContext, offset: usize) -> Option<std::path::PathBuf> {
+    let document = completion::heading_target(ctx, offset).or_else(|| wiki::heading_target(ctx, offset));
+    match document {
+        Some(document) => ctx.graph.document(document).map(|record| record.path.clone()),
+        None => completion::heading_target_file(ctx, offset),
+    }
+}
+
+/// The document the link, wiki link, or transclusion at `offset` in the
+/// document at `path` lands on, read from the graph's resolved edges: a
+/// graph document, or a Markdown file outside the graph.
+pub fn reference_target_at(
+    graph: &WorkspaceGraph,
+    path: &Path,
+    offset: usize,
+) -> Option<std::path::PathBuf> {
+    use crate::graph::{EdgeKind, EdgeTarget};
+    let document = graph.document_id(path)?;
+    let references = graph
+        .links(document)
+        .chain(graph.wiki_links(document))
+        .map(|(id, node)| (id, node, EdgeKind::References));
+    let transclusions = graph
+        .transclusions(document)
+        .map(|(id, node)| (id, node, EdgeKind::Transcludes));
+    references
+        .chain(transclusions)
+        .filter(|(_, node, _)| node.span.contains(&offset))
+        .find_map(|(id, _, kind)| {
+            graph.outgoing(id, kind).find_map(|edge| match &edge.target {
+                EdgeTarget::Node(node) => {
+                    let target = graph.node(*node)?;
+                    graph.document(target.document).map(|record| record.path.clone())
+                }
+                EdgeTarget::File(file) => crate::graph::is_markdown_path(file).then(|| file.clone()),
+                EdgeTarget::Unresolved(_) => None,
+            })
+        })
 }

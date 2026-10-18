@@ -155,6 +155,10 @@ protocol-focused:
 - `unicode-normalization` — NFC normalization of wiki-link targets and logical
   paths (Phase 5 / R-8), so a vault resolves identically on macOS, Windows, and
   Linux. Already in the tree transitively via `url`/`idna`.
+- `rusqlite` (`bundled`) — the persistent per-file facts store that
+  references, rename, file rename, and workspace symbols narrow their
+  candidates with. Bundled SQLite gives every OS the same 3.45 build, which
+  supports `STRICT` tables; the same version and feature `claudine/lib` uses.
 - `darkmatter` (lib) — the semantic authority (span vocabulary,
   frontmatter block extraction, single-document reference extraction, and the
   later-phase parsing surfaces).

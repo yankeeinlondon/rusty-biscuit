@@ -251,6 +251,21 @@ impl TriggerRegistry {
     pub fn context(&self) -> &FileResolutionContext {
         &self.context
     }
+
+    /// The files an effective schema layered from this registry depends on:
+    /// each file trigger's envelope, and each resolved payload file with its
+    /// imports and examples. Embedded triggers contribute none; a registry
+    /// built without [`scan`] contributes only its envelopes.
+    pub fn dependencies(&self) -> impl Iterator<Item = &Path> {
+        self.triggers
+            .iter()
+            .filter_map(|trigger| trigger.source.path())
+            .chain(
+                self.payloads
+                    .iter()
+                    .flat_map(|payload| payload.dependencies.iter().map(PathBuf::as_path)),
+            )
+    }
 }
 
 /// An embedded trigger's envelope and resolved payload, or `None` for a bundle
@@ -333,6 +348,59 @@ struct RootFile {
     path: PathBuf,
     /// UTF-8 filename (last path component).
     name: String,
+}
+
+/// The regular `.yaml`/`.yml` files directly in schema root `root`, ordered by
+/// UTF-8 filename bytes.
+///
+/// This is discovery's own enumeration, under the [discovery
+/// contract](self#discovery-contract): symlinks and non-UTF-8 names are
+/// skipped, and two names that collide after case-folding are an error.
+///
+/// ## Errors
+///
+/// [`SchemaError::Io`] when the folder or one of its entries cannot be read;
+/// [`SchemaError::TriggerCaseFoldCollision`] for colliding names.
+pub fn enumerate_root_files(root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
+    Ok(enumerate_root(root)?.into_iter().map(|file| file.path).collect())
+}
+
+/// Where [`scan_with_source`] reads schema-root folders and files from.
+///
+/// [`scan`] reads the filesystem directly. A host that keeps schema-root
+/// contents in memory (DMLS) supplies them here, so its registry is the one
+/// discovery computes from those contents. Either method may read the
+/// filesystem; the trait only decides where the bytes come from.
+pub trait SchemaRootSource {
+    /// The files [`enumerate_root_files`] returns for `root`.
+    ///
+    /// ## Errors
+    ///
+    /// Every [`enumerate_root_files`] error.
+    fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError>;
+
+    /// The UTF-8 text of root file `path`.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::Io`] naming `path` when it cannot be read as UTF-8 text.
+    fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError>;
+}
+
+/// The filesystem [`SchemaRootSource`] that [`scan`] uses.
+struct FilesystemRoots;
+
+impl SchemaRootSource for FilesystemRoots {
+    fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
+        enumerate_root_files(root)
+    }
+
+    fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError> {
+        std::fs::read_to_string(path).map(Into::into).map_err(|source| SchemaError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
 }
 
 /// Enumerates regular `.yaml`/`.yml` files in `root`, rejecting symlinks and
@@ -465,6 +533,25 @@ pub fn scan_with_embedded(
     context: &FileResolutionContext,
     bundles: &[EmbeddedSchemaBundle],
 ) -> Result<TriggerRegistry, SchemaError> {
+    scan_with_source(context, bundles, &mut FilesystemRoots)
+}
+
+/// [`scan_with_embedded`], reading each searched root's file list and file
+/// text from `source` instead of the filesystem.
+///
+/// Everything else is unchanged: the roots come from
+/// [`SchemaRoots::for_document`], and payloads resolve in `context` through
+/// the filesystem. Given a `source` that returns what the filesystem holds,
+/// the result equals [`scan_with_embedded`]'s.
+///
+/// ## Errors
+///
+/// Every [`scan_with_embedded`] error, and any error `source` returns.
+pub fn scan_with_source(
+    context: &FileResolutionContext,
+    bundles: &[EmbeddedSchemaBundle],
+    source: &mut dyn SchemaRootSource,
+) -> Result<TriggerRegistry, SchemaError> {
     let roots = SchemaRoots::for_document(context)?;
 
     // Apply filename shadowing: the first root wins by filename.
@@ -472,7 +559,11 @@ pub fn scan_with_embedded(
     let mut unshadowed: Vec<(RootFile, &Path)> = Vec::new();
     let mut shadowed: Vec<ShadowedFile> = Vec::new();
     for root in roots.searched() {
-        for file in enumerate_root(&root.path)? {
+        for path in source.root_files(&root.path)? {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let file = RootFile { name: name.to_string(), path };
             if let Some(shadowing_path) = first_by_name.get(&file.name) {
                 shadowed.push(ShadowedFile {
                     path: file.path.clone(),
@@ -489,10 +580,7 @@ pub fn scan_with_embedded(
     let mut triggers: Vec<LoadedTrigger> = Vec::new();
     let mut trigger_paths: Vec<PathBuf> = Vec::new();
     for (file, pattern_cwd) in &unshadowed {
-        let content = std::fs::read_to_string(&file.path).map_err(|e| SchemaError::Io {
-            path: file.path.clone(),
-            source: e,
-        })?;
+        let content = source.root_file_text(&file.path)?;
         match parse_trigger_envelope_from_str(&content) {
             Ok(None) => {
                 // Not a trigger-schema — silently ignored.

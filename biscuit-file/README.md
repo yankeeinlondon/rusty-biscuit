@@ -142,11 +142,15 @@ canonicalized the same way.
 and Linux, `USERPROFILE` on native Windows (setting only `HOME` there changes
 nothing), the platform profile lookup when the variable is unset, and `None`
 for a relative value. The result is used as spelled, never canonicalized.
+`user_cache_dir()` (same feature) names the per-user cache directory from
+that home: `<home>/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
+`<home>/.cache` elsewhere on Unix, `%LOCALAPPDATA%` on native Windows.
 
 ```rust
 let home = biscuit_file::home_dir();                       // Option<PathBuf>
+let cache = biscuit_file::user_cache_dir();                // Option<PathBuf>
 let here = biscuit_file::canonicalize_simplified(std::path::Path::new("."))?;
-# let _ = (home, here);
+# let _ = (home, cache, here);
 # Ok::<(), std::io::Error>(())
 ```
 
