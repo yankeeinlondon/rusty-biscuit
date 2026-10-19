@@ -70,6 +70,7 @@ mod level2_removed_validation_key_capture;
 mod level2_schema_parse_capture;
 #[cfg(unix)]
 mod level2_sequence_review_screen;
+mod level2_sequence_container_ctrl_c;
 #[cfg(unix)]
 mod level2_sequence_task_stream_capture;
 #[cfg(unix)]

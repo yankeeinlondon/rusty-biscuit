@@ -11,6 +11,10 @@ last_updated: 2026-09-17
     - List documents with [`::file-links`](./docs/inline/file-links.md), using directory context labels and terminal-aware icons
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
+- [Shell approval](./docs/inline/preflight-checks.md) supports exact commands and
+  reusable typed shapes such as `template ls {{ string }}/build`. Shape-approved
+  commands validate each value and pass its containing word as one argument
+  directly to the program; missing values stop composition.
 - YAML frontmatter rejects duplicate keys at every mapping depth; explicit
   document merges continue to use their selected conflict strategy
 - Validate frontmatter against a [schema](./docs/topics/schemas/definition.md); each problem points at the [offending YAML node](./docs/topics/schemas/definition.md#problem-locations), however deeply nested, as a line and column in the complete file:

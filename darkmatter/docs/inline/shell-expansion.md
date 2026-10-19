@@ -47,14 +47,16 @@ base: main
 ::shell git log --oneline origin/{{ base }}..HEAD
 ```
 
-The command that is approved is the command after interpolation. A value that changes from run to run therefore produces a command that needs approving again, unless a whitelist entry covers it by prefix.
+The command can be approved as the command after interpolation, its exact bytes, which a value that changes from run to run makes new each time. It can instead be approved by its shape, a `template` rule such as `template git log --oneline origin/{{ string }}..HEAD`, which covers every value; it then runs as a template, each placeholder filling exactly one argument after its value is checked. See [Running a command as a template](./preflight-checks.md#running-a-command-as-a-template).
 
 An interpolated value supplies **arguments only**. The directive, the program it runs, `&&`/`||`, and redirections must all be written in the document, so a value cannot choose what runs:
 
 ```md
 ::shell {{ exe }} --version        <!-- rejected: the program came from a value -->
-::shell echo {{ note }} && ls      <!-- fine, unless `note` itself contains `&&` -->
+::shell echo {{ note }} && ls      <!-- as bytes only while `note` holds no `&&`; as a template, always -->
 ```
+
+A value holding quotes, `&&`, `;`, or other command syntax keeps the command from running as bytes. It can still run as a template, where that value is one argument.
 
 A value that holds `::shell …` on its own line is inserted as text; it cannot start a directive.
 
@@ -118,6 +120,8 @@ Darkmatter parses the line and starts each program itself; it does not hand the 
 | `a \|\| b` | run `b` only if `a` failed |
 | `2>&1` | merge standard error into standard output, in the order the program wrote them |
 | `2>/dev/null`, `>/dev/null` | discard a stream |
+
+Redirections apply from left to right. `2>&1 > /dev/null` discards stdout but keeps stderr on the original stdout destination; `> /dev/null 2>&1` discards both. A frontmatter `::result` therefore reports the surviving stderr text in its `stdout` field for the first spelling. The same rule applies to template execution and resolved commands.
 
 | Rejected when the document is parsed | Message |
 |---|---|

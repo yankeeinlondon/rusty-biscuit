@@ -622,6 +622,10 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
         refreshed_envelope.is_empty(),
         "valid envelope diagnostics after consumer open: {refreshed_envelope:?}"
     );
+    // An open envelope can be published twice for one event; drop any
+    // leftover so the wait below reads a post-save publication.
+    fixture.flush_server();
+    while fixture.take_buffered_diagnostics(envelope_uri.as_str()).is_some() {}
 
     std::fs::remove_file(&payload_path).unwrap();
     fixture.notify(
@@ -805,6 +809,78 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
         repaired["diagnostics"],
         json!([]),
         "repair must clear the open envelope"
+    );
+
+    fixture.shutdown();
+}
+
+/// The diagnostics last published for `uri` once the server is idle.
+fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
+    fixture.flush_server();
+    let mut latest = fixture.wait_for_diagnostics_params(uri);
+    while let Some(params) = fixture.take_buffered_diagnostics(uri) {
+        latest = params;
+    }
+    latest["diagnostics"].as_array().cloned().unwrap_or_default()
+}
+
+fn requires_model(diagnostics: &[Value]) -> bool {
+    diagnostics.iter().any(|diagnostic| {
+        diagnostic["code"] == json!("dm.schema.missing_required")
+            && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+    })
+}
+
+#[test]
+fn saving_an_open_trigger_buffer_updates_consumers_and_unsaved_edits_do_not() {
+    let workspace = LspWorkspace::new();
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    let envelope_path = schemas.join("prompt.trigger.yaml");
+    let document_path = workspace.path().join("prompt.md");
+    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let retargeted = "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: prompt.yaml\n";
+    let document = "---\nprompt: hello\n---\n\nBody\n";
+    std::fs::write(&envelope_path, envelope).unwrap();
+    std::fs::write(schemas.join("prompt.yaml"), "$schema:\n  model: string(required)\n").unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_initialize_params(workspace.path()));
+    let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    open(&fixture, document_uri.as_str(), document);
+    assert!(requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": {
+            "uri": envelope_uri.as_str(), "languageId": "yaml", "version": 1, "text": envelope
+        } }),
+    );
+
+    // An unsaved edit of the open envelope does not reach its consumers.
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": envelope_uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": retargeted }]
+        }),
+    );
+    assert!(
+        requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())),
+        "an unsaved schema edit must not change consuming documents"
+    );
+
+    // Saving it does, with no watched-file event.
+    std::fs::write(&envelope_path, retargeted).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": envelope_uri.as_str() } }),
+    );
+    assert!(
+        !requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())),
+        "saving the open envelope must refresh its consumers"
     );
 
     fixture.shutdown();
@@ -7438,5 +7514,98 @@ fn a_frontmatter_less_document_never_reports_undeclared_properties() {
         "any name could be a `--set` value: {diagnostics:#?}"
     );
 
+    fixture.shutdown();
+}
+
+/// The 2026-10-17 incident file (`schemas/feature-review.yaml` mid-edit) with
+/// its first comment line replaced by a `kind: trigger-schema` claim and one
+/// character before the line-17 error replaced by a non-BMP character, so the
+/// error stays at character column 93 while its UTF-8 and UTF-16 offsets
+/// differ from each other and from the character count.
+fn claimed_incident_envelope() -> String {
+    let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
+    let mut lines: Vec<String> = incident.split('\n').map(str::to_string).collect();
+    assert!(lines[0].starts_with('#'), "{}", lines[0]);
+    lines[0] = "kind: trigger-schema".to_string();
+    assert!(lines[16].contains("every finding"), "{}", lines[16]);
+    lines[16] = lines[16].replacen("every finding", "😀very finding", 1);
+    lines.join("\n")
+}
+
+/// A claimed envelope that is not valid YAML is diagnosed at the parser's
+/// position, converted into the negotiated encoding (never byte columns).
+#[test]
+fn a_claimed_unparseable_trigger_envelope_is_diagnosed_at_its_yaml_position() {
+    let envelope = claimed_incident_envelope();
+    let line = &envelope.split('\n').nth(16).unwrap();
+    let colon = line.find("): <title>").unwrap() + 1;
+    assert_eq!(line[..colon].chars().count(), 92, "the error stays at character column 93");
+    for (encoding, character) in [
+        ("utf-16", line[..colon].encode_utf16().count()),
+        ("utf-8", colon),
+    ] {
+        let workspace = LspWorkspace::new();
+        init_repository(workspace.path());
+        let schemas = workspace.path().join("schemas");
+        std::fs::create_dir(&schemas).unwrap();
+        let path = schemas.join("broken.yaml");
+        std::fs::write(&path, &envelope).unwrap();
+        let mut params = neovim_like_initialize_params(workspace.path());
+        params["capabilities"]["general"]["positionEncodings"] = json!([encoding]);
+        let mut fixture = LspFixture::start(&workspace);
+        let result = fixture.initialize(params);
+        assert_eq!(result["capabilities"]["positionEncoding"], json!(encoding));
+        let uri = url::Url::from_file_path(&path).unwrap();
+        open(&fixture, uri.as_str(), &envelope);
+
+        // Startup's registry preparation already published the closed
+        // file's diagnostic; the open buffer's publication is versioned.
+        let diagnostics = loop {
+            let params = fixture.wait_for_diagnostics_params(uri.as_str());
+            if !params["version"].is_null() {
+                break params["diagnostics"].as_array().cloned().unwrap_or_default();
+            }
+        };
+        let trigger: Vec<&Value> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+            .collect();
+        assert_eq!(trigger.len(), 1, "{encoding}: {diagnostics:#?}");
+        let message = trigger[0]["message"].as_str().unwrap();
+        assert!(message.contains("is not valid YAML at line 17, column 93"), "{encoding}: {message}");
+        assert!(!message.contains("match expression"), "{encoding}: {message}");
+        assert_eq!(
+            trigger[0]["range"]["start"],
+            json!({ "line": 16, "character": character }),
+            "{encoding}: {diagnostics:#?}"
+        );
+        assert_eq!(trigger[0]["range"]["end"]["line"], json!(16), "{encoding}");
+        fixture.shutdown();
+    }
+}
+
+/// The incident file verbatim: an ordinary schema-root file that is not valid
+/// YAML and does not claim the envelope gets no trigger diagnostic.
+#[test]
+fn an_unclaimed_unparseable_schema_root_file_gets_no_trigger_diagnostic() {
+    let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
+    let workspace = LspWorkspace::new();
+    init_repository(workspace.path());
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    let path = schemas.join("feature-review.yaml");
+    std::fs::write(&path, incident).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&path).unwrap();
+    open(&fixture, uri.as_str(), incident);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.iter().all(|diagnostic| {
+            !diagnostic["message"].as_str().unwrap_or_default().contains("trigger-schema")
+        }),
+        "{diagnostics:#?}"
+    );
     fixture.shutdown();
 }

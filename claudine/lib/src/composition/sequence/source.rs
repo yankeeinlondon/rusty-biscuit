@@ -24,7 +24,7 @@ use super::expr::SourceExpressionLookup;
 use super::formal;
 use super::grammar::{SequenceReference, SourceOperator};
 use super::model::{SequencePlan, SequenceSource};
-use super::normalize::normalize_plan;
+use super::normalize::normalize_plan_at;
 
 /// Resolve an external sequence reference string to an absolute existing path.
 ///
@@ -107,6 +107,10 @@ pub fn load_referenced_sequence(
 
     if formal {
         let root = document.as_object().expect("formal implies an object root");
+        if let Some(value) = root.get("fail_fast") {
+            return Err(super::grammar::removed_task_key("fail_fast", value, path));
+        }
+        super::grammar::validate_sequence_root(root, path)?;
         let mut plan = formal::normalize_formal_plan(
             items,
             formal::formal_keys(root)?,
@@ -127,13 +131,14 @@ pub fn load_referenced_sequence(
         return Ok(plan);
     }
 
-    normalize_plan(
+    normalize_plan_at(
         &items,
         SequenceSource::DataFile {
             path: path.to_path_buf(),
         },
         invocation_path,
         document_fail_fast,
+        reference.offset.as_deref().unwrap_or(""),
     )
 }
 

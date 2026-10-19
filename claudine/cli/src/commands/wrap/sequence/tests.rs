@@ -49,16 +49,16 @@ fn auto_selectable_states_are_classified() {
 
     // Only Selected and ListOneInstalled auto-select; every other state is
     // a prompting state that the no-TTY gate must abort on.
-    assert!(is_auto_selectable_state(&AgentResolutionState::Selected {
+    assert_eq!(providers::auto_selected(&AgentResolutionState::Selected {
         provider: Provider::Claude
-    }));
-    assert!(is_auto_selectable_state(
+    }), Some(Provider::Claude));
+    assert_eq!(providers::auto_selected(
         &AgentResolutionState::ListOneInstalled {
-            selected: Provider::Claude,
+            selected: Provider::Codex,
             not_installed: Vec::new(),
             invalid: Vec::new(),
         }
-    ));
+    ), Some(Provider::Codex));
 
     for state in [
         AgentResolutionState::NoAgent,
@@ -79,7 +79,7 @@ fn auto_selectable_states_are_classified() {
         },
     ] {
         assert!(
-            !is_auto_selectable_state(&state),
+            providers::auto_selected(&state).is_none(),
             "prompting state {state:?} must not be auto-selectable"
         );
     }

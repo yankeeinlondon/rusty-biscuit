@@ -1173,9 +1173,9 @@ fn origins_referenced_file_carries_uri() {
     let origin = effective.origins.get("title").expect("title origin");
     assert_eq!(origin.kind, SchemaOriginKind::ReferencedFile);
     assert!(
-        origin.uri.as_ref().map(|p| p.ends_with("schema.yaml")).unwrap_or(false),
+        origin.file().map(|p| p.ends_with("schema.yaml")).unwrap_or(false),
         "expected the referenced file path, got {:?}",
-        origin.uri,
+        origin.source,
     );
 }
 

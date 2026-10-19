@@ -39,12 +39,14 @@ use crate::wiki::{self, Match, ParseOutcome, WikiDoc, shortest_unique_suffix};
 use crate::workspace::{DocumentStore, file_path_to_uri, resolve_wiki_roots};
 
 /// Everything the rename providers need beyond the request payload: the open
-/// buffers, the current graph snapshot, config/profile, workspace roots, and the
+/// buffers, the graph to answer from, config/profile, workspace roots, and the
 /// negotiated encoding (for building source maps of closed documents).
 pub struct RenameEnv<'a> {
     /// Open-buffer store (authoritative over disk).
     pub documents: &'a DocumentStore,
-    /// The current workspace graph snapshot.
+    /// The graph to answer from: the server's request graph over the index
+    /// store's candidates, whose wiki universe is the whole file list, or
+    /// the live snapshot for `prepareRename`.
     pub graph: &'a WorkspaceGraph,
     /// Effective configuration.
     pub config: &'a DmlsConfig,
@@ -258,35 +260,38 @@ fn apply_file_rename(env: &RenameEnv, file: &FileRename, builder: &mut EditBuild
         return true; // not a file:// rename we can reason about; nothing to do
     };
     let Some(old_doc) = env.graph.document_id(&old_path) else {
-        return true; // the renamed file is not an indexed document
+        return true; // the renamed file is not a graph document
     };
-    // Filesystem/index conflict: the destination is already a tracked document.
-    if env.graph.document_id(&new_path).is_some() {
+    // Filesystem/index conflict: the destination is already a tracked file,
+    // whether or not this graph holds it as a document.
+    let universe = env.graph.wiki_universe();
+    if env.graph.document_id(&new_path).is_some() || universe.slot(&new_path).is_some() {
         return false;
     }
+    let Some(old_slot) = env.graph.wiki_slot(old_doc) else {
+        return true;
+    };
 
     // The post-rename wiki universe: the old document's slot now holds the new
     // path's canonical logical path.
     let wiki_roots = resolve_wiki_roots(env.roots, env.config.wiki.wiki_root.as_deref());
-    let mut post_docs = env.graph.wiki_docs();
-    let old_index = old_doc.0 as usize;
-    if let Some(slot) = post_docs.get_mut(old_index) {
-        *slot = wiki_doc_for(&new_path, &wiki_roots);
-    }
+    let mut post_docs = universe.docs().to_vec();
+    post_docs[old_slot] = WikiDoc::for_path(&new_path, &wiki_roots);
 
     // Rewrite every wiki link that uniquely resolved to the old document.
     for document in 0..env.graph.document_count() {
         let doc_id = DocumentId(document as u32);
-        for (node_id, node) in env.graph.wiki_links(doc_id) {
+        let Some(source) = env.graph.wiki_slot(doc_id) else {
+            continue;
+        };
+        for (_, node) in env.graph.wiki_links(doc_id) {
             let Some(payload) = node.as_wiki_link() else {
                 continue;
             };
             if !resolves_uniquely_to(env.graph, payload, old_doc) {
                 continue;
             }
-            let _ = node_id;
-            let source = document;
-            let Some(spelling) = safe_new_spelling(&post_docs, old_index, source, env.config) else {
+            let Some(spelling) = safe_new_spelling(&post_docs, old_slot, source, env.config) else {
                 return false; // no unique replacement spelling → abort
             };
             if !push_target_edit(env, node.document, &payload.target_span, &spelling, builder) {
@@ -478,22 +483,6 @@ fn document_source(env: &RenameEnv, path: &Path) -> Option<(String, SourceMap)> 
     };
     let map = SourceMap::new(uri, 0, env.encoding, Arc::from(text.as_str()));
     Some((text, map))
-}
-
-/// A [`WikiDoc`] for `path` against the wiki roots (R-8 canonicalization).
-fn wiki_doc_for(path: &Path, wiki_roots: &[PathBuf]) -> WikiDoc {
-    for (index, root) in wiki_roots.iter().enumerate() {
-        if path.starts_with(root) {
-            return WikiDoc {
-                canonical: wiki::canonical_segments(path, Some(root)),
-                workspace_id: index,
-            };
-        }
-    }
-    WikiDoc {
-        canonical: wiki::canonical_segments(path, None),
-        workspace_id: WikiDoc::NO_ROOT,
-    }
 }
 
 /// Parses a `file://` URI string into a path.

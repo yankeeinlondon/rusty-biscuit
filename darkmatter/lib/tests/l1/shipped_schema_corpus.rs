@@ -56,6 +56,9 @@ enum Class {
     EnvelopeRejected,
     /// A definition does not parse; `error` is part of the expected message.
     Draft { error: &'static str },
+    /// A `kind: trigger-schema` envelope: never a standalone schema, and its
+    /// `$schema` payload parses and resolves inline from its own directory.
+    Trigger,
 }
 
 struct Exception {
@@ -154,14 +157,20 @@ const EXCEPTIONS: &[Exception] = &[
     exception(
         "claudine/schemas",
         "claudine.yaml",
-        Class::Placeholder,
-        "reserved for Claudine's global-variable schema",
+        Class::Trigger,
+        "Claudine's frontmatter catalog, applied by trigger",
     ),
     exception(
         "claudine/schemas",
-        "partials/lifecycle.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
+        "inline-compose.yaml",
+        Class::Trigger,
+        "inline-compose's document metadata, applied by trigger",
+    ),
+    exception(
+        "claudine/schemas",
+        "sequence.yaml",
+        Class::Trigger,
+        "the sequence document's catalog, applied by trigger",
     ),
     // claudine/docs/schemas: design drafts, not loaded by any reader.
     exception(
@@ -254,15 +263,22 @@ const EXCEPTIONS: &[Exception] = &[
 /// one of the core types, with the canonical keywords it uses; `any` parses as
 /// `unknown`. Native YAML null declarations parse as `null`.
 const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
+    // Zero-argument verbs take `null` or an empty `unknown[]`, generated verbs
+    // and loose bodies are `unknown`, and `shell` types the shell command.
+    ("claudine/schemas/action.yaml", &["null", "shell", "unknown"]),
+    ("claudine/schemas/lifecycle.yaml", &["null", "shell", "unknown"]),
+    // The hash payload.
+    ("claudine/schemas/claudine.yaml", &["unknown"]),
+    ("claudine/schemas/inline-compose.yaml", &["unknown"]),
+    // Removed root `fail_fast`, and the parser-checked task and step fields.
+    ("claudine/schemas/sequence.yaml", &["null"]),
+    ("claudine/schemas/sequence-types.yaml", &["unknown"]),
     // `set_frontmatter.value` has a native null arm; the undefined actions are
     // `unknown` placeholders.
     (
         "claudine/docs/schemas/partials/side-effect.yaml",
         &["null", "unknown"],
     ),
-    ("darkmatter/docs/schemas/claudine-types.yaml", &["unknown"]),
-    // `any` for provider-specific shapes and the optional sequence states.
-    ("darkmatter/docs/schemas/claudine.yaml", &["unknown"]),
     ("darkmatter/docs/schemas/darkmatter.yaml", &["unknown"]),
     ("darkmatter/schemas/partials/fm.yaml", &["unknown"]),
 ];
@@ -596,6 +612,8 @@ fn shipped_schema_artifacts_parse_passively() {
         );
         let document: YamlValue = serde_yaml_ng::from_str(&artifact.source)
             .unwrap_or_else(|error| panic!("{label} is not YAML: {error}"));
+        let trigger = parse_trigger_envelope_from_str(&artifact.source);
+        assert!(trigger.is_ok(), "{label}: trigger classification failed: {trigger:?}");
         let outcome = standalone_outcome(&artifact.source, &artifact.path);
         let phantom = phantom_dir.join(&artifact.file);
         assert_eq!(
@@ -640,6 +658,16 @@ fn shipped_schema_artifacts_parse_passively() {
                 let message =
                     outcome.expect_err(&format!("{label} now loads; remove its exception"));
                 assert!(message.contains("unsupported keys"), "{label}: {message}");
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
+            }
+            Class::Trigger => {
+                assert_eq!(outcome, Ok(None), "{label} is a trigger, never a standalone schema");
+                assert!(
+                    matches!(parse_trigger_envelope_from_str(&artifact.source), Ok(Some(_))),
+                    "{label} must parse as a trigger envelope",
+                );
                 let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
@@ -751,7 +779,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                 assert_lowered(&resolved, &label);
                 resolved_files += 1;
             }
-            Class::EnvelopeRejected | Class::NotASchema => {
+            Class::EnvelopeRejected | Class::NotASchema | Class::Trigger => {
                 if artifact.class == Class::EnvelopeRejected {
                     let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                         .expect_err(&format!("{label} now loads; remove its exception"));
@@ -1081,17 +1109,17 @@ fn inline_shape<'a>(definition: &'a PropertyDef, label: &str) -> &'a SchemaShape
     }
 }
 
-/// The migrated side-effect partial and the shipped Claudine baseline carry the
-/// presence the migration decided, read through the passive parser:
+/// The migrated side-effect partial and Claudine's frontmatter catalog carry
+/// the presence the migration decided, read through the passive parser:
 /// `set_frontmatter.value` admits null and is therefore optional,
 /// `merge_frontmatter` takes exactly `file` and a required `obj`, and the
-/// injected `state` stays required (an object, never null) while the optional
-/// sequence states admit null.
+/// sequence values Claudine injects are null-admitting `unknown`s, never
+/// required.
 #[test]
 fn migrated_shipped_definitions_declare_their_presence() {
     let root = repo_root();
     let side_effect_path = root.join("claudine/docs/schemas/partials/side-effect.yaml");
-    let claudine_path = root.join("darkmatter/docs/schemas/claudine.yaml");
+    let claudine_path = root.join("claudine/schemas/claudine.yaml");
     let before = fingerprint([side_effect_path.as_path(), claudine_path.as_path()]);
     let counters = effect_counters();
 
@@ -1134,22 +1162,17 @@ fn migrated_shipped_definitions_declare_their_presence() {
 
     let claudine: YamlValue =
         serde_yaml_ng::from_str(&fs::read_to_string(&claudine_path).expect("readable"))
-            .expect("Claudine baseline is YAML");
-    let schema = yaml_key(&claudine, "$schema").expect("the baseline has `$schema`");
+            .expect("Claudine's catalog is YAML");
+    let schema = yaml_key(&claudine, "$schema").expect("the trigger has a `$schema` payload");
     let property = |key: &str| {
         parse_property_definition(key, yaml_key(schema, key).unwrap_or_else(|| panic!("no `{key}`")))
             .unwrap_or_else(|error| panic!("`{key}`: {error}"))
     };
-    let state = property("state");
-    assert!(state.is_required(), "`state` must stay required: {state:?}");
-    assert!(!state.admits_null(), "`state` is an object, never null");
-    for key in ["previous_state", "next_state", "tools", "skills", "compatibility"] {
-        let definition = property(key);
-        assert!(
-            definition.admits_null() && !definition.is_required(),
-            "`{key}` is a null-admitting `unknown`: {definition:?}"
-        );
+    for key in ["state", "previous", "next", "outputs", "sequence_id", "fail_fast"] {
+        assert!(yaml_key(schema, key).is_none(), "`{key}` is not an authored catalog property");
     }
+    let cancelled = property("cancelled");
+    assert!(!cancelled.is_required() && !cancelled.admits_null(), "{cancelled:?}");
 
     assert_eq!(effect_counters(), counters, "parsing a definition ran an effect");
     assert!(

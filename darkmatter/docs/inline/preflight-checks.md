@@ -32,10 +32,37 @@ The governing invariant is:
 execution_set ⊆ approval_set      (always)
 ```
 
-Because approval is a superset of anything reachable under any state, the
-execution-time gate degrades to a pure membership check: the command is already
-approved, so it runs with no prompt — this run or any later loop iteration with
-flipped conditions. A dead-branch command is **approved but never executed**.
+At execution, membership must match the approved bytes or typed shape. A shape
+member still needs value validation, blacklist checks, and direct-target
+validation before execution or result reuse. Re-preparing a document with
+changed state requires another audit; an exact decision cannot cover new bytes.
+A dead-branch command is **approved but never executed**.
+
+### Missing values
+
+A shell command never runs with a missing value. A placeholder is missing
+when its expression evaluates to `null`, which is also what an absent
+property reads as. Pre-flight evaluates every placeholder of every
+`::shell`, `::shell-block`, and frontmatter `$( … )` command, in every
+branch, and fails with `MissingValue` before any command runs:
+
+```md
+---
+target: null
+---
+::shell ls {{ target }}
+```
+
+```text
+shell command 'ls {{ target }}' reads 'target', which is missing (line 4)
+```
+
+An empty string, `0`, and `false` are present, and so is a fallback that
+yields a value (`{{ target || 'src' }}`). The error names the command and
+the expression, never the value. Like `NotPreApproved`, it always fails the
+composition: no `--when-error`, timeout fallback, transclusion notice, or
+`as_markdown(…) || fallback` absorbs it. Everywhere outside a shell command
+(body text, other frontmatter), `null` still renders as an empty string.
 
 Collection resolves every transclusion target the way composition does, from
 the same repository-aware context, so a `::file &README.md` or
@@ -170,17 +197,235 @@ A library caller that sets no policy root (`ComposeOptions::with_shell_policy_ro
 gets the request context's repository root, else its home directory, else the
 request directory. Pre-flight and execution read the same files.
 
+#### File format
+
+Each file is UTF-8 text with one rule per line. Blank lines and lines starting
+with `#` are ignored.
+
+```text
+# whitelist
+exact just ci-local --plan
+prefix ls
+template just clean --out {{ string }}/build
+```
+
+| Rule | Matches |
+|------|---------|
+| `exact <command>` | that command, argument for argument |
+| `prefix <executable>` | the executable with any arguments |
+| `template <shape>` | a command with the same argument list, where each `{{ type }}` hole stands for one argument value of that type |
+
+Matching compares parsed arguments: quoting and whitespace variants have the
+same shape, but changing a literal, argument count, hole position, chain
+operator, or ordered redirection changes it. For example, `tool "{{ x }}"`
+and `tool {{ x }}` share a shape; `tool prefix-{{ x }}` needs a rule retaining
+that literal prefix. Adjacent holes such as `{{ x }}{{ y }}` stay in one word.
+
+Only a bare top-level property (`out` or `fm.out`) gets its declaration from
+the effective schema of the document that owns the command. Named declarations
+resolve there, including in a transcluded child with its own schema. Other
+expressions (`env.OUT`, `last(seq.outputs)`, `out || 'dist'`), undeclared properties,
+and schemas without a SimplifiedSchema projection use a broad `string` hole.
+
+| Rule hole | Candidate declaration | Covered? |
+| --- | --- | --- |
+| `string` | any declaration | yes; its original validator still applies |
+| `alphanumeric(allow-slashes)` | `alphanumeric` | yes, the declaration is narrower |
+| `alphanumeric` | `alphanumeric(allow-slashes)` | no |
+| `alphanumeric` | `string`, a number, or a union | no |
+
+Constraints such as `min(3)` remain runtime validators and are omitted from the
+saved shape. Numeric and union declarations save a `string` hole; the prompt
+discloses their retained validator. A rule never narrows a broad declaration
+by inspecting today's value.
+
+A `template` hole holds one type with its options and nothing else:
+`{{ string }}` or a narrower string-like type such as
+`{{ alphanumeric(allow-slashes) }}`. A literal containing spaces, quotes,
+braces, or shell characters is double-quoted, with `\\`, `\"`, `\{`, `\}`,
+`\n`, `\r`, and `\t` as escapes; `"{{ x }}"` inside quotes is literal text, so
+write it `"\{\{ x \}\}"`. A line the loader cannot read is skipped with a
+warning naming the file and line, and the other rules still load. These
+template lines are skipped:
+
+| Line | Why |
+|------|-----|
+| `template build {{ alphanumeric(allow-slashes; min(3)) }}` | a constraint |
+| `template build {{ alphanumeric(min(3)) }}` | a constraint, written without `;` |
+| `template build {{ number }}` | not a string-like type |
+| `template build {{ slug }}` | a named type |
+| `template {{ string }} run` | a hole in the program word |
+
+In the blacklist, a `template` line blocks any command whose arguments it
+matches, whatever the hole types: `template deploy {{ string }}` blocks
+`deploy prod`, including a command written without any placeholder. A
+single-command rule blocks that command anywhere in an `&&`/`||` chain.
+
+A whitelist `template` rule approves a command at pre-flight when no `exact`
+rule covers its bytes: an `exact` rule wins, then a `template` rule, then a
+`prefix` rule. The approval records the command's shape, not its bytes, and
+the command then runs as a template.
+
+### Running a command as a template
+
+A command with a placeholder runs one of two ways, decided by what approved
+it:
+
+| Approved by | Runs as |
+|-------------|---------|
+| an `exact` rule, an earlier exact decision, or a `prefix` rule | its **resolved bytes**: the text after interpolation, split into words, exactly as before templates existed |
+| a `template` rule, an earlier shape decision, or the "this command shape" choice | a **template**: each placeholder fills exactly one argument |
+
+A command can also run only as a template: when a value it reads is produced
+later in the run (see [Late values](#claudinedarkmatter-boundary)), or when a
+value holds quotes, operators, or other command syntax so the interpolated
+text no longer reads as a command. Such a command is approved by its shape,
+or by `prefix` rules for its programs, never by bytes.
+
+```md
+---
+dir: "a b"
+---
+::shell ls {{ dir }}/build
+```
+
+With `exact ls a b/build` this runs `ls` with the two arguments `a` and
+`b/build`. With `template ls {{ string }}/build` it runs `ls` with the one
+argument `a b/build`.
+
+In template mode, before anything runs:
+
+1. **Every placeholder is evaluated once** against the document's current
+   state and checked. `null` is a missing value (`MissingValue`). An array or
+   object, or a string holding a NUL byte, is refused, even under a `string`
+   rule. The original value must pass the placeholder's declared type,
+   constraints included (`min`, `pattern`, …); nothing is converted first, so
+   a number never passes `alphanumeric`. A refused value fails with
+   `TemplateValueRejected`, which names the placeholder and its declared type
+   and never shows the value.
+2. **The value becomes text** (a string as is, a number or boolean as written)
+   and joins the literal text of its word: `{{ dir }}/build` is one argument,
+   `{{ a }}{{ b }}` is one argument, and an empty value is one empty argument.
+   The value is never read again for spaces, quotes, operators, or
+   placeholders.
+3. **The whole filled command is checked** against the built-in blacklist and
+   then the user blacklist, every segment of an `&&`/`||` chain before the
+   first starts. `template git {{ string }}` therefore cannot run
+   `git reset`.
+4. **Each program is found without a shell.** It must be on `PATH` and run
+   natively: on Windows an `.exe` or `.com`, never a `.cmd` or `.bat`; on Unix
+   a native executable or a `#!` script, never a file the system would hand to
+   `/bin/sh`. A shell builtin or alias is not found. A refusal is
+   `TemplateTarget`.
+
+These four failures, and `MissingValue`, are not command failures: no
+`--when-error` handler, allowed timeout, or transclusion notice absorbs them.
+A command's result is cached for the composition by its filled program and
+argument list, so the same approval with different values runs again, while
+the same filled command runs once.
+
+Authorization and results are separate caches. Authorization includes the
+execution mode, policy root, and typed shape or exact bytes. A result hit grants
+no permission: the current template is filled and validated, and the runtime
+blacklist and target checks run before a result can be reused. A saved shape
+contains no runtime values.
+
+Template grammar permits fixed program words, literal argument fragments,
+placeholders, `&&`/`||`, and only `> /dev/null`, `2> /dev/null`, `2>&1`, and
+`>&2` redirections. Pipes, semicolons, background execution, append/input
+redirection, and variable program words or redirect targets are refused in
+template mode, including under prefix or once approval. Values containing
+those characters are still argument data. Redirection order matters:
+`2>&1 > /dev/null` keeps stderr on the original stdout destination;
+`> /dev/null 2>&1` discards both.
+
+The shell runtime rejection chain omits a refused value. Earlier document
+schema validation has its own diagnostics and may display that value; this
+is not a secrecy guarantee for every composition error.
+
+```mermaid
+flowchart TD
+    A["::shell tool {{ x }}"] --> B{approved by}
+    B -->|exact or prefix| C[run the interpolated bytes]
+    B -->|template or shape| D[evaluate and check each value]
+    D --> E[fill one argument per word]
+    E --> F[check the filled chain against both blacklists]
+    F --> G[resolve each program without a shell]
+    G --> H[run, or reuse the result of the same filled command]
+```
+
 ## Interactive Approval
 
-When a command does not match the blacklist and is not in the whitelist, the user is prompted with these options:
+When a command does not match the blacklist and is not in the whitelist, and
+both stdin and stderr are terminals, `md` asks about it on stderr. The prompt
+lists only the choices the command is eligible for, numbered in this order:
 
-| Option | Behavior |
-|--------|----------|
-| Allow exact command | Persist the command with all parameters to `.darkmatter-shell-whitelist` |
-| Allow with any parameters | Persist a wildcard signature for the executable to `.darkmatter-shell-whitelist` |
-| Allow once | Execute this session only; cached but not persisted |
-| Deny | Abort the pipeline with an error; nothing is persisted |
-| Blacklist | Abort the pipeline and add the command to `.darkmatter-shell-blacklist` |
+| Choice | Listed when | Saves |
+|--------|-------------|-------|
+| Allow this exact command | every value is known now | `exact <resolved command>` to `.darkmatter-shell-whitelist` |
+| Allow this command shape | the command has a placeholder and valid template grammar | `template <shape>` to `.darkmatter-shell-whitelist`; the command runs as a template |
+| Allow this program with any arguments | every program word is fixed | `prefix <program>` for each distinct program of the chain |
+| Allow once | always | nothing; this run only (for a command with no exact choice, its shape for this run) |
+| Deny | always | nothing; the run stops |
+| Blacklist and stop | always | `exact <resolved command>` to `.darkmatter-shell-blacklist`, or `template <shape>` when no exact choice is listed; the run stops |
+
+The program-word restriction comes from the authored command, even when a host
+allows it to run as resolved bytes after template grammar fails. For example,
+`{{ tool }} probe` and `git --version && {{ tool }} probe` cannot offer or save
+program approval; their eligible byte approvals remain exact, once, deny, and
+exact blacklist. This does not enable interpolated executables in document
+shell directives, blocks, or frontmatter shell values.
+
+A command with a placeholder shows each one as `{{ name: type }}`, and its
+resolved bytes beside it when they are known:
+
+```text
+  ⚠  Shell Approval Required
+  Source:   /work/doc.md:line 4
+  Command:  just clean --out {{ out: string }}/build
+  Resolved: just clean --out dist/build
+
+  1 │ Allow this exact command               (saves "exact just clean --out dist/build" to the whitelist)
+  2 │ Allow this command shape               (saves "template just clean --out {{ string }}/build" to the whitelist; runs as a template)
+  3 │ Allow this program with any arguments  (saves "prefix just" to the whitelist)
+  4 │ Allow once                             (this session only)
+  5 │ Deny                                   (stops the run)
+  6 │ Blacklist and stop                     (saves "exact just clean --out dist/build" to the blacklist; stops the run)
+```
+
+A placeholder whose declared type is not string-like is approved with the
+broad `string` type, and the prompt says which validator still checks the
+value: `seq {{ count: string (validated as number) }}`. A value that is not
+known yet is never shown, and never shown as an empty string: such a command
+has no `Resolved:` line and no exact choice.
+
+A number that names no listed choice is refused and the prompt is shown
+again. Input that ends without an answer denies. Without a terminal there is
+no prompt: the command fails with the approval-required error, which names
+the whitelist and the rules that would allow it.
+
+`md compose` decides each command site once, before anything runs, and
+writes the row the chosen option names. A choice that cannot be written (for
+example, the whitelist path is not writable) fails with a policy I/O error and
+approves nothing; it never falls back to "allow once". A saved rule answers
+the next run without a prompt, and a rule already in the file is not written
+again.
+
+The approval request a handler receives says which choices it may offer
+(`ShellApprovalRequest::offered`) and, for a command with a placeholder,
+carries its template (`ShellApprovalRequest::template`): the shape a
+"this command shape" choice persists, and the display form
+`git --version {{ word: string }}`. A command whose value is produced later
+in the run (see below) has no bytes yet, so it is never offered the exact
+choice, and its request leaves `normalized_exact` empty. A decision for a
+choice the request did not offer is treated as a denial.
+
+A handler installed on composition itself (`with_shell_approval_handler`) is
+offered the shape the same way. Choosing it (`AllowTemplatePersist`) writes the
+`template` rule and runs the command as a template; "allow once" on a request
+that offers no exact choice approves the shape for the rest of the
+composition. `darkmatter_cli::approval::approve_with_io` runs one prompt
+session over any reader and writer, which is how the prompt is tested.
 
 ## Timeouts
 
@@ -192,7 +437,7 @@ When a command does not match the blacklist and is not in the whitelist, the use
 
 ## Integration with External Tools
 
-When Darkmatter is used through an external orchestrator (such as Claudine), the pre-flight flow can be bypassed in favor of the orchestrator's own approval system. In this mode, Darkmatter receives a set of pre-approved commands and skips its own whitelist, blacklist, and interactive approval checks. See the [Claudine/Darkmatter boundary](#claudinedarkmatter-boundary) below for details.
+When Darkmatter is used through an external orchestrator (such as Claudine), the pre-flight flow can be bypassed in favor of the orchestrator's own approval system. In this mode, Darkmatter receives a set of pre-approved commands and skips its own whitelist and interactive approval checks; each command it runs still meets the built-in and user blacklists. See the [Claudine/Darkmatter boundary](#claudinedarkmatter-boundary) below for details.
 
 ### Claudine/Darkmatter Boundary
 
@@ -212,7 +457,25 @@ Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightRe
 
 **Claudine's role is authorization.** It takes the approval set from Darkmatter, merges in commands from its harness, checks everything against the whitelist, and prompts the user once for anything missing. The merged, authorized set is handed back to the pipeline as the execution membership source.
 
-**During composition**, Darkmatter receives the pre-approved set via `pre_approved_commands` on `ComposeOptions` and trusts it completely, bypassing its own approval flow.
+**Each command site is reported.** Besides the deduped resolved-byte entries, the report's `candidates` holds one `ShellCandidate` per command site, never merged by bytes: its authored template, typed against the schema of the document that owns it (a transcluded child uses its own), whether it may run as resolved bytes, and the bytes discovery resolved for it.
+
+**Late values.** A host whose commands read values the run produces later (Claudine's sequence outputs, for example) declares those roots with `ComposeOptions::with_deferred_shell_roots`. Discovery does not evaluate a placeholder that reads one, directly or through a frontmatter value derived from one, and marks it `HoleTiming::Deferred`. Its command has no resolved bytes, so it can be approved only as a template (`ModeRequirement::TemplateRequired`); one whose authored text is not a valid template fails pre-flight with `TemplateGrammar`. Declaring a root late does not make it readable: availability stays with the host's globals. The command's other placeholders are still checked for missing values. A late root names a host global: `fm.<root>` reads the document's own property of that name and is an approval-time value.
+
+A host that places commands where their values may change before they run (a sequence task after the first) also calls `DeferredShellRoots::with_placeholders_template_required()`. Every command with a placeholder is then `TemplateRequired`, even when all its values are known: it contributes no resolved bytes, is never offered "this exact command", and an `exact` rule for its current bytes does not cover it. Its approval-time placeholders are still evaluated and checked for missing values, and a command with a placeholder that is not a valid template fails with `TemplateGrammar`. A command with no placeholder is unaffected.
+
+```md
+---
+latest: "{{ last(seq.outputs) }}"
+---
+::shell just test {{ last(seq.outputs) }} --package {{ pkg }}   <!-- template only; `pkg` must be present -->
+::shell just clean {{ latest }}                              <!-- template only, through `latest` -->
+```
+
+**During composition**, Darkmatter receives the pre-approved set via `pre_approved_commands` on `ComposeOptions` (a `ShellPreApprovals` holding resolved bytes and template shapes) and bypasses its own approval flow. Each command must prove membership: its resolved bytes are in the exact set, or its authored shape, re-typed against its owner's schema, is in the template set. A template-only site is never admitted by bytes, and execution never adds the bytes it resolved to either set. A command admitted by its shape runs as a template, with the checks of [Running a command as a template](#running-a-command-as-a-template); a pre-approval never skips them.
+
+**Running templates elsewhere.** A host that runs commands itself (Claudine's sequence and lifecycle runners) uses the same checks from `shell_expansion::template`: `fill_template` to fill a template through a `HoleEvaluator`, `resolve_late_values` to check values the run produced before a step's first command, `check_filled_chain` for the blacklists, and `resolve_direct_target` for each program. A host-owned whole-value `$( … )` (Claudine's lifecycle `set`) is a `ResolvedShellValue`; `with_template` makes it run as its typed template, `with_late_values` hands it values already checked at a barrier, and `execute_shell_values_with` reads its other placeholders through the host's own `HoleEvaluator`. Its pre-approval is then its shape, not its bytes. `ResolvedShellValue::template_only` keeps such a value whose interpolated text no longer reads as a command, so it can run only as its template.
+
+**Values that do not exist yet.** A host global declared `Availability::ExecutionDependent` (Claudine's `loop` before a loop's first iteration) has no value at discovery. A placeholder reading one is unknown, not missing, and a body `::shell` or `::shell-block` command reading one contributes neither bytes nor a site: the preparation that binds the value discovers and audits it.
 
 This separation ensures:
 

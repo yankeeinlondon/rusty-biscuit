@@ -771,3 +771,53 @@ fn a_failed_retry_overlay_spends_no_attempt_and_stages_nothing() {
     assert_eq!(active.iteration().attempt().number(), 1, "no attempt is spent");
     assert_eq!(active.iteration().retry_budget().ceiling(), None, "no retry budget is established");
 }
+
+fn assert_document_recovery_event_order(control: serde_json::Value) {
+    let fx = fixture(serde_json::json!({
+        "start": {"stderr": "start"},
+        "failure": [{"stderr": "failure"}, control],
+        "finalize": {"stderr": "finalize"}
+    }));
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings, messaging: &fx.messaging, term: &fx.term,
+        source_path: &fx.source_path, repo_root: Some(fx._dir.path()),
+        launch_area: Some(fx._dir.path()), context: None,
+    };
+    let mut guard = LifecycleRunGuard::new(&fx.config, &ctx, &emitter);
+    let eng = engine(fx._dir.path());
+    let mut state = prompt_state(&fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    let ledger = ledger(&fx.source_path);
+    for attempt in 1..=2 {
+        run_lifecycle_event(&mut guard, LifecycleSignal::Start, &fx.materialized,
+            &fx.source_path, Some(fx._dir.path()), &fx.term, &eng, None, loop_start_now());
+        guard.mark_provider_launched();
+        let recovery = drive_terminal_recovery(&mut guard, LifecycleSignal::Failure,
+            None, &fx.materialized, Some(fx._dir.path()), &fx.term, &eng,
+            loop_start_now(), attempt, active.iteration_mut(), Some("session"),
+            resume_capable_profile(), Provider::Claude, &mut state, &ledger, false).unwrap();
+        if attempt == 1 {
+            assert!(matches!(recovery, TerminalRecovery::NextAttempt));
+            assert!(!guard.finalize_emitted());
+        } else {
+            assert!(matches!(recovery, TerminalRecovery::Completed));
+            assert!(guard.finalize_emitted());
+        }
+    }
+    let signals: Vec<_> = emitter.events().into_iter().filter_map(|event| match event {
+        Emitted::Stderr(signal, _) => Some(signal), _ => None,
+    }).collect();
+    assert_eq!(signals, [LifecycleSignal::Start, LifecycleSignal::Failure,
+        LifecycleSignal::Start, LifecycleSignal::Failure, LifecycleSignal::Finalize]);
+}
+
+#[test]
+fn document_retry_reenters_directly_without_finalizing_failed_attempt() {
+    assert_document_recovery_event_order(serde_json::json!({"retry": {"max_attempts": 1, "delay": "0s"}}));
+}
+
+#[test]
+fn document_resume_reenters_directly_without_finalizing_failed_attempt() {
+    assert_document_recovery_event_order(serde_json::json!({"resume": {"message": "continue", "max_attempts": 1}}));
+}

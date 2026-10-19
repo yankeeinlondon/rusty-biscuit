@@ -116,27 +116,30 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 Some(property) => format!("<cyan>{}</cyan>", code_span(property)),
                 None => lifecycle_evaluation_surface_label(surface),
             };
-            let reason_text = match reason {
-                LifecycleEvaluationReason::Expression => escape_prose_path(message),
-            };
-            let body = format!(
-                "A late-binding expression raised while the <cyan>`{event}`</cyan> \
-                 lifecycle event was firing, in {surface_label} ({file_link}).\n\n\
-                 <b>Reason:</b> {reason_text}"
-            );
-            let hint = match reason {
-                LifecycleEvaluationReason::Expression => {
+            let reason_text = escape_prose_path(message);
+            let (title, opening, hint) = match reason {
+                LifecycleEvaluationReason::Expression => (
+                    "lifecycle evaluation error",
+                    "A late-binding expression raised",
                     "This is a crashed expression, not a clean `false` guard: the run \
                      halts and exits non-zero. Fix the expression (resolve the missing \
                      path or variable, correct the function call) or guard it with a \
-                     fallback so it evaluates instead of raising."
-                }
+                     fallback so it evaluates instead of raising.",
+                ),
+                LifecycleEvaluationReason::BreakWithoutLoop => (
+                    "lifecycle `break` outside a loop",
+                    "A `break` fired with no enclosing loop",
+                    "`break` ends the nearest loop around the page that fires it: a \
+                     document's own `loop:`, or a looping group or sequence that contains \
+                     it. Add a `loop:` there, or remove the `break`.",
+                ),
             };
+            let body = format!(
+                "{opening} while the <cyan>`{event}`</cyan> lifecycle event was firing, \
+                 in {surface_label} ({file_link}).\n\n<b>Reason:</b> {reason_text}"
+            );
             StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "CompositionError",
-                    "lifecycle evaluation error",
-                ))
+                .error_header(ErrorHeader::new("CompositionError", title))
                 .body(body)
                 .hint(hint)
         }
@@ -182,8 +185,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .error_header(ErrorHeader::new("CompositionError", "removed grammar"))
                 .body(body)
                 .hint(
-                    "Lifecycle events are ordered action lists; see the lifecycle \
-                     documentation for the current grammar.",
+                    "See the sequence and lifecycle documentation for the current grammar.",
                 )
         }
         CompositionError::LifecycleStackInvalidShape {
@@ -366,9 +368,10 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle overlay <cyan>`{property}.{path}`</cyan> in \
-                 {file_link} is a {actual}; <cyan>`with`</cyan> must be a mapping of target \
-                 frontmatter properties."
+                "{} <cyan>`{}`</cyan> in {file_link} is a {actual}; <cyan>`with`</cyan> must be \
+                 a mapping of target frontmatter properties.",
+                with_owner_label(property),
+                with_property_path(property, path)
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "`with` must be a mapping"))
@@ -386,11 +389,13 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle overlay <cyan>`{property}.{path}`</cyan> in \
-                 {file_link} was supplied as the whole-mapping interpolation <cyan>{}</cyan>.\
-                 \n\nSupplying the entire mapping from one expression is not supported in this \
-                 version and is a named follow-up. Author the keys explicitly; each value may \
-                 still be a whole-value interpolation carrying an object or array.",
+                "{} <cyan>`{}`</cyan> in {file_link} was supplied as the whole-mapping \
+                 interpolation <cyan>{}</cyan>.\n\nSupplying the entire mapping from one \
+                 expression is not supported in this version and is a named follow-up. Author \
+                 the keys explicitly; each value may still be a whole-value interpolation \
+                 carrying an object or array.",
+                with_owner_label(property),
+                with_property_path(property, path),
                 code_span(raw)
             );
             StatusBlock::new(StatusState::Error)
@@ -411,10 +416,11 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle overlay <cyan>`{property}.{path}`</cyan> in \
-                 {file_link} has the dynamic key <cyan>{}</cyan>.\n\n\
+                "{} <cyan>`{}`</cyan> in {file_link} has the dynamic key <cyan>{}</cyan>.\n\n\
                  <cyan>`with`</cyan> keys name top-level frontmatter properties of the target \
                  and are never interpolated. Only values resolve.",
+                with_owner_label(property),
+                with_property_path(property, path),
                 code_span(key)
             );
             StatusBlock::new(StatusState::Error)
@@ -433,25 +439,39 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             message,
             ..
         } => {
-            let verb = overlay_directive(property);
             let file_link = render_file_link(source_path);
-            let body = format!(
-                "Lifecycle action <cyan>`{verb}`</cyan> to <cyan>{}</cyan> in {file_link} could \
-                 not resolve <cyan>`{property}.{path}`</cyan>.\n\n{message}\n\n\
-                 The whole <cyan>`with`</cyan> mapping resolves at the source before the \
-                 transition, so nothing was passed on and the source is still active.",
-                code_span(target)
-            );
+            let at = with_property_path(property, path);
+            let (body, hint) = match overlay_directive(property) {
+                Some(verb) => (
+                    format!(
+                        "Lifecycle action <cyan>`{verb}`</cyan> to <cyan>{}</cyan> in {file_link} \
+                         could not resolve <cyan>`{at}`</cyan>.\n\n{message}\n\n\
+                         The whole <cyan>`with`</cyan> mapping resolves at the source before the \
+                         transition, so nothing was passed on and the source is still active.",
+                        code_span(target)
+                    ),
+                    "`with:` values resolve against the source document — its live frontmatter, \
+                     `ctx.*`/`env.*`, and the globals valid for this event.",
+                ),
+                None => (
+                    format!(
+                        "The task running <cyan>{}</cyan> in {file_link} could not resolve \
+                         <cyan>`{at}`</cyan>.\n\n{message}\n\n\
+                         The whole <cyan>`with`</cyan> mapping resolves at the task's turn before \
+                         its document is composed, so the task did not launch.",
+                        code_span(target)
+                    ),
+                    "A task's `with:` values resolve against the sequence's live state — step \
+                     values, `seq.*`, runtime `set` writes, `ctx.*`, and `env.*`.",
+                ),
+            };
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "CompositionError",
                     "`with` value could not be resolved",
                 ))
                 .body(body)
-                .hint(
-                    "`with:` values resolve against the source document — its live frontmatter, \
-                     `ctx.*`/`env.*`, and the globals valid for this event.",
-                )
+                .hint(hint)
         }
         CompositionError::LifecycleWithUnsupported {
             source_path,
@@ -462,7 +482,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let body = format!(
                 "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
                  {file_link} received a <cyan>`with`</cyan> overlay, which only \
-                 <cyan>`proxy`</cyan> and <cyan>`retry`</cyan> accept."
+                 <cyan>`proxy`</cyan>, <cyan>`retry`</cyan>, and <cyan>`prep`</cyan> accept."
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -472,8 +492,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .body(body)
                 .hint(
                     "Remove `with`, or use `set` for invocation-local state. Only \
-                     `proxy: { target: ..., with: { ... } }` and \
-                     `retry: { with: { ... } }` take an overlay.",
+                     `proxy: { target: ..., with: { ... } }`, `retry: { with: { ... } }`, and \
+                     `prep: { target: ..., with: { ... } }` take an overlay.",
                 )
         }
         CompositionError::LifecycleTransitionUnownedAtStage {
@@ -846,4 +866,9 @@ fn set_shape_block(
         .error_header(ErrorHeader::new("CompositionError", title))
         .body(body)
         .hint("Use only the mapping form: `set: {property: value}`.")
+}
+
+/// How a `LifecycleWith*` status block names the `with`'s owner.
+fn with_owner_label(property: &str) -> &'static str {
+    if overlay_directive(property).is_some() { "Lifecycle overlay" } else { "Task input" }
 }

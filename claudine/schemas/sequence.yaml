@@ -1,0 +1,25 @@
+# The sequence document's catalog, applied to any document that sets
+# `sequence` to a non-null value. Hand-maintained; see README.md.
+#
+# `sequence` is matched once per non-null YAML type, so a value of the wrong
+# type still selects this schema and the payload then rejects it (a native
+# number or boolean is the exception: Darkmatter coerces a top-level scalar to
+# the file-reference string arm, and the sequence parser rejects it).
+#
+# This payload declares only the sequence keys. The document's lifecycle
+# events and `loop` select claudine.yaml whenever they are set, and that
+# trigger types them; declaring them here as well would compile every event
+# stack twice. The payload declares no required property and leaves the
+# document open, so a body step's frontmatter data is kept.
+kind: trigger-schema
+match:
+    any:
+        - sequence: string(required)
+        - sequence: number(required)
+        - sequence: boolean(required)
+        - sequence: object(required)
+        - sequence: "unknown[](required)"
+$schema:
+    sequence: "steps@./sequence-types.yaml -> the sequence's steps: an inline list, or a reference to one"
+    template: "object -> values merged into every step (formal sequence documents)"
+    fail_fast: "null -> removed: a sequence document has no fail_fast; set fail_fast on a group object"

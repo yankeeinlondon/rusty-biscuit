@@ -1,0 +1,382 @@
+# Claudine's lifecycle stack types and the `loop:` block type. Named types are
+# inlined, so a conditional's nesting is unrolled one type per level.
+# Hand-maintained; see README.md.
+#
+# The `stack` and `initialize-*` families are typed three conditional levels
+# deep: a `then`/`else` body inside a level-3 conditional is accepted loosely,
+# and the lifecycle parser still checks it. `initialize-*` excludes shells.
+#
+# The `cancelled-*` family permits only stop among flow directives, and is
+# unrolled to the parser's five-level limit, so the restriction holds at every
+# depth the parser accepts and a sixth-level `when`/`then` conditional is a
+# schema error (a guarded bundle there is left to the parser).
+# Its conditionals type `then` and `else` with one pattern key: two literal
+# keys would inline each body twice per level, and five such levels make
+# every validation about ten times slower. The cost of the pattern key is
+# that the parser alone requires `then` beside `else`, and the editor does not
+# complete `then`/`else` or resolve values below them.
+#
+# The sequence container types (`step`, `task`, `group`) that import these
+# stacks live in sequence-types.yaml.
+kind: schema
+types:
+    bare-verb: "enum(stop, skip, error, retry, break, and, or, branch_exists_on_remote, ipv4, ipv6, remote_vendor) -> a zero-argument verb written as a bare list item"
+    loose-body:
+        - "unknown[] -> a list of actions, checked only by the lifecycle parser"
+        - "{ <string>: unknown } -> a dictionary of verbs, checked only by the lifecycle parser"
+    stack:
+        - item-1[]
+        - bundle@./action.yaml
+    item-1:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - bundle@./action.yaml
+        - conditional-1
+        - bare-verb
+    conditional-1:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "stack-2(required) -> the actions to run when the condition holds"
+        else: "stack-2 -> the actions to run when it does not"
+    stack-2:
+        - item-2[]
+        - bundle@./action.yaml
+    item-2:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - bundle@./action.yaml
+        - conditional-2
+        - bare-verb
+    conditional-2:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "stack-3(required) -> the actions to run when the condition holds"
+        else: "stack-3 -> the actions to run when it does not"
+    stack-3:
+        - item-3[]
+        - bundle@./action.yaml
+    item-3:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - bundle@./action.yaml
+        - conditional-3
+        - bare-verb
+    conditional-3:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "loose-body(required) -> the actions to run when the condition holds"
+        else: "loose-body -> the actions to run when it does not"
+    initialize-stack:
+        - initialize-item-1[]
+        - initialize-bundle@./action.yaml
+    initialize-item-1:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - expression@./action.yaml
+        - initialize-bundle@./action.yaml
+        - initialize-conditional-1
+        - bare-verb
+    initialize-conditional-1:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "initialize-stack-2(required) -> the actions to run when the condition holds"
+        else: "initialize-stack-2 -> the actions to run when it does not"
+    initialize-stack-2:
+        - initialize-item-2[]
+        - initialize-bundle@./action.yaml
+    initialize-item-2:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - expression@./action.yaml
+        - initialize-bundle@./action.yaml
+        - initialize-conditional-2
+        - bare-verb
+    initialize-conditional-2:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "initialize-stack-3(required) -> the actions to run when the condition holds"
+        else: "initialize-stack-3 -> the actions to run when it does not"
+    initialize-stack-3:
+        - initialize-item-3[]
+        - initialize-bundle@./action.yaml
+    initialize-item-3:
+        - communicate@./action.yaml
+        - flow@./action.yaml
+        - expression@./action.yaml
+        - initialize-bundle@./action.yaml
+        - initialize-conditional-3
+        - bare-verb
+    initialize-conditional-3:
+        when: "expression(required) -> the condition choosing then or else"
+        then: "loose-body(required) -> the actions to run when the condition holds"
+        else: "loose-body -> the actions to run when it does not"
+    loop-action: "{ op: enum(increment, decrement, set, append, prepend, merge; required), prop: string(not-empty; required), value: unknown }"
+    loop-action-entry:
+        - string
+        - loop-action
+    loop:
+        while: "expression -> keep iterating while this condition holds"
+        until: "expression -> stop iterating once this condition holds"
+        action:
+            - "string -> an iteration action such as increment(iteration)"
+            - loop-action
+            - "loop-action-entry[]"
+        actions:
+            - "string -> an iteration action such as increment(iteration)"
+            - loop-action
+            - "loop-action-entry[]"
+        max:
+            - "number(integer; min(1)) -> the most iterations to run"
+            - "interpolation@./action.yaml -> a cap such as {{ cap }}, resolved once before the loop starts"
+        on_rate_limit: "enum(pause, abort, continue) -> what to do when the provider reports a rate limit; a document loop only"
+        gate: "stack -> the lifecycle stack run after each iteration; never beside loose verb keys"
+        no_error: "boolean -> keep the loop running when one of the loose actions fails"
+        say: "string -> speak the text aloud through text-to-speech"
+        speak: "string -> alias of say"
+        effect: "string -> play the named sound effect from the effect catalog"
+        message: "string -> send the text to the configured messaging routes"
+        notify: "string -> show the text as a desktop notification"
+        stderr: "string -> write the text to standard error"
+        stdout: "string -> write the text to standard output"
+        info: "string -> print the text as an informational status line"
+        warn: "string -> print the text as a warning status line"
+        success: "string -> print the text as a success status line"
+        stop:
+            - null
+            - "unknown[](max(0)) -> stop the remaining actions of this stack"
+        skip:
+            - null
+            - "unknown[](max(0)) -> skip the provider run (the parser allows skip only in initialize)"
+        error:
+            - null
+            - "unknown[](max(0))"
+            - "string -> fail the run with this reason"
+        proxy: "string -> hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
+        retry:
+            - null
+            - "unknown[](max(0))"
+            - "count@./action.yaml -> re-read and re-run the document at most this many times"
+        resume: "string -> send this follow-up message into the live session"
+        defer: "string -> planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
+        break:
+            - null
+            - "unknown[](max(0))"
+            - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+        prep: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
+        shell: "shell -> run a shell command (never in initialize)"
+        set: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
+        append_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        append_jsonl: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        append_line: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        decrement_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        delete_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        ensure_dir: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        ensure_file: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        http_post: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        increment_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        merge_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        prepend_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        set_frontmatter: "unknown -> Darkmatter side effect; the parser checks its arguments"
+        abs: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        absolute: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        and: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_csv: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_json: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_json5: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_line_separated: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_markdown: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_ordered_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_space_separated: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_tsv: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        as_unordered_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        basename: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        basename_without_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        branch_exists_on_remote: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        camel_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        can_execute: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        capitalize: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        cicd: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        cicd_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        code_link: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        contains: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        date: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        date_delta: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        decrement_file_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        dir_leading: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        dirname: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ends_with: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ensure_leading: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ensure_trailing: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ext: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        file_exists: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        file_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        file_trailing: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        find_files: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        find_first_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        find_last_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        first: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        frontmatter: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_agentic_cli: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_alias: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_binary: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_builtin_function: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_command: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_key: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_local_skill: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_skill: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        has_user_function: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        increment_file_index: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ipv4: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ipv6: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_array: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_date: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_date_time: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_date_time_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_date_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_empty: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_indexed_file: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_integer: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_negative: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_null: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_number: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_object: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_positive: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_string: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_this_month: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_this_month_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_this_year: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_this_year_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_today: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_today_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_tomorrow: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_tomorrow_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_yesterday: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        is_yesterday_utc: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        join: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        kebab_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        last: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        length: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        link: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        lower: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        markdown_body_empty: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        markdown_title: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        min: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        newer_than: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        number: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        older_than: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        or: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        package: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        package_area: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        parent_dir: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        pascal_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ping: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        ping_under: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        pr: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        pr_list: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        predict_conflicts: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        recent_commits: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        relative: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        remote_vendor: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        replace: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        replace_first: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        replace_last: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        round: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        snake_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        starts_with: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        terminal: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        title_case: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        try_frontmatter: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        upper: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        validate_schema: "unknown -> Darkmatter expression function; the parser checks its arguments"
+        without_date: "unknown -> Darkmatter expression function; the parser checks its arguments"
+    cancelled-stack:
+        - cancelled-item-1[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-1:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-1
+        - "enum(stop)"
+    cancelled-conditional-1:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-2
+        $constraints:
+            min-keys: 2
+    cancelled-stack-2:
+        - cancelled-item-2[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-2:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-2
+        - "enum(stop)"
+    cancelled-conditional-2:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-3
+        $constraints:
+            min-keys: 2
+    cancelled-stack-3:
+        - cancelled-item-3[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-3:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-3
+        - "enum(stop)"
+    cancelled-conditional-3:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-4
+        $constraints:
+            min-keys: 2
+    cancelled-stack-4:
+        - cancelled-item-4[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-4:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-4
+        - "enum(stop)"
+    cancelled-conditional-4:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-5
+        $constraints:
+            min-keys: 2
+    cancelled-stack-5:
+        - cancelled-item-5[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-5:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - cancelled-conditional-5
+        - "enum(stop)"
+    cancelled-conditional-5:
+        when: "expression(required)"
+        "<pattern::^(?:then|else)$>": cancelled-stack-6
+        $constraints:
+            min-keys: 2
+    cancelled-stack-6:
+        - cancelled-item-6[]
+        - cancelled-bundle@./action.yaml
+    cancelled-item-6:
+        - communicate@./action.yaml
+        - cancelled-stop@./action.yaml
+        - shell@./action.yaml
+        - expression@./action.yaml
+        - cancelled-bundle@./action.yaml
+        - "enum(stop)"

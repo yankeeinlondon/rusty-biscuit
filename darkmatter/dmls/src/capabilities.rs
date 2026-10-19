@@ -227,6 +227,9 @@ pub struct ClientProfile {
     /// DMLS keeps a server-side rescan/hash fallback (no watchers, or
     /// Neovim-on-Linux where client watching is limited/disabled).
     pub needs_watch_fallback: bool,
+    /// Watchers may be rooted at a folder (`relativePatternSupport`), which
+    /// schema-location watches outside the workspace need.
+    pub supports_relative_watch_patterns: bool,
     /// `workspace/willRenameFiles` works (VS Code, Zed, Helix — not Neovim).
     pub supports_file_operations: bool,
     /// Client answers `workspace/configuration` requests.
@@ -296,6 +299,10 @@ impl ClientProfile {
                 .and_then(|watch| watch.dynamic_registration)
                 .unwrap_or(false),
             needs_watch_fallback: false,
+            supports_relative_watch_patterns: workspace
+                .and_then(|ws| ws.did_change_watched_files.as_ref())
+                .and_then(|watch| watch.relative_pattern_support)
+                .unwrap_or(false),
             supports_file_operations: workspace
                 .and_then(|ws| ws.file_operations.as_ref())
                 .and_then(|ops| ops.will_rename)

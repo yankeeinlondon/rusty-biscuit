@@ -1,0 +1,763 @@
+facts_version: 1
+FileFacts {
+    path: "/corpus/other/other.md",
+    hash: 7357337813567959518,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Other Root",
+            slug: "other-root",
+            span: 0..13,
+            title_span: 2..12,
+            line: 1,
+        },
+    ],
+    links: [
+        LinkFact {
+            raw_target: "peer.md",
+            target: RelativePath {
+                path: "peer.md",
+                fragment: None,
+            },
+            span: 14..29,
+            line: 3,
+        },
+    ],
+    wiki_links: [
+        WikiLinkFact {
+            target: "note",
+            heading: None,
+            alias: None,
+            span: 30..38,
+            target_span: 32..36,
+            heading_span: None,
+            line: 4,
+            unsupported: false,
+        },
+    ],
+    transclusions: [],
+    candidate_keys: {
+        "/corpus/other/peer",
+        "/corpus/other/peer.md",
+        "note",
+        "peer",
+        "peer.md",
+    },
+}
+FileFacts {
+    path: "/corpus/other/peer.md",
+    hash: 2942762262934834378,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Peer Doc",
+            slug: "peer-doc",
+            span: 0..11,
+            title_span: 2..10,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/alpha/topic.md",
+    hash: 16722532492946180881,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Alpha Topic",
+            slug: "alpha-topic",
+            span: 0..14,
+            title_span: 2..13,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/beta/topic.md",
+    hash: 5243356986922995230,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Beta Topic",
+            slug: "beta-topic",
+            span: 0..13,
+            title_span: 2..12,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/docs/Upper.md",
+    hash: 10948798160076482175,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Upper Case",
+            slug: "upper-case",
+            span: 0..13,
+            title_span: 2..12,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/docs/a.md",
+    hash: 7422890263692598002,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Doc A",
+            slug: "doc-a",
+            span: 0..8,
+            title_span: 2..7,
+            line: 1,
+        },
+        HeadingFact {
+            level: 2,
+            title: "Alpha Section",
+            slug: "alpha-section",
+            span: 9..26,
+            title_span: 12..25,
+            line: 3,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/docs/b.md",
+    hash: 7850694442205573425,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Doc B",
+            slug: "doc-b",
+            span: 0..8,
+            title_span: 2..7,
+            line: 1,
+        },
+        HeadingFact {
+            level: 2,
+            title: "Some Heading",
+            slug: "some-heading",
+            span: 9..25,
+            title_span: 12..24,
+            line: 3,
+        },
+    ],
+    links: [
+        LinkFact {
+            raw_target: "#some-heading",
+            target: SameDocumentAnchor {
+                slug: "some-heading",
+            },
+            span: 26..54,
+            line: 5,
+        },
+    ],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/docs/café.md",
+    hash: 13254739037695590201,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Cafe Doc",
+            slug: "cafe-doc",
+            span: 0..11,
+            title_span: 2..10,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/docs/compose.md",
+    hash: 16623649276660154277,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Compose",
+            slug: "compose",
+            span: 0..10,
+            title_span: 2..9,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [
+        TransclusionFact {
+            raw_target: "./a.md",
+            path: "./a.md",
+            span: 18..24,
+            line: 3,
+        },
+        TransclusionFact {
+            raw_target: "../src/snippet.txt",
+            path: "../src/snippet.txt",
+            span: 33..51,
+            line: 5,
+        },
+    ],
+    candidate_keys: {
+        "/corpus/ws/docs/a",
+        "/corpus/ws/docs/a.md",
+        "/corpus/ws/src/snippet.txt",
+    },
+}
+FileFacts {
+    path: "/corpus/ws/docs/guide.md",
+    hash: 4361181888337442611,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Guide",
+            slug: "guide",
+            span: 0..8,
+            title_span: 2..7,
+            line: 1,
+        },
+    ],
+    links: [
+        LinkFact {
+            raw_target: "./a.md",
+            target: RelativePath {
+                path: "./a.md",
+                fragment: None,
+            },
+            span: 11..29,
+            line: 3,
+        },
+        LinkFact {
+            raw_target: "../spec.md",
+            target: RelativePath {
+                path: "../spec.md",
+                fragment: None,
+            },
+            span: 32..52,
+            line: 4,
+        },
+        LinkFact {
+            raw_target: "a.md",
+            target: RelativePath {
+                path: "a.md",
+                fragment: None,
+            },
+            span: 55..75,
+            line: 5,
+        },
+        LinkFact {
+            raw_target: "sub/c.md",
+            target: RelativePath {
+                path: "sub/c.md",
+                fragment: None,
+            },
+            span: 78..101,
+            line: 6,
+        },
+        LinkFact {
+            raw_target: "docs/a.md",
+            target: RelativePath {
+                path: "docs/a.md",
+                fragment: None,
+            },
+            span: 104..130,
+            line: 7,
+        },
+        LinkFact {
+            raw_target: "my%20file.md",
+            target: RelativePath {
+                path: "my%20file.md",
+                fragment: None,
+            },
+            span: 133..156,
+            line: 8,
+        },
+        LinkFact {
+            raw_target: "my file.md",
+            target: RelativePath {
+                path: "my file.md",
+                fragment: None,
+            },
+            span: 159..180,
+            line: 9,
+        },
+        LinkFact {
+            raw_target: "b.md#some-heading",
+            target: RelativePath {
+                path: "b.md",
+                fragment: Some(
+                    "some-heading",
+                ),
+            },
+            span: 183..210,
+            line: 10,
+        },
+        LinkFact {
+            raw_target: "sub/",
+            target: RelativePath {
+                path: "sub/",
+                fragment: None,
+            },
+            span: 213..230,
+            line: 11,
+        },
+        LinkFact {
+            raw_target: "A.md",
+            target: RelativePath {
+                path: "A.md",
+                fragment: None,
+            },
+            span: 233..245,
+            line: 12,
+        },
+        LinkFact {
+            raw_target: "cafe\u{301}.md",
+            target: RelativePath {
+                path: "cafe\u{301}.md",
+                fragment: None,
+            },
+            span: 248..264,
+            line: 13,
+        },
+        LinkFact {
+            raw_target: "/docs/a.md",
+            target: RelativePath {
+                path: "/docs/a.md",
+                fragment: None,
+            },
+            span: 267..291,
+            line: 14,
+        },
+    ],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {
+        "/corpus/ws/docs/a",
+        "/corpus/ws/docs/a.md",
+        "/corpus/ws/docs/b",
+        "/corpus/ws/docs/b.md",
+        "/corpus/ws/docs/café",
+        "/corpus/ws/docs/café.md",
+        "/corpus/ws/docs/docs/a",
+        "/corpus/ws/docs/docs/a.md",
+        "/corpus/ws/docs/my file",
+        "/corpus/ws/docs/my file.md",
+        "/corpus/ws/docs/my%20file",
+        "/corpus/ws/docs/my%20file.md",
+        "/corpus/ws/docs/sub/c",
+        "/corpus/ws/docs/sub/c.md",
+        "/corpus/ws/spec",
+        "/corpus/ws/spec.md",
+        "a",
+        "a.md",
+        "b",
+        "b.md",
+        "c",
+        "c.md",
+        "café",
+        "café.md",
+        "my file",
+        "my file.md",
+        "my%20file",
+        "my%20file.md",
+        "sub",
+    },
+}
+FileFacts {
+    path: "/corpus/ws/docs/my file.md",
+    hash: 5898233984412197658,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "My File",
+            slug: "my-file",
+            span: 0..10,
+            title_span: 2..9,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/docs/sub/c.md",
+    hash: 17574362259550683880,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Doc C",
+            slug: "doc-c",
+            span: 0..8,
+            title_span: 2..7,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/index.md",
+    hash: 5385022099262922590,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Corpus Index",
+            slug: "corpus-index",
+            span: 0..15,
+            title_span: 2..14,
+            line: 1,
+        },
+    ],
+    links: [
+        LinkFact {
+            raw_target: "spec.md",
+            target: RelativePath {
+                path: "spec.md",
+                fragment: None,
+            },
+            span: 18..43,
+            line: 3,
+        },
+        LinkFact {
+            raw_target: "notes/note.md",
+            target: RelativePath {
+                path: "notes/note.md",
+                fragment: None,
+            },
+            span: 46..73,
+            line: 4,
+        },
+        LinkFact {
+            raw_target: "nested/inner.md",
+            target: RelativePath {
+                path: "nested/inner.md",
+                fragment: None,
+            },
+            span: 76..107,
+            line: 5,
+        },
+        LinkFact {
+            raw_target: "docs/b.md#some-heading",
+            target: RelativePath {
+                path: "docs/b.md",
+                fragment: Some(
+                    "some-heading",
+                ),
+            },
+            span: 110..148,
+            line: 6,
+        },
+    ],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {
+        "/corpus/ws/docs/b",
+        "/corpus/ws/docs/b.md",
+        "/corpus/ws/nested/inner",
+        "/corpus/ws/nested/inner.md",
+        "/corpus/ws/notes/note",
+        "/corpus/ws/notes/note.md",
+        "/corpus/ws/spec",
+        "/corpus/ws/spec.md",
+        "b",
+        "b.md",
+        "inner",
+        "inner.md",
+        "note",
+        "note.md",
+        "spec",
+        "spec.md",
+    },
+}
+FileFacts {
+    path: "/corpus/ws/nested/inner.md",
+    hash: 7866842953612256247,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Inner Doc",
+            slug: "inner-doc",
+            span: 0..12,
+            title_span: 2..11,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/notes/also.md",
+    hash: 2399100079796331666,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Also Transcludes",
+            slug: "also-transcludes",
+            span: 0..19,
+            title_span: 2..18,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [
+        TransclusionFact {
+            raw_target: "../docs/a.md",
+            path: "../docs/a.md",
+            span: 27..39,
+            line: 3,
+        },
+    ],
+    candidate_keys: {
+        "/corpus/ws/docs/a",
+        "/corpus/ws/docs/a.md",
+    },
+}
+FileFacts {
+    path: "/corpus/ws/notes/note.md",
+    hash: 6171937470488847970,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Note",
+            slug: "note",
+            span: 0..7,
+            title_span: 2..6,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/notes/spec.md",
+    hash: 4716551164982715346,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Notes Spec",
+            slug: "notes-spec",
+            span: 0..13,
+            title_span: 2..12,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}
+FileFacts {
+    path: "/corpus/ws/notes/symlinked.md",
+    hash: 377196470954668317,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Through Symlink",
+            slug: "through-symlink",
+            span: 0..18,
+            title_span: 2..17,
+            line: 1,
+        },
+    ],
+    links: [
+        LinkFact {
+            raw_target: "../linked/a.md",
+            target: RelativePath {
+                path: "../linked/a.md",
+                fragment: None,
+            },
+            span: 19..45,
+            line: 3,
+        },
+    ],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {
+        "/corpus/ws/linked/a",
+        "/corpus/ws/linked/a.md",
+    },
+}
+FileFacts {
+    path: "/corpus/ws/notes/wiki.md",
+    hash: 4284453603883220428,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Wiki Links",
+            slug: "wiki-links",
+            span: 0..13,
+            title_span: 2..12,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [
+        WikiLinkFact {
+            target: "note",
+            heading: None,
+            alias: None,
+            span: 16..24,
+            target_span: 18..22,
+            heading_span: None,
+            line: 3,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "spec",
+            heading: None,
+            alias: None,
+            span: 27..35,
+            target_span: 29..33,
+            heading_span: None,
+            line: 4,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "notes/spec",
+            heading: None,
+            alias: None,
+            span: 38..52,
+            target_span: 40..50,
+            heading_span: None,
+            line: 5,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "b",
+            heading: Some(
+                "Some Heading",
+            ),
+            alias: None,
+            span: 55..73,
+            target_span: 57..58,
+            heading_span: Some(
+                59..71,
+            ),
+            line: 6,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "upper",
+            heading: None,
+            alias: None,
+            span: 76..85,
+            target_span: 78..83,
+            heading_span: None,
+            line: 7,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "cafe\u{301}",
+            heading: None,
+            alias: None,
+            span: 88..98,
+            target_span: 90..96,
+            heading_span: None,
+            line: 8,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "index",
+            heading: None,
+            alias: None,
+            span: 101..110,
+            target_span: 103..108,
+            heading_span: None,
+            line: 9,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "topic",
+            heading: None,
+            alias: None,
+            span: 113..122,
+            target_span: 115..120,
+            heading_span: None,
+            line: 10,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "alpha/topic",
+            heading: None,
+            alias: None,
+            span: 125..140,
+            target_span: 127..138,
+            heading_span: None,
+            line: 11,
+            unsupported: false,
+        },
+        WikiLinkFact {
+            target: "beta/topic",
+            heading: None,
+            alias: None,
+            span: 143..157,
+            target_span: 145..155,
+            heading_span: None,
+            line: 12,
+            unsupported: false,
+        },
+    ],
+    transclusions: [],
+    candidate_keys: {
+        "b",
+        "café",
+        "index",
+        "note",
+        "spec",
+        "topic",
+        "upper",
+    },
+}
+FileFacts {
+    path: "/corpus/ws/spec.md",
+    hash: 4100855553756563284,
+    headings: [
+        HeadingFact {
+            level: 1,
+            title: "Root Spec",
+            slug: "root-spec",
+            span: 0..12,
+            title_span: 2..11,
+            line: 1,
+        },
+    ],
+    links: [],
+    wiki_links: [],
+    transclusions: [],
+    candidate_keys: {},
+}

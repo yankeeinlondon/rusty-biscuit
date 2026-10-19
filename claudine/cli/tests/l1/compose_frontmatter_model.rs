@@ -169,7 +169,7 @@ fn sequence_launches_every_step_with_the_document_model() {
     write(
         &sequence,
         &format!(
-            "---\nagent: opencode\nmodel: {UNRECOGNIZED_MODEL}\nsequence:\n  - alpha\n  - beta\n---\n\nStep {{{{state}}}}\n"
+            "---\nagent: opencode\nmodel: {UNRECOGNIZED_MODEL}\nsequence:\n  - alpha\n  - beta\n---\n\nStep {{{{seq}}}}\n"
         ),
     );
 

@@ -3,91 +3,93 @@
 Part of the `rust-testing` skill; [SKILL.md](SKILL.md) is the index.
 
 An L1 test that runs its crate's own binary must run it against a workspace the
-test built — never against the checkout the suite was compiled from. Make that
-hold **by construction**, through one shared command builder per package area,
-rather than per-test `.env(...)` chains.
+test built, never the checkout the suite was compiled from. Make that hold **by
+construction**, through one shared command builder per package area, not
+per-test `.env(...)` chains.
 
-Inheriting the runner's environment costs twice:
+Inheriting the runner's environment hurts twice:
 
-- **Cost.** The ambient working directory under `cargo nextest` is the package
-  directory inside the monorepo, so anything that discovers a repository walks
-  all 35 members. That is ~220 ms on an idle 16-core Mac and 20–77 s per test in
-  a WSL2 guest reading its workspace over the Windows disk.
-- **Correctness.** The child also sees the checkout's git state and root
-  `system-prompt.md`, the developer's `$HOME`, and — with a full host `PATH` —
-  every real CLI installed on the machine. Assertions then pin a snapshot of
-  whichever machine ran them.
+- **Cost.** Under nextest the ambient working directory is inside the monorepo,
+  so anything that discovers a repository walks the whole workspace; on a slow
+  filesystem (a WSL2 guest) that is seconds per test.
+- **Correctness.** The child sees the checkout's git state and root files, the
+  developer's `$HOME`, and every real CLI on a full host `PATH`, so assertions
+  pin whichever machine ran them.
 
-The shape that fixes it, with claudine's `claudine-cli` L1 suite as the
-reference implementation:
+## The shape
+
+`claudine-cli`'s L1 suite is the reference implementation.
 
 | Piece | Where | Contract |
 |---|---|---|
-| Fixture | `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` — `CliProcessFixture` | Per-test temp `cwd`/`home`/`bin` plus area-owned config/cache/temp policy; platform home variables point inside the fixture |
-| Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd`; child-local `PLAYA_DRY_RUN=1` and a private `PLAYA_SPOOL_DIR` so shipped `say:`/`effect:` lifecycle actions stay silent (`detached_audio.rs` opts out per key) |
-| Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
-| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine, darkmatter, and sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
+| Fixture | `CliProcessFixture` in `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` | Per-test temp `cwd`/`home`/`bin` plus area-owned config, cache, and temp policy; platform home variables point inside the fixture |
+| Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn, with `current_dir` pinned to the fixture `cwd` |
+| Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that must keep the child (a signal, a deadline, a streaming read, an `expectrl` session) |
+| Guard | `cli/tests/l1/spawn_site_guard.rs` in claudine, darkmatter, and sniff | Source scan; a raw `Command::cargo_bin("<bin>")`, an isolation escape, or a stale exemption fails the suite |
 
-**Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
-live-child test needs a `std::process::Command` — and hand-building one
-re-derives the isolation at the call site, which is the per-test `.env(…)` chain
-the fixture replaced. Do not give the two surfaces separate builders: compute
-the policy once as data (clear flag, ordered removes, ordered sets,
-`current_dir`) and apply it through a small trait each command type implements.
-Then assert the two produce the **same effective environment** against a
-recording stub, so a policy change that reaches only one of them fails there
-rather than in a platform-only test months later.
+**Two command surfaces, one policy.** `assert_cmd::Command` cannot `spawn`, so
+live-child tests need `std::process::Command`. Do not give the two separate
+builders: compute the policy once as data (clear flag, ordered removes, ordered
+sets, `current_dir`), apply it through a small trait each command type
+implements, and assert both produce the **same effective environment** against
+a recording stub (`claudine/cli/tests/l1/cli_process_fixture.rs`).
 
-**Default `PATH` is the fixture `bin` plus a minimal system set** — `/usr/bin:/bin`
+## PATH
+
+**Default `PATH` is the fixture `bin` plus a minimal system set**: `/usr/bin:/bin`
 on Unix, `%SystemRoot%\System32` on Windows, `PATHEXT` untouched so `.cmd` stubs
-resolve. Fake-only is stricter but breaks every test whose subject shells out
-by bare name (`sh`, `cmd`, `git`, `sleep`), so the opt-out would become the
-norm; the minimal set still excludes the Homebrew, npm, cargo, and
-`~/.local/bin` prefixes real tools install into. Escapes are named methods, and
-each requires a call-site comment naming the tool or the proof it needs:
-`fake_only_path()`, `host_path()`, and `ambient_context(dir)` — the last pins
-the launch CWD to a repository the test built *inside its own workspace* and
-panics on anything outside it.
+resolve. Fake-only would break every subject that shells out by bare name
+(`sh`, `cmd`, `git`, `sleep`); the minimal set still excludes the Homebrew,
+npm, cargo, and `~/.local/bin` prefixes.
 
-The tool roster is platform-specific: the Windows system set does not provide
-Git for Windows or Unix utilities. Use native fixture scripts or explicit
-fixture tools and `std::env::join_paths`; do not assume a Unix roster on Windows.
-This PATH convention bounds lookup, not security: tools installed in the
-allowed directories remain visible. Use fake-only lookup when absence is the
-assertion. Reject fixture roots inside the checkout, including through symlinks,
-so ancestor discovery cannot silently undo isolation.
+- Escapes are named methods, each needing a call-site comment naming the tool
+  or proof it needs: `fake_only_path()`, `host_path()`, and
+  `ambient_context(dir)`, which pins the launch cwd to a repository the test
+  built inside its own workspace and panics on anything outside it.
+- The Windows system set has no Git for Windows or Unix utilities: use native
+  fixture scripts or explicit fixture tools with `std::env::join_paths`.
+- This bounds lookup, not security. Use fake-only lookup when absence is the
+  assertion.
+- Reject fixture roots inside the checkout, including through symlinks, so
+  ancestor discovery cannot undo isolation.
 
-The builder must also control inherited application variables, Git plumbing
-such as `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`, and rendering inputs such as
-width and forced color. That includes selectors for third-party tools the
-application launches (claudine: every provider overlay selector such as
-`CODEX_HOME`, read from provider metadata, plus profile-owned state such as
-`CODEX_SQLITE_HOME`) — a suite run from a wrapped agent session exports them.
-Scrub inherited values before applying intentional test overrides. Keep cache roots and platform home variables inside the
-fixture where the application uses them. Choose a documented deny list or a
-cleared environment based on actual runtime needs; Windows command stubs may
-need `SystemRoot`, `COMSPEC`, and `PATHEXT` restored.
+## Environment scrubbing
 
-**Also disable the side effects that outlive the process.** Two of claudine's
-defaults exist only because the child can start work that the child's own exit
-does not end:
+The builder also controls inherited application variables, Git plumbing
+(`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`), rendering inputs (width, forced
+color), and selectors for third-party tools the application launches (in
+claudine, every provider overlay selector such as `CODEX_HOME`, read from
+provider metadata, plus profile-owned state such as `CODEX_SQLITE_HOME`); a
+suite run from inside an agent session exports them.
 
-- `CLAUDINE_RENDEZVOUS_REPORT=false` — absence means *enabled*, so a test that
-  merely forgets the key reports a live session to the developer's daemon.
-- `PLAYA_DRY_RUN=1` plus a fixture-local `PLAYA_SPOOL_DIR` — a lifecycle audio
-  effect makes the CLI re-exec **itself** as playa's detached spool worker,
-  which deliberately survives the command that enqueued the job. Without the
-  default, an L1 test that composes a prompt carrying such an effect leaves two
-  orphaned binaries per run and plays a sound through the developer's speakers.
-  `just test-leaks` is what surfaces this; no assertion in the test will.
+- Scrub inherited values first, then apply intentional overrides.
+- Keep cache roots and platform home variables inside the fixture.
+- Choose a documented deny list or a cleared environment from actual runtime
+  needs; Windows command stubs may need `SystemRoot`, `COMSPEC`, and `PATHEXT`
+  restored.
 
-Both live inside namespaces the builder sweeps by prefix, so the *ordering* is
-part of the contract: scrub first, then apply defaults. Assert them against a
-parent that exported the opposite value — a set-equality comparison between two
-command surfaces cannot catch a policy that is identically wrong on both.
+## Side effects that outlive the process
 
-Give the guard an **explicit allowlist of `(file, one-line reason)` entries with
-stale-entry failure**: an entry matching no live site fails too, so the list
-burns down instead of becoming a grandfather table. Same mechanics as
-`dispatch_inventory.rs`; sanitize comments and string literals before searching,
-as `test_placement.rs` does, so prose mentions don't false-positive.
+Default off anything the child can start that its own exit does not end.
+Claudine's builder sets:
+
+- `CLAUDINE_RENDEZVOUS_REPORT=false`: absence means *enabled*, so a test that
+  forgets the key reports a live session to the developer's daemon.
+- `PLAYA_DRY_RUN=1` plus a fixture-local `PLAYA_SPOOL_DIR`: a lifecycle audio
+  effect re-execs the CLI as playa's detached spool worker, which survives the
+  command, leaves orphans, and plays sound. `claudine/cli/tests/l1/detached_audio.rs`
+  opts out per key. `just test-leaks` surfaces such leaks; no assertion will.
+
+Both keys sit in namespaces the builder sweeps by prefix, so scrub-then-default
+ordering is part of the contract. Assert the defaults against a parent that
+exported the opposite value; comparing the two command surfaces cannot catch a
+policy that is identically wrong on both.
+
+## The spawn-site guard
+
+Give the guard an **explicit allowlist of `(file, one-line reason)` entries
+that fails on a stale entry**, so the list burns down instead of becoming a
+grandfather table (same mechanics as `claudine/cli/tests/l1/dispatch_inventory.rs`).
+Strip comments and string literals before searching, as
+`claudine/cli/tests/l1/test_placement.rs` does, so prose mentions do not
+false-positive.

@@ -221,7 +221,7 @@ fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<Comp
 /// Bridge [`ClaudineConfig`] TTS settings to legacy [`GlobalSettings`].
 ///
 /// Constructs a minimal [`GlobalSettings`] containing only the TTS
-/// configuration, suitable for
+/// configuration and the pre-warm switch, suitable for
 /// [`LifecycleRuntimeContext`](crate::composition::lifecycle::LifecycleRuntimeContext).
 pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
     use crate::config::tts::{Gender, TtsValue, VoiceSelection};
@@ -244,7 +244,7 @@ pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
                 None => None,
             };
             Some(TtsSettings {
-                provider: Some(cfg.provider.clone()),
+                provider: cfg.provider.clone(),
                 voice,
                 rate: None,
             })
@@ -252,6 +252,7 @@ pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
     };
     GlobalSettings {
         tts,
+        tts_prewarm: config.tts.prewarm_enabled(),
         ..GlobalSettings::default()
     }
 }

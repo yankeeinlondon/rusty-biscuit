@@ -1,5 +1,7 @@
 # Windows: Consoles, Terminals, and PowerShell
 
+Part of the `os` skill; [SKILL.md](SKILL.md) is the index.
+
 Load before writing a Windows Level 2 test, driving a console or
 pseudoconsole, using WezTerm on `build-win`, or capturing a native command's
 output from PowerShell. Path spelling is in [windows-paths.md](windows-paths.md);
@@ -7,145 +9,96 @@ processes and the environment in [windows.md](windows.md).
 
 ## WezTerm on `build-win`
 
-- `~/.wezterm.lua` there `dofile`s the shared config from `X:` and then a UNC
-  path. `X:` is a per-logon mapped drive that no SSH, nextest, or mux-server
-  process has, so every config *evaluation* from those contexts blocks for
-  the SMB connect timeout — measured at 21.2–21.3 s, deterministic, on each
-  `wezterm cli spawn`; Windows negative-caches the failure for well under a
-  minute, so a second spawn seconds later is 0.1 s. `wezterm cli list` does
-  not evaluate the config at all, which is why the harness's availability
-  gate passes and only the spawn times out (15 s `SPAWN_TIMEOUT`).
-  `biscuit-test-harness` now runs every `wezterm` client as
-  `wezterm --skip-config`; the mux server keeps its own config. Do not "fix"
-  this by raising the timeout.
-- A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET`
-  (`C:\Users\ken\.local\share\wezterm\sock`) is all the Level 2 tier needs
-  there; the twin in `level2_windows_provided_partial_file_capture.rs` passes
-  against it in ~4 s. Never blanket-stop mux servers on that host — one of
-  them may be carrying the session the developer is working in.
-- `cross-check --os windows` runs in an SSH session with no
-  `WEZTERM_UNIX_SOCKET`, so a WezTerm Level 2 test **skips there and nextest
-  prints PASS in ~0.02 s**. Read the duration, or set
-  `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` so a missing backend fails.
+- **A spawn times out while `wezterm cli list` works.** That host's
+  `~/.wezterm.lua` loads config from a per-logon mapped drive that SSH,
+  nextest, and mux-server processes lack, so every config *evaluation* waits
+  out the SMB connect timeout; `list` evaluates no config. The harness runs
+  clients with `--skip-config` (see the `biscuit-test-harness` skill); do not
+  raise the timeout.
+- A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET` is
+  all Level 2 needs there. Never blanket-stop mux servers on that host; one may
+  carry the developer's session.
+- **`cross-check --os windows` has no `WEZTERM_UNIX_SOCKET`,** so a WezTerm
+  Level 2 test skips and nextest prints a near-instant PASS. Read the duration,
+  or set `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` so a missing backend fails.
 
 ## PowerShell
 
-- **A PowerShell function's output stream is not its return value.** Every
-  native command inside a function writes its stdout into that function's
-  output, so `$code = Invoke-Thing` binds an *array* whose first element is
-  some program's chatter, and `exit $code` reports that. Symptom: a remote run
-  whose tier exited 1 is summarized as a pass (`cross-check --os windows`,
-  build-win-native, 2026-09-14). Assign a `$script:`-scoped variable at every
-  failure point and call the function as `Invoke-Thing | Out-Host`, which keeps
-  the log on the console without binding it. `$LASTEXITCODE` after each native
-  command is still the right check — the bug is in how the result leaves the
-  function, not in how it is read.
-- **Windows PowerShell 5.1 re-encodes a native command's captured stdout** with
-  `[Console]::OutputEncoding`, which is the OEM code page (IBM437 on
-  build-win-native). A UTF-8 `café-ü日` arrived as `caf├⌐-├╝µùÑ`. A wrapper
-  that captures a Rust binary's output (`$out = & tool.exe`) must set
-  `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)` around
-  the call and restore it in `finally`. stdin and stderr stay TTYs while
-  stdout is captured. Measured 2026-09-24 under `ssh -tt`
-  (`worktree/fixes/2026-09-24-ux-improvements/spike-s3.md`).
+- **A function's output stream is not its return value.** Every native
+  command's stdout inside a function joins its output, so
+  `$code = Invoke-Thing` binds an array led by some program's chatter, and
+  `exit $code` can report a failed run as a pass. Set a `$script:`-scoped
+  result at each failure point and call `Invoke-Thing | Out-Host`.
+  `$LASTEXITCODE` after each native command is still the right check.
+- **Windows PowerShell 5.1 re-encodes captured native stdout** with
+  `[Console]::OutputEncoding` (the OEM code page), turning UTF-8 into mojibake
+  (`café` becomes `caf├⌐`). A wrapper that captures a Rust binary's output
+  must set `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)`
+  around the call and restore it in `finally`. stdin and stderr stay TTYs
+  while stdout is captured.
 
 ## A real console without a window: ConPTY
 
-Measured on `build-win-native` on 2026-09-25 through `just cross-check`
-(`worktree/cli/tests/level2_powershell_remove.rs`).
+Reference tests: `worktree/cli/tests/level2_powershell_remove.rs` and
+`claudine/cli/tests/l1/lifecycle_message_drain_console_windows.rs`.
 
-- **A pseudoconsole is a Level 2 console that needs no backend.** `xpty`
-  (already in `Cargo.lock` for `unchained-ai`) opens ConPTY from inside the SSH
-  session's nextest process, with no window and no focus change. Interactive
-  Windows PowerShell 5.1 runs in it with PSReadLine, keystrokes are plain bytes
-  (`\r` for Enter), and a Rust prompt (inquire) sees a terminal. `xpty` leaves
-  out `PSEUDOCONSOLE_INHERIT_CURSOR`, so conhost sends no DSR that the test
-  would have to answer.
-- **The output stream is a repaint, not the text.** PSReadLine's echo of one
-  typed line arrived as `. 'C:\…\s. 'C:\…\sc. 'C:\…\sce…`. Wait for a single
-  word in the stream at most; assert on the console's own screen buffer,
-  which the session can dump with `$Host.UI.RawUI.GetBufferContents` (the
-  Windows counterpart of `tmux capture-pane`).
-- **Index that buffer with `GetValue`.** In a script, `$cells[$y, $x]` on the
-  `BufferCell[,]` it returns failed to parse ("Missing ']' after array index
-  expression"); `$cells.GetValue($y, $x).Character` works.
-- **The screen buffer hard-wraps at the column width, mid-word.** A long
-  error line (a temp path) split as `…': P` / `ermission denied`. Join a
-  full-width row to the next without a space before matching a phrase
-  (`unwrapped` in that test, 2026-09-25).
-- **`build-win-native` checks files out with CRLF** (`core.autocrlf`), so a
-  test that wrote `"guide\n"`, committed it, and read the file back from a
-  `git worktree add` checkout got `"guide\r\n"`. Normalize line endings
-  before comparing checked-out content (2026-09-25).
-- **Ctrl+C typed into a pseudoconsole is ignored unless the child inherits
-  Ctrl+C processing.** Writing ETX (`\x03`) to the ConPTY input makes conhost
-  raise `CTRL_C_EVENT`, as a terminal key press does, but "ignore Ctrl+C"
-  (`SetConsoleCtrlHandler(NULL, TRUE)`) is a process attribute that children
-  inherit, and a process chain under sshd and nextest can carry it. The child
-  then never sees the event, its registered handler is never called, and it
-  runs to completion; `CTRL_BREAK_EVENT` is unaffected, which is why the
-  group-targeted Ctrl+Break tests pass on the same host. Call
-  `SetConsoleCtrlHandler(None, FALSE)` in the test process before spawning,
-  as a terminal launching a shell effectively does
-  (`claudine/cli/tests/l1/lifecycle_message_drain_console_windows.rs`,
-  `build-win-native`, 2026-09-27).
-- **A ConPTY child starts about 3 s late unless the host answers its Device
-  Attributes query.** ConPTY writes `ESC [ c` first and holds the child's
-  startup until a reply arrives or ~3 s pass; even `cmd /c echo hi` took 3 s.
-  Answer from the output-reader thread with Windows Terminal's reply
-  (`ESC [ ? 61;4;6;7;14;21;22;23;24;28;32;42 c`); a bare `ESC [ ? 1;0 c` does
-  NOT release it. The child then starts in ~50 ms
-  (`lifecycle_message_drain_console_windows.rs`, 2026-10-09). Any other test
-  that reads a `xpty` pseudoconsole should do the same.
-- **`xpty::CommandBuilder` starts from the parent's environment**, like
-  `std::process::Command`. When copying a `Command` built by a fixture that
-  inherits and only overrides, apply its `get_envs()` on top without
-  `env_clear()`: clearing dropped `PATHEXT`, so `which("claude")` no longer
-  matched `claude.cmd` (2026-09-27).
-- The process's working directory is the one passed to `CommandBuilder::cwd`,
-  so this is also how a test reproduces "a window launched inside the
-  directory" for the current-directory lock in [windows.md](windows.md).
+- **A pseudoconsole is a Level 2 console that needs no backend.** `xpty` opens
+  ConPTY from inside an SSH session's nextest process with no window or focus
+  change. Interactive PowerShell runs in it with PSReadLine, keystrokes are
+  plain bytes (`\r` for Enter), and a Rust prompt sees a terminal. `xpty` omits
+  `PSEUDOCONSOLE_INHERIT_CURSOR`, so conhost sends no cursor DSR to answer.
+- **Answer the Device Attributes query or the child starts about 3 s late.**
+  ConPTY writes `ESC [ c` first and holds the child until a reply arrives or
+  the wait expires. Reply from the output-reader thread with Windows
+  Terminal's answer (`ESC [ ? 61;4;6;7;14;21;22;23;24;28;32;42 c`); a bare
+  `ESC [ ? 1;0 c` does not release it. Every test that reads an `xpty`
+  pseudoconsole should do this.
+- **The output stream is a repaint, not the text.** PSReadLine re-echoes a
+  typed line incrementally. Wait for a single word in the stream at most;
+  assert on the screen buffer, dumped in-session with
+  `$Host.UI.RawUI.GetBufferContents` (the counterpart of `tmux capture-pane`).
+  - Index it with `$cells.GetValue($y, $x).Character`; `$cells[$y, $x]` fails
+    to parse in a script.
+  - It hard-wraps at the column width mid-word; join a full-width row to the
+    next without a space before matching a phrase.
+- **Ctrl+C typed as ETX is ignored if the child inherits "ignore Ctrl+C".**
+  `SetConsoleCtrlHandler(NULL, TRUE)` is inherited, and an sshd/nextest chain
+  can carry it, so the child never sees `CTRL_C_EVENT` and runs to completion;
+  `CTRL_BREAK_EVENT` is unaffected. Call `SetConsoleCtrlHandler(None, FALSE)`
+  in the test process before spawning, as a terminal does.
+- **`xpty::CommandBuilder` inherits the parent environment** like
+  `std::process::Command`. When copying a fixture's `Command`, apply its
+  `get_envs()` on top without `env_clear()`; clearing drops `PATHEXT`, and
+  `which("claude")` stops matching `claude.cmd`.
+- **Checked-out text may be CRLF** on a host with `core.autocrlf`, so content
+  read back from a `git worktree add` checkout gains `\r\n`. Normalize line
+  endings before comparing.
+- `CommandBuilder::cwd` sets the child's working directory, so a ConPTY child
+  reproduces "a window launched inside the directory" for the
+  current-directory lock in [windows.md](windows.md#current-directory-locks).
 
 ## Attaching a console inside a nextest process
 
-`biscuit-tui/cli/tests/level2/windows_captured_stdout.rs` is ordinary `windows-latest`
-**L1** evidence inside `biscuit-tui-cli`'s own cell — not an `#[ignore]`d test
-behind a hand-invoked recipe or workflow. It compiles into the `level2` binary
-because it needs `terminal-tests`, but its test name has no tier marker, so the
-L1 filter selects it there (2026-09-22-consolidated-test-binaries-wave-2, R4).
-Everything below was measured on
-`build-win-native` at the CI thread count (`--test-threads 4`), 2026-09-14.
+`biscuit-tui/cli/tests/level2/windows_captured_stdout.rs` is ordinary
+`windows-latest` **L1** evidence in `biscuit-tui-cli`'s cell: it lives in the
+`level2` binary because it needs `terminal-tests`, but its name carries no tier
+marker, so the L1 filter selects it.
 
 - **Process-wide handle rewiring is safe only because nextest gives each test
-  its own process.** `AllocConsole` + `SetStdHandle` mutate process state; under
-  `cargo test`'s shared harness they would corrupt every sibling test in the
-  binary. Say so in the test's `//!` docs — it is the reason the tier is L1
-  rather than a serialized L3.
-- **`AllocConsole` returning `ERROR_ACCESS_DENIED` (0x80070005) is the normal
-  path, not a failure.** A console is usually already present, and the API
-  reports that as access denied. Treat "already present or failed" as one state
-  and assert the *precondition you actually need* — `stderr.is_terminal()` and
-  `CONOUT$` openable — instead of the call's return value.
-- **Redirecting a std handle to `CONOUT$` makes everything printed afterwards
-  invisible to nextest.** The line goes to the attached console, not to the
-  harness pipe. Two consequences, both found the hard way: a success diagnostic
-  printed after the redirect never reaches the log (`grep -c` returns 0), and —
-  worse — an assertion that panics *after* the redirect leaves nextest reporting
-  `FAIL` with an empty message. Redirect only the handle the contract requires
-  (stderr here; the stdout redirect was deleted as unnecessary), capture the
-  original handle before redirecting, and restore it the moment the child exits
-  so later failures are reported through the pipe.
-- **The console input buffer queues injected records**, so a written input
-  record survives the child not having started its event loop yet. The 750 ms /
-  250 ms fixed sleeps this test shipped with were covering a measured
-  requirement of **0 ms**: the test's real work is ~45 ms and the sleep *was*
-  its 0.78 s runtime. A bounded readiness loop — 2 s deadline, 25 ms poll,
-  re-inject at 500 ms — replaced them; no passing run has needed the second
-  injection. Keep the loop anyway: it converts a timing assumption into an
-  assertion that fails loudly at its own deadline rather than at nextest's 90 s
-  `ci` termination ceiling, and it kills and reaps the child so the cell reports
-  `FAIL` rather than `LEAK`.
-- Six consecutive clean runs, zero flakes (392 run / 392 passed / 7 skipped).
-  Runs that died in `git fetch` with `ssh: connect to host github.com port 22`
-  are a build-host network fault, not a test result — exclude them rather than
-  counting them as failures.
+  its own process.** `AllocConsole` and `SetStdHandle` mutate process state and
+  would corrupt sibling tests under `cargo test`. Say so in the test's `//!`
+  docs; it is why the tier is L1 rather than a serialized L3.
+- **`AllocConsole` returning `ERROR_ACCESS_DENIED` (`0x80070005`) is normal**:
+  a console is usually already present. Assert the precondition you need
+  (`stderr.is_terminal()`, `CONOUT$` openable), not the call's result.
+- **Output after redirecting a std handle to `CONOUT$` is invisible to
+  nextest.** Diagnostics vanish, and a panic after the redirect makes nextest
+  report `FAIL` with an empty message. Redirect only the handle the contract
+  needs, save the original first, and restore it as soon as the child exits.
+- **The console input buffer queues injected records,** so input written
+  before the child's event loop starts is not lost and fixed sleeps are
+  unnecessary. Use a bounded readiness loop (deadline, short poll, one
+  re-inject) that fails at its own deadline rather than nextest's termination
+  ceiling, and kill and reap the child so the cell reports `FAIL`, not `LEAK`.
+- A run that dies in `git fetch` with `ssh: connect to host github.com port
+  22` is a build-host network fault, not a test result; exclude it.

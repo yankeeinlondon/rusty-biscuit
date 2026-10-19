@@ -31,9 +31,9 @@ There are three primary API's which LLM model providers and local LLM runners wi
 
 ## Task
 
-::block when="state.name != 'comparison'"
+::block when="seq.name != 'comparison'"
 
-Your task is to research the {{ state.section }} and use that research to update the `## {{ state.section }}` section
+Your task is to research the {{ seq.section }} and use that research to update the `## {{ seq.section }}` section
 in the document: {{ research }}
 
 Your research should be able to answer at least the following questions:
@@ -50,26 +50,26 @@ Your research should be able to answer at least the following questions:
     - Moonshot AI, Z.ai, Qwen/Alibaba, Minimax, DeepSeek
     - OpenCode Zen
     - OpenRouter, Zenmux
-- which local runners support the {{ state.section }} as a way to interact with their locally served models? 
+- which local runners support the {{ seq.section }} as a way to interact with their locally served models?
     - be sure to include -- at a minimum -- the following local runners:
     - ollama, llama.cpp, vllm, oMLX
     - but try to include as many as you can find reference to
 - list out the various endpoints which are provided as part of the API and give a brief description of each
 
-Your research should be written in clear prose which targets a technical audience who understands all of the basics of API terminology but don't assume they know any of the specifics of the {{ state.section }} when writing.
+Your research should be written in clear prose which targets a technical audience who understands all of the basics of API terminology but don't assume they know any of the specifics of the {{ seq.section }} when writing.
 
 - the document will already exist along with a document structure (some of the sections may already be filled out)
-- you must be careful not to overwrite any of the existing content but as long as you put your research into the H2 heading "## {{state.section}}" you can include any document structure (H3 downward) that you like
+- you must be careful not to overwrite any of the existing content but as long as you put your research into the H2 heading "## {{seq.section}}" you can include any document structure (H3 downward) that you like
 
 Once the prose content of your research is complete we must update the Frontmatter of the document:
 
-- set `{{state.name}}_api_docs` to the URL for API documentation
-- set `{{state.name}}_api_schema` to a URL defining the schema of the API
-- set `{{state.name}}_latest_version` to the latest published version of the API
-- set `{{state.name}}_model_providers` to the latest 
+- set `{{seq.name}}_api_docs` to the URL for API documentation
+- set `{{seq.name}}_api_schema` to a URL defining the schema of the API
+- set `{{seq.name}}_latest_version` to the latest published version of the API
+- set `{{seq.name}}_model_providers` to the latest
 
 ::end-block
 
-::block when="state.name == 'comparison'"
+::block when="seq.name == 'comparison'"
 
 ::end-block

@@ -19,7 +19,7 @@ prompt: |-
     5. Product - information about a product
     6. Place - information about a place/location
     
-    ::block when="state.name == 'start'"
+    ::block when="seq.name == 'start'"
     ## Task
 
     No prior research has been done but the Markdown document has been seeded with the **structure** of the document we are trying to create (it's possible that if this prompt is being re-run ... that there WILL be content and in that case just review the content and make any adjustments you feel are needed). Your task is to do broad based research on each of the entities described above and come up with an initial set of Rust structs and enums that shape these entities.
@@ -39,15 +39,15 @@ prompt: |-
     
     ::end-block
     
-    ::block when="!contains('start, closure', state.name)"
+    ::block when="!contains('start, closure', seq.name)"
     ## Task
 
-    A draft of the various entities described above should already exist in this document. Your task is to review the document "./{{state.name}}.md" (which contains research information about a related topic to web page scraping and the Reaper project). Based on the knowledge in the research document, review the existing content in the body of this Markdown document and update the schema where you see fit as well as add additional context to the notes sections.
+    A draft of the various entities described above should already exist in this document. Your task is to review the document "./{{seq.name}}.md" (which contains research information about a related topic to web page scraping and the Reaper project). Based on the knowledge in the research document, review the existing content in the body of this Markdown document and update the schema where you see fit as well as add additional context to the notes sections.
 
     Once you've reviewed and updated each section in the document, and SAVED your updates, the task is complete.
     ::end-block
     
-    ::block when="state.name == 'closure'"
+    ::block when="seq.name == 'closure'"
     We have gone through several iterations of defining schemas for the entities above. We have now reached the final step and your task is to read through each section:
 
     - look for errors, redundancies, or overlapping ideas and fix inline in the body of this document

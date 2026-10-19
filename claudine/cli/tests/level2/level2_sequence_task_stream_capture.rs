@@ -85,7 +85,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: fetch-data
           shell: \"printf 'fetched\\n'\"
@@ -114,7 +113,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: emit-one
           shell: \"printf 'alpha-out\\n'; sleep 1.2; printf 'alpha-err\\n' >&2\"
@@ -125,7 +123,7 @@ sequence:
 Body.
 ";
 
-/// A serial group followed by a parallel one, each emitting a body line long
+/// A serial shell task followed by a parallel group, each emitting a body line long
 /// enough to need folding in a narrow pane.
 ///
 /// The pairing is the point: the same long payload rendered under an invisible
@@ -134,17 +132,11 @@ Body.
 const MIXED_WIDTH_DOC: &str = "\
 ---
 sequence:
-  - name: serial-step
-    group:
-      name: serial-bundle
-      execution: serial
-      tasks:
-        - name: ser-task
-          shell: \"printf 'alpha bravo charlie delta echo foxtrot golf hotel india juliett\\n'\"
+  - name: ser-task
+    shell: \"printf 'alpha bravo charlie delta echo foxtrot golf hotel india juliett\\n'\"
   - name: parallel-step
     group:
       name: parallel-bundle
-      execution: parallel
       tasks:
         - name: par-task
           shell: \"printf 'alpha bravo charlie delta echo foxtrot golf hotel india juliett\\n'\"
@@ -159,7 +151,7 @@ const ZERO_STEP_DOC: &str = "\
 items: []
 sequence: \"{{ items }}\"
 ---
-Work on {{state}}.
+Work on {{seq}}.
 ";
 
 /// A parallel group of two **prompt** tasks, both driven by the same scripted
@@ -175,7 +167,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: task-one
           prompt: one.md
@@ -189,27 +180,28 @@ Body.
 /// A parallel group whose prompt documents both hand off through `proxy`.
 ///
 /// The first target fails schema validation before provider launch. The second
-/// target succeeds, and the later reader proves that the failed group settled
+/// target succeeds, and the later reader proves that the tolerant group settled
 /// before the sequence continued and that declaration-ordered state merge
 /// remained sequence-owned across both handoffs.
 const PARALLEL_PROXY_FAILURE_DOC: &str = "\
 ---
-fail_fast: false
 shared: initial
 sequence:
   - name: proxy-group
     group:
       name: bundle
-      execution: parallel
+      fail_fast: false
       tasks:
         - name: failing-proxy
-          prompt: one.md
-          setup:
+          initialize:
             - set: {shared: from-failing}
+          sequence:
+            - { name: route-failure, prompt: one.md }
         - name: surviving-proxy
-          prompt: two.md
-          setup:
+          initialize:
             - set: {shared: from-survivor}
+          sequence:
+            - { name: route-success, prompt: two.md }
   - name: verify-merge
     prompt: reader.md
 ---
@@ -225,7 +217,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: slow-task
           prompt: one.md
@@ -931,9 +922,9 @@ fn level2_mega_merge_s10_parallel_proxy_failure_task_integrity() {
     );
 
     let capture = run_in_pane(&mut harness, &staged, 120, 160, &[]);
-    assert_ne!(
+    assert_eq!(
         capture.exit_code, 0,
-        "the failed proxied target must fail the containing group.\nplain:\n{}",
+        "the tolerant group must continue after the failed proxied target.\nplain:\n{}",
         capture.frame.plain
     );
 
@@ -1331,7 +1322,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: md-task
           prompt: one.md

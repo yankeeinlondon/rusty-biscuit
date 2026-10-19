@@ -20,6 +20,7 @@ fn make_prepared_composition(
             agent: agent_hint.clone(),
             model: model_hint,
             interactive: None,
+        yolo: None,
             agent_invalid: Vec::new(),
             agent_was_list: matches!(agent_hint, Some(AgentHint::List(_))),
         },
@@ -469,6 +470,7 @@ fn hints_from_agent_with_list(
         agent,
         model: None,
         interactive: None,
+        yolo: None,
         agent_invalid: invalid,
         agent_was_list: was_list,
     }

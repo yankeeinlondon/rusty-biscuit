@@ -1,83 +1,27 @@
 # CLI Output Testing
 
-Rust CLIs should test more than success or failure. High-value coverage usually includes:
+Part of the `rust-testing` skill; [SKILL.md](SKILL.md) is the index.
 
-- stdout vs stderr channel separation
-- `NO_COLOR`, `FORCE_COLOR`, and explicit `--plain` handling
-- shell completion generation
-- stable dry-run or help output snapshots
+Test more than success or failure. Spawn the binary through the area's command
+builder ([spawning-binaries.md](spawning-binaries.md)), and put shared tempdir,
+config, git, and ANSI helpers in `tests/common/` (wired per
+[consolidated-binaries.md](consolidated-binaries.md) where `autotests = false`).
 
-## Shared Pattern
+## What to cover
 
-Put common tempdir, config, git, executable, and ANSI helpers in `tests/common/mod.rs`. In a package with per-file test targets, each integration test crate declares `mod common;`. In a package with consolidated binaries, the crate root declares it once (`#[path = "../common/mod.rs"] mod common;`) and modules `use crate::common;` (see "Consolidated Integration-Test Binaries" in `SKILL.md`).
-
-## Output Channels
-
-Machine-readable or pipeable output should be asserted on `stdout`. Status, progress, warnings, and errors should be asserted on `stderr`.
-
-```rust
-let output = cargo_bin_cmd!("my-cli")
-    .args(["completions", "bash"])
-    .assert()
-    .success()
-    .get_output()
-    .clone();
-
-assert!(output.stderr.is_empty());
-assert!(!output.stdout.is_empty());
-```
-
-For failure paths, assert the inverse when appropriate:
-
-```rust
-let output = cargo_bin_cmd!("my-cli")
-    .args(["run", "/tmp/missing.file"])
-    .assert()
-    .failure()
-    .get_output()
-    .clone();
-
-assert!(output.stdout.is_empty());
-assert!(!output.stderr.is_empty());
-```
-
-## Color Modes
-
-Test the three common modes independently:
-
-- `NO_COLOR=1`: no ANSI sequences
-- `FORCE_COLOR=1`: ANSI sequences even in non-TTY integration tests
-- `--plain`: explicit CLI no-style mode; should usually override forced color
-
-```rust
-let stdout = String::from_utf8(
-    cargo_bin_cmd!("my-cli")
-        .env("NO_COLOR", "1")
-        .args(["providers"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone(),
-).unwrap();
-
-assert_eq!(stdout, strip_ansi(&stdout));
-```
-
-## Shell Completions
-
-Prefer shell-specific markers over full snapshots:
-
-- bash: `_my_cli()`
-- zsh: `#compdef my-cli`
-- fish: `complete -c my-cli`
-- elvish: `edit:completion:arg-completer[...]`
-
-## Snapshot Targets
-
-Good CLI snapshot candidates:
-
-- grouped help output
-- stable dry-run output
-- tables or summaries without live timestamps
-- error messages after redaction
+- **Channels.** Machine-readable or pipeable output goes to stdout; status,
+  progress, warnings, and errors go to stderr. Assert both sides: a success
+  path such as `completions bash` has empty stderr, and a failure path has
+  empty stdout.
+- **Color modes, each independently.** `NO_COLOR=1` emits no ANSI;
+  `FORCE_COLOR=1` emits ANSI even without a TTY; `--plain` is the explicit
+  no-style mode and should usually override forced color. Assert "no ANSI" as
+  `stdout == strip_ansi(&stdout)` with `biscuit_test_harness::strip_ansi`,
+  which handles the full escape-sequence shape (including `ESC ( B`) rather
+  than a hand-rolled stripper.
+- **Shell completions.** Assert a shell-specific marker rather than snapshot the
+  script: bash `_my_cli()`, zsh `#compdef my-cli`, fish `complete -c my-cli`,
+  elvish `edit:completion:arg-completer[...]`.
+- **Snapshots** for grouped help, stable dry-run output, and tables or
+  summaries without live values, after redaction
+  ([snapshot-redaction.md](snapshot-redaction.md)).

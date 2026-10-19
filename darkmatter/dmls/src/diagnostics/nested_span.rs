@@ -9,8 +9,9 @@
 //! ## Lifecycle-key inventory
 //!
 //! [`lifecycle`] is a documented stopgap: a static copy of the Claudine
-//! lifecycle layout, kept in step with `darkmatter/docs/schemas/claudine.yaml`
-//! and `claudine-types.yaml` by a parity test rather than by a crate dependency. Schema triggers that
+//! lifecycle layout, kept in step with Claudine's schemas in `claudine/schemas/`
+//! (`claudine.yaml`, `lifecycle.yaml`, `action.yaml`) by a parity test rather
+//! than by a crate dependency. Schema triggers that
 //! scope variables are the intended replacement; until then this is the only
 //! place DMLS knows Claudine's lifecycle keys.
 

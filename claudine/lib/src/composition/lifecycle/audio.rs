@@ -25,6 +25,7 @@ impl LifecycleSignal {
             Self::Failure => "failure",
             Self::Finalize => "finalize",
             Self::Loop => "loop",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -45,7 +46,7 @@ impl LifecycleSignal {
             Self::Initialize => StatusState::Info,
             Self::Start => StatusState::Info,
             Self::Success => StatusState::Success,
-            Self::Blocked | Self::Failure => StatusState::Error,
+            Self::Blocked | Self::Failure | Self::Cancelled => StatusState::Error,
             Self::Finalize => StatusState::Info,
             Self::Loop => StatusState::Info,
         }
@@ -55,12 +56,12 @@ impl LifecycleSignal {
     /// legitimately reference the lifecycle-stack-only `err` global.
     ///
     /// Per the spec's `err` static-scan rule:
-    /// - `blocked` and `failure` always carry an error.
+    /// - `blocked`, `failure`, and `cancelled` always carry an error.
     /// - `finalize` *optionally* carries an error (success path: no error;
     ///   failure path: error present).
     /// - `initialize`, `start`, `success`, `loop` never carry an error.
     pub const fn can_carry_error(self) -> bool {
-        matches!(self, Self::Blocked | Self::Failure | Self::Finalize)
+        matches!(self, Self::Blocked | Self::Failure | Self::Cancelled | Self::Finalize)
     }
 
     /// Whether an *unintentional* action error during this event's stack
@@ -69,7 +70,7 @@ impl LifecycleSignal {
     /// Per the spec's action error-propagation table, setup-phase events
     /// (`initialize`, `start`, `blocked`) propagate an errored action to
     /// `failure` so the agent is never invoked with a broken environment.
-    /// Terminal-phase events (`success`, `failure`, `finalize`, `loop`) log
+    /// Terminal-phase events (`success`, `failure`, `cancelled`, `finalize`, `loop`) log
     /// the error but leave the composition outcome unchanged.
     ///
     /// This governs only unintentional action errors. The explicit `Error`
@@ -81,6 +82,9 @@ impl LifecycleSignal {
 }
 
 /// Build the TTS configuration lifecycle speech uses from global settings.
+///
+/// Pre-warm builds its candidates with this same function: a prepared phrase
+/// is reused only when playback resolves an identical configuration.
 pub(crate) fn tts_config_from_settings(tts: Option<&TtsSettings>) -> TtsConfig {
     let mut config = TtsConfig::new();
     let Some(settings) = tts else {

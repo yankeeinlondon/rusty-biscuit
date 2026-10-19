@@ -8,13 +8,14 @@ fn compose_state(source_path: &Path, input_layers: CallerInputLayers) -> Harness
         source_path: source_path.to_path_buf(),
         original_ref: source_path.display().to_string(),
         base_prompt: None,
-        overlay: indexmap::IndexMap::new(),
+        overlay: Default::default(),
         pending_retry_overlay: None,
         prompt_tail: Vec::new(),
         input_layers,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
         last_final_output: None,
+        launched_providers: Vec::new(),
         entry: DocumentEntryReason::ProxyTarget,
         invocation_context: None,
         epoch_context: None,
@@ -356,7 +357,7 @@ fn proxy_target_preflight_approves_frontmatter_shell_and_rematerializes() {
         .as_ref()
         .expect("pre-approved set must be populated after target pre-flight");
     assert!(
-        approved.contains("basename features/x/spec.md"),
+        approved.contains_exact("basename features/x/spec.md"),
         "expected the resolved frontmatter shell command; got: {approved:?}",
     );
 

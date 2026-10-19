@@ -118,13 +118,14 @@ fn capture_command(harness: &mut TmuxHarness, subcommand: &str, staged: &Staged)
         )
         .expect("send claudine command");
 
-    let frame = wait_for_pane_marker(
+    // The hint precedes the highlighted YAML snippet, so the marker only proves
+    // the command reached the pane; the asserted frame is the settled one.
+    wait_for_pane_marker(
         harness,
         "Use exactly three dashes",
         Duration::from_secs(15),
     );
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    frame
+    biscuit_test_harness::capture_settled(harness).expect("settled capture")
 }
 
 fn assert_malformed_fence_diagnostic(frame: &CapturedFrame, subcommand: &str) {

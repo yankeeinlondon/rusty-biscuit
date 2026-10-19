@@ -11,15 +11,49 @@ pub mod types;
 
 pub use types::ShellBlockError;
 
-use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionRuntime};
+use super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, prepare_site};
+use super::shell_expansion::template::HoleEvaluator;
+use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionError, ShellExpansionRuntime};
 use super::shell_expansion::{
-    execute_prepared_directive, prepare_directive,
+    execute_prepared_directive,
     resolve_policy_paths,
 };
 use super::ComposeReport;
-use super::body_origin::{DataRanges, EditOrigin, TextEdit};
+use super::body_origin::{AuthoredBody, DataRanges, EditOrigin, TextEdit};
 use std::path::PathBuf;
 use types::{ShellBlockCommandResult, SourceExcerpt};
+
+/// What a shell-block stage needs to read a command as a template: the
+/// authored body, the scope its placeholders are typed in, and the state they
+/// are read from.
+pub(crate) struct BlockTemplates<'a> {
+    pub authored: &'a AuthoredBody,
+    pub scope: SiteScope<'a>,
+    pub evaluator: &'a dyn HoleEvaluator,
+    /// The authored document, for template diagnostics.
+    pub ctx: biscuit_terminal::errors::SourceContext,
+}
+
+impl BlockTemplates<'_> {
+    /// The authored commands of the block `pair` of `content`, with the
+    /// authored 1-based line of the block's opener, or `None` when the block
+    /// cannot be traced back to its authored text.
+    fn authored_commands(
+        &self,
+        content: &str,
+        pair: &super::block_pairs::BlockPair,
+    ) -> Option<(Vec<body::RawShellCommand>, usize)> {
+        let start = self.authored.project(content, &(pair.span.start..pair.span.start + 1))?.start;
+        let text = self.authored.text();
+        let authored = super::block_pairs::scan_block_pairs_in(text, None)
+            .ok()?
+            .into_iter()
+            .find(|candidate| candidate.span.start == start)?;
+        let (commands, dangling) =
+            body::group_logical_commands(&text[authored.body_span.clone()], authored.start_line + 1);
+        dangling.is_none().then_some((commands, authored.start_line))
+    }
+}
 
 /// Extract source file path from compose options.
 fn source_file_from_options(options: &crate::markdown::compose::ComposeRequest) -> Option<PathBuf> {
@@ -40,7 +74,7 @@ pub(crate) fn run_shell_blocks_stage(
     ctx: &biscuit_terminal::errors::SourceContext,
     line_offset: usize,
 ) -> Result<(String, ComposeReport), ShellBlockError> {
-    run_shell_blocks_stage_in(content, None, options, runtime, ctx, line_offset)
+    run_shell_blocks_stage_in(content, None, None, options, runtime, ctx, line_offset)
         .map(|(content, report, _)| (content, report))
 }
 
@@ -51,9 +85,14 @@ pub(crate) fn run_shell_blocks_stage(
 /// Block markers must be authored, and data may supply a command's arguments
 /// but never split a command, join two, or supply an executable, chain
 /// operator, or redirection.
+///
+/// With `templates`, a command whose authored text holds a placeholder may
+/// also run as a template (see [`prepare_site`]), including when the values
+/// interpolated into the block keep its text from parsing as commands.
 pub(crate) fn run_shell_blocks_stage_in(
     content: &str,
     data: Option<&DataRanges>,
+    templates: Option<&BlockTemplates<'_>>,
     options: &crate::markdown::compose::ComposeRequest,
     runtime: &mut ShellExpansionRuntime,
     ctx: &biscuit_terminal::errors::SourceContext,
@@ -112,16 +151,97 @@ pub(crate) fn run_shell_blocks_stage_in(
     for pair in shell_pairs {
         let region = parser::parse_shell_block_region(content, &pair)?;
         let body_text = &content[pair.body_span.clone()];
-        let commands = body::split_logical_commands(body_text, pair.start_line + 1)?;
-        if let Some(data) = data.filter(|data| data.intersects(&pair.body_span)) {
-            reject_data_shaped_commands(
-                &commands,
-                &data.masked(content)[pair.body_span.clone()],
-                pair.start_line + 1,
-                body_text,
-                line_offset,
-                source_file.clone(),
-            )?;
+        let resolved = body::split_logical_commands(body_text, pair.start_line + 1).and_then(|commands| {
+            if let Some(data) = data.filter(|data| data.intersects(&pair.body_span)) {
+                reject_data_shaped_commands(
+                    &commands,
+                    &data.masked(content)[pair.body_span.clone()],
+                    pair.start_line + 1,
+                    body_text,
+                    line_offset,
+                    source_file.clone(),
+                )?;
+            }
+            Ok(commands)
+        });
+        let block_start_line = pair.start_line + line_offset;
+        let frame = |span: std::ops::Range<usize>| SiteFrame {
+            span,
+            indent: String::new(),
+            error_handling: region.options.clone(),
+            timeout_override: region.timeout_override,
+            no_cache: region.no_cache,
+        };
+        let directive_of = |command: &types::ShellBlockCommand| ShellDirective {
+            raw_command: command.raw_command.clone(),
+            executable: command.executable.clone(),
+            args: command.args.clone(),
+            span: command.physical_span.clone(),
+            // Opener indentation is applied once to the combined block output
+            // at the splice boundary, not per command.
+            indent: String::new(),
+            origin: ShellCommandOrigin::ShellBlock {
+                start_line: block_start_line,
+                command_line: command.start_line + line_offset,
+            },
+            error_handling: region.options.clone(),
+            timeout_override: region.timeout_override,
+            no_cache: region.no_cache,
+            pipeline: Some(command.pipeline.clone()),
+            ctx: ctx.clone(),
+        };
+
+        // Each command as resolved bytes and, when its authored text holds a
+        // placeholder, as a template site.
+        let mut commands: Vec<(Result<ShellDirective, ShellExpansionError>, Option<TemplateSite<'_>>, usize)> =
+            Vec::new();
+        let authored = templates.and_then(|templates| {
+            templates
+                .authored_commands(content, &pair)
+                .map(|(commands, opener_line)| (templates, commands, opener_line))
+        });
+        match (resolved, authored) {
+            (Ok(resolved), Some((templates, authored, opener_line))) if resolved.len() == authored.len() => {
+                for (command, raw) in resolved.iter().zip(authored) {
+                    let directive = directive_of(command);
+                    let site = block_site(templates, &raw, opener_line, line_offset, frame(command.physical_span.clone()))?;
+                    commands.push((Ok(directive), site, command.start_line));
+                }
+            }
+            (Ok(resolved), _) => {
+                for command in &resolved {
+                    commands.push((Ok(directive_of(command)), None, command.start_line));
+                }
+            }
+            // The block's interpolated text no longer reads as commands: run
+            // it from its authored text, a command with a placeholder as a
+            // template and any other as its own (uninterpolated) bytes.
+            (Err(error), Some((templates, authored, opener_line))) => {
+                for raw in authored {
+                    let site = block_site(templates, &raw, opener_line, line_offset, frame(raw.physical_span.clone()))?;
+                    let command_line = raw.start_line - opener_line + pair.start_line;
+                    if site.is_some() {
+                        let unread = ShellExpansionError::ParseDirective {
+                            ctx: Box::new(ctx.clone()),
+                            origin: ShellCommandOrigin::ShellBlock {
+                                start_line: block_start_line,
+                                command_line: command_line + line_offset,
+                            },
+                            message: "the block's interpolated text does not parse as commands".to_string(),
+                        };
+                        commands.push((Err(unread), site, command_line));
+                        continue;
+                    }
+                    if !super::expression::ExpressionFinder::scan_plain(&raw.raw_command).expressions.is_empty() {
+                        return Err(error);
+                    }
+                    let single = body::split_logical_commands(&raw.raw_command, command_line)?;
+                    for command in &single {
+                        commands.push((Ok(directive_of(command)), None, command_line));
+                    }
+                }
+            }
+            (Err(error), None) => return Err(error),
         }
 
         if commands.is_empty() {
@@ -133,36 +253,17 @@ pub(crate) fn run_shell_blocks_stage_in(
 
         // Prepare all commands before executing any
         let mut prepared = Vec::new();
-        for command in &commands {
-            let directive = ShellDirective {
-                raw_command: command.raw_command.clone(),
-                executable: command.executable.clone(),
-                args: command.args.clone(),
-                span: command.physical_span.clone(),
-                // Opener indentation is applied once to the combined block output
-                // at the splice boundary, not per command.
-                indent: String::new(),
-                origin: ShellCommandOrigin::ShellBlock {
-                    start_line: pair.start_line + line_offset,
-                    command_line: command.start_line + line_offset,
-                },
-                error_handling: region.options.clone(),
-                timeout_override: region.timeout_override,
-                no_cache: region.no_cache,
-                pipeline: Some(command.pipeline.clone()),
-                ctx: ctx.clone(),
-            };
-
-            match prepare_directive(&directive, options, &policy_paths, runtime) {
-                Ok(p) => prepared.push((p, command.clone())),
+        for (directive, site, start_line) in commands {
+            match prepare_site(directive, site.as_ref(), options, &policy_paths, runtime) {
+                Ok(p) => prepared.push((p, start_line)),
                 Err(e) => {
                     return Err(ShellBlockError::Command {
-                        block_start_line: pair.start_line + line_offset,
-                        command_line: command.start_line + line_offset,
+                        block_start_line,
+                        command_line: start_line + line_offset,
                         partial_output: Box::new(Vec::new()),
                         excerpt: SourceExcerpt::from_text(
                             body_text,
-                            command.start_line + line_offset,
+                            start_line + line_offset,
                             pair.start_line + 1 + line_offset,
                             2,
                         ),
@@ -176,7 +277,7 @@ pub(crate) fn run_shell_blocks_stage_in(
         // Execute sequentially
         let mut results = Vec::new();
 
-        for (prep, command) in prepared {
+        for (prep, start_line) in prepared {
             match execute_prepared_directive(&prep, options, runtime) {
                 Ok(execution) => {
                     results.push(ShellBlockCommandResult {
@@ -191,12 +292,12 @@ pub(crate) fn run_shell_blocks_stage_in(
                     // unhandled.
                     let partial: Vec<String> = results.iter().map(|r| r.output.clone()).collect();
                     return Err(ShellBlockError::Command {
-                        block_start_line: pair.start_line + line_offset,
-                        command_line: command.start_line + line_offset,
+                        block_start_line,
+                        command_line: start_line + line_offset,
                         partial_output: Box::new(partial),
                         excerpt: SourceExcerpt::from_text(
                             body_text,
-                            command.start_line + line_offset,
+                            start_line + line_offset,
                             pair.start_line + 1 + line_offset,
                             2,
                         ),
@@ -230,6 +331,42 @@ pub(crate) fn run_shell_blocks_stage_in(
     report.shell_approvals_used += runtime.take_recent_approval_count();
 
     Ok((new_content, report, edits))
+}
+
+/// The template site of one authored block command, or `None` when it has no
+/// placeholder or is not a valid template.
+fn block_site<'a>(
+    templates: &BlockTemplates<'a>,
+    raw: &body::RawShellCommand,
+    opener_line: usize,
+    line_offset: usize,
+    frame: SiteFrame,
+) -> Result<Option<TemplateSite<'a>>, ShellBlockError> {
+    if super::expression::ExpressionFinder::scan_plain(&raw.raw_command).expressions.is_empty() {
+        return Ok(None);
+    }
+    let origin = ShellCommandOrigin::ShellBlock {
+        start_line: opener_line + line_offset,
+        command_line: raw.start_line + line_offset,
+    };
+    templates
+        .scope
+        .site(
+            &raw.raw_command,
+            super::shell_expansion::template::parse_authored(&raw.raw_command),
+            origin,
+            templates.ctx.clone(),
+            templates.evaluator,
+            frame,
+        )
+        .map_err(|error| ShellBlockError::Command {
+            block_start_line: opener_line + line_offset,
+            command_line: raw.start_line + line_offset,
+            partial_output: Box::new(Vec::new()),
+            excerpt: SourceExcerpt::default(),
+            source: Box::new(error),
+            source_file: None,
+        })
 }
 
 /// Fails when inserted data shaped a block's commands: split or joined a

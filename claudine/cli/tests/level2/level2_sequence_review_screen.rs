@@ -173,12 +173,12 @@ fn level2_tmux_review_screen_lays_out_eligible_rows_and_submits_catalog_choices(
     assert!(!clipped.contains(LONG_STEP_NAME), "the long label must be clipped: {clipped:?}");
     assert_eq!(
         column_of(&scrolled.plain, "6 summarize-", "● Claude"),
-        column_of(&scrolled.plain, "5 build", "● Claude"),
+        column_of(&scrolled.plain, "5 member", "● Claude"),
         "clipping must not move the provider column:\n{}",
         scrolled.plain
     );
     assert_eq!(
-        column_of(&scrolled.plain, "5 build", "● Claude"),
+        column_of(&scrolled.plain, "5 member", "● Claude"),
         narrow_column,
         "scrolling must not change the column widths:\n{}",
         scrolled.plain
@@ -322,4 +322,48 @@ fn level2_tmux_review_screen_escape_exits_130_without_work() {
 fn level2_tmux_review_screen_ctrl_c_exits_130_without_work() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     assert_key_cancels("review-screen-ctrl-c", "C-c");
+}
+
+/// Acceptance 7: a task whose document names its own provider is a
+/// read-only row showing it, focus never lands on it, and a choice on an
+/// editable row is the provider that launches.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tmux_review_screen_shows_own_provider_tasks_read_only() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let review = ReviewFixture::stage_with("review-screen-own-provider", ModelEditor::FreeText, true);
+    let mut harness = pane();
+    let open = review.open(&mut harness);
+
+    // Row 4 names Goose itself: shown, with no selectable choice.
+    let own = row_block(&open.plain, ROW_LABELS[1]);
+    assert!(own[0].contains("Goose"), "row 4 must show its own provider:\n{}", open.plain);
+    // A picker cell draws its options with `●`/`○`; a read-only cell is text.
+    assert!(!own[0].contains('●') && !own[0].contains('○'), "row 4 must not be a picker:\n{}", open.plain);
+    for label in [ROW_LABELS[0], ROW_LABELS[2], ROW_LABELS[3]] {
+        assert!(shows_selected(&row_block(&open.plain, label), "Claude"), "{label} is editable:\n{}", open.plain);
+    }
+
+    // Row 2's provider → Goose; the other editable rows keep Claude.
+    for key in ["Down", "Enter"] {
+        press(&mut harness, key);
+    }
+    wait_until(&mut harness, "row 2 on Goose", |frame| {
+        shows_selected(&row_block(&frame.plain, ROW_LABELS[0]), "Goose")
+    });
+    press(&mut harness, "C-s");
+    let (frame, status) = review.wait_for_exit(&mut harness);
+    assert_eq!(status, "0", "the submitted sequence must succeed:\n{frame}");
+    let providers: Vec<(&str, String)> =
+        review.targets_by_step().into_iter().map(|(token, provider, _)| (token, provider)).collect();
+    let mut expected = vec![
+        (STEP_TOKENS[0], "goose".to_string()),
+        (STEP_TOKENS[1], "goose".to_string()),
+        (STEP_TOKENS[2], "claude".to_string()),
+        (STEP_TOKENS[3], "claude".to_string()),
+    ];
+    expected.sort();
+    assert_eq!(providers, expected, "providers per step:\n{frame}");
+    review.assert_no_audio();
 }

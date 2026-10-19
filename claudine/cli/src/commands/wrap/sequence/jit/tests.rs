@@ -36,6 +36,9 @@ fn step_options(
     let caller_input_records = BTreeMap::new();
     let child_cwd = source.resolved_path.parent().unwrap().to_path_buf();
     let context = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
         source_repo_root: source_context.repository_root(),
         child_cwd: &child_cwd,
         launch_area,
@@ -46,6 +49,10 @@ fn step_options(
         caller_input_records: &caller_input_records,
         invocation,
         run_evidence: None,
+        deferred_shell_roots: Default::default(),
+        loop_values: None,
+        validation_probe: false,
+        document_shell_values: None,
     };
     step_prepare_options(source, &context, overrides, env_overrides, false)
 }
@@ -75,6 +82,9 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         ),
     )]);
     let context = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
         source_repo_root: source_context.repository_root(),
         child_cwd: directory.path(),
         launch_area: Some(directory.path()),
@@ -85,13 +95,17 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         caller_input_records: &caller_input_records,
         invocation: &invocation,
         run_evidence: None,
+        deferred_shell_roots: Default::default(),
+        loop_values: None,
+        validation_probe: false,
+        document_shell_values: None,
     };
     let step = compose_step(
         &source,
         &context,
         &claudine::composition::LayeredOverrides::new(),
         &BTreeMap::new(),
-        std::collections::HashSet::new(),
+        Default::default(),
         false,
     )
     .unwrap();
@@ -112,10 +126,9 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
             prepared_context_consumers: BTreeMap::from([
                 ("body".to_string(), 1),
                 ("effective-frontmatter".to_string(), 1),
-                ("preflight".to_string(), 1),
             ]),
         },
-        "one sequence step must prepare through one complete epoch"
+        "execution uses one epoch and consumes existing approvals without a new preflight audit"
     );
 }
 
@@ -195,7 +208,7 @@ fn template_preflight_resolves_against_document_dir() {
     let result = approve_document_shell(&source, &options, &approval_options).unwrap();
 
     assert!(
-        result.approved_commands.contains("echo true"),
+        result.approved_commands.contains_exact("echo true"),
         "template preflight must resolve file_exists(spec) against the document \
          dir, CWD-independently; approved: {:?}",
         result.approved_commands,
@@ -247,13 +260,13 @@ fn template_preflight_does_not_resolve_launch_only_file() {
     let result = approve_document_shell(&source, &options, &approval_options).unwrap();
 
     assert!(
-        result.approved_commands.contains("echo false"),
+        result.approved_commands.contains_exact("echo false"),
         "launch-only spec.md is unreachable from the document context, so \
          file_exists(spec) resolves false; approved: {:?}",
         result.approved_commands,
     );
     assert!(
-        !result.approved_commands.contains("echo true"),
+        !result.approved_commands.contains_exact("echo true"),
         "document-backed resolution must not see the launch-area file; approved: {:?}",
         result.approved_commands,
     );
@@ -395,6 +408,8 @@ mod layering {
 
     fn snapshot(mutations: &[(&str, Value)], outputs: &[&str]) -> RuntimeSnapshot {
         RuntimeSnapshot {
+            seq: None,
+            proxy_chain: Vec::new(),
             mutations: mutations
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), v.clone()))
@@ -418,7 +433,7 @@ mod layering {
         assert_eq!(map["phase"], json!("from-mutation"));
         assert_eq!(map["only_user"], json!("kept"));
         assert_eq!(
-            map["state"]["name"],
+            merged.sequence_value().unwrap()["name"],
             json!("alpha"),
             "a user setter must not displace the reserved overlay"
         );
@@ -433,7 +448,7 @@ mod layering {
         let runtime = snapshot(&[], &["first"]);
 
         let merged = step_set_overrides(&plan, 1, None, Some(&runtime));
-        assert_eq!(merged.values()["outputs"], json!(["first"]));
+        assert_eq!(merged.sequence_value().unwrap()["outputs"], json!(["first"]));
         assert!(
             !reserved_overlay(&plan, 1)
                 .as_object()
@@ -451,22 +466,22 @@ mod layering {
         let plan = two_step_plan(dir.path());
 
         let merged = step_set_overrides(&plan, 0, None, None);
-        assert_eq!(merged.values()["outputs"], json!([]));
+        assert_eq!(merged.sequence_value().unwrap()["outputs"], json!([]));
     }
 
     /// Both neighbors render on an interior step; a boundary neighbor is `null`
-    /// rather than absent, so `{{ previous }}` reads empty instead of unknown.
+    /// rather than absent, so `{{ seq.previous }}` reads empty instead of unknown.
     #[test]
     fn the_overlay_carries_the_neighbor_states() {
         let dir = tempfile::TempDir::new().unwrap();
         let plan = two_step_plan(dir.path());
 
         let first = reserved_overlay(&plan, 0);
-        assert!(first["previous"].is_null());
-        assert_eq!(first["next"]["name"], json!("beta"));
+        assert!(first["seq"]["previous"].is_null());
+        assert_eq!(first["seq"]["next"]["name"], json!("beta"));
 
         let last = reserved_overlay(&plan, 1);
-        assert_eq!(last["previous"]["name"], json!("alpha"));
-        assert!(last["next"].is_null());
+        assert_eq!(last["seq"]["previous"]["name"], json!("alpha"));
+        assert!(last["seq"]["next"].is_null());
     }
 }

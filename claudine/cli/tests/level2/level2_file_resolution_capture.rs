@@ -583,7 +583,7 @@ fn level2_sequence_task_file_parameter_is_anchored_to_sequence_document_in_tmux(
     let sequence = sequence_dir.join("sequence.md");
     write(
         &sequence,
-        "---\nsequence:\n  - name: anchored\n    prompt: ^shared-task.md\n    params:\n      spec: task-spec.md\n---\nSEQUENCE\n",
+        "---\nsequence:\n  - name: anchored\n    prompt: ^shared-task.md\n    with:\n      spec: task-spec.md\n---\nSEQUENCE\n",
     );
 
     let claudine = cargo_bin("claudine").display().to_string();

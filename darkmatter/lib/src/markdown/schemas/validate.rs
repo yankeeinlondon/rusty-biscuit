@@ -100,7 +100,7 @@ struct CacheInner {
     entries: HashMap<u64, Vec<CacheEntry>>,
     /// Content hashes of shared schemas, by allocation. The `Weak` keeps the
     /// allocation from being reused for another schema while it is listed.
-    schema_hashes: Vec<(Weak<Value>, u64)>,
+    schema_hashes: Vec<(Weak<Value>, SchemaDigest)>,
     tick: u64,
     capacity: usize,
 }
@@ -224,7 +224,9 @@ impl ValidatorCache {
     /// the request-scoped candidate plan for `format: darkmatter-file` values;
     /// otherwise `context`'s `cwd` is. It is folded into the cache key so two
     /// documents that share a schema but live in different directories do not
-    /// share a validator.
+    /// share a validator. A schema that judges no file value (no
+    /// `darkmatter-file*` format and no `match()`) is the same in every
+    /// context, so it shares one structural validator instead.
     ///
     /// ## Errors
     ///
@@ -236,7 +238,7 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
-        self.validator_for_hashed(schema, schema_content_hash(schema), base_dir, context)
+        self.validator_for_hashed(schema, schema_digest(schema), base_dir, context)
     }
 
     /// [`Self::validator_for`] for a schema shared through an `Arc`: its
@@ -253,34 +255,39 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
-        let content = self.shared_schema_hash(schema);
-        self.validator_for_hashed(schema, content, base_dir, context)
+        let digest = self.shared_schema_digest(schema);
+        self.validator_for_hashed(schema, digest, base_dir, context)
     }
 
-    fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
+    fn shared_schema_digest(&self, schema: &Arc<Value>) -> SchemaDigest {
         let pointer = Arc::as_ptr(schema);
         {
             let guard = self.inner.lock().expect("validator cache lock poisoned");
-            if let Some((_, hash)) = guard.schema_hashes.iter().find(|(weak, _)| weak.as_ptr() == pointer) {
-                return *hash;
+            if let Some((_, digest)) = guard.schema_hashes.iter().find(|(weak, _)| weak.as_ptr() == pointer) {
+                return *digest;
             }
         }
-        let hash = schema_content_hash(schema);
+        let digest = schema_digest(schema);
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.schema_hashes.retain(|(weak, _)| weak.strong_count() > 0);
-        guard.schema_hashes.push((Arc::downgrade(schema), hash));
-        hash
+        guard.schema_hashes.push((Arc::downgrade(schema), digest));
+        digest
     }
 
     fn validator_for_hashed(
         &self,
         schema: &Value,
-        content: u64,
+        digest: SchemaDigest,
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
+        // A schema with no file value to judge validates identically in every
+        // context, so one structural validator serves every document.
+        if !digest.judges_files {
+            return self.structural_validator_hashed(schema, digest.hash);
+        }
         let judged_in = JudgedIn::Context(Box::new(context.clone()), self.caller_origins.clone());
-        let key = canonical_hash(content, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
+        let key = canonical_hash(digest.hash, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
         // Fast path: hit.
         if let Some(hit) = self.lookup(&key, &judged_in) {
             return Ok(hit);
@@ -308,7 +315,11 @@ impl ValidatorCache {
     /// Propagates [`SchemaError::BuildValidator`] when `jsonschema` rejects
     /// the schema.
     pub fn structural_validator_for(&self, schema: &Value) -> Result<Arc<Validator>, SchemaError> {
-        let key = canonical_hash(schema_content_hash(schema), None, None, &JudgedIn::Syntax);
+        self.structural_validator_hashed(schema, schema_content_hash(schema))
+    }
+
+    fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
+        let key = canonical_hash(content, None, None, &JudgedIn::Syntax);
         if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
             return Ok(hit);
         }
@@ -1436,6 +1447,26 @@ fn schema_content_hash(schema: &Value) -> u64 {
     biscuit_hash::xx_hash_bytes(&serde_json::to_vec(schema).expect("schema serialises to JSON"))
 }
 
+/// A schema's content hash, and whether it judges any file value.
+#[derive(Clone, Copy)]
+struct SchemaDigest {
+    hash: u64,
+    /// `false` only when the schema names neither a `darkmatter-file*` format
+    /// nor the `match()` keyword, so no part of its verdict reads a context.
+    /// A mention inside a description reads as `true`, which only costs a
+    /// context-keyed validator.
+    judges_files: bool,
+}
+
+fn schema_digest(schema: &Value) -> SchemaDigest {
+    let text = serde_json::to_string(schema).expect("schema serialises to JSON");
+    SchemaDigest {
+        hash: biscuit_hash::xx_hash_bytes(text.as_bytes()),
+        judges_files: text.contains(super::format::DARKMATTER_FILE_FORMAT)
+            || text.contains(super::file_match::DARKMATTER_MATCH_KEYWORD),
+    }
+}
+
 fn canonical_hash(
     content: u64,
     base_dir: Option<&Path>,
@@ -1550,7 +1581,10 @@ mod tests {
     #[test]
     fn cache_keeps_contexts_sharing_a_key_without_recompiling() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let schema = Arc::new(trivial_schema());
+        let schema = Arc::new(json!({
+            "type": "object",
+            "properties": { "spec": { "type": "string", "format": "darkmatter-file" } }
+        }));
         let parent = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("parent.md"));
         let child = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("child.md"));
 
@@ -1563,6 +1597,39 @@ mod tests {
         assert!(Arc::ptr_eq(&parent_first, &parent_again));
         assert!(Arc::ptr_eq(&child_first, &child_again));
         assert_eq!(cache.len(), 2);
+    }
+
+    /// A schema that judges no file value validates the same in every
+    /// context, so documents in different folders and contexts share one
+    /// compiled validator; one naming a file format or `match()` does not.
+    #[test]
+    fn a_file_free_schema_shares_one_validator_across_contexts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first_dir = dir.path().join("first");
+        let second_dir = dir.path().join("second");
+        let first = biscuit_file::FileResolutionContext::new(&first_dir);
+        let second = biscuit_file::FileResolutionContext::new(&second_dir).with_repository_root(dir.path());
+        let cache = ValidatorCache::with_capacity(8);
+
+        let file_free = Arc::new(trivial_schema());
+        let a = cache.validator_for_shared(&file_free, Some(&first_dir), &first).unwrap();
+        let b = cache.validator_for_shared(&file_free, Some(&second_dir), &second).unwrap();
+        assert!(Arc::ptr_eq(&a, &b), "a file-free schema compiles once");
+        assert!(a.is_valid(&json!({"name": "x"})));
+        assert!(!a.is_valid(&json!({"name": ["x"]})));
+        assert_eq!(cache.len(), 1);
+
+        for judging in [
+            json!({"type": "object", "properties": {"doc": {"type": "string", "format": "darkmatter-file"}}}),
+            json!({"type": "object", "properties": {"doc": {"type": "string", "format": "darkmatter-file-reference"}}}),
+            json!({"type": "object", "properties": {"doc": {"type": "string", "x-darkmatter-match": ["*.md"]}}}),
+        ] {
+            let cache = ValidatorCache::with_capacity(8);
+            let judging = Arc::new(judging);
+            let a = cache.validator_for_shared(&judging, Some(&first_dir), &first).unwrap();
+            let b = cache.validator_for_shared(&judging, Some(&second_dir), &second).unwrap();
+            assert!(!Arc::ptr_eq(&a, &b), "a file-judging schema is keyed by context: {judging}");
+        }
     }
 
     #[test]

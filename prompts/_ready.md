@@ -17,9 +17,9 @@
         - defects in code this spec did not add or change, unless this spec's change made them reachable
         - a guarantee stronger than the spec states, including one an earlier repair cycle wrote into a `docs/` page; when such a page overpromises, the observation is to narrow the page
         - inputs only a contrived or adversarial test can produce
-- if `ready` was set to `false` then you will need to set the `findings` frontmatter property:
-    - the prose/body of the review should already have a set of _findings_ which are given a title along with priority before providing details about the finding
-    - the `findings` frontmatter property should be a list of the titles and priority (not the details) of each **high** finding
+- set the `findings` frontmatter property to every finding in the review, high, medium, and low, whether or not `ready` is `true`:
+    - write each entry as `<ID> (<priority>): <title>`, for example `R2-F3 (medium): absent cap reads as zero`; no details
+    - the repair step reads this list: it fixes high findings first, and fixes medium and low findings even when the review is ready, so a finding missing from it is a finding nobody repairs
 - set the `observations` frontmatter property to a list of the titles of the review's `## Observations` (an empty list when there are none)
 - set `human_review` to a boolean value to indicate whether human review is required prior to this specification being fully complete
     - the goal of this flag is to allow agents to do as much work as possible (aka, until the `ready` flag has been set to true) before they need to involve the human in review

@@ -258,3 +258,12 @@ fn the_guide_needs_no_artificial_span_for_its_literals_to_convert() {
     assert!(!composed.body.contains("}}}"), "{}", composed.body);
     assert!(composed.body.contains("**Interpolation.** {{ expr }} is evaluated"), "{}", composed.body);
 }
+
+#[test]
+fn shipped_guide_teaches_lexical_sequence_bindings_and_containers() {
+    let composed = compose("guide-sequence-containers", &[]);
+    for rule in ["`seq.run_id`", "`seq.outputs`", "`group.legs`", "`cancelled`", "`initialize`", "`finalize`"] {
+        assert!(composed.body.contains(rule), "missing {rule}:\n{}", composed.body);
+    }
+    assert!(!composed.body.contains("`sequence_id`"), "{}", composed.body);
+}

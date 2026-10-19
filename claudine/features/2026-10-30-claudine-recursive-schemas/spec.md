@@ -27,7 +27,7 @@ $schema:
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
-reviewed_on: 2026-10-11
+reviewed_on: 2026-10-16
 review_iterations: 0
 human_review: false
 pipeline_step: 20
@@ -37,6 +37,7 @@ depends-on:
     - 2026-10-29-recursive-schema-types
 related:
     - 2026-10-20-lifecycle-grammar
+    - 2026-10-24-sequence-containers
     - 2026-10-28-schema-enhancements
 ---
 
@@ -55,11 +56,14 @@ This specification replaces the interim shape and types generated arguments.
 It does not change which actions execute or grant new permissions.
 
 **Reader's note:** the review replaces the original single merged item example
-with two recursive families. A merged object would allow conditional keys
+with separate recursive families. A merged object would allow conditional keys
 beside actions and could admit shell actions during initialization. Separate
 families preserve the grammar and event restrictions already decided by the
 prerequisites. The review also preserves Darkmatter's ownership of shared
 action definitions instead of introducing a second Claudine-owned copy.
+There are three event profiles: ordinary events, initialization, and
+cancellation. Container recursion and conditional recursion are independent;
+only conditional nesting is subject to the five-level parser limit.
 
 ## Prerequisites and ownership
 
@@ -86,6 +90,11 @@ those changes: this document describes the target after they land.
 - `2026-10-29-recursive-schema-types` supplies recursive references, local
   JSON Schema `$ref`/`$defs`, positioned errors, and editor traversal.
 
+Use the ownership prerequisite's `kind: schema-trigger` and
+`--no-schema-triggers` spellings in new fixtures and documentation. The older
+trigger kind and flag in pre-prerequisite examples are not compatibility
+aliases. This migration does not restore them.
+
 Claudine's `action.yaml` and `lifecycle.yaml` retain their public imports and
 exported type names unless a prerequisite has already moved them. Shared
 shapes are changed under their Darkmatter owner; Claudine's files select and
@@ -101,7 +110,9 @@ fall back to an embedded file with the same basename.
 Remove the numbered item, conditional, and stack types and every loose body
 below the third level. Keep one recursive item/conditional/stack family for
 ordinary events and a separate family for `initialize`. Sharing a type is safe
-only when both families have identical permissions.
+only when the event profiles have identical permissions. The third,
+cancellation family is described under [Recursive containers](#containers-recurse-and-every-container-event-is-typed)
+and is also used by document-level `cancelled`.
 
 The following abbreviated example shows the structure; the imported action
 definitions remain owned by Darkmatter as described above:
@@ -153,6 +164,10 @@ Preserve these contracts at every depth:
 - A single-verb list item permits its supported short or long form. A bundle
   contains short forms only, with the existing `when` and `no_error` rules.
   Long-form parameter maps and action mappings stay closed to unknown keys.
+  Preserve any parser-supported single-action dictionary long form, including
+  a single-action branch body; the short-form-only bundle rule concerns
+  mappings containing multiple actions. Do not use the bundle arm to reject
+  a supported single-action form.
 - `initialize` excludes direct `shell` actions in both branches at every
   depth. Shell expansion inside a `set` value remains a parser prohibition
   and runtime backstop; recursive typing does not replace that protection.
@@ -166,6 +181,48 @@ Empty event stacks remain legal. Explicitly empty `then`/`else` bodies,
 root-bundle placement rules, action availability by event, and other semantic
 restrictions that the interim schema leaves to the parser stay parser checks.
 Do not claim schema acceptance proves executability.
+
+**Reader's note:** the lifecycle parser accepts a long-form action in a
+single-action dictionary, including a branch body. Earlier wording described
+all dictionary forms as short-only. Preserve that supported form through a
+single-action schema alternative; only multi-action bundles require short
+forms. This corrects an accidental schema restriction without changing the
+execution grammar.
+
+### Containers recurse, and every container event is typed
+
+*(amended 2026-10-16)* This spec predates `2026-10-24-sequence-containers`,
+which added `task`/`group` containers with their own lifecycle events and a
+restricted `cancelled` event. Its reviewed interim design bounded the
+schema: two typed container levels (`task`/`group`, then
+`step-2`/`task-2`/`group-2`), `cancelled` typed through a hand-unrolled
+`cancelled-*` family, and every other container event checked for shape only.
+This spec removes that bound:
+
+- One recursive `task` and one recursive `group` replace the numbered
+  container types. A task's inline `sequence:` items and a group's `tasks:`
+  legs reference them, so containers are typed at every depth.
+- Every container event is typed: `initialize` with the initialization
+  family, `start`/`blocked`/`success`/`failure`/`finalize` with the ordinary
+  family, and `cancelled` with a third recursive family that admits only the
+  `cancelled` action set (`stop` the only flow directive), as the document-level
+  `cancelled` event already does.
+- The `cancelled` conditional types `then` and `else` as two literal keys. The
+  interim single pattern key existed only because literal keys doubled the
+  inlined size per level; with shared definitions that cost is gone, and
+  literal keys restore editor completion of `then`/`else`.
+
+Preserve the task parser's accepted container forms and required fields;
+recursion does not introduce a new task syntax. A scalar sequence step remains
+valid where it is valid today. Retain string file-reference alternatives for
+`sequence:` and `group:` alongside their inline forms. A referenced YAML file
+is still checked by the task parser during preparation, not automatically by
+Markdown trigger discovery. This work does not add recursive filesystem
+validation, file loading for completion, or a container-depth limit.
+
+An absent or empty event remains valid on every container. Test nested
+`initialize` restrictions and ordinary event actions as well as `cancelled`;
+typing only cancellation would leave the main container coverage gap open.
 
 ### Generated actions project catalog signatures into value schemas
 
@@ -206,13 +263,20 @@ input, and do not become action-value schemas.
   action definition in the parity test. A newly ambiguous collision fails
   generation rather than silently dropping an entry. Completion lists
   canonical names; accepted aliases follow the existing parser contract.
+  Preserve documented planned-only hand-written entries such as `break` and
+  `prep` until their implementing work changes that status. Test these
+  exceptions separately from generated catalog parity; schema acceptance
+  still does not promise parser or runtime support.
 - `unknown` remains valid where the catalog genuinely accepts arbitrary data.
   It is not a fallback for missing type metadata. No action-key catch-all is
   added to Claudine's profile.
 
-Use the existing generator as an authoring tool; builds embed checked-in YAML
-and do not regenerate it. Document a deterministic regeneration command that
-works from any checkout without absolute paths or writes to historical spike
+Provide a maintained repository generator as an authoring tool; builds embed
+checked-in YAML and do not regenerate it. The historical spike script is
+reference material, not the production output location. Reuse its useful
+logic without changing the frozen measurement inputs. Document a deterministic
+regeneration command that works from any checkout without hardcoded absolute
+paths or writes to historical spike
 fixtures. Compare generated structures with the checked-in definitions to
 catch drift, including short forms and bundle projections, not only names.
 
@@ -234,19 +298,47 @@ an unrestricted string alternative would hide real mistakes. Generated argument
 typing therefore reuses expression-aware validation and the shared conversion
 rules:
 
+- Apply argument validation after identifying the action form and binding its
+  positional or named parameters. A template in one operand never defers the
+  action name, parameter names, arity, required-argument presence, or checks
+  of other literal operands. For example, an extra named argument is invalid
+  even beside `count: "{{ fm.count }}"`.
 - A literal operand is checked with Darkmatter's shared conversion rules, the
   same policy runtime conversion uses. For a number parameter, `3` and `"3"`
   pass; `"three"` is a positioned schema error.
 - An operand containing `{{ … }}` is recognized as deferred through
   Darkmatter's existing template parser. Schema validation accepts it without
   judging its value; its evaluated value is checked against the parameter type
-  at the existing runtime boundary when the event runs. This applies to
-  deferred scalars and deferred structured values alike.
+  before the action is dispatched when the event runs. This applies to
+  deferred scalars and deferred structured values alike. A whole-value
+  expression can supply a collection; a collection containing an expression
+  defers only the affected child values, while literal siblings and the
+  collection's known shape remain checked. Recognize expressions using the
+  template parser, not a substring test. Malformed template syntax is a
+  positioned diagnostic, not an exemption from validation.
 - Schema validation, in the CLI, at Claudine's launch preflight, and in DMLS,
   never evaluates an expression, probes the host, or performs an effect to
   discover a value.
 - No second conversion policy or expression evaluator is introduced; schema
-  projections integrate with the existing deferred-value checks.
+  projections integrate with the existing deferred-value checks. Input
+  acceptance is a projection of the shared parameter contract, distinct from
+  the value delivered after conversion. Validation checks a converted copy
+  and never rewrites the authored document or evaluates a template. Do not
+  mark operands `eager` merely to enforce required call parameters; the
+  Launch/Completion presence rules must not make an incomplete call valid.
+
+**Reader's note:** ordinary JSON Schema argument types alone do not express
+convertible inputs and deferred operands. The implementation must connect the
+shared parameter binder and template classification to passive schema
+validation, rather than widening every numeric argument to arbitrary text.
+That integration belongs to Darkmatter so `md`, DMLS, and Claudine use one
+verdict. If the prerequisites do not expose the necessary passive API, adding
+that API is required work here and its cost must be recorded; it is not
+permission to omit argument checks. Use the same overload-selection rules
+at validation and execution, and never combine separate overloads' parameters
+to accept a call that no overload admits. This intentionally replaces any
+older merged-signature approximation for generated argument checks, while
+retaining valid documented call forms.
 
 ### Side-effect argument metadata
 
@@ -270,8 +362,12 @@ therefore decided as follows:
 
 ### The conditional depth limit remains parser-only
 
-A root-list conditional counts as level one. Each conditional in either branch
-adds one level; sibling guards do not add a level. The parser validates both
+A root-list `when` counts as level one, whether it uses `then`/`else` or
+guards sibling actions in a bundle. Each nested `when` in either branch adds
+one level; guards beside each other in a list do not accumulate levels. A
+guarded bundle inside a level-five conditional is therefore level six, even
+without a `then` key. Container nesting itself does not consume this budget;
+each event stack starts its own count. The parser validates both
 branches and rejects level six with `LifecycleStackInvalidShape` and its path.
 That parser is Darkmatter-owned after the ownership prerequisite; Claudine
 surfaces its diagnostic using its existing error mapping.
@@ -307,7 +403,8 @@ fixtures with declared repository inputs.
 | Schema embedding, trigger selection, event typing, and launch policy | `2026-10-21-claudine-schemas`; preserve those contracts |
 | Lifecycle event ownership, host profiles, and tolerant Darkmatter baseline | `2026-10-27-darkmatter-lifecycle-ownership`; integrate without reversing ownership |
 | New coercion rules or a second expression evaluator | Reuse Darkmatter's existing mechanisms |
-| DMLS caching, new performance infrastructure, and new CI matrix cells | Not needed for this schema migration |
+| DMLS caching and performance infrastructure (stage timings, benchmark) | Part A of `2026-10-29-recursive-schema-types` |
+| New CI matrix cells | Not needed for this schema migration |
 
 ## Estimate
 
@@ -318,14 +415,23 @@ updates and parser parity (0.5–0.75), DMLS parity (0.25–0.5), docs and skill
 (0.5). Extending the Darkmatter-owned action metadata for gaps the coverage
 test proves, and any new integration between schema projections and the
 existing deferred-value checks, is not included here; record that added cost
-in the implementation log when the coverage test identifies it.
+in the implementation log when the coverage test identifies it. Recursive containers and the third `cancelled` family add
+**0.75–1.25 days** *(amended 2026-10-16)*. The combined baseline estimate
+is therefore **2.75–4.25 engineer-days**, before any missing shared metadata
+or passive-validation API work is identified.
 
 The recursive resolver prerequisite already measures duplication reduction.
 Do not repeat its performance spike or promise an order-of-magnitude runtime
 improvement for this different catalog. Retain the draft's 2 MB resolved-size
 check for the final embedded Claudine payload as a deterministic regression
-check. If it fails, inspect duplicated definitions and record the cause; do
-not loosen it or add timing thresholds without author review.
+check. Measure the UTF-8 byte length of compact serialized resolved JSON
+Schema (including `$defs`, without pretty printing), with a ceiling of
+2,000,000 bytes. Resolve the final Claudine trigger payload with its complete
+transitive bundle in isolation from user schemas and the document baseline;
+also resolve each exported type independently for correctness. Record which
+root was measured so unrelated user schemas cannot change this result. If it
+fails, inspect duplicated definitions and record the cause; do not loosen it
+or add timing thresholds without author review.
 
 ## Acceptance criteria
 
@@ -336,11 +442,12 @@ or browser or executes real effects, shell commands, audio, or providers.
 Tests must be portable to macOS, Linux, native Windows, and WSL2. Add no CI
 matrix cell or gate; the existing planner schedules changed code normally.
 
-1. **Recursive shape and embedding.** Both event families recurse, no numbered
-   unroll or loose deep body remains, and the loop gate uses the ordinary
+1. **Recursive shape and embedding.** All three event families recurse, with
+   no numbered unroll or loose deep body, and the loop gate uses the ordinary
    family. The final embedded payload contains local `$ref`/`$defs`, resolves
    without disk schemas, and is at most 2 MB. Resolve every exported type and
-   exercise both initialization and ordinary event imports.
+   exercise initialization, ordinary, and cancellation event imports. Include
+   nested task/group references in the size-checked trigger payload.
 2. **Catalog and generated-definition parity.** Canonical generated names
    match the parser-admitted catalog inventory after documented collisions
    and host filtering. Value schemas match signatures, including overloads,
@@ -357,7 +464,9 @@ matrix cell or gate; the existing planner schedules changed code normally.
    rejects the sixth level by path. `depth6-wrong-verb.md` fails both schema
    surfaces with the verb, path, and source position. `md schema triggers`
    confirms the intended trigger was discovered; its listing alone is not
-   a validation verdict.
+   a validation verdict. A guarded bundle inside a level-five conditional
+   passes schema validation but fails the parser's depth check, just like a
+   sixth `when` using `then`.
 5. **Editor parity and passivity.** DMLS diagnostic verdicts match CLI schema
    validation for the shared fixtures. Completion and hover reach generated
    verbs and long-form parameters at depth 4 in `then` and `else`, filter shell
@@ -384,13 +493,44 @@ matrix cell or gate; the existing planner schedules changed code normally.
    schema validation and are checked at the runtime boundary, where an
    evaluated value of the wrong type fails. Recording fakes prove no
    expression is evaluated, no host probe runs, and no effect executes during
-   schema validation.
+   schema validation. A deferred operand beside an unknown parameter, missing
+   required argument, extra positional argument, or invalid literal sibling
+   does not hide that error in either Launch or Completion validation.
+   Malformed templates fail passively. Failed conversion leaves the input
+   unchanged, and runtime binding failure prevents action dispatch.
 9. **Side-effect metadata coverage.** A test fails when any side-effect
    descriptor lacks a typed parameter definition in Darkmatter's shared action
    metadata, and the generator rejects such an effect rather than emitting an
    untyped value. The generator contains no local table of effect parameter
    types.
 
+10. **Recursive containers.** *(amended 2026-10-16)* No numbered container
+   type (`step-2`, `task-2`, `group-2`) or loose container list remains. For
+   each container path sequence → sequence, sequence → group, group →
+   sequence, and group → group, nested to container depth 4, an unknown
+   action in each of the seven container events is rejected with its path,
+   and each forbidden `cancelled` action (`retry`, `resume`, `proxy`, `prep`,
+   `skip`, `error`, `break`, `defer`) is rejected, including inside `then`
+   and `else` at conditional level 4. `[stop]` and `[]` remain valid
+   `cancelled` stacks. DMLS completes `then`/`else` inside a `cancelled`
+   conditional. Preserve scalar steps and file-reference alternatives.
+   At nested container paths, reject an initialization shell in each branch
+   and a malformed generated argument in an ordinary event. Confirm each
+   container event starts an independent conditional-depth count.
+11. **Validation time goal.** *(amended 2026-10-16)* One-shot `md schema
+   validate` of a Claudine document with nested containers targets **under
+   200 ms** on the dev Mac. Take a quick sample of one representative nested
+   container document using the prerequisite's existing stage timings; reuse
+   an equivalent measurement if already available. No additional benchmark
+   suite, repetition count, or OS run is required. The command, document,
+   result, host load, and available stage breakdown are recorded in the
+   implementation log. This is a recorded goal, not a test or gate; a miss is
+   recorded with its dominant stage, not hidden by a relaxed target.
+
 ## Open questions
 
-None.
+None. The passive argument-validation integration is required scope rather
+than a choice to weaken typing. If implementation uncovers a contract that
+cannot represent a documented valid call, stop that portion of the migration
+and record the concrete call and alternatives for author review before
+changing accepted syntax or conversion rules.

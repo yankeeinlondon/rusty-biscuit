@@ -156,13 +156,13 @@ fn sequence_outputs_with_template_syntax_stay_raw() {
     fs::write(fixture.cwd().join("producer.md"), "Produce.\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nLast: [{{ last(outputs) }}]\n",
+        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nLast: [{{ last(seq.outputs) }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - name: alpha\n    prompt: producer.md\n  - name: beta\n    prompt: reader.md\n    params:\n      entry: \"{{ last(outputs) }}\"\n---\nBody.\n",
+        "---\nsequence:\n  - name: alpha\n    prompt: producer.md\n  - name: beta\n    prompt: reader.md\n    with:\n      entry: \"{{ last(seq.outputs) }}\"\n---\nBody.\n",
     )
     .unwrap();
 
@@ -185,7 +185,7 @@ fn sequence_parallel_group_nested_output_stays_raw() {
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' '{{ ctx.repo }}'\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nNested: [{{ last(outputs)[0] }}]\n",
+        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nNested: [{{ last(seq.outputs).templated }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -196,7 +196,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: templated
           shell: "/bin/sh emit.sh"
@@ -204,8 +203,8 @@ sequence:
           shell: "printf 'plain\n'"
   - name: beta
     prompt: reader.md
-    params:
-      entry: "{{ last(outputs)[0] }}"
+    with:
+      entry: "{{ last(seq.outputs).templated }}"
 ---
 Body.
 "#,
@@ -791,7 +790,7 @@ fn sequence_state_from_jsonl_item_stays_raw() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\ntitle: authored-title\nsequence: items.jsonl\n---\nNote: [{{ state.note }}]\n",
+        "---\ntitle: authored-title\nsequence: items.jsonl\n---\nNote: [{{ seq.note }}]\n",
     )
     .unwrap();
 
@@ -805,11 +804,11 @@ fn sequence_state_from_jsonl_item_stays_raw() {
     );
 }
 
-/// Row B12: group `variables:` and task `params:` evaluated from a prior
+/// Row B12: group `variables:` and task `with:` evaluated from a prior
 /// task's output reach the member prompt raw.
 #[test]
-fn task_params_and_group_variables_from_outputs_stay_raw() {
-    let fixture = CliProcessFixture::named("agent-text-params");
+fn task_with_and_group_variables_from_outputs_stay_raw() {
+    let fixture = CliProcessFixture::named("agent-text-with");
     counting_goose(&fixture, "", "ok");
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' 'see {{ title }}'\n").unwrap();
     fs::write(
@@ -828,12 +827,12 @@ sequence:
     group:
       name: bundle
       variables:
-        prev: "{{ last(outputs) }}"
+        prev: "{{ last(seq.outputs) }}"
       tasks:
         - name: read
           prompt: reader.md
-          params:
-            entry: "{{ last(outputs) }}"
+          with:
+            entry: "{{ last(seq.outputs) }}"
 ---
 Body.
 "#,

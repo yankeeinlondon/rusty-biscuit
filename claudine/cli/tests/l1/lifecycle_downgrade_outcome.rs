@@ -364,14 +364,12 @@ fn downgrading_step(fixture: &CliProcessFixture) {
     );
 }
 
-fn sequence_doc(fail_fast: bool) -> String {
-    format!(
-        "---\nfail_fast: {fail_fast}\nsequence:\n    - name: first\n      prompt: \"./step.md\"\n    - name: second\n      side_effect: {{ append_line: [\"events.log\", \"second step\"] }}\n---\n"
-    )
+fn sequence_doc(_fail_fast: bool) -> String {
+    "---\nsequence:\n    - name: first\n      prompt: \"./step.md\"\n    - name: second\n      side_effect: { append_line: [\"events.log\", \"second step\"] }\n---\n".to_string()
 }
 
 #[test]
-fn sequence_step_downgrade_halts_under_fail_fast_true() {
+fn sequence_step_downgrade_halts_on_unhandled_failure() {
     let fixture = fixture("downgrade-sequence-fail-fast");
     downgrading_step(&fixture);
     let doc = write_doc(&fixture, "sequence.md", &sequence_doc(true));
@@ -395,40 +393,16 @@ fn sequence_step_downgrade_halts_under_fail_fast_true() {
     assert_eq!(run.reason_count(), 1, "{}", run.output);
 }
 
-#[test]
-fn sequence_step_downgrade_continues_and_fails_under_fail_fast_false() {
-    let fixture = fixture("downgrade-sequence-continue");
-    downgrading_step(&fixture);
-    let doc = write_doc(&fixture, "sequence.md", &sequence_doc(false));
-
-    let run = run(
-        &fixture,
-        &["sequence", "--claude", doc.to_str().expect("UTF-8 path")],
-    );
-
-    assert_eq!(
-        lines_of(&fixture.cwd().join("events.log")),
-        ["step success", "second step"],
-        "the second step still runs: {}",
-        run.output
-    );
-    assert_eq!(run.count("1 succeeded, 1 failed"), 1, "{}", run.output);
-    assert_eq!(run.code, Some(1), "{}", run.output);
-    assert_eq!(run.count("step 1/2 failed"), 1, "{}", run.output);
-    assert_eq!(run.error_line_count(), 0, "{}", run.output);
-    assert_eq!(run.reason_count(), 1, "{}", run.output);
-}
-
-fn looping_doc(fail_fast: bool) -> String {
+fn looping_doc() -> String {
     format!(
-        "---\ncounter: 0\nloop:\n    while: \"counter < 2\"\n    action: \"increment(counter)\"\n    fail_fast: {fail_fast}\nsuccess:\n    - append_line: [\"events.log\", \"iteration {{{{ loop.count }}}}\"]\n    - error: \"{REASON}\"\n---\nbody\n"
+        "---\ncounter: 0\nloop:\n    while: \"counter < 2\"\n    action: \"increment(counter)\"\nsuccess:\n    - append_line: [\"events.log\", \"iteration {{{{ loop.count }}}}\"]\n    - error: \"{REASON}\"\n---\nbody\n"
     )
 }
 
 #[test]
-fn loop_iteration_downgrade_halts_under_fail_fast_true() {
+fn loop_iteration_downgrade_halts_by_default() {
     let fixture = fixture("downgrade-loop-fail-fast");
-    let doc = write_doc(&fixture, "loop.md", &looping_doc(true));
+    let doc = write_doc(&fixture, "loop.md", &looping_doc());
 
     let run = compose(&fixture, &doc);
 
@@ -443,31 +417,6 @@ fn loop_iteration_downgrade_halts_under_fail_fast_true() {
     assert_eq!(run.count("iteration failed"), 1, "{}", run.output);
     assert_eq!(run.error_line_count(), 0, "{}", run.output);
     assert_eq!(run.reason_count(), 1, "{}", run.output);
-}
-
-#[test]
-fn loop_iteration_downgrade_reaches_gate_under_fail_fast_false() {
-    let fixture = fixture("downgrade-loop-continue");
-    let doc = write_doc(&fixture, "loop.md", &looping_doc(false));
-
-    let run = compose(&fixture, &doc);
-
-    // Each failed iteration still reaches the gate, whose action advances the
-    // counter, so the condition ends the loop after the counter-2 iteration.
-    assert_eq!(
-        lines_of(&fixture.cwd().join("events.log")),
-        ["iteration 1", "iteration 2", "iteration 3"],
-        "{}",
-        run.output
-    );
-    assert_eq!(run.code, Some(1), "{}", run.output);
-    assert_eq!(
-        run.reason_count(),
-        3,
-        "each failed iteration reports its error once: {}",
-        run.output
-    );
-    assert_eq!(run.error_line_count(), 0, "{}", run.output);
 }
 
 #[cfg(unix)]

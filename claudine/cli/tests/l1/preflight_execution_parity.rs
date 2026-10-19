@@ -4,7 +4,7 @@
 //! Every row composes a document whose shell command interpolates a value and
 //! changes only where the command lives and where the value comes from. The
 //! approval set is exactly the commands the row whitelists by their full
-//! bytes, so a run that succeeds and shows the command's output proves the
+//! bytes (or a typed shape for a lexical sequence read), so a run that succeeds and shows the command's output proves the
 //! command that launched was the command pre-flight approved. The command is
 //! `git check-ref-format --branch ran/<value>`, which prints `ran/<value>`
 //! without a repository.
@@ -87,7 +87,10 @@ fn run(
     for (name, content) in files {
         write(&fixture.cwd().join(name), content);
     }
-    let whitelist: String = approved.iter().map(|command| format!("exact {command}\n")).collect();
+    let whitelist: String = approved.iter().map(|command| {
+        if command.starts_with("template ") { format!("{command}\n") }
+        else { format!("exact {command}\n") }
+    }).collect();
     // Outside a repository, a document's shell policy is read from its own
     // directory, so every directory a row writes a document into gets the list.
     let mut policy_dirs: Vec<std::path::PathBuf> = vec![fixture.cwd().to_path_buf()];
@@ -215,7 +218,7 @@ const ROWS: &[Row] = &[
         name: "reserved sequence input",
         files: &[
             ("seq.md", "---\nsequence:\n  - alpha\n---\n::file ./part-state.md\n"),
-            ("part-state.md", "::shell git check-ref-format --branch ran/{{ state }}\n"),
+            ("part-state.md", "::shell git check-ref-format --branch ran/{{ seq.name }}\n"),
         ],
         args: &["sequence", "--claude", "seq.md"],
         value: "alpha",
@@ -256,7 +259,11 @@ const ROWS: &[Row] = &[
 
 fn assert_row_launches_approved_bytes(row: &Row) {
     let fixture = fixture("preflight-parity");
-    let result = run(&fixture, row.files, &[command_for(row.value)], row.args);
+    let approval = if row.name == "reserved sequence input" {
+        // Lexical sequence reads require shape approval even in the first task.
+        "template git check-ref-format --branch ran/{{ string }}".to_string()
+    } else { command_for(row.value) };
+    let result = run(&fixture, row.files, &[approval], row.args);
     assert_eq!(result.code, Some(0), "{}: {}", row.name, result.output);
     assert_eq!(
         result.output.contains(&format!("ran/{}", row.value)),

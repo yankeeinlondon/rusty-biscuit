@@ -1,6 +1,6 @@
 //! Core types for composition workflows.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -15,12 +15,14 @@ use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
 use crate::diagnostics::DiagnosticSnapshot;
 use crate::harness::shell::CachedApprovalDecision;
+use darkmatter::markdown::compose::shell_expansion::template::{ApprovalKey, ShellPreApprovals};
 use crate::provider::Provider;
 
 /// Shared approval cache that can be reused across composition runs
 /// (e.g. steps of one sequence) so that previously approved commands
-/// do not prompt again.
-pub type SharedApprovalCache = Arc<Mutex<HashMap<String, CachedApprovalDecision>>>;
+/// do not prompt again. Keys are tagged with their execution mode and
+/// policy root.
+pub type SharedApprovalCache = Arc<Mutex<HashMap<ApprovalKey, CachedApprovalDecision>>>;
 
 /// Which composition mode to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,14 +53,81 @@ pub struct LoopConfig {
     pub condition: LoopCondition,
     /// Actions applied to frontmatter after each completed iteration.
     pub actions: Vec<LoopAction>,
-    /// Optional per-document positive iteration cap.
+    /// The authored positive iteration cap, once known.
+    ///
+    /// `None` while [`Self::max_template`] still waits for resolution, and
+    /// when `max` is absent.
     pub max_iterations: Option<usize>,
-    /// Optional per-document failure behavior.
-    pub fail_fast: Option<bool>,
+    /// A templated `max` (`"{{ cap }}"`) as authored, awaiting its one
+    /// resolution before the loop starts
+    /// ([`super::looping::resolve_templated_loop_max`]). The engine refuses a
+    /// configuration that still carries one, so an unresolved cap never falls
+    /// back to the default.
+    pub max_template: Option<String>,
     /// Optional per-document policy for what to do when a completed iteration
     /// reports a provider rate-limit signal. `None` falls back to
-    /// [`OnRateLimit::Pause`].
+    /// [`OnRateLimit::Pause`]. Accepted only on a [`LoopOwner::Document`]
+    /// loop.
     pub on_rate_limit: Option<OnRateLimit>,
+}
+
+/// The primitive that owns a `loop:` block.
+///
+/// The owner decides which keys the block accepts: `on_rate_limit` reads a
+/// provider's rate-limit signal, so only a document loop has one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopOwner {
+    /// A Markdown document's frontmatter `loop:`.
+    Document,
+    /// A group object's `loop:`, beside `tasks:`.
+    Group,
+    /// A sequence document's root `loop:` or an inline nested sequence's task
+    /// entry `loop:`.
+    Sequence,
+}
+
+impl LoopOwner {
+    /// The owner's name as diagnostics spell it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Document => "document",
+            Self::Group => "group",
+            Self::Sequence => "sequence",
+        }
+    }
+}
+
+impl fmt::Display for LoopOwner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Where a `loop:` block was authored: its file and the authored path of the
+/// block itself (`loop` at a document or sequence root, `tasks[2].loop` on a
+/// task entry). Every loop configuration error names both, and key paths in
+/// its message are rooted at `property`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopLocation {
+    /// The file that holds the block.
+    pub source_path: PathBuf,
+    /// The authored path of the `loop:` block.
+    pub property: String,
+}
+
+impl LoopLocation {
+    /// The `loop:` block at the root of `source_path`'s frontmatter.
+    pub fn document_root(source_path: impl Into<PathBuf>) -> Self {
+        Self {
+            source_path: source_path.into(),
+            property: "loop".to_string(),
+        }
+    }
+
+    /// The authored path of `key` inside this block (`tasks[2].loop.max`).
+    pub fn key(&self, key: &str) -> String {
+        format!("{}.{key}", self.property)
+    }
 }
 
 /// Policy for how the loop engine reacts to a rate-limit signal observed on
@@ -363,14 +432,14 @@ pub struct ProviderPickerPlan {
     pub default_index: usize,
 }
 
-/// Per-step draft for sequence review.
+/// One row of the sequence review: a provider-launching task.
 ///
-/// Every step has a draft, but only steps whose outer executable can launch a
-/// provider (a prompt, task, group, or body step) are shown for review.
+/// Shell and side-effect tasks launch no provider and have no draft.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SequenceStepDraft {
-    /// Zero-based index of the step in the whole sequence; reviewed choices
-    /// are mapped back by this index, never by row number or name.
+    /// Zero-based index of the task's root step in the whole sequence, which
+    /// labels the row. Several tasks of one step share it, so reviewed choices
+    /// are mapped back by row order, never by this index or by name.
     pub step_index: usize,
     /// Display name for the step.
     pub step_name: String,
@@ -387,6 +456,10 @@ pub struct SequenceStepDraft {
     /// The provisional provider: the explicit flag, the auto-selected agent,
     /// or the picker plan's default. `None` when the plan has no options.
     pub resolved_provider: Option<Provider>,
+    /// Set for a row that is shown but never edited, because the task already
+    /// names its provider: the text its provider cell shows (`Codex`,
+    /// `decided at launch`). The review returns no target for such a row.
+    pub read_only: Option<String>,
 }
 
 /// A typed hint for which agent(s) to use, parsed from frontmatter `agent`.
@@ -472,6 +545,8 @@ pub struct EffectiveSelectionHints {
     /// `None` means absent or explicitly `null`, preserving today's default
     /// non-interactive behavior.
     pub interactive: Option<bool>,
+    /// Provider permission bypass requested by this document.
+    pub yolo: Option<bool>,
     /// `agent` strings that did not match the known provider catalog.
     ///
     /// Kept separate from [`Self::agent`] so existing resolution code can
@@ -486,6 +561,101 @@ pub struct EffectiveSelectionHints {
     /// this to route a single-entry all-invalid list to the zero-installed
     /// list state rather than the single-invalid state.
     pub agent_was_list: bool,
+}
+
+impl EffectiveSelectionHints {
+    /// Whether the parsed `agent` is a hint: a provider or an invalid name.
+    /// An absent, null, or empty-list `agent` is not.
+    #[must_use]
+    pub fn names_agent(&self) -> bool {
+        self.agent.is_some() || !self.agent_invalid.is_empty()
+    }
+
+    /// Explicit CLI/environment intent wins over the document's default.
+    pub fn yolo_enabled(&self, cli_yolo: bool) -> bool {
+        cli_yolo || self.yolo.unwrap_or(false)
+    }
+}
+
+/// An evaluated `with:` overlay as the document it targets receives it.
+///
+/// A relative file value in a `proxy`, `retry`, or `prep` `with:` resolves from
+/// the file that authored the directive, not from the target and not from the
+/// launch directory, so each value keeps that file's context. Only a value the
+/// target's schema selects as a file is anchored; every other value is plain
+/// data. A `null` value removes the key from the target and carries no origin.
+///
+/// Preparation turns the origins into caller-input records layered below the
+/// caller's own ([`PrepareOptions`](super::PrepareOptions)), so a caller setter
+/// still outranks the overlay, value and origin alike.
+#[derive(Clone, Default, PartialEq)]
+pub struct AnchoredOverlay {
+    values: indexmap::IndexMap<String, serde_json::Value>,
+    origins: BTreeMap<String, biscuit_file::FileResolutionContext>,
+}
+
+impl fmt::Debug for AnchoredOverlay {
+    /// Names the properties, never the values: an overlay may carry secrets.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.values.keys()).finish()
+    }
+}
+
+impl AnchoredOverlay {
+    /// `values`, every one authored in the file `origin` resolves from.
+    pub fn new(
+        values: indexmap::IndexMap<String, serde_json::Value>,
+        origin: &biscuit_file::FileResolutionContext,
+    ) -> Self {
+        let origins = values
+            .iter()
+            .filter(|(_, value)| !value.is_null())
+            .map(|(key, _)| (key.clone(), origin.clone()))
+            .collect();
+        Self { values, origins }
+    }
+
+    #[allow(missing_docs)]
+    pub fn values(&self) -> &indexmap::IndexMap<String, serde_json::Value> {
+        &self.values
+    }
+
+    #[allow(missing_docs)]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// `over` layered key-wise on top: a shared key takes `over`'s value and
+    /// origin.
+    #[must_use]
+    pub fn layered(&self, over: &Self) -> Self {
+        let mut layered = self.clone();
+        for (key, value) in &over.values {
+            layered.values.insert(key.clone(), value.clone());
+            match over.origins.get(key) {
+                Some(origin) => layered.origins.insert(key.clone(), origin.clone()),
+                None => layered.origins.remove(key),
+            };
+        }
+        layered
+    }
+
+    /// Each non-null value paired with the context of the file that authored
+    /// it, as the caller-input records Darkmatter materializes file values by.
+    pub fn input_records(&self) -> darkmatter::markdown::compose::CallerInputRecords {
+        self.origins
+            .iter()
+            .map(|(key, origin)| {
+                (
+                    key.clone(),
+                    darkmatter::markdown::compose::CallerInputRecord::new(
+                        self.values[key].clone(),
+                        origin.clone(),
+                    ),
+                )
+            })
+            .collect()
+    }
 }
 
 /// The caller's input layers, reapplied at every canonical preparation of
@@ -509,6 +679,8 @@ pub struct CallerInputLayers {
     /// Top-level keys of [`set_overrides`](Self::set_overrides) that are data
     /// (see [`PrepareOptions::data_override_keys`][super::PrepareOptions]).
     pub data_override_keys: std::collections::BTreeSet<String>,
+    /// Complete lexical sequence root, carried outside frontmatter.
+    pub sequence_binding: Option<serde_json::Value>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Launch-area directory that anchors caller-supplied file references.
@@ -516,13 +688,13 @@ pub struct CallerInputLayers {
     /// The request's file-resolution context, captured before the first
     /// source is resolved.
     pub file_resolution_context: biscuit_file::FileResolutionContext,
-    /// Shell commands approved during the original pre-flight discovery.
-    /// Shell commands approved so far in this invocation.
+    /// Shell commands approved so far in this invocation: resolved bytes and
+    /// template shapes.
     ///
     /// Grows as a fresh document's own pre-flight approves its own commands
-    /// (see [`add_approved_commands`][Self::add_approved_commands]); an exact
-    /// already-approved command never re-prompts.
-    pub pre_approved_commands: Option<HashSet<String>>,
+    /// (see [`add_approved_commands`][Self::add_approved_commands]); an
+    /// already-approved command or shape never re-prompts.
+    pub pre_approved_commands: Option<ShellPreApprovals>,
     /// Composition env overrides (e.g. `AGENT`, `MODEL`, `YOLO`) injected into
     /// the [`ComposeContext`][darkmatter::markdown::compose::ComposeContext] for
     /// the run.
@@ -546,6 +718,7 @@ impl CallerInputLayers {
         Self {
             set_overrides: None,
             data_override_keys: Default::default(),
+            sequence_binding: None,
             caller_input_records: Default::default(),
             file_ref_fallback_dir: None,
             file_resolution_context,
@@ -593,6 +766,7 @@ impl CallerInputLayers {
         Self {
             set_overrides: options.set_overrides.clone(),
             data_override_keys: options.data_override_keys.clone(),
+            sequence_binding: options.sequence_binding.clone(),
             caller_input_records: options.caller_input_records.clone(),
             file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
             file_resolution_context: options.file_resolution_context.clone(),
@@ -605,10 +779,12 @@ impl CallerInputLayers {
     /// The overrides with the origin of each key.
     pub fn layered_overrides(&self) -> super::LayeredOverrides {
         super::LayeredOverrides::from_parts(self.set_overrides.as_ref(), &self.data_override_keys)
+            .with_sequence_value(self.sequence_binding.clone())
     }
 
     /// Replace the overrides and their origins together.
     pub fn set_layered_overrides(&mut self, overrides: super::LayeredOverrides) {
+        self.sequence_binding = overrides.sequence_value().cloned();
         self.data_override_keys = overrides.data_keys().clone();
         self.set_overrides = Some(overrides.to_value());
     }
@@ -618,6 +794,7 @@ impl CallerInputLayers {
     pub fn apply_to(&self, mut options: super::PrepareOptions) -> super::PrepareOptions {
         options.set_overrides = self.set_overrides.clone();
         options.data_override_keys = self.data_override_keys.clone();
+        options.sequence_binding = self.sequence_binding.clone();
         options.caller_input_records = self.caller_input_records.clone();
         options.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         options.file_resolution_context = self.file_resolution_context.clone();
@@ -627,15 +804,14 @@ impl CallerInputLayers {
         options
     }
 
-    /// Fold commands a document's own pre-flight just approved into the
+    /// Fold approvals a document's own pre-flight just granted into the
     /// invocation-wide approved set.
-    pub fn add_approved_commands(&mut self, commands: impl IntoIterator<Item = String>) {
-        let mut commands = commands.into_iter().peekable();
-        if commands.peek().is_none() {
+    pub fn add_approved_commands(&mut self, commands: ShellPreApprovals) {
+        if commands.is_empty() {
             return;
         }
         self.pre_approved_commands
-            .get_or_insert_with(HashSet::new)
+            .get_or_insert_with(ShellPreApprovals::new)
             .extend(commands);
     }
 }
@@ -819,6 +995,33 @@ impl FromStr for OutputFormat {
     }
 }
 
+/// The providers a run's attempts actually spawned, in order, shared by every
+/// document the run executes (retries, resumes, and proxy targets included).
+///
+/// A run that spawned nothing (skipped, blocked, or failed before launch)
+/// leaves it empty, so it never reports a provider it only planned.
+#[derive(Debug, Clone, Default)]
+pub struct LaunchLog(std::sync::Arc<std::sync::Mutex<Vec<Provider>>>);
+
+impl LaunchLog {
+    /// Record one spawned attempt.
+    pub fn record(&self, provider: Provider) {
+        self.0.lock().expect("launch log poisoned").push(provider);
+    }
+
+    /// Every spawned attempt's provider, in launch order.
+    #[must_use]
+    pub fn attempts(&self) -> Vec<Provider> {
+        self.0.lock().expect("launch log poisoned").clone()
+    }
+
+    /// The final spawned attempt's provider.
+    #[must_use]
+    pub fn last(&self) -> Option<Provider> {
+        self.0.lock().expect("launch log poisoned").last().copied()
+    }
+}
+
 /// A fully-specified request to execute a composition through the
 /// wrapper-grade pipeline.
 #[derive(Debug, Clone)]
@@ -837,7 +1040,7 @@ pub struct CompositionExecutionRequest {
     pub explicit_provider: Option<Provider>,
     /// Providers to exclude from automatic selection.
     pub excluded: BTreeSet<Provider>,
-    /// Enable provider-specific YOLO/auto-approval mode.
+    /// CLI/environment YOLO intent; document defaults are resolved separately.
     pub yolo: bool,
     /// Preserve these env vars even when they match sensitive-name filters.
     pub include: Vec<String>,
@@ -894,6 +1097,8 @@ pub struct CompositionExecutionRequest {
     /// cache instead of prompting again. Used by sequence execution to
     /// honour "allow once" for the whole run, not just one step.
     pub shared_approval_cache: Option<SharedApprovalCache>,
+    /// Sequence invocation approvals; descendants may reuse membership but never extend it.
+    pub closed_shell_approvals: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
@@ -950,9 +1155,10 @@ pub struct CompositionExecutionRequest {
     /// document, when it was reached through a proxy. Re-applied over the
     /// target's authored frontmatter on every re-materialization
     /// (retry/resume), so the immutable pre-schema handoff input survives
-    /// refresh exactly as canonical preparation left it. Empty for a
-    /// directly-invoked document.
-    pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+    /// refresh exactly as canonical preparation left it, each value anchored
+    /// at the source document that authored it. Empty for a directly-invoked
+    /// document.
+    pub proxy_overlay: super::AnchoredOverlay,
 
     /// The invocation-wide run ledger, shared with the provider harness so a
     /// terminal-event proxy can be committed against the one chain while the
@@ -972,6 +1178,11 @@ pub struct CompositionExecutionRequest {
     /// canonical R4 staging for every route. `None` for a directly-invoked
     /// document and for the caller's first document.
     pub adopted_handoff: Option<Box<crate::composition::ProxyHandoff>>,
+
+    /// Where every attempt this request runs records the provider it spawned,
+    /// shared with the caller that reports them (a sequence step or task).
+    /// `None` records nothing.
+    pub launch_log: Option<LaunchLog>,
 
     /// The invocation-local runtime state cell shared with the caller.
     ///
@@ -1007,7 +1218,7 @@ pub struct CompositionExecutionRequest {
 /// Options for sequence execution at the CLI level.
 #[derive(Debug, Clone)]
 pub struct SequenceExecutionOptions {
-    /// CLI `--fail-fast` override. `None` means use the document default.
+    /// Internal execution override; the CLI no longer accepts `--fail-fast`.
     pub fail_fast_override: Option<bool>,
 }
 
@@ -1054,6 +1265,9 @@ pub struct SequenceStepResult {
     /// When the step ran a group, one entry per member task that ran, in
     /// declaration order. Empty for every other step.
     pub tasks: Vec<SequenceTaskResult>,
+    /// Whether the step's `when:` guard was false, so nothing ran. A skipped
+    /// step counts as succeeded.
+    pub skipped: bool,
 }
 
 /// One group member task's contribution to a step summary.
@@ -1069,6 +1283,15 @@ pub struct SequenceTaskResult {
     pub success: bool,
     /// Whether the task was interrupted rather than failed.
     pub interrupted: bool,
+    /// Whether the task's `when:` guard was false, so nothing ran.
+    pub skipped: bool,
     /// Wall-clock duration of the task.
     pub duration: std::time::Duration,
+}
+
+impl CompositionExecutionRequest {
+    /// Provider bypass intent, including the active document's default.
+    pub fn provider_yolo(&self) -> bool {
+        self.prepared.selection_hints.yolo_enabled(self.yolo)
+    }
 }

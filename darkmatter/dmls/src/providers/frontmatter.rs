@@ -20,7 +20,7 @@ use darkmatter::markdown::schemas::completion::{
 use darkmatter::markdown::schemas::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    darkmatter_base_schema, decode_scalar, locate_schema_declaration_cursor, mapping_separator,
+    decode_scalar, effective_property_shape, locate_schema_declaration_cursor, mapping_separator,
     locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
     schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
     flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
@@ -891,7 +891,7 @@ fn file_path_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
     };
     let start = offset - partial.len();
     let mut out = Vec::new();
-    for record in ctx.graph.documents() {
+    for record in ctx.graph.documents().iter().filter(|record| !record.dependency) {
         if record.path == ctx.path {
             continue;
         }
@@ -2028,74 +2028,18 @@ pub fn document_symbols(ctx: &DocumentContext) -> Vec<DocumentSymbol> {
 // ── Schema-shape helpers ────────────────────────────────────────────────────
 
 /// The effective completion shape: the Darkmatter base properties, overlaid
-/// with each matched extension baseline (e.g. Claudine), then the document's
-/// own `$schema` (document > extension > base — compose precedence).
+/// with each matched extension baseline (e.g. a configured extension), then the
+/// matching trigger payloads, then the document's own `$schema` — the layer
+/// order and per-property precedence validation uses
+/// ([`EffectiveSchema::property_shape`](darkmatter::markdown::schemas::EffectiveSchema::property_shape)).
 ///
 /// Exposed for reuse by other frontmatter-aware providers (e.g. navigation).
 pub(crate) fn known_shape(ctx: &DocumentContext) -> SchemaShape {
-    let mut shape = match darkmatter_base_schema() {
-        SimplifiedSchema::Single(shape) => shape,
-        SimplifiedSchema::Union(_) => SchemaShape::default(),
-    };
-    if let Some(bundle) = ctx.overlay.and_then(|overlay| overlay.bundle()) {
-        for extension in &bundle.extension_shapes {
-            for (name, def) in &extension.properties {
-                shape.properties.insert(name.clone(), def.clone());
-            }
-        }
-        match &bundle.effective.simplified {
-            Some(SimplifiedSchema::Single(document)) => {
-                for (name, def) in &document.properties {
-                    shape.properties.insert(name.clone(), def.clone());
-                }
-            }
-            // A root `$schema` union: overlay the arm a shared literal
-            // discriminant selects (so top-level completion/hover narrows), or
-            // every arm's keys merged when no arm is unambiguously selected.
-            Some(SimplifiedSchema::Union(arms)) => {
-                overlay_root_union(&mut shape, arms, &bundle.frontmatter_json);
-            }
-            None => {}
-        }
-    }
-    shape
-}
-
-/// Overlays a root `$schema` union's arm properties onto the effective
-/// top-level shape.
-///
-/// When the top-level frontmatter mapping selects exactly one arm via the
-/// shared literal discriminant (the Phase-4 [`select_literal_discriminant_arm`]
-/// — never a second, DMLS-only algorithm), only that arm's properties overlay,
-/// so top-level key completion offers just the matched arm's remaining keys.
-/// Before a discriminant is present, or for an unknown, duplicate, or
-/// conflicting discriminant, every inline arm's properties merge instead via
-/// [`merged_root_arm_shape`]: a key present in more than one arm resolves to the
-/// union of those arms' atoms (via [`merge_defs`]), so a shared property whose
-/// type diverges across arms stays a property union rather than collapsing to
-/// the last arm. A file-reference arm contributes no directly-known properties
-/// here.
-fn overlay_root_union(shape: &mut SchemaShape, arms: &[SchemaArm], frontmatter_json: &Value) {
-    let arm_json: Vec<Value> = arms.iter().map(root_arm_discriminant_json).collect();
-    match select_literal_discriminant_arm(&arm_json, frontmatter_json) {
-        Some(index) => overlay_arm(shape, &arms[index]),
-        // The merge is across arms only; the merged document shape still takes
-        // precedence over the base/extension baseline it overlays.
-        None => {
-            for (name, def) in merged_root_arm_shape(arms).properties {
-                shape.properties.insert(name, def);
-            }
-        }
-    }
-}
-
-/// Overlays one inline root-union arm's properties, ignoring a file-reference
-/// arm (its properties are not resolved into the arm shape here).
-fn overlay_arm(shape: &mut SchemaShape, arm: &SchemaArm) {
-    if let SchemaArm::Inline(arm_shape) = arm {
-        for (name, def) in &arm_shape.properties {
-            shape.properties.insert(name.clone(), def.clone());
-        }
+    match ctx.overlay.and_then(|overlay| overlay.bundle()) {
+        Some(bundle) => bundle
+            .effective
+            .property_shape(&bundle.extension_shapes, &bundle.frontmatter_json),
+        None => effective_property_shape(&[], None, &Value::Null),
     }
 }
 
@@ -2121,16 +2065,6 @@ fn merged_root_arm_shape(arms: &[SchemaArm]) -> SchemaShape {
         }
     }
     merged
-}
-
-/// The minimal discriminant JSON for one root-union arm, aligned by index with
-/// the arm slice so the selector's returned index maps back. A file-reference
-/// arm contributes no discriminant properties but still occupies its slot.
-fn root_arm_discriminant_json(arm: &SchemaArm) -> Value {
-    match arm {
-        SchemaArm::Inline(shape) => shape_discriminant_json(shape),
-        SchemaArm::FileRef(_) => serde_json::json!({}),
-    }
 }
 
 /// The nested [`SchemaShape`] reached by walking typed `ancestors`, selecting
@@ -2221,8 +2155,8 @@ impl<'p> ShapeMemo<'p> {
     /// algorithm), the walk descends into that arm. When narrowing is
     /// unavailable (absent/unknown/duplicate/conflicting discriminant, or an
     /// ordinary non-discriminated union), it descends into a MERGED view of
-    /// every admissible inline-object arm instead — the [`overlay_root_union`]
-    /// policy applied to nested unions (spec D3 / AC-10).
+    /// every admissible inline-object arm instead — the root-union policy of
+    /// [`EffectiveSchema::property_shape`](darkmatter::markdown::schemas::EffectiveSchema::property_shape) applied to nested unions (spec D3 / AC-10).
     fn shape<'s>(
         &'s mut self,
         ctx: &DocumentContext,

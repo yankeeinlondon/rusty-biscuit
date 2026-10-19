@@ -47,6 +47,24 @@ could not remove; it also panics unless the thread is already panicking.
 Tests that execute helpers must release blocked fixtures and observe completion
 before removing their spool. Never use the operator's real queue for test cleanup.
 
+The fixture does not redirect the temp directory or the voice-capability
+cache: `PLAYA_DRY_RUN=1` already stops lifecycle speech pre-warm before it
+resolves a phrase, so an ordinary test writes no audio cache. A test that
+asserts no TTS cache file appears sets fixture-owned `TMPDIR`, `TMP`, `TEMP`
+(the audio cache lives in `std::env::temp_dir()`), and `BISCUIT_SPEAKS_CACHE`
+on its own builder and inspects those directories, never the user's. To see
+which phrases pre-warm prepares, a `test-fixtures` build reads
+`CLAUDINE_TEST_PREWARM=record:<path>` (append one line per preparation to
+`<path>`: its text, a tab, and its voice configuration as JSON)
+or `block:<path>` (append, then never finish). Those tests set
+`PLAYA_DRY_RUN=0` so the pre-warm gates let the phrases through, and use only
+phrases whose events never fire so nothing is published. The recorder file
+read after the command exits shows *what* was prepared, not *when*: a later
+preparation phase produces the same phrases. To prove a phrase was prepared
+by an earlier phase, have the stub provider read the recorder while it is
+still running, as the three-prompt sequence test does. See
+`cli/tests/l1/tts_prewarm.rs`.
+
 ## Messaging fixtures
 
 A test that needs a real outbound message uses the loopback webhook listener in
