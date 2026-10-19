@@ -37,14 +37,15 @@ mod resume;
 mod tests;
 
 pub use resolve::{Candidate, PendingTarget, ResolveError, Target, resolve_target, resolve_target_in};
-pub use resume::{Inspection, RecordApproval, Resolution, ResumeRequest, inspect, release_unstarted, resume};
+pub use resume::{Inspection, RecordApproval, Resolution, ResumeRequest, inspect, release_unstarted, resume, resume_consent};
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use sniff::filesystem::query::{FileIdentity, NativeString};
 
@@ -80,9 +81,11 @@ use super::usage::{OwnedHandles, UsageClearance, UsageRefusal, UsageSource, chec
 /// What the user approved, as the report showed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Approval {
-    /// The checkout's files, with its include assessment.
+    /// The checkout's files, with its include assessment; on resume,
+    /// [`ResumeConsent::inventory`].
     pub inventory: Inventory,
-    /// [`Inventory::fingerprint`] of `inventory`; see [`consent_state`].
+    /// [`Inventory::fingerprint`] of `inventory` (see [`consent_state`]); on
+    /// resume, [`ResumeConsent::fingerprint`].
     pub fingerprint: String,
     /// The commit the checkout's branch (or detached HEAD) was approved at.
     pub tip: String,
@@ -103,6 +106,45 @@ pub fn consent_state(base: &Path, checkout: &Path, branch: Option<&str>) -> Resu
     inventory.included = classify_included(base, checkout, branch)?;
     let fingerprint = inventory.fingerprint(base, checkout)?;
     Ok((inventory, fingerprint))
+}
+
+/// The consent state of a pending removal's moved checkout: what
+/// [`consent_state`] collects there, less the dirty entries the operation's
+/// own confirmed deletions explain. Built by [`resume_consent`]; a retry's
+/// [`Approval`] carries `inventory` and `fingerprint`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeConsent {
+    /// Everything `git status` lists in the moved checkout.
+    pub raw: Inventory,
+    /// `raw` without `excluded`: what the report lists and consent covers.
+    pub inventory: Inventory,
+    /// Each an unstaged deletion (porcelain ` D`) of a path that some
+    /// attempt's journal records as `Deleted`, inspected absent now.
+    pub excluded: Vec<PathBuf>,
+    /// [`Inventory::fingerprint`] of `raw`, bound to `excluded`, so a retry's
+    /// approval and the recheck under the operation lock compare both views.
+    pub fingerprint: String,
+}
+
+/// `raw` split into what consent covers and what this operation's confirmed
+/// deletions explain. `deleted` holds every journal path with a durable
+/// `Deleted` result; `absent` inspects a quarantine-relative path without
+/// following links, and an inspection error is not absence.
+///
+/// Paths are compared by component, which is exact and case-sensitive but
+/// lets Git's `/` match a Windows journal's `\`; a deleted directory
+/// explains no path beneath it.
+fn explain_deletions(raw: &Inventory, deleted: &HashSet<&Path>, absent: impl Fn(&Path) -> bool) -> (Inventory, Vec<PathBuf>) {
+    let mut inventory = raw.clone();
+    let mut excluded = Vec::new();
+    inventory.dirty.retain(|entry| {
+        let explained = entry.status == " D" && deleted.get(entry.path.as_path()).is_some_and(|journaled| absent(journaled));
+        if explained {
+            excluded.push(entry.path.clone());
+        }
+        !explained
+    });
+    (inventory, excluded)
 }
 
 /// Deletes the local branch `name` while its tip is still `expected_tip`.
@@ -154,6 +196,25 @@ pub struct Environment<'a> {
     /// move that refuses, after it the removal stops.
     pub interrupted: &'a dyn Fn() -> bool,
     pub observe: &'a StartObservation<'a>,
+    /// Called at most once per attempt, after observation starts and before
+    /// the move (on a resumed attempt, before its further deletion), when
+    /// the startup ([`ObservationDiagnostics::startup_ms`]) took longer than
+    /// [`SLOW_STARTUP`]. The removal continues.
+    ///
+    /// [`ObservationDiagnostics::startup_ms`]: super::observation::ObservationDiagnostics::startup_ms
+    pub slow_startup: &'a dyn Fn(Duration),
+}
+
+/// The observation startup above which [`Environment::slow_startup`] is told.
+pub const SLOW_STARTUP: Duration = Duration::from_secs(1);
+
+/// Tells [`Environment::slow_startup`] when `observation` took longer than
+/// [`SLOW_STARTUP`] to start.
+fn report_slow_startup(observation: &Observation, env: &Environment<'_>) {
+    let startup = observation.diagnostics().startup_ms.map(Duration::from_millis);
+    if let Some(startup) = startup.filter(|startup| *startup > SLOW_STARTUP) {
+        (env.slow_startup)(startup);
+    }
 }
 
 /// [`StartObservation`] with this platform's native adapter.
@@ -213,8 +274,9 @@ pub enum Refusal {
     /// cleaned up automatically.
     #[error("removal {} cannot be resumed: {}", .0.id, .0.resolution)]
     Recovery(Box<Inspection>),
-    /// [`Environment::interrupted`] held before the move.
-    #[error("the removal was interrupted before anything was moved")]
+    /// [`Environment::interrupted`] held before the move, or before a
+    /// resumed attempt's deletion.
+    #[error("the removal was interrupted before it changed anything")]
     Interrupted,
 }
 
@@ -346,6 +408,7 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         Err(ObservationError::Interrupted) => return refuse(Refusal::Interrupted),
         Err(error) => return refuse(Refusal::Observation(error)),
     };
+    report_slow_startup(&observation, env);
     timeline.push(event(Step::ObservationStarted, StepResult::Succeeded, None));
     let inventory = match DeletionInventory::capture(&plan.original, &approval.inventory.consent_sensitive_paths()) {
         Ok(inventory) => inventory,
@@ -365,7 +428,8 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
 
     // After discovery and observation setup: the approval must still
     // describe the checkout.
-    if let Err(refusal) = recheck(base, entry, &entry.path, approval) {
+    let current = || consent_state(base, &entry.path, entry.branch.as_deref()).map_err(Refusal::Git);
+    if let Err(refusal) = recheck(base, entry, approval, current) {
         return refuse(refusal);
     }
     // Rechecking ran `git status`, which may rewrite the index; the binding
@@ -492,14 +556,20 @@ fn no_pending(store: &RecoveryStore, admin_dir: &Path) -> Result<(), StoreError>
     Ok(())
 }
 
-/// The approval's bindings read fresh: the branch tip and the consent
-/// fingerprint of `checkout` (the original, or the quarantine on resume).
-fn recheck(base: &Path, entry: &WorktreeEntry, checkout: &Path, approval: &Approval) -> Result<(), Refusal> {
+/// The approval's bindings read fresh: the branch tip, and the consented
+/// inventory and fingerprint `current` collects ([`consent_state`] of the
+/// original, or [`resume_consent`] on resume).
+fn recheck(
+    base: &Path,
+    entry: &WorktreeEntry,
+    approval: &Approval,
+    current: impl FnOnce() -> Result<(Inventory, String), Refusal>,
+) -> Result<(), Refusal> {
     let tip = recorded_head(base, entry).map_err(Refusal::Git)?;
     if tip != approval.tip {
         return Err(Refusal::Changed(format!("the worktree's HEAD moved from {} to {tip} after it was checked", approval.tip)));
     }
-    let (inventory, fingerprint) = consent_state(base, checkout, entry.branch.as_deref()).map_err(Refusal::Git)?;
+    let (inventory, fingerprint) = current()?;
     if inventory.dirty != approval.inventory.dirty || fingerprint != approval.fingerprint {
         return Err(Refusal::Changed("the worktree's files or staged changes changed after they were checked".into()));
     }

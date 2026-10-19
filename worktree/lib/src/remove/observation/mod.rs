@@ -21,9 +21,10 @@
 //!   below it that were not yet delivered (FSEvents coalesces them), so a
 //!   caller that must see those changes drains before removing or renaming
 //!   the directory;
-//! - coverage loss (a kernel overflow, a full queue, a watch lost to anything
-//!   but the operation's own deletion) is a typed [`CoverageLost`] that stays
-//!   set for the rest of the session, never a silent downgrade;
+//! - coverage loss (a kernel overflow, FSEvents' drop or rescan flags, a full
+//!   queue, a watch lost to anything but the operation's own deletion, or
+//!   delivery that could not be confirmed) is a typed [`CoverageLost`] that
+//!   stays set for the rest of the session, never a silent downgrade;
 //! - the queue between the platform and `drain` is bounded
 //!   ([`ObserverOptions::queue_capacity`]); a full queue is coverage loss;
 //! - confirming delivery (at startup, in each drain, before the move is
@@ -488,7 +489,7 @@ impl Observation {
         }
     }
 
-    fn started_after(self, elapsed: std::time::Duration) -> Self {
+    pub(crate) fn started_after(self, elapsed: std::time::Duration) -> Self {
         self.diagnostics.update(|diagnostics| diagnostics.startup_ms = Some(diagnostics::millis(elapsed)));
         self
     }

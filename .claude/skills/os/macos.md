@@ -191,6 +191,43 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   shared parent: every sibling's activity reaches the stream, and a busy
   sibling (a build) is enough to make FSEvents drop events.
 
+### A stuck fseventsd delays every stream
+
+Every FSEvents stream on the host goes through one fseventsd, so its health is
+a host condition, not a repository defect. Two failure modes have been seen
+with `wt remove`:
+
+- **fseventsd stuck in its own path matching.** After 26 days of uptime, its
+  notify thread was pinned at one full core in its path-matching loop while
+  system-wide event volume was tiny (about 5 events a second; `sample`
+  showed `strncmp` under a mutex). Events took more than 10 s to arrive
+  (`wt remove`'s marker waits stalled), and quitting nine apps that watch
+  files changed nothing. Overall CPU looked low, because the busy thread was
+  a single efficiency-core thread, so nothing pointed at fseventsd. A
+  restart brought it to 0.1 % CPU and same-second delivery.
+- **A healthy fseventsd still drops under a fast deletion burst.** About
+  6,600 to 7,000 deletions a second made FSEvents drop events (which flags
+  fired was not recorded then; `FsEventsDropped` now keeps them). `wt`
+  drains every 512 entries on macOS (`DEFAULT_DRAIN_EVERY`) to spread
+  bursts out; that lowers the pressure but does not prevent a drop.
+
+Diagnose by hand:
+
+```bash
+ps -o %cpu,etime -p "$(pgrep fseventsd)"   # CPU (lifetime average) and uptime
+top -o cpu                                 # current CPU; or Activity Monitor
+sudo sample fseventsd 5                    # optional: the hot thread's stack
+```
+
+High CPU alone does not establish the diagnosis; it needs slow delivery too
+(for example a `delivery_stalled` loss in a `wt remove` report). An
+administrator can restart it with `sudo killall fseventsd`; launchd restarts
+it at once. **That is system-wide:** every FSEvents client (Spotlight, Time
+Machine, editors, file watchers, build tools) may miss events from around the
+restart or rescan. It is a manual troubleshooting step only: never script it,
+never run it from a test or recipe, and never have `wt` do it. The user-facing
+version is in `worktree/docs/cli/remove.md` ("When fseventsd is slow").
+
 ### Reading other processes' descriptors and cwd
 
 `sniff/lib/src/filesystem/query/macos.rs` implements this. Traps it handles:

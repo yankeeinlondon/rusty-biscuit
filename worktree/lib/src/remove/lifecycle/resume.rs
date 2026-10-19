@@ -10,6 +10,7 @@
 //! up automatically: [`inspect`] says what is where, and the caller explains
 //! the manual way out.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::io;
 use std::path::Path;
@@ -18,8 +19,9 @@ use std::sync::Arc;
 use sniff::filesystem::query::NativeString;
 
 use super::{
-    Approval, Attempt, BranchActions, Boundary, Crashed, Environment, Hook, Presence, Refusal, Removal, Tree, check_usage,
-    confirm_unchanged, event, now_ms, preflight_runs, presence, recheck, registration_state, retained_entries,
+    Approval, Attempt, BranchActions, Boundary, Crashed, Environment, Hook, Presence, Refusal, Removal, ResumeConsent, Tree,
+    check_usage, confirm_unchanged, consent_state, event, explain_deletions, now_ms, preflight_runs, presence, recheck,
+    registration_state, report_slow_startup, retained_entries,
 };
 use crate::availability::{self, EntryKind};
 use crate::remove::admin_entry::{AdminEntry, common_git_dir, same_location};
@@ -33,8 +35,9 @@ use crate::remove::outcome::{
 use crate::remove::quarantine::association::{MoveRefusal, verify_quarantined};
 use crate::remove::quarantine::rename;
 use crate::remove::recovery::OperationId;
-use crate::remove::recovery::journal::summarize;
-use crate::remove::recovery::record::{RecoveryRecord, RepositoryBinding};
+use crate::remove::inventory::bind_excluded;
+use crate::remove::recovery::journal::{EntryState, summarize};
+use crate::remove::recovery::record::{BranchBinding, RecoveryRecord, RepositoryBinding};
 use crate::remove::recovery::store::{RecoveryStore, StoreError};
 use crate::remove::usage::OwnedHandles;
 use crate::worktree::{WorktreeEntry, parse_worktree_list};
@@ -261,12 +264,52 @@ pub struct RecordApproval {
 pub struct ResumeRequest<'a> {
     pub base: &'a Path,
     pub id: &'a OperationId,
-    /// For [`Resolution::Quarantined`]: consent for what survives, read from
-    /// the quarantine with [`super::consent_state`].
+    /// For [`Resolution::Quarantined`]: consent for what survives, from
+    /// [`resume_consent`]'s `inventory` and `fingerprint`.
     pub approval: Option<&'a Approval>,
     /// For [`Resolution::ContentRemoved`].
     pub record: Option<&'a RecordApproval>,
     pub branches: &'a BranchActions,
+}
+
+/// The consent a retry of pending operation `id` asks for, read from its
+/// moved checkout: every attempt's journal is read and validated first, and
+/// a dirty entry leaves consent only when its own deletion by this operation
+/// explains it (see [`ResumeConsent::excluded`]). [`resume`] repeats this
+/// under the operation lock and refuses unless the approval still matches.
+///
+/// ## Errors
+///
+/// [`Refusal::Store`] when the record or a journal cannot be read or
+/// validated (the recovery refusal, which enables no exclusion);
+/// [`Refusal::Inventory`] when the moved checkout cannot be opened as
+/// itself; [`Refusal::Git`] as for [`consent_state`].
+pub fn resume_consent(base: &Path, id: &OperationId) -> Result<ResumeConsent, Refusal> {
+    let store = open_store(base).map_err(Refusal::Store)?;
+    let record = store.read_record(id).map_err(Refusal::Store)?;
+    let (expected, _) = current_binding(&record).map_err(Refusal::Store)?;
+    resume_consent_in(&store, &record, &expected, base)
+}
+
+fn resume_consent_in(store: &RecoveryStore, record: &RecoveryRecord, expected: &RepositoryBinding, base: &Path) -> Result<ResumeConsent, Refusal> {
+    let quarantine = record.quarantine.as_path();
+    let (dir, _) = crate::remove::observation::inventory::open_root(quarantine, Some(&record.checkout_identity)).map_err(Refusal::Inventory)?;
+    let present = |relative: &Path| match dir.symlink_metadata(relative) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    };
+    let recovered = store.recover(&record.operation_id, expected, present).map_err(Refusal::Store)?;
+    let branch = match &record.branch {
+        BranchBinding::Named(branch) => Some(branch.as_str()),
+        BranchBinding::Detached => None,
+    };
+    let (raw, raw_fingerprint) = consent_state(base, quarantine, branch).map_err(Refusal::Git)?;
+    let deleted: HashSet<&Path> =
+        recovered.entries.iter().filter(|entry| entry.state == EntryState::Deleted).map(|entry| entry.path.as_path()).collect();
+    let (inventory, excluded) = explain_deletions(&raw, &deleted, |relative| matches!(present(relative), Ok(false)));
+    let fingerprint = bind_excluded(&raw_fingerprint, &excluded);
+    Ok(ResumeConsent { raw, inventory, excluded, fingerprint })
 }
 
 /// Continues pending operation `id` from what [`inspect`] finds, under
@@ -274,6 +317,10 @@ pub struct ResumeRequest<'a> {
 /// unregisters, [`Resolution::ContentRemoved`] removes the registration, and
 /// [`Resolution::CheckoutRemoved`] runs the branch actions. Any other
 /// resolution refuses with [`Refusal::Recovery`].
+///
+/// For a quarantine, [`resume_consent`]'s calculation runs again under the
+/// operation lock before anything more is deleted; unless the request's
+/// approval matches it, the retry refuses with [`Refusal::Changed`].
 pub fn resume(request: &ResumeRequest<'_>, env: &Environment<'_>) -> Removal {
     match resume_with(request, env, &mut |_| false) {
         Ok(removal) => removal,
@@ -408,6 +455,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
             Err(ObservationError::Interrupted) => return refuse(Refusal::Interrupted),
             Err(error) => return refuse(Refusal::Observation(error)),
         };
+        report_slow_startup(&observation, self.env);
         let inventory = match DeletionInventory::capture(quarantine, &approval.inventory.consent_sensitive_paths()) {
             Ok(inventory) => inventory,
             Err(refusal) => return refuse(Refusal::Inventory(refusal)),
@@ -419,7 +467,10 @@ impl<'r, 'a> Resumed<'r, 'a> {
             Ok(clearance) => clearance,
             Err(refusal) => return refuse(Refusal::Usage(refusal)),
         };
-        if let Err(refusal) = recheck(base, &entry, quarantine, approval) {
+        // Under the operation lock: no other attempt can add a deletion
+        // result between this and the deletion it approves.
+        let current = || resume_consent_in(self.store, self.record, &self.expected, base).map(|consent| (consent.inventory, consent.fingerprint));
+        if let Err(refusal) = recheck(base, &entry, approval, current) {
             return refuse(refusal);
         }
         if let Err(refusal) = confirm_unchanged(&inventory, &checked_drain(&mut observation, self.env.interrupted), quarantine, Tree::AtQuarantine, true) {

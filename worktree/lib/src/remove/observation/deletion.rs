@@ -18,9 +18,11 @@
 //! - each drained event is resolved by checking its exact path: an entry this
 //!   operation deleted must still be absent, an approved entry not yet
 //!   reached must still match its record, and anything else is activity;
-//! - a lost watch or a full queue stops the operation, as does an interrupt
-//!   request; the observer records the loss at its deletion stage, with the
-//!   entries processed since the previous drain.
+//! - any [`CoverageLost`] (dropped notifications, a lost watch, a full queue,
+//!   or a delivery wait that stalled or reached its ceiling) stops the
+//!   operation, as does an interrupt request; the observer records the loss
+//!   at its deletion stage, with the entries processed since the previous
+//!   drain.
 //!
 //! The checks narrow the window in which a concurrent write can be lost; they
 //! cannot close it. A write that lands between an entry's final check and its

@@ -20,9 +20,19 @@ deletion engine decides which are the operation's own.
   drain. Events received before the loss are still returned, for the report.
   `CoverageLost` is serialized into `report.json` (tagged by `kind`, durations
   as `waited_ms`), so changing a variant changes the report's shape.
+  `FsEventsDropped` keeps the event's whole mask (unnamed bits too) and every
+  named flag in `FsEventsLossFlag` order, with no precedence;
+  `MustScanSubDirs` alone is loss. Linux and Windows keep generic `Overflow`;
+  `QueueFull` is `wt`'s own bounded queue, never a kernel signal.
+  `DeliveryStalled`/`DrainCeiling` mean confirmation was unavailable, not
+  that events dropped, and their texts must never say "dropped". The CLI
+  renders each variant (stop line, startup failure, the macOS fseventsd hint)
+  in `cli/src/commands/remove/recovery.rs`, and `docs/cli/remove.md`'s "When
+  watching stops" table lists them: a new variant needs both.
 - **Diagnostics.** `Observation::diagnostics()` (and `diagnostics_handle()`,
   which outlives the session) holds one `ObservationDiagnostics` per attempt:
-  backend, `startup_ms` (set by `Observation::start`), last and longest
+  backend, `startup_ms` (set by `Observation::start`; the lifecycle's
+  slow-start warning reads it, see [lifecycle.md](lifecycle.md)), last and longest
   confirmed marker round trip (`Outcome::Confirmed { round_trip }` from
   `await_marker`, kept by each adapter's `Backend::round_trips`), and the
   first loss with the `ObservationStage` of the drain that received it. The
@@ -58,7 +68,11 @@ deletion engine decides which are the operation's own.
   move, the deletion engine and the post-move drain stop as
   `Stop::Interrupted`), and an interrupted `moved_to_quarantine` is reported
   by the next drain. Once coverage is lost, a drain does not wait again.
-  Linux ignores both: reading until empty never waits.
+  Linux ignores both: reading until empty never waits. When both limits
+  expire at one check, the ceiling is reported. A stall on a healthy host is
+  rare; the usual cause on macOS is a delayed or stuck fseventsd
+  ([os skill](../os/macos.md#a-stuck-fseventsd-delays-every-stream)), which
+  `wt` never restarts.
 - **Out-of-scope events are dropped before the bound counts them**
   (`Targets::classify`, used by `Sink` and `EventQueue`), so a busy sibling
   never fills the queue.
