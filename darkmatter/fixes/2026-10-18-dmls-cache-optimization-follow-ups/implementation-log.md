@@ -17,37 +17,60 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_3:
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
 packages:
     - darkmatter
     - biscuit-file
+    - dmls
 human_review: false
 message_to_agent: |-
-    Phase 1 landed `ResolvedSchema::searched` -> `ResolvedPayload.searched` ->
-    `TriggerRegistry::searched_locations()`. Facts Phase 2 relies on:
+    Phase 3 wired searched candidates into DMLS. Facts for Phase 4 (docs,
+    skill, comment sweep, final gates):
 
-    - Entries are absolute and LEXICAL (biscuit-file's new
-      `DetailedResolution::probed_paths()`, the same normalization as
-      `matched_path()`), never canonicalized. They include every probed
-      candidate up to and including the selected file, and a nearer candidate
-      that exists as a directory (`NonFile`). Recursive `%` search roots are
-      omitted (R1). Existing dependency files in `dependencies` keep their
-      canonical spelling, so the same file can appear in both lists with
-      different spellings: compare per list, never across them.
-    - On macOS a temp dir under `/var` is reached via `/private/var`; fixtures
-      that canonicalize their root (as `payload_memo_tests::Fixture` does) get
-      matching spellings.
-    - R6 needed no cache-carry: `ImportEngine::resolve_namespace` probes
-      before it consults `namespace_cache`, so every import site records its
-      own candidates (locked by
-      `resolve::searched_tests::second_import_of_a_cached_namespace_still_records_its_own_search`).
-    - Stale comments left for the Phase 4 sweep: `ResolvedSchema::imports` /
-      `examples` docs still say "invalidation wiring is deferred", and the
-      `file_payload_memo` doc in `assemble.rs` (~line 328) still claims root and
-      selected-folder listings cover every searched directory (Phase 2 should
-      replace that claim when it extends `inputs_fingerprint`).
-    - `just cross-check` re-splits its args: pass nextest positional filters
-      (`just cross-check darkmatter --os windows name_a name_b`), not `-E
-      '...(...)'`, which fails with a remote shell syntax error.
+    - Already current (updated in Phase 3, re-check rather than rewrite):
+      `docs/lsp/indexing.md` registry-change table row for searched
+      locations, the "Each preparation records" paragraph (concrete example,
+      R7 carry, recursive `%` limitation), and "Watching schema folders"
+      (absent folder watched from its nearest existing ancestor with `<rel>`
+      and `<rel>/*`, re-registered once it exists). Still missing there: the
+      Mermaid diagram of probe -> fingerprint -> watch -> re-prepare that the
+      plan asks for.
+    - `.claude/skills/darkmatter/dmls.md` watch and trigger-registry bullets
+      are updated; `schema.md` was not touched.
+    - Comment sweep: `registry.rs` module header and `Dependencies` docs are
+      updated; `watch.rs` `schema_watch_registration` doc is updated. Check
+      `ResolvedSchema` / `ResolvedPayload` / `file_payload_memo` docs from
+      Phases 1-2 for drift only.
+    - Departure from the plan: no "event's parent equals a candidate's
+      parent" rule in `scope_affected` (it would invalidate on any sibling
+      file); events at a candidate or at a folder above one are enough. Absent
+      schema roots now use the same absent-folder watch form. Recorded in the
+      Phase 3 log.
+    - New public type `dmls::workspace::watch::WatchedFolder`;
+      `TriggerRegistries::watch_folders()` / `OverlayState::trigger_watch_folders()`
+      now return `BTreeSet<WatchedFolder>`. No consumer outside `dmls`.
+    - Phase 2's library changes (`assemble.rs`, `payload_memo_tests.rs`) are
+      still uncommitted in this worktree alongside Phase 3's.
+
 ---
 
 # Implementation Log for 2026-10-18-dmls-cache-optimization-follow-ups (4 phases)
@@ -171,3 +194,220 @@ yet.
 - No load-sensitive or pre-existing failures observed.
 
 Phase 1 status: implementation complete, ready for review.
+
+## Phase 2
+
+### What changed
+
+- **`file_payload_memo::inputs_fingerprint`**
+  (`lib/src/markdown/schemas/triggers/assemble.rs`) now takes the whole
+  `ResolvedPayload` and returns `Option<u64>`. On top of the dependency bytes
+  and schema-root / dependency-folder listings it folds in:
+  - the parent folder of every `searched` candidate, in the same sorted,
+    deduplicated folder list (so an absent `schemas/shared/` is observed as
+    missing, with a marker distinct from an empty folder's listing);
+  - a per-candidate kind observation (`std::fs::metadata`: absent / file /
+    directory / other), so a directory → file swap under the same name, which
+    leaves every listing unchanged, still misses.
+- **Expected absence vs failed observation.** `NotFound` and `NotADirectory`
+  (a path component is a file; `ENOTDIR` / Windows `ERROR_DIRECTORY`) are
+  expected observations with markers. Any other error, including one failed
+  entry inside an otherwise readable listing (previously filtered out
+  silently), makes the fingerprint `None`: a held entry is not reused, and a
+  fresh resolution is returned but not stored (the stale entry for the key is
+  still dropped). Previously an unreadable root or dependency hashed as
+  "absent" and could validate a hit.
+- **I/O stays outside the mutex** (both fingerprint calls precede the lock).
+  Key, capacity (32), LRU, and `Arc` identity on hits are unchanged.
+- **Test seam.** No filesystem-failure seam existed. The fingerprint's three
+  reads go through a private `observe` module; under `#[cfg(test)]` a
+  thread-local `fail_observing(path)` guard makes that one path's reads fail.
+  This avoids permission-bit tests (different under elevated users and native
+  Windows). Not compiled into release builds.
+- **Comments.** The `file_payload_memo` doc's claim that "the schema roots and
+  each dependency's folder" are every searched directory is replaced with the
+  real coverage, including the recursive `%` limitation (R1) and the
+  failed-observation rule.
+- **Docs.** `docs/lsp/indexing.md` "Resolved payloads are shared" reuse
+  paragraph described only the old rule; rewritten to the current one with the
+  concrete example. The DMLS registry-change table and the fuller rewrite
+  (Mermaid, watch advance) remain for Phases 3/4.
+
+### Finding: which cases were actually stale in the library
+
+Proving the tests against the old fingerprint (searched ignored) showed the
+spec's concrete example was **not** stale in the library alone: creating
+`schemas/shared/` adds an entry to the `schemas/` schema-root listing that
+was already hashed. The library missed the case when the nearer candidate's
+folder appears under a folder that is neither a schema root nor a dependency
+folder: an existing `schemas/shared/` holding no dependency, a nested absent
+folder (`shared/deep/...`), or a directory → file swap. The precedence rows
+therefore use `shared/deep/...` under a pre-existing `shared/` folder so each
+is load-bearing; the concrete example stays as the spec's acceptance-1 test.
+In DMLS the concrete example is still stale (Phase 3).
+
+### Requirement → test mapping
+
+Boundary: library trigger discovery (`scan`) → process-wide payload memo,
+observed through the public `TriggerRegistry` and `PayloadMemoTally`.
+Fidelity F2 (real temp filesystem, real resolver), tier L1, in
+`triggers::payload_memo_tests` (compiled by the `darkmatter` lib test
+target; no tier marker). No CLI/terminal boundary. "Fails before" means the
+test fails with the fingerprint's `searched` folding disabled.
+
+| Requirement | Test | Fails before |
+| --- | --- | --- |
+| Acc. 1 concrete example: hit + same `Arc`; create nearer (+ folder) → miss, `number` fields, new dependency; delete → fallback | `a_nearer_import_candidate_created_in_an_absent_folder_is_resolved_again` | no (root listing covers it; see finding) |
+| Acc. 2 payload path | `a_nearer_payload_path_is_resolved_again` | yes |
+| Acc. 2 direct import (nested absent folder) | `a_nearer_import_is_resolved_again` | yes |
+| Acc. 2 transitive import | `a_nearer_transitive_import_is_resolved_again` | yes |
+| Acc. 2 example file | `a_nearer_example_file_is_resolved_again` | yes |
+| Acc. 2 bare-name control (kept) | `a_file_added_to_a_schema_root_is_resolved_again` | n/a |
+| Acc. 2 explicit `./` has no fallback; failure not kept; creating the named file recovers | `an_explicit_relative_reference_gains_no_fallback` | n/a (behavior lock) |
+| Acc. 3 existing candidate parent | `a_nearer_candidate_in_an_existing_folder_is_resolved_again` | yes |
+| Acc. 3 directory → file, same entry name | `a_nearer_candidate_swapped_from_directory_to_file_is_resolved_again` | yes |
+| Acc. 3 failed observation is not a hit and is not kept; recovers after | `a_failed_observation_is_never_a_hit` | yes |
+| Acc. 6 unrelated files / content edits keep the hit and `Arc` | `unrelated_edits_keep_the_held_payload` | n/a |
+| Acc. 6 isolation, capacity, LRU, failed-resolution, tally | existing `payload_memo_tests` (unchanged, green) | n/a |
+
+Counts via `PayloadMemoTally`; no sleeps, no global cache clears. Input
+Robustness Matrix: not applicable (no file-format or configuration reader).
+
+Targeted run: `cargo nextest run -p darkmatter --lib -E
+'test(payload_memo_tests)'` → 29 passed.
+
+### Gates
+
+- `just lint` (darkmatter): pass (exit 0, no warnings).
+- `just test` (darkmatter): 10555 passed, 0 failed, 10 skipped (pre-existing
+  skips), first run, no reruns, no load-sensitive failures.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- CI scope: `git status --porcelain --untracked-files=all | awk '{print $NF}'
+  | xargs python3 scripts/ci/affected_scope.py` (excluding an unrelated
+  `worktree/fixes/2026-10-18-remove-observation-under-load/spec.md` edit made
+  by another session in this worktree, not part of this phase) → `packages:
+  [darkmatter, test-toolkit]`, `change_class: package`, so the gates were
+  required and were run.
+- Cross-OS (`NotFound` / `NotADirectory` mapping is OS-specific):
+  `just cross-check darkmatter --os windows payload_memo_tests` → 29 passed.
+- Dependents: no public symbol changed (`fail_observing` is `#[cfg(test)]`);
+  the behavior change only narrows reuse. Claudine consumes trigger scanning,
+  so its schema tests ran: `cargo nextest run -p claudine -E
+  'test(claudine_schemas)'` → 174 passed (7 flagged slow by nextest; not
+  touched by this phase).
+- `.claude/skills/darkmatter/dmls.md` payload-memo bullet updated with the
+  fingerprint coverage, the failed-observation rule, the test seam, and the
+  "nearer candidate must be outside observed listings" testing trap.
+
+Phase 2 status: implementation complete, ready for review.
+
+## Phase 3
+
+### What changed
+
+- **`Dependencies`** (`dmls/src/overlay/registry.rs`) gained `searched`
+  (every `TriggerRegistry::searched_locations()` candidate, through
+  `normalized`, sorted, deduplicated) and `absent_bases` (absent root folders
+  and absent candidate folders, each with its nearest existing ancestor).
+  Both are filled in `Preparation::run` (`Dependencies::record_searched` /
+  `record_absence`), the only place allowed to do I/O; the absence check is a
+  `Path::is_dir` per distinct folder, bounded by the recorded candidates.
+- **`scope_affected`**: after the existing byte comparison for known files
+  (unchanged, still first), a Ready scope is affected when the event path is
+  a searched candidate or a folder above one (`candidate.starts_with(path)`).
+  That covers creation, deletion, replacement, and a directory-only event
+  (R8). Unrelated events (same file name in folders nothing searched) do not
+  affect it. I did not add the plan's "parent equals a candidate's parent"
+  rule: every create/delete/rename of a candidate reports the candidate path
+  itself, and a parent rule would invalidate on any sibling file, which the
+  spec asks to avoid.
+- **R7**: `begin` copies the replaced scope's `searched` and `folders` into
+  `Preparation::carried`; on a failed scan `run` re-records them (so absence
+  is re-observed off the lock: a now-present folder is watched as present).
+  Chained failures keep carrying. Last-good and root-failure rules in
+  `install` are untouched (they key on `installed`, not on `deps`).
+- **Watch registration** (`dmls/src/workspace/watch.rs`): new
+  `WatchedFolder { folder, absent_base }`. `schema_watch_registration` takes
+  them: a present folder keeps the old `<parent>` + `<name>/*` watch; an
+  absent folder is watched from `absent_base` with `<rel>` and `<rel>/*`
+  (each segment glob-escaped). `TriggerRegistries::watch_folders()` (and
+  `OverlayState::trigger_watch_folders`) now return `BTreeSet<WatchedFolder>`
+  and include candidate folders; the router wraps Markdown dependency folders
+  as present. Because `absent_base` is part of the set, a folder appearing
+  changes the set and `sync_schema_watches` re-registers (coverage advance),
+  with no I/O in the sync itself. Absent schema roots now also get the
+  absent form (base = nearest existing ancestor, folder + children); that is
+  a small, consistent widening of their watch.
+- **Change replay**: needed no new code; `install` replays `Change::Path`
+  through `scope_affected`, so the new rule applies there too (tested).
+- **Fallback modes**: no code change. A server rescan already marks every
+  registry stale, and the library memo (Phase 2) then re-resolves; a YAML
+  `didSave` goes through `invalidate_trigger_inputs` and so the same
+  candidate rule (tested). No external-change promise without client events.
+- **Docs** (`docs/lsp/indexing.md`): registry-change table row, the
+  "Each preparation records" paragraph (searched locations, R7, the concrete
+  example, the recursive `%` limitation), and "Watching schema folders"
+  (absent-folder watch and its advance). Phase 4 still owns the Mermaid
+  diagram and the full sweep.
+- **Skill** (`.claude/skills/darkmatter/dmls.md`): watch-registration and
+  trigger-registry bullets.
+
+### Finding
+
+At the DMLS layer the concrete example's *file* event
+(`schemas/shared/types.yaml`) was stale before this phase (its parent is
+neither a root nor a dependency folder), but a *directory-only* event for
+`schemas/shared` was already covered, since `schemas/` holds the payload and
+is a dependency folder. The directory-event test therefore uses a nested
+absent folder (`schemas/shared/deep/` under an existing `schemas/shared/`).
+
+### Requirement → test mapping
+
+Boundaries: registry cache (in-process, F2, real temp filesystem and real
+resolver) and the LSP protocol (F3: the in-process `LspFixture` server over
+`lsp_server` messages, real temp repository). Tier L1. "Fails before" =
+fails with the candidate rule (and, for R7, the carry) disabled.
+
+| Requirement | Test | Fails before |
+| --- | --- | --- |
+| Acc. 4 concrete example: ready → create nearer → event → reselect; absent folder watched from nearest ancestor; coverage advances; removal falls back | `overlay::registry::tests::a_nearer_candidate_created_in_an_absent_folder_invalidates_a_ready_registry` | yes |
+| R8 directory-only event above a candidate (nested absent folder) | `…::a_directory_event_above_a_candidate_invalidates_a_ready_registry` | yes |
+| Acc. 5 replay (registry level) | `…::a_candidate_created_during_a_preparation_leaves_its_result_stale` | yes |
+| Acc. 5 malformed nearer → last-good, watch kept (R7), repeat failure keeps it, repair recovers | `…::a_malformed_nearer_candidate_keeps_last_good_and_its_watch_until_repaired` | yes |
+| Acc. 6 unrelated events keep fresh, zero work | `…::unrelated_events_keep_a_ready_registry_fresh_and_do_no_work` | n/a (control) |
+| Watch unit: absent nested folder → nearest ancestor, folder + children patterns, escaping; present form | `workspace::watch::tests::test_an_absent_folder_is_watched_from_its_nearest_existing_ancestor` (+ updated `test_schema_watch_registration_roots_each_folder_at_its_parent`) | n/a (new API) |
+| Acc. 4 protocol: watched create → `/model` type mismatch appears; registration has `shared` + `shared/*` at `schemas/`, then re-registered without `shared`; watched delete → fallback | `searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back` | yes |
+| Acc. 4 save notification | `searched_candidates::a_saved_nearer_candidate_reselects_the_import` | yes |
+| Acc. 4 fallback (server-rescan) mode | `searched_candidates::a_fallback_rescan_rebuilds_from_the_new_candidate` | no (rescan already invalidates all; locks the guarantee) |
+| Acc. 5 protocol: startup probe held after reading, malformed candidate + event, replay → trigger `dm.schema.prepare` published; repair clears it | `searched_candidates::a_candidate_created_during_an_in_flight_preparation_is_prepared_again_and_recovers` | yes |
+| Acc. 6 protocol: unrelated events + ready hovers do 0 registry scans / enumerations | `searched_candidates::unrelated_events_and_ready_requests_prepare_nothing` | n/a (control) |
+
+`searched_candidates` is declared in `tests/l1/main.rs` (no tier marker in
+its path). Existing registry, watch, `referenced_targets`, and
+`workspace_file_list` registration tests stay green. Input Robustness
+Matrix: not applicable (no file-format or configuration reader).
+
+Targeted runs: `cargo nextest run -p dmls --lib -E 'test(registry::tests) |
+test(watch::tests)'` → 36 passed; `cargo nextest run -p dmls --test l1 -E
+'test(searched_candidates)'` → 5 passed (each under 0.1 s).
+
+### Gates
+
+- `just lint` (darkmatter): pass (exit 0, no warnings).
+- `just test` (darkmatter): 10566 passed, 0 failed, 10 skipped (pre-existing
+  skips), first run, no reruns, no load-sensitive failures.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- CI scope: `git status --porcelain --untracked-files=all | awk '{print $NF}'
+  | xargs python3 scripts/ci/affected_scope.py` → `packages: [darkmatter,
+  dmls, test-toolkit]`, `change_class: package`, so the gates were required
+  and were run. (The working tree also holds Phase 2's uncommitted library
+  edits and an unrelated `worktree/` spec edit from another session.)
+- Cross-OS (path comparison via `starts_with` and canonical prefixes):
+  `just cross-check dmls --os windows searched_candidates registry::tests
+  watch::tests` → 41 passed.
+- Dependents: the changed public items (`WatchedFolder`, `watch_folders`,
+  `trigger_watch_folders`, `schema_watch_registration`) are used only inside
+  `dmls` (`git grep`); `zed-dmls` compiles in `just lint` and its tests ran
+  in `just test`. No library symbol changed in this phase.
+
+Phase 3 status: implementation complete, ready for review.

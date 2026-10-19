@@ -18,9 +18,30 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_3:
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
 packages:
     - darkmatter
     - biscuit-file
+    - dmls
 ---
 
 # Plan: DMLS cache optimization follow-ups
@@ -46,19 +67,19 @@ to editor invalidation and watching (`dmls`), and document it.
 
 **Done when** (spec acceptance 1-6):
 
-- [ ] Concrete example (`schemas/payload.yaml` importing `Fields@shared/types.yaml`):
+- [x] Concrete example (`schemas/payload.yaml` importing `Fields@shared/types.yaml`):
       unchanged repeat is a hit returning the same shared schema; creating
       `schemas/shared/types.yaml` forces a miss and selects the new fields;
       deleting it falls back.
-- [ ] Same precedence change covered for payload path, transitive import,
+- [x] Same precedence change covered for payload path, transitive import,
       example file; bare-name root-shadowing test kept as control; explicit
       `./` / `../` references gain no fallback.
-- [ ] A ready DMLS registry detects the new file through a delivered watch
+- [x] A ready DMLS registry detects the new file through a delivered watch
       event (no test-only invalidation), including removal, save notification,
       and fallback-mode rescan; change replay during an in-flight preparation
       prevents a stale install; a malformed nearer file follows last-good
       policy and recovers after repair.
-- [ ] Unchanged/unrelated inputs keep hits; ready lookups do no reads, hashes,
+- [x] Unchanged/unrelated inputs keep hits; ready lookups do no reads, hashes,
       or payload resolution; existing isolation, capacity (32), LRU, and
       embedded tests stay green.
 - [ ] `just test` and `just lint` pass in `darkmatter/`; docs, skill, and
@@ -167,36 +188,36 @@ Goal: `file_payload_memo` misses when any recorded candidate changes.
 
 ### Wave 2.1 — fingerprint (sequential)
 
-- [ ] **Extend `inputs_fingerprint`** (`assemble.rs` ~430) with the searched
+- [x] **Extend `inputs_fingerprint`** (`assemble.rs` ~430) with the searched
   candidates and each candidate's parent-folder observation: sorted, deduplicated
   folders; entry names for readable folders; a distinct marker for a missing
   folder versus an empty readable one; a per-candidate kind observation
   (absent / regular file / directory / other) so a swap that leaves entry names
   unchanged still misses. Keep `biscuit-hash`, do the I/O outside the mutex.
-- [ ] **Failed observation never validates a hit** — an unreadable directory
+- [x] **Failed observation never validates a hit** — an unreadable directory
   (other than expected "not found") forces a normal re-resolve so typed errors
   surface; avoid permission-bit tests (use existing seams).
-- [ ] **Store searched with the entry** — `Entry` fingerprint computed from
+- [x] **Store searched with the entry** — `Entry` fingerprint computed from
   `resolved.searched`; shared `Arc` identity on unchanged hits preserved;
   capacity 32/LRU/key unchanged.
-- [ ] **Comments** — replace the claim that root and selected-folder listings
+- [x] **Comments** — replace the claim that root and selected-folder listings
   cover every searched directory with the actual coverage.
 
 ### Wave 2.2 — library tests (after 2.1; extend `payload_memo_tests.rs`; tests parallelizable by author)
 
-- [ ] Acceptance 1: concrete example (hit, same object, create → miss + new
+- [x] Acceptance 1: concrete example (hit, same object, create → miss + new
   fields + new dependency, delete → fallback).
-- [ ] Acceptance 2: payload path, transitive import, example variants; keep the
+- [x] Acceptance 2: payload path, transitive import, example variants; keep the
   existing bare-name test as control; explicit relative refs get no fallback.
-- [ ] Acceptance 3: existing candidate parent; directory→regular file swap with
+- [x] Acceptance 3: existing candidate parent; directory→regular file swap with
   same entry name; failed observation is not a hit.
-- [ ] Acceptance 6 (library half): unrelated edit keeps hit; embedded,
+- [x] Acceptance 6 (library half): unrelated edit keeps hit; embedded,
   context-isolation, capacity and eviction tests green. Use tally counters, no
   sleeps or global cache clears.
 
 ### Checkpoint 2
 
-- [ ] `just test` and `just lint` in `darkmatter/` pass. The library regression
+- [x] `just test` and `just lint` in `darkmatter/` pass. The library regression
   is fixed on its own; DMLS still stale until Phase 3.
 
 ## Phase 3: Editor invalidation and watching (`dmls`)
@@ -211,30 +232,30 @@ subagents against an agreed interface: `Dependencies.searched: Vec<PathBuf>`
 plus `watch_folders()` returning a richer type (folder + "absent" marker) or
 a second set of absent-candidate folders.
 
-- [ ] **Record searched in `Preparation::run`** — populate `Dependencies` from
+- [x] **Record searched in `Preparation::run`** — populate `Dependencies` from
   `registry.searched_locations()` (lexical, normalized like `files`), no extra
   reads.
-- [ ] **`scope_affected`** — also affected when the event path equals a searched
+- [x] **`scope_affected`** — also affected when the event path equals a searched
   candidate, equals/contains-below a searched candidate's ancestor (directory
   events, R8), or its parent is a searched candidate's parent. Preserve the
   byte comparison for known dependency files; unrelated file events must not
   invalidate every registry.
-- [ ] **Failed preparation (R7)** — on error, union the previous scope's
+- [x] **Failed preparation (R7)** — on error, union the previous scope's
   searched/folders/absent into the retained scope's `Dependencies`; verify
   last-good policy and the root-failure rule (never serve last-good on root
   failure) are untouched.
-- [ ] **`watch_folders` / registration** — include searched candidate parents;
+- [x] **`watch_folders` / registration** — include searched candidate parents;
   for absent parents register the nearest existing ancestor base with patterns
   for the folder and its children (R8) in `schema_watch_registration`; bounded
   by recorded paths only, including external roots.
-- [ ] **Coverage advance** — after the event, the re-preparation recomputes
+- [x] **Coverage advance** — after the event, the re-preparation recomputes
   watch folders; confirm `router.rs` (~1652) re-registers when the set changes.
 
 ### Wave 3.2 — replay and fallback (after 3.1)
 
-- [ ] Confirm `Change` replay at `install` applies the new rules (event during
+- [x] Confirm `Change` replay at `install` applies the new rules (event during
   in-flight preparation leaves result stale or triggers follow-up).
-- [ ] Fallback watch mode: server rescan rebuilds from the new candidate
+- [x] Fallback watch mode: server rescan rebuilds from the new candidate
   state; a supported save notification for a candidate invalidates it. No
   promise for external changes without client events.
 
@@ -243,20 +264,20 @@ a second set of absent-candidate folders.
 Under `dmls/tests/l1` using the existing preparation test gate and work
 counters.
 
-- [ ] Acceptance 4: ready registry → create nearer folder+file → deliver
+- [x] Acceptance 4: ready registry → create nearer folder+file → deliver
   watched event → watch coverage asserted and schema behavior changes, no
   explicit invalidation; removal; save notification; fallback rescan.
-- [ ] Acceptance 5: gate held, creation event delivered, replay prevents a
+- [x] Acceptance 5: gate held, creation event delivered, replay prevents a
   stale response; malformed nearer file → last-good/error, recovers after
   repair (exercises R7).
-- [ ] Acceptance 6 (editor half): unrelated file events do not invalidate;
+- [x] Acceptance 6 (editor half): unrelated file events do not invalidate;
   ready lookups perform no reads/hashes/payload resolution.
-- [ ] Watch unit tests in `watch.rs`: registration for an absent nested
+- [x] Watch unit tests in `watch.rs`: registration for an absent nested
   candidate parent (nearest existing ancestor, folder + children patterns).
 
 ### Checkpoint 3
 
-- [ ] `just test` and `just lint` in `darkmatter/` pass; verify tests use
+- [x] `just test` and `just lint` in `darkmatter/` pass; verify tests use
   portable temp paths (path separators, case, `\\?\` simplification) so they
   compile on Windows/WSL2 — load the `os` skill before touching path
   comparisons.
