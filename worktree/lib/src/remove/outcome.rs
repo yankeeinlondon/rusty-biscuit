@@ -10,12 +10,13 @@
 use serde::{Deserialize, Serialize};
 use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
 
+use super::observation::ObservationDiagnostics;
 use super::recovery::OperationId;
 use super::recovery::journal::JournalEntry;
 
 /// Version of the [`OperationReport`] serialization. Bump it with any change
 /// to the persisted shape.
-pub const REPORT_VERSION: u32 = 4;
+pub const REPORT_VERSION: u32 = 5;
 
 /// The most activity observations a report lists. Later ones are counted in
 /// [`Truncation::activity_omitted`]; the deletion journal itself is never
@@ -294,6 +295,8 @@ pub struct EarlierAttempt {
     pub activity_omitted: u64,
     pub branches: Vec<BranchOutcome>,
     pub errors: Vec<String>,
+    /// That attempt's [`OperationReport::observation`].
+    pub observation: Option<ObservationDiagnostics>,
 }
 
 /// Everything known about one removal operation; persisted as
@@ -328,6 +331,11 @@ pub struct OperationReport {
     pub truncation: Truncation,
     /// Earlier attempts that saved a report, oldest first.
     pub earlier_attempts: Vec<EarlierAttempt>,
+    /// What this attempt's activity observation measured. `None` means
+    /// unknown: the attempt started no observer (it had nothing to delete),
+    /// or the report predates version 5, which lacks the field. An explicit
+    /// `null` reads the same way; neither is an error.
+    pub observation: Option<ObservationDiagnostics>,
 }
 
 impl OperationReport {
@@ -352,6 +360,7 @@ impl OperationReport {
             errors: Vec::new(),
             truncation: Truncation::default(),
             earlier_attempts: Vec::new(),
+            observation: None,
         }
     }
 
@@ -370,6 +379,7 @@ impl OperationReport {
             activity_omitted: earlier.truncation.activity_omitted,
             branches: earlier.branches,
             errors: earlier.errors,
+            observation: earlier.observation,
         });
     }
 
@@ -439,6 +449,142 @@ mod tests {
             state: BranchState::NotAttempted,
         });
         report
+    }
+
+    /// A report a version-4 `wt` saved: one earlier attempt, and no
+    /// `observation` field anywhere.
+    const VERSION_4_REPORT: &str = concat!(
+        r#"{"activity":[],"branches":[{"state":"not_attempted","target":{"local":{"name":"fix/path"}}}],"#,
+        r#""deleted":[],"discovery":[{"at_ms":2,"path":{"display":"/work/fix"},"purpose":"diagnostic","#,
+        r#""result":{"failed":{"kind":"root_not_found","message":"gone"}}}],"earlier_attempts":[{"activity":[],"#,
+        r#""activity_omitted":0,"branches":[{"state":"not_attempted","target":{"local":{"name":"fix/path"}}}],"#,
+        r#""discovery":[{"at_ms":2,"path":{"display":"/work/fix"},"purpose":"diagnostic","#,
+        r#""result":{"failed":{"kind":"root_not_found","message":"gone"}}}],"errors":[],"#,
+        r#""original_state":"recreated","outcome":"activity_detected","quarantine":{"identity":{"device":"1","#,
+        r#""inode":"2","kind":"unix"},"path":{"display":"/work/.wt-remove-fix-a91c"},"retained":[],"#,
+        r#""retained_entries":0,"state":"present"},"registration":"at_quarantine","timeline":[{"at_ms":1,"#,
+        r#""detail":null,"result":"succeeded","step":"moved"}]}],"errors":[],"#,
+        r#""journal":{"deleted":{"directories":0,"files":124,"links":0},"externally_absent":{"directories":0,"#,
+        r#""files":0,"links":0},"kept":{"directories":0,"files":0,"links":0},"planned":{"directories":0,"#,
+        r#""files":0,"links":0},"uncertain":{"directories":0,"files":1,"links":0}},"journal_entries":[],"#,
+        r#""notes":[],"operation_id":"0123456789abcdef0123456789abcdef","original":{"display":"/work/fix"},"#,
+        r#""original_state":"recreated","outcome":"activity_detected","quarantine":{"identity":{"device":"1","#,
+        r#""inode":"2","kind":"unix"},"path":{"display":"/work/.wt-remove-fix-a91c"},"retained":[],"#,
+        r#""retained_entries":0,"state":"present"},"registration":"at_quarantine","report_version":4,"#,
+        r#""timeline":[{"at_ms":1,"detail":null,"result":"succeeded","step":"moved"}],"#,
+        r#""truncation":{"activity_omitted":0,"deleted_omitted":0,"retained_omitted":0}}"#,
+    );
+
+    #[test]
+    fn a_version_4_report_reads_with_unknown_diagnostics_and_keeps_its_earlier_attempt() {
+        let report: OperationReport = serde_json::from_str(VERSION_4_REPORT).unwrap();
+
+        assert_eq!((report.report_version, report.observation.as_ref()), (4, None));
+        let [earlier] = report.earlier_attempts.as_slice() else { panic!("{:?}", report.earlier_attempts) };
+        assert_eq!((earlier.outcome, earlier.observation.as_ref()), (RemovalOutcome::ActivityDetected, None));
+        assert_eq!(earlier.discovery, report.discovery);
+
+        // A retry of it carries the attempt it read, still with unknown
+        // diagnostics, before its own.
+        let mut retry = OperationReport::new(report.operation_id.clone(), RemovalOutcome::Removed, report.original.clone());
+        retry.observation = Some(diagnostics());
+        retry.continue_from(report);
+        let observations: Vec<_> = retry.earlier_attempts.iter().map(|attempt| attempt.observation.clone()).collect();
+        assert_eq!(observations, vec![None, None]);
+        let back: OperationReport = serde_json::from_slice(&serde_json::to_vec(&retry).unwrap()).unwrap();
+        assert_eq!(back, retry);
+        assert_eq!(back.report_version, REPORT_VERSION);
+    }
+
+    fn diagnostics() -> ObservationDiagnostics {
+        serde_json::from_value(serde_json::json!({
+            "backend": "fs_events",
+            "startup_ms": 1_250,
+            "last_round_trip_ms": 40,
+            "longest_round_trip_ms": 12_000,
+            "loss": {
+                "stage": "deletion",
+                "reason": { "kind": "fs_events_dropped", "raw": 0x6, "flags": ["kernel_dropped", "user_dropped"] },
+                "entries_since_drain": 530,
+            },
+        }))
+        .unwrap()
+    }
+
+    /// The `observation` field through the report reader: present (the
+    /// control), absent or `null` (both unknown), and the wrong type
+    /// (refused). Earlier attempts read it the same way.
+    #[test]
+    fn the_observation_field_reads_present_absent_null_and_refuses_the_wrong_type() {
+        let mut report = stopped_report();
+        report.observation = Some(diagnostics());
+        let mut earlier = stopped_report();
+        earlier.observation = Some(diagnostics());
+        report.continue_from(earlier);
+        let control = serde_json::to_value(&report).unwrap();
+        assert_eq!(serde_json::from_value::<OperationReport>(control.clone()).unwrap(), report);
+
+        for (field, edit) in [
+            ("absent", None),
+            ("null", Some(serde_json::Value::Null)),
+        ] {
+            for at in ["top", "earlier"] {
+                let mut value = control.clone();
+                let object = if at == "top" { &mut value } else { &mut value["earlier_attempts"][0] };
+                match &edit {
+                    None => drop(object.as_object_mut().unwrap().remove("observation")),
+                    Some(null) => object["observation"] = null.clone(),
+                }
+                let read: OperationReport = serde_json::from_value(value).unwrap();
+                let observation = if at == "top" { read.observation } else { read.earlier_attempts[0].observation.clone() };
+                assert_eq!(observation, None, "{field} at {at} is unknown");
+            }
+        }
+        for wrong in [serde_json::json!("fs_events"), serde_json::json!({ "backend": 3 })] {
+            let mut value = control.clone();
+            value["observation"] = wrong.clone();
+            assert!(serde_json::from_value::<OperationReport>(value).is_err(), "{wrong}");
+        }
+        let mut value = control.clone();
+        value["observation"]["loss"]["reason"]["surprise"] = serde_json::json!(1);
+        assert!(serde_json::from_value::<OperationReport>(value).is_err(), "an unknown loss field is refused");
+    }
+
+    /// Every loss reason keeps its details through the report, durations as
+    /// whole milliseconds; the generic overflow and the full queue stay
+    /// distinct from the macOS payload.
+    #[test]
+    fn every_loss_reason_round_trips_through_the_report() {
+        use crate::remove::observation::{CoverageLost, FsEventsLossFlag, Root};
+        use std::time::Duration;
+        let reasons = [
+            (CoverageLost::Overflow, serde_json::json!({ "kind": "overflow" })),
+            (
+                CoverageLost::FsEventsDropped { raw: 0x1, flags: vec![FsEventsLossFlag::MustScanSubDirs] },
+                serde_json::json!({ "kind": "fs_events_dropped", "raw": 1, "flags": ["must_scan_sub_dirs"] }),
+            ),
+            (CoverageLost::QueueFull { capacity: 16_384 }, serde_json::json!({ "kind": "queue_full", "capacity": 16_384 })),
+            (CoverageLost::WatchLost { root: Root::Admin }, serde_json::json!({ "kind": "watch_lost", "root": "admin" })),
+            (CoverageLost::ReadFailed { message: "denied".into() }, serde_json::json!({ "kind": "read_failed", "message": "denied" })),
+            (
+                CoverageLost::DeliveryStalled { waited: Duration::from_millis(30_000), watch: Some(Root::Parent) },
+                serde_json::json!({ "kind": "delivery_stalled", "waited_ms": 30_000, "watch": "parent" }),
+            ),
+            (
+                CoverageLost::DrainCeiling { waited: Duration::from_secs(300), watch: None },
+                serde_json::json!({ "kind": "drain_ceiling", "waited_ms": 300_000, "watch": null }),
+            ),
+        ];
+        for (reason, json) in reasons {
+            let mut report = stopped_report();
+            let mut observation = diagnostics();
+            observation.loss.as_mut().unwrap().reason = reason.clone();
+            report.observation = Some(observation);
+            let value = serde_json::to_value(&report).unwrap();
+            assert_eq!(value["observation"]["loss"]["reason"], json, "{reason:?}");
+            let back: OperationReport = serde_json::from_value(value).unwrap();
+            assert_eq!(back.observation.unwrap().loss.unwrap().reason, reason);
+        }
     }
 
     #[test]

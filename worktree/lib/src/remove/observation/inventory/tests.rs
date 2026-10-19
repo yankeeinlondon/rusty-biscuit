@@ -187,7 +187,7 @@ fn the_finishing_check_refuses_each_kind_of_change_at_the_reported_path() {
         let inventory = DeletionInventory::capture(&checkout.path, &Checkout::sensitive()).unwrap();
         change_it(&checkout.path);
         injector.event(Root::Tree, reported, EventKind::Modified);
-        match inventory.confirm(&checkout.path, &observation.drain()) {
+        match inventory.confirm(&checkout.path, &observation.drain(&|| false)) {
             Err(InventoryRefusal::Changed { change, .. }) => assert_eq!(change, expected, "{name}"),
             other => panic!("{name}: {other:?}"),
         }
@@ -201,7 +201,7 @@ fn an_unchanged_path_or_no_event_passes_and_unreported_metadata_preserving_write
     let inventory = DeletionInventory::capture(&checkout.path, &Checkout::sensitive()).unwrap();
     injector.event(Root::Tree, "README.md", EventKind::Modified);
     injector.event(Root::Tree, "src", EventKind::Metadata);
-    inventory.confirm(&checkout.path, &observation.drain()).unwrap();
+    inventory.confirm(&checkout.path, &observation.drain(&|| false)).unwrap();
 
     // Other bytes, same size and time, in a file that is not hashed, and no
     // event: nothing can see it, which the report states as its limit.
@@ -209,16 +209,16 @@ fn an_unchanged_path_or_no_event_passes_and_unreported_metadata_preserving_write
     let before = fs::metadata(&path).unwrap().modified().unwrap();
     fs::write(&path, b"README\n").unwrap();
     set_modified(&path, before);
-    inventory.confirm(&checkout.path, &observation.drain()).unwrap();
+    inventory.confirm(&checkout.path, &observation.drain(&|| false)).unwrap();
     // The same edit reported: the hash-free check still passes, since the
     // inspected metadata did not change.
     injector.event(Root::Tree, "README.md", EventKind::Modified);
-    inventory.confirm(&checkout.path, &observation.drain()).unwrap();
+    inventory.confirm(&checkout.path, &observation.drain(&|| false)).unwrap();
     // A different time is detected.
     set_modified(&path, before + Duration::from_secs(5));
     injector.event(Root::Tree, "README.md", EventKind::Modified);
     assert!(matches!(
-        inventory.confirm(&checkout.path, &observation.drain()),
+        inventory.confirm(&checkout.path, &observation.drain(&|| false)),
         Err(InventoryRefusal::Changed { change: Change::Modified, .. })
     ));
 }
@@ -233,7 +233,7 @@ fn a_permission_change_is_a_modification() {
     fs::set_permissions(checkout.path.join("README.md"), fs::Permissions::from_mode(0o755)).unwrap();
     injector.event(Root::Tree, "README.md", EventKind::Metadata);
     assert!(matches!(
-        inventory.confirm(&checkout.path, &observation.drain()),
+        inventory.confirm(&checkout.path, &observation.drain(&|| false)),
         Err(InventoryRefusal::Changed { change: Change::Modified, .. })
     ));
 }
@@ -244,7 +244,7 @@ fn lost_coverage_or_a_replaced_root_refuses() {
     let (mut observation, injector) = observed(&checkout);
     let inventory = DeletionInventory::capture(&checkout.path, &[]).unwrap();
     injector.overflow();
-    assert!(matches!(inventory.confirm(&checkout.path, &observation.drain()), Err(InventoryRefusal::Coverage(CoverageLost::Overflow))));
+    assert!(matches!(inventory.confirm(&checkout.path, &observation.drain(&|| false)), Err(InventoryRefusal::Coverage(CoverageLost::Overflow))));
 
     let checkout = Checkout::new();
     let (mut observation, _injector) = observed(&checkout);
@@ -252,7 +252,7 @@ fn lost_coverage_or_a_replaced_root_refuses() {
     fs::rename(&checkout.path, checkout.parent.join("elsewhere")).unwrap();
     fs::create_dir(&checkout.path).unwrap();
     assert!(matches!(
-        inventory.confirm(&checkout.path, &observation.drain()),
+        inventory.confirm(&checkout.path, &observation.drain(&|| false)),
         Err(InventoryRefusal::Changed { change: Change::Replaced, .. })
     ));
 }
@@ -265,12 +265,12 @@ fn native_capturing_an_inventory_raises_nothing_the_check_refuses() {
     let admin = checkout.parent.join("admin");
     fs::create_dir_all(&admin).unwrap();
     let targets = Targets::new(&checkout.path, &checkout.parent.join(".wt-remove-checkout-0123"), &admin).unwrap();
-    let mut observation = Observation::start(targets, ObserverOptions::default()).unwrap();
+    let mut observation = Observation::start(targets, ObserverOptions::default(), &|| false).unwrap();
     let inventory = DeletionInventory::capture(&checkout.path, &Checkout::sensitive()).unwrap();
-    inventory.confirm(&checkout.path, &observation.drain()).unwrap();
+    inventory.confirm(&checkout.path, &observation.drain(&|| false)).unwrap();
 
     fs::write(checkout.path.join("target").join("late.o"), b"x").unwrap();
-    match inventory.confirm(&checkout.path, &observation.drain()) {
+    match inventory.confirm(&checkout.path, &observation.drain(&|| false)) {
         Err(InventoryRefusal::Changed { path, change: Change::Appeared }) => {
             assert!(path.ends_with(Path::new("target").join("late.o")), "{path:?}");
         }

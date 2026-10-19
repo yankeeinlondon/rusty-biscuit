@@ -56,9 +56,9 @@ use super::admin_entry::{BackReferenceError, read_back_reference, same_location}
 use super::included::classify_included;
 use super::inventory::{Inventory, collect_inventory};
 use super::missing::{IndexBinding, MissingRefusal, bind_index, recorded_head};
-use super::observation::deletion::{DeletionOptions, delete_content_with, own_move};
+use super::observation::deletion::{DeletionOptions, Stop, delete_content_with, own_move};
 use super::observation::inventory::{DeletionInventory, InventoryRefusal};
-use super::observation::{Drain, EventKind, Observation, ObservationError, ObserverOptions, Scope, Targets};
+use super::observation::{DiagnosticsHandle, Drain, EventKind, Observation, ObservationError, ObserverOptions, Scope, Targets};
 use super::outcome::{
     ActivityKind, ActivityLocation, BranchOutcome, BranchState, BranchTarget, DiscoveryPurpose, DiscoveryResult,
     DiscoveryRun, ObservedActivity, OperationReport, OriginalState, QuarantineReport, QuarantineState, RegistrationState,
@@ -142,24 +142,26 @@ pub struct RemovalRequest<'a> {
 }
 
 /// How an observer is started: `moved` says the tree is already at the
-/// quarantine.
-pub type StartObservation<'a> = dyn Fn(Targets, bool) -> Result<Observation, ObservationError> + 'a;
+/// quarantine; the predicate is [`Environment::interrupted`].
+pub type StartObservation<'a> = dyn Fn(Targets, bool, &dyn Fn() -> bool) -> Result<Observation, ObservationError> + 'a;
 
 /// What the lifecycle asks of its surroundings. Tests inject each.
 pub struct Environment<'a> {
     pub usage: &'a dyn UsageSource,
     /// Polled once before the move, where it refuses with nothing changed,
-    /// and at every deletion entry boundary, where it stops the removal.
+    /// at every deletion entry boundary, where it stops the removal, and by
+    /// every wait for change delivery, which it ends at once: before the
+    /// move that refuses, after it the removal stops.
     pub interrupted: &'a dyn Fn() -> bool,
     pub observe: &'a StartObservation<'a>,
 }
 
 /// [`StartObservation`] with this platform's native adapter.
-pub fn native_observation(targets: Targets, moved: bool) -> Result<Observation, ObservationError> {
+pub fn native_observation(targets: Targets, moved: bool, interrupted: &dyn Fn() -> bool) -> Result<Observation, ObservationError> {
     if moved {
-        Observation::start_at_quarantine(targets, ObserverOptions::default())
+        Observation::start_at_quarantine(targets, ObserverOptions::default(), interrupted)
     } else {
-        Observation::start(targets, ObserverOptions::default())
+        Observation::start(targets, ObserverOptions::default(), interrupted)
     }
 }
 
@@ -339,8 +341,9 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         return refuse(Refusal::Ineligible(MoveRefusal::Unsupported("its quarantine is not a sibling".into())));
     };
     let mut timeline = Vec::new();
-    let mut observation = match (env.observe)(targets, false) {
+    let mut observation = match (env.observe)(targets, false, env.interrupted) {
         Ok(observation) => observation,
+        Err(ObservationError::Interrupted) => return refuse(Refusal::Interrupted),
         Err(error) => return refuse(Refusal::Observation(error)),
     };
     timeline.push(event(Step::ObservationStarted, StepResult::Succeeded, None));
@@ -367,7 +370,7 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
     }
     // Rechecking ran `git status`, which may rewrite the index; the binding
     // is taken after it, so admin events up to here are not refused.
-    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(), &plan.original, Tree::AtOriginal, true) {
+    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, true) {
         return refuse(refusal);
     }
     let binding = match bind_index(base, &plan.admin, approval.tip.clone()) {
@@ -397,18 +400,19 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
         return Ok(discard(operation, Refusal::Interrupted));
     }
     // The last look before the move; anything since the binding refuses.
-    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(), &plan.original, Tree::AtOriginal, false) {
+    if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(env.interrupted), &plan.original, Tree::AtOriginal, false) {
         return Ok(discard(operation, refusal));
     }
     let moved = {
         let observation = RefCell::new(&mut observation);
-        move_to_quarantine(base, &plan, &|| unexpected_before_rollback(&mut observation.borrow_mut()))
+        move_to_quarantine(base, &plan, &|| unexpected_before_rollback(&mut observation.borrow_mut(), env.interrupted))
     };
 
     let mut report = OperationReport::new(Some(id), RemovalOutcome::Removed, NativeString::from(plan.original.as_path()));
     report.timeline = timeline;
     report.discovery.extend(preflight_runs(discovered_at, NativeString::from(plan.original.as_path()), clearance));
     let mut attempt = Attempt::new(base, env, operation, report, branches, &plan.original, &plan.quarantine, plan.identity, &plan.admin.dir);
+    attempt.observed_by(&observation);
     match moved {
         Ok(()) => {}
         Err(error) if error.nothing_changed() => return Ok(discard(attempt.operation, Refusal::Move(error))),
@@ -423,7 +427,7 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
             return Ok(attempt.stop(RemovalOutcome::CleanupFailed, error));
         }
     }
-    observation.moved_to_quarantine();
+    observation.moved_to_quarantine(env.interrupted);
     attempt.step(Step::Moved, StepResult::Succeeded, None);
     attempt.step(Step::AssociationUpdated, StepResult::Succeeded, None);
     attempt.report.original_state = OriginalState::Moved;
@@ -443,12 +447,15 @@ pub(crate) fn run_with(request: &RemovalRequest<'_>, env: &Environment<'_>, hook
     }
     // The move's own events: explained here, since the deletion engine
     // treats every admin event as activity.
-    let own = observation.drain();
+    let own = observation.drain(env.interrupted);
     if let Some((outcome, activity, why)) = unexplained_move_events(&plan, &own) {
         for observed in activity {
             attempt.report.push_activity(observed);
         }
         return Ok(attempt.stop(outcome, why));
+    }
+    if own.interrupted {
+        return Ok(attempt.stop(Stop::Interrupted.outcome(), Stop::Interrupted));
     }
     attempt.delete(observation, &binding, hook)
 }
@@ -509,10 +516,13 @@ enum Tree {
 /// The finishing consistency check before a mutation: every tree path
 /// `drain` names must still match `inventory` (the tree is at `root`),
 /// nothing may appear at the other location, and admin events refuse unless
-/// `admin_allowed`.
+/// `admin_allowed`. A drain the interrupt ended refuses as an interrupt.
 fn confirm_unchanged(inventory: &DeletionInventory, drain: &Drain, root: &Path, tree: Tree, admin_allowed: bool) -> Result<(), Refusal> {
     if let Some(lost) = &drain.lost {
         return Err(Refusal::Inventory(InventoryRefusal::Coverage(lost.clone())));
+    }
+    if drain.interrupted {
+        return Err(Refusal::Interrupted);
     }
     let mut tree_events = Vec::new();
     for observed in &drain.events {
@@ -538,15 +548,16 @@ fn confirm_unchanged(inventory: &DeletionInventory, drain: &Drain, root: &Path, 
             }
         }
     }
-    inventory.confirm(root, &Drain { events: tree_events, lost: None }).map_err(Refusal::Inventory)
+    inventory.confirm(root, &Drain { events: tree_events, lost: None, interrupted: false }).map_err(Refusal::Inventory)
 }
 
 /// Called by a move whose association failed, before it undoes the rename:
-/// anything but the move's own events, or lost coverage, keeps the
-/// quarantine in place.
-fn unexpected_before_rollback(observation: &mut Observation) -> bool {
-    let drain = observation.drain();
+/// anything but the move's own events, lost coverage, or a wait the
+/// interrupt ended keeps the quarantine in place.
+fn unexpected_before_rollback(observation: &mut Observation, interrupted: &dyn Fn() -> bool) -> bool {
+    let drain = observation.drain(interrupted);
     drain.lost.is_some()
+        || drain.interrupted
         || drain.events.iter().any(|observed| match &observed.scope {
             Scope::Original(relative) | Scope::Quarantine(relative) | Scope::Tree(relative) => !relative.as_os_str().is_empty(),
             Scope::Admin(name) => name != "gitdir",
@@ -671,6 +682,9 @@ struct Attempt<'a> {
     /// The report lists every journal entry, so completion may delete the
     /// journals.
     journal_reported: bool,
+    /// The attempt's observer, read into the report whenever it is saved;
+    /// `None` for an attempt that started none.
+    observation: Option<DiagnosticsHandle>,
 }
 
 impl<'a> Attempt<'a> {
@@ -698,6 +712,17 @@ impl<'a> Attempt<'a> {
             admin_dir: admin_dir.to_path_buf(),
             warnings: Vec::new(),
             journal_reported: false,
+            observation: None,
+        }
+    }
+
+    fn observed_by(&mut self, observation: &Observation) {
+        self.observation = Some(observation.diagnostics_handle());
+    }
+
+    fn record_observation(&mut self) {
+        if let Some(observation) = &self.observation {
+            self.report.observation = Some(observation.snapshot());
         }
     }
 
@@ -735,7 +760,7 @@ impl<'a> Attempt<'a> {
         if hook(Boundary::ContentRemoved) {
             return Err(Crashed);
         }
-        match unregister_quarantine(self.base, &mut observation, binding) {
+        match unregister_quarantine(self.base, &mut observation, binding, self.env.interrupted) {
             Ok(warning) => self.warnings.extend(warning.map(|warning| format!("could not delete the copy record: {warning}"))),
             Err(error) => {
                 if let UnregisterError::Activity(activity) = &error {
@@ -817,6 +842,7 @@ impl<'a> Attempt<'a> {
             return Err(Crashed);
         }
         self.step(Step::Completed, StepResult::Succeeded, None);
+        self.record_observation();
         let Self { operation, report, mut warnings, journal_reported, .. } = self;
         let report_path = operation.report_path();
         match operation.complete(&report, journal_reported) {
@@ -952,6 +978,7 @@ impl<'a> Attempt<'a> {
     }
 
     fn save_report(&mut self) {
+        self.record_observation();
         if let Err(error) = self.operation.save_report(&self.report) {
             self.warnings.push(format!("the report could not be saved: {error}"));
         }

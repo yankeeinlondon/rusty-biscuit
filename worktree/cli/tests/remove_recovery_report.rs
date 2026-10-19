@@ -336,6 +336,7 @@ fn a_stop_tells_its_checks_apart() {
         activity_omitted: 0,
         branches: Vec::new(),
         errors: Vec::new(),
+        observation: None,
     });
 
     let markup = stopped_markup_of(retry);

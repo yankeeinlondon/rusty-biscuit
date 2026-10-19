@@ -14,8 +14,59 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .claude/skills/worktree/observation.md
+source_files_during_phase_2:
+  - worktree/lib/src/remove/observation/wait.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/inventory/tests.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/quarantine/unregister/tests.rs
+docs_updated_during_phase_2:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_3:
+  - worktree/lib/src/remove/observation/diagnostics.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/wait.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+docs_updated_during_phase_3:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/worktree/lifecycle.md
 packages:
   - worktree
+  - worktree-cli
 ---
 
 # Plan: `wt remove` under a slow or overrun change watcher
@@ -166,7 +217,7 @@ Wave 1 runs the two adapters concurrently; they share only the Phase 1 helper.
 
 ### Wave 1
 
-- [ ] **macOS wait.** In `fsevents.rs`:
+- [x] **macOS wait.** In `fsevents.rs`:
     - Remove `DRAIN_TIMEOUT` and rewrite `barrier()` and `marker_round()`
       around `WaitState`; the ceiling spans every marker round of one drain.
     - Feed `progress()` from newly acknowledged markers and in-scope events
@@ -178,7 +229,7 @@ Wave 1 runs the two adapters concurrently; they share only the Phase 1 helper.
       the flush where the wait can still check deadlines, or bound each flush
       and recheck; do not hold the queue lock while waiting.
     - Update the module docs that cite `DRAIN_TIMEOUT`.
-- [ ] **Windows wait.** In `read_directory_changes.rs`:
+- [x] **Windows wait.** In `read_directory_changes.rs`:
     - Replace the single `Instant::now() + DRAIN_TIMEOUT` deadline with
       `WaitState` keyed per awaited handle; progress on the parent handle must
       not reset the admin handle's stall clock, and the reverse.
@@ -188,23 +239,23 @@ Wave 1 runs the two adapters concurrently; they share only the Phase 1 helper.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Interrupt integration.** Thread the interrupt from the deletion
+- [x] **Interrupt integration.** Thread the interrupt from the deletion
       engine and lifecycle call sites into `Observation::drain` and the
       startup path (R1); keep before/after-move interruption behavior.
       Linux adapter accepts and ignores the signal.
-- [ ] **Test seam at the wait boundary.** Existing `Injector::delayed` /
+- [x] **Test seam at the wait boundary.** Existing `Injector::delayed` /
       `deliver_delayed` feed only the event queue. Extend `injected.rs` (and
       each adapter's test module) so marker acknowledgments and in-scope events
       can be delivered on a controlled clock, then prove startup, drain, and
       admin-release each use the policy.
-- [ ] **Tests (L1).** Interrupt ends a wait without waiting for a deadline;
+- [x] **Tests (L1).** Interrupt ends a wait without waiting for a deadline;
       sticky loss ends waiting and blocks further deletion; the first loss and
       prior events are preserved. macOS tests stay in nextest's `fsevents-l1`
       group.
 
 ### Validation checkpoint
 
-- [ ] `just test worktree` on macOS; the Windows adapter cannot compile here, so
+- [x] `just test worktree` on macOS; the Windows adapter cannot compile here, so
       plan the Windows and WSL2 proof through the `os` skill's reachable hosts
       (load it before claiming otherwise) and the existing receipts rules.
 
@@ -214,32 +265,32 @@ Wave 1 tasks touch separate files and run concurrently; Wave 2 depends on both.
 
 ### Wave 1
 
-- [ ] **macOS loss payload.** In `fsevents.rs` callback, keep the raw mask and
+- [x] **macOS loss payload.** In `fsevents.rs` callback, keep the raw mask and
       all present named flags (`KernelDropped`, `UserDropped`,
       `MustScanSubDirs`); `MustScanSubDirs` alone still loses coverage. Add the
       payload variant (R7); keep `QueueFull` distinct. Tests feed each flag
       and a combined mask through the existing callback seam.
-- [ ] **Deletion cadence.** In `deletion.rs` make the default
+- [x] **Deletion cadence.** In `deletion.rs` make the default
       `drain_every` 512 on macOS and 2,048 on Linux (including WSL2) and
       Windows; delete the comment equating 2,048 deletions with a kernel
       buffer size. Keep depth-level drains, the 256-entry journal batch, and
       the "evaluate after each completed batch" rule. Extend the existing
       drain-count test: macOS default, overshoot bounded by one batch minus
       one entry, depth-level drains still happen.
-- [ ] **Diagnostics type.** Define the observation diagnostic struct (R8)
+- [x] **Diagnostics type.** Define the observation diagnostic struct (R8)
       and have `Observation` track last and longest marker round-trip, and the
       stage where a loss was received. No sample accumulation.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Report persistence.** Add the optional field to `OperationReport`
+- [x] **Report persistence.** Add the optional field to `OperationReport`
       and to the earlier-attempt representation; `REPORT_VERSION` = 5; resumes
       carry earlier attempts forward; old v4 files read with diagnostics
       unknown.
-- [ ] **Startup failures.** Carry diagnostics through `ObservationError`
+- [x] **Startup failures.** Carry diagnostics through `ObservationError`
       paths so the CLI can show them before a recovery record exists, without
       promising a report path.
-- [ ] **Tests (L1).** Serialized loss details with all flags, including
+- [x] **Tests (L1).** Serialized loss details with all flags, including
       `MustScanSubDirs` alone; generic `Overflow` and `QueueFull` unchanged on
       Linux and Windows; an old v4 report fixture stays readable with earlier
       attempts preserved; no new required fields in recovery records or
@@ -259,7 +310,7 @@ doc comment.
 
 ### Validation checkpoint
 
-- [ ] `just test worktree` and `just lint` pass; report round-trip and old-report
+- [x] `just test worktree` and `just lint` pass; report round-trip and old-report
       tests are green.
 
 ## Phase 4: Resume consent

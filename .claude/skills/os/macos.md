@@ -165,6 +165,14 @@ Measured with `fsevent-sys` 4.1 at latency 0:
   watched-path event, and treats anything later as arriving in a later drain
   (`worktree/lib/src/remove/observation/fsevents.rs`). A round costs ~11 ms
   idle, up to ~650 ms under suite load.
+- **Wait without the blocking flush, but keep flushing.** `FlushSync` blocks
+  for as long as fseventsd takes, so a wait cannot check a deadline or Ctrl-C
+  while inside it. `FSEventStreamFlushAsync` returns at once and may be called
+  from another thread than the run loop's. One async flush per marker round is
+  not enough: the stream then holds the marker for its latency (0.1 s in
+  `wt`), which made each round ~100 ms and the macOS observation tests about
+  7x slower. Re-issue it every ~1 ms while waiting (`wt` does this in the
+  wait's park step).
 - **`FSEventStreamStart` returns before events are routed.** Confirm with one
   marker before relying on the stream.
 - **Removing or renaming a directory replaces its pending child events** in

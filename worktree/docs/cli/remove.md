@@ -238,9 +238,16 @@ it) instead of the folder holding them, with the same effect. Each check for
 new activity first writes a marker file into a private folder in your
 per-user temporary directory (`wt-observe-<random>`, removed when the
 removal ends) and waits until the system reports it, because only then has
-every earlier change been reported. A check that is not confirmed within 5
-seconds counts as lost coverage, and so does the folder holding the checkout,
-or Git's record of the worktree, being moved or deleted while watching runs.
+every earlier change been reported. A check keeps waiting while reports keep
+arriving: it gives up after 30 seconds in which nothing relevant arrives (the
+marker, or a change at the checkout's locations), or once it has taken
+5 minutes in total, and either counts as lost coverage. The same limits apply
+while watching starts, around the move, and before Git's record is removed.
+Ctrl-C ends a wait at once: before the move the removal stops with nothing
+changed, and after it the removal stops as at any other interrupt, leaving a
+pending removal that a retry continues. The folder holding the checkout, or
+Git's record of the worktree, being moved or deleted while watching runs also
+counts as lost coverage.
 macOS can report a folder's removal or rename in place of changes inside it
 that happened just before, so `wt` checks for activity after deleting a
 folder's contents and before removing the folder itself.
@@ -251,9 +258,12 @@ Changes in sibling worktrees still reach `wt` there, which ignores them. Each
 check for new activity creates a hidden marker file
 (`.wt-observe-<random>-<number>`) in each of those two folders and waits until
 Windows reports it, because Windows reports each folder's changes in order. The
-marker deletes itself when `wt` closes it, even if `wt` crashes. As on macOS,
-a check that is not confirmed within 5 seconds counts as lost coverage, and
-so does either folder being moved or deleted. So does Windows reporting that
+marker deletes itself when `wt` closes it, even if `wt` crashes. Checks wait
+under the same limits as on macOS, and Ctrl-C ends them the same way, but the
+30 seconds are counted separately for each of the two watches, so activity in
+the folder holding the checkout never hides a silent watch on Git's record. A
+check that gives up counts as lost coverage and names the watch that went
+silent, and so does either folder being moved or deleted. So does Windows reporting that
 it dropped changes because too many arrived at once. `wt` stops watching
 Git's record before the step that removes it, so that step is never blocked.
 Windows reports a change to a file's attributes the same way as a change to its
@@ -295,8 +305,8 @@ flowchart TD
   to be the folder in the list. A folder replaced by a link is never entered,
   so nothing outside the checkout is deleted. A link in the checkout is
   deleted itself; its target is untouched.
-- Reported changes are checked after each level (and after every 2,048
-  entries): a change at a path `wt` deleted must still be a deletion, a
+- Reported changes are checked after each level (and after every 512
+  entries on macOS, 2,048 elsewhere): a change at a path `wt` deleted must still be a deletion, a
   change to an entry not yet reached must leave it matching the list, and
   anything else at either location, or in Git's record of the worktree, stops
   removal. A folder whose contents are gone but which cannot be removed (a new
@@ -414,9 +424,24 @@ read, the journals are kept and `wt remove` warns.
   each location after a stop), and `windows_search_hold` (a first check that
   found only Windows Search; the `preflight` after it is the one recheck that
   decided).
+- `observation` describes the run's change watching: the `backend`
+  (`fs_events`, `inotify`, or `read_directory_changes`), how long watching
+  took to start (`startup_ms`), and the latest and longest time a check's
+  marker took to be reported (`last_round_trip_ms`, `longest_round_trip_ms`;
+  absent until one is, and always on Linux, which uses no markers). If
+  coverage was lost, `loss` says where (`stage`: `startup`, `pre_move`,
+  `post_move`, `deletion`, or `unregistration`), why (`reason`), and, during
+  deletion, how many entries `wt` had processed since its previous check
+  (`entries_since_drain`). On macOS a dropped-notification `reason` keeps the
+  system's whole flag mask (`raw`) and names every loss flag in it
+  (`kernel_dropped`, `user_dropped`, `must_scan_sub_dirs`). The round trips
+  time markers only, and the deletion count is context, not proof that `wt`
+  caused a drop. A report saved by an older `wt` has no `observation`, which
+  reads as unknown.
 - `earlier_attempts` keeps what each earlier run reported when it stopped:
   its outcome, both locations, timeline, process checks, observed activity,
-  branch results, and errors. The top-level fields describe the last run.
+  change-watching `observation`, branch results, and errors. The top-level
+  fields describe the last run.
 
 For example, a removal interrupted after deleting 4 files, then retried to
 completion, ends with a report like this (abridged):
@@ -430,6 +455,25 @@ completion, ends with a report like this (abridged):
     { "attempt": 2, "batch": 1, "path": { "display": "README.md" }, "kind": "file", "state": "deleted" }
   ],
   "earlier_attempts": [{ "outcome": "cleanup_failed", "errors": ["the removal was interrupted"], "...": "..." }]
+}
+```
+
+A macOS run that stopped because the system dropped notifications during
+deletion records its watching like this:
+
+```json
+{
+  "observation": {
+    "backend": "fs_events",
+    "startup_ms": 14,
+    "last_round_trip_ms": 9,
+    "longest_round_trip_ms": 31,
+    "loss": {
+      "stage": "deletion",
+      "reason": { "kind": "fs_events_dropped", "raw": 6, "flags": ["kernel_dropped", "user_dropped"] },
+      "entries_since_drain": 512
+    }
+  }
 }
 ```
 

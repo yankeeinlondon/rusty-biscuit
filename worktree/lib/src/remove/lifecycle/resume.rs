@@ -24,7 +24,7 @@ use super::{
 use crate::availability::{self, EntryKind};
 use crate::remove::admin_entry::{AdminEntry, common_git_dir, same_location};
 use crate::remove::missing::{MissingCheckout, MissingRefusal, bind_index, remove_missing_record};
-use crate::remove::observation::Targets;
+use crate::remove::observation::{Drain, Observation, ObservationError, Targets};
 use crate::remove::observation::inventory::DeletionInventory;
 use crate::remove::outcome::{
     JournalSummary, OperationReport, OriginalState, QuarantineReport,
@@ -403,8 +403,9 @@ impl<'r, 'a> Resumed<'r, 'a> {
         let Some(targets) = Targets::new(self.original(), quarantine, self.admin()) else {
             return refuse(Refusal::Ineligible(MoveRefusal::Unsupported("its quarantine is not a sibling".into())));
         };
-        let mut observation = match (self.env.observe)(targets, true) {
+        let mut observation = match (self.env.observe)(targets, true, self.env.interrupted) {
             Ok(observation) => observation,
+            Err(ObservationError::Interrupted) => return refuse(Refusal::Interrupted),
             Err(error) => return refuse(Refusal::Observation(error)),
         };
         let inventory = match DeletionInventory::capture(quarantine, &approval.inventory.consent_sensitive_paths()) {
@@ -421,7 +422,7 @@ impl<'r, 'a> Resumed<'r, 'a> {
         if let Err(refusal) = recheck(base, &entry, quarantine, approval) {
             return refuse(refusal);
         }
-        if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(), quarantine, Tree::AtQuarantine, true) {
+        if let Err(refusal) = confirm_unchanged(&inventory, &checked_drain(&mut observation, self.env.interrupted), quarantine, Tree::AtQuarantine, true) {
             return refuse(refusal);
         }
         let binding = match bind_index(base, &AdminEntry { dir: self.admin().to_path_buf() }, approval.tip.clone()) {
@@ -442,16 +443,17 @@ impl<'r, 'a> Resumed<'r, 'a> {
             report.timeline.push(event(Step::Discovery, StepResult::Succeeded, Some(search.summary(true))));
         }
         report.discovery.extend(preflight_runs(discovered_at, self.record.quarantine.clone(), clearance));
-        let attempt = match self.attempt(lock, Arc::clone(&inventory), report) {
+        let mut attempt = match self.attempt(lock, Arc::clone(&inventory), report) {
             Ok(attempt) => attempt,
             Err(refusal) => return refuse(refusal),
         };
+        attempt.observed_by(&observation);
         if hook(Boundary::Begun) {
             return Err(Crashed);
         }
         // The last look before deleting; this attempt has changed nothing
         // yet, and the operation stays pending as it was.
-        if let Err(refusal) = confirm_unchanged(&inventory, &observation.drain(), quarantine, Tree::AtQuarantine, false) {
+        if let Err(refusal) = confirm_unchanged(&inventory, &checked_drain(&mut observation, self.env.interrupted), quarantine, Tree::AtQuarantine, false) {
             return refuse(refusal);
         }
         attempt.delete(observation, &binding, hook)
@@ -537,4 +539,13 @@ fn listed_at(base: &Path, path: &Path) -> Result<WorktreeEntry, Refusal> {
         Ok([entry]) => Ok(entry),
         Err(found) => Err(Refusal::Changed(format!("Git's worktree list shows the moved checkout {} times", found.len()))),
     }
+}
+
+/// A drain for a resumed attempt's checks before deletion. The checkout was
+/// moved by an earlier attempt, so an interrupt here is left to the deletion
+/// engine, which stops at its first drain with the report any interrupt after
+/// the move gets; refusing would say that nothing was moved. The events are
+/// still checked.
+fn checked_drain(observation: &mut Observation, interrupted: &dyn Fn() -> bool) -> Drain {
+    Drain { interrupted: false, ..observation.drain(interrupted) }
 }

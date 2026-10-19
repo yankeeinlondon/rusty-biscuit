@@ -51,7 +51,10 @@ actions → `Operation::complete`.
   `preflight_runs` records the first report as a `WindowsSearchHold`
   discovery run before the `Preflight` one, and the `Discovery` timeline
   event carries `SearchRecheck::summary` (the retry pushes that event only
-  when it rechecked). `REPORT_VERSION` 4 added the purpose.
+  when it rechecked). `REPORT_VERSION` 4 added the purpose; 5 added the
+  optional `observation` diagnostics on the report and on each
+  `EarlierAttempt` (absent or `null` reads as unknown, so v4 reports still
+  load).
 - **The recheck runs `git status`, which may rewrite the index**, so its admin
   events are drained before `bind_index` and allowed; any admin event after
   the binding refuses (before the move) or stops (after it).

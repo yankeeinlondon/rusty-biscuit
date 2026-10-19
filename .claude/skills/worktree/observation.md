@@ -5,25 +5,60 @@ removal ends, and the deletion inventory and checked deletion engine built on
 it (`2026-10-05-graceful-file-contention`, Phases 6-9). User-facing behavior
 is in `worktree/docs/cli/remove.md`.
 
-`Observation::start(Targets::new(original, quarantine, admin)?, options)`
+`Observation::start(Targets::new(original, quarantine, admin)?, options, interrupted)`
 watches the parent (only the original's and the quarantine's names), every
 directory of the tree, and the admin files in `ADMIN_FILES` plus
-`sharedindex.*`. `drain()` returns a `Drain { events, lost }`: events carry a
+`sharedindex.*`. `drain(interrupted)` returns a
+`Drain { events, lost, interrupted }`: events carry a
 `Scope` (`Tree(rel)` wherever the tree now is, `Original(rel)`,
 `Quarantine(rel)`, `Admin(name)`) and a receipt time. Events are facts; the
 deletion engine decides which are the operation's own.
 
 - **Lost coverage is sticky.** The first `CoverageLost` (`Overflow`,
-  `QueueFull`, `WatchLost { root }`, `ReadFailed`, `DeliveryStalled`, `DrainCeiling`) is returned by every later
+  `FsEventsDropped { raw, flags }` on macOS, `QueueFull`, `WatchLost { root }`,
+  `ReadFailed`, `DeliveryStalled`, `DrainCeiling`) is returned by every later
   drain. Events received before the loss are still returned, for the report.
+  `CoverageLost` is serialized into `report.json` (tagged by `kind`, durations
+  as `waited_ms`), so changing a variant changes the report's shape.
+- **Diagnostics.** `Observation::diagnostics()` (and `diagnostics_handle()`,
+  which outlives the session) holds one `ObservationDiagnostics` per attempt:
+  backend, `startup_ms` (set by `Observation::start`), last and longest
+  confirmed marker round trip (`Outcome::Confirmed { round_trip }` from
+  `await_marker`, kept by each adapter's `Backend::round_trips`), and the
+  first loss with the `ObservationStage` of the drain that received it. The
+  stage follows `moved` until the deletion engine and unregistration call
+  `enter_stage`; the engine drains through `drain_after(entries)`, which
+  records `entries_since_drain`. A startup confirmation that loses coverage is
+  `ObservationError::NotDelivering(diagnostics)` (still exit 4), not `Setup`.
+  The lifecycle's `Attempt::observed_by` copies the snapshot into every saved
+  report.
 - **Register before the usage query.** `register_handles(&mut OwnedHandles)`
   must run before `check_usage`. On Linux, Sniff reports each watch inside the
   checkout as `WatchRegistration` with the inotify instance's fd as
   `descriptor`; unregistered, `wt` refuses its own removal (pinned by
   `inotify::tests::sniff_sees_the_watches_until_the_session_ends`).
-- **Call `moved_to_quarantine()` right after the rename** and
-  `release_admin()` before the step that unregisters the worktree. Without the
-  release, Git deleting the admin directory is `WatchLost { Admin }`.
+- **Call `moved_to_quarantine(interrupted)` right after the rename** and
+  `release_admin(interrupted)` before the step that unregisters the worktree.
+  Without the release, Git deleting the admin directory is
+  `WatchLost { Admin }`. An interrupted release returns `WaitInterrupted` and
+  keeps the watch; unregistration then stops (`UnregisterError::Interrupted`).
+- **Every wait for delivery runs under `ObserverOptions::wait`
+  (`WaitPolicy`, default 30 s stall / 5 min ceiling) and polls the
+  interrupt.** `wait.rs` owns it: `WaitState` keeps one stall clock per
+  awaited key plus one ceiling, and `await_marker` reads a `Source` (the
+  adapters' `Delivery`: highest marker and in-scope event count per key, a
+  generation, a condvar) and returns `Confirmed | Lost | Interrupted |
+  Stalled | Ceiling`. Progress is only a higher marker or an in-scope event
+  (`EventQueue::push` returns whether the event classified); siblings,
+  unreported admin files, and a marker's own cleanup are not. The interrupt
+  and recorded loss are polled every `POLL_INTERVAL` (50 ms). An interrupted
+  wait records no loss: startup returns `ObservationError::Interrupted`
+  (the lifecycle maps it to `Refusal::Interrupted`, exit 1, not exit 4), a
+  drain sets `Drain::interrupted` (`confirm_unchanged` refuses before the
+  move, the deletion engine and the post-move drain stop as
+  `Stop::Interrupted`), and an interrupted `moved_to_quarantine` is reported
+  by the next drain. Once coverage is lost, a drain does not wait again.
+  Linux ignores both: reading until empty never waits.
 - **Out-of-scope events are dropped before the bound counts them**
   (`Targets::classify`, used by `Sink` and `EventQueue`), so a busy sibling
   never fills the queue.
@@ -40,19 +75,27 @@ deletion engine decides which are the operation's own.
   (`<confstr(_CS_DARWIN_USER_TEMP_DIR)>/wt-observe-<hex>`), not the parent:
   FSEvents is recursive, so a parent watch would carry every sibling's
   activity. Facts measured in Phase 7 that shape it:
-  - **`FSEventStreamFlushSync` alone is not a barrier** (1 of 50
-    write-then-flush rounds missed the write). The drain writes a marker,
-    flushes every 1 ms until the marker's event arrives (about 11 ms idle),
-    and `DRAIN_TIMEOUT` (5 s) without it is `CoverageLost::DeliveryStalled`.
-    Works with the checkout on another volume than the marker.
+  - **A flush alone is not a barrier** (1 of 50 write-then-flush rounds
+    missed the write). The drain writes a marker and waits for its event,
+    calling the non-blocking `FSEventStreamFlushAsync` every 1 ms
+    (`FLUSH_INTERVAL`, via the `Flushing` source) while it waits; about
+    11 ms idle. The blocking `FlushSync` is no longer used, so a wait can
+    always check its deadlines and the interrupt. Flushing only once per
+    round left each marker to the stream's 0.1 s latency and made the
+    macOS native tests about 7x slower (`native_drain_delivers_every_change_kind`
+    0.8 s → 6.4 s). Works with the checkout on another volume than the
+    marker.
   - **One confirmed marker is not a barrier either** (2026-10-13).
     fseventsd does not keep the order changes were made in: in a burst of
     2,000 creations it gave a contiguous run of 1-9 of them event IDs
     *after* a marker created once all writes had returned, and delivered
     them in the next drain, with no drop flag (about 1 drain in 15, also
     with the test alone). A second `FlushSync` does not help. The drain
-    therefore repeats marker rounds until one delivers no watched-path
-    event (`Shared::delivered`), all within `DRAIN_TIMEOUT`; 500 stressed
+    therefore repeats marker rounds until one delivers no in-scope event
+    (`Shared::delivery`'s count). The rounds share one `WaitState`: each
+    round re-`expect`s the key (its stall clock restarts), and the ceiling
+    spans every round, so a stream that keeps delivering ends as
+    `DrainCeiling`, and silence as `DeliveryStalled { watch: None }`. 500 stressed
     bursts, 200 of them under full-suite load, then passed. It is still
     not a barrier: with all 11 FSEvents tests stressed at once, a quiet
     round returned with 240 of 2,000 creations pending. The macOS contract
@@ -68,6 +111,10 @@ deletion engine decides which are the operation's own.
     path's ID with the marker's.
   - **`FSEventStreamStart` returns before events flow**; `start` runs one
     barrier before returning, or a change right after it is missed.
+  - Tests hold delivery with `Shared::held` (the callback spins while set;
+    `FsEvents::start_held` sets it from the start, and `Drop` clears it) and
+    shorten `adapter.policy` after start, so a stall, the ceiling, and an
+    interrupt are provoked against a real stream in under 1.5 s each.
   - **A directory's removal or rename hides pending child events** in the
     same batch (even at latency 0). A caller must drain between changing a
     directory's children and removing or renaming the directory itself; the
@@ -97,8 +144,14 @@ deletion engine decides which are the operation's own.
     before any work, and parent entries carry the session's own names.
   - The drain is a marker per watched directory: a hidden file
     `.wt-observe-<hex>-<n>` opened with `FILE_FLAG_DELETE_ON_CLOSE`, so a
-    crash leaves nothing. Delivery is FIFO per handle; `DRAIN_TIMEOUT` (5 s)
-    without the marker is `DeliveryStalled` (naming the watch). `start` runs one barrier.
+    crash leaves nothing. Delivery is FIFO per handle. Each awaited handle
+    (`Root::Parent`, `Root::Admin`) is its own `WaitState` key, so a busy
+    parent never hides a silent admin handle; a stall is
+    `DeliveryStalled { watch: Some(root) }` and the ceiling names the first
+    handle still awaited. An ended watch is `Delivery::end`ed (marker
+    `u64::MAX`) and never awaited. `start` runs one barrier. Tests hold
+    completions with `Shared::held` (set from the start through
+    `start_with_buffer(.., held)`), alongside the older `gate` mutex.
   - A zero-byte completion and `ERROR_NOTIFY_ENUM_DIR` are `Overflow`; any
     other completion error, or a failed reissue, is `WatchLost { root }`. The
     session's own cancel (release, drop) is never read as a completion.
@@ -142,6 +195,15 @@ deletion engine decides which are the operation's own.
 - **Test seams:** `Observation::injected(targets, options)` returns an
   `Injector` (`event`, `delayed`/`deliver_delayed`, `overflow`, `lose_watch`,
   `hold_handle`) feeding the same `EventQueue` a threaded adapter uses.
+  `Observation::injected_confirming` also waits like an adapter: every drain,
+  move labeling, and admin release awaits a marker through `await_marker` on a
+  virtual clock that jumps to the next `Injector::at(time, Scripted::…)`
+  delivery (`Acknowledge`, `Event`, `Overflow`, `Interrupt`) instead of
+  sleeping, so a 30 s stall or 5 min ceiling is proven in milliseconds on
+  every platform (`observation::tests`, the deletion engine's, the
+  lifecycle's `Observers::confirming`, and unregistration's tests). Each
+  `Acknowledge` confirms the wait in progress when it fires; schedule one per
+  wait at distinct times, since every delivery due by a park fires at once.
   Linux kernel signals are fed through `Inotify::translate` in
   `inotify/tests.rs`; FSEvents flags through `Shared::deliver` in
   `fsevents/tests.rs`. A real `IN_Q_OVERFLOW` needs `max_queued_events` ≤ 32,768:
@@ -172,8 +234,11 @@ record, Arc<inventory>)` (the inventory is journal line 2), the move,
   handle's identity uses `rename::handle_identity`. That costs about 0.5 ms an
   entry on build-win-native (600 files took ~1.2 s per test); keep Windows
   fixtures small.
-- **Drains are per depth level** (plus every `DEFAULT_DRAIN_EVERY` = 2,048
-  entries), never per batch or entry: a macOS drain is ~11 ms. Journal batches
+- **Drains are per depth level** (plus every `DEFAULT_DRAIN_EVERY` entries:
+  512 on macOS, 2,048 elsewhere), never per batch or entry: a macOS drain is
+  ~11 ms. The interval is checked after each batch, so a drain can come one
+  batch minus one entry late. 512 paces bursts that made FSEvents drop
+  events at about 7,000 deletions a second; it cannot rule a drop out. Journal batches
   stay one directory, at most 256 entries. `.git` and everything under it are
   deleted after all other content.
 - **Event resolution is by exact path, not kind:** a path the engine deleted

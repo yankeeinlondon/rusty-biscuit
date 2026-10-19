@@ -27,7 +27,7 @@ use std::time::SystemTime;
 use inotify::{EventMask, WatchDescriptor, WatchMask};
 use sniff::filesystem::query::EvidenceKind;
 
-use super::{Backend, CoverageLost, EventKind, ObservationError, RawEvent, Root, Sink, Targets};
+use super::{Backend, CoverageLost, EventKind, ObservationBackend, ObservationError, RawEvent, Root, Sink, Targets, Waited};
 
 const BUFFER_BYTES: usize = 64 * 1024;
 
@@ -197,8 +197,9 @@ impl Inotify {
     }
 }
 
+/// Reading until empty never waits, so the interrupt is not polled here.
 impl Backend for Inotify {
-    fn drain(&mut self, sink: &mut Sink<'_>) {
+    fn drain(&mut self, sink: &mut Sink<'_>, _interrupted: &dyn Fn() -> bool) -> Waited {
         let mut buffer = std::mem::take(&mut self.buffer);
         loop {
             let events = match self.inotify.read_events(&mut buffer) {
@@ -215,11 +216,12 @@ impl Backend for Inotify {
             }
         }
         self.buffer = buffer;
+        Waited::Done
     }
 
-    fn release_admin(&mut self) {
+    fn release_admin(&mut self, _interrupted: &dyn Fn() -> bool) -> Waited {
         if self.admin_released {
-            return;
+            return Waited::Done;
         }
         self.admin_released = true;
         let admin = self.watches.iter().find(|(_, watch)| watch.root == Root::Admin).map(|(id, watch)| (*id, watch.descriptor.clone()));
@@ -229,6 +231,7 @@ impl Backend for Inotify {
             self.ending.insert(id);
             let _ = self.inotify.watches().remove(descriptor);
         }
+        Waited::Done
     }
 
     /// Sniff reports each watch inside the checkout with the instance's file
@@ -236,5 +239,9 @@ impl Backend for Inotify {
     fn handles(&self) -> Vec<(EvidenceKind, u64)> {
         let descriptor = self.inotify.as_raw_fd();
         vec![(EvidenceKind::WatchRegistration, u64::try_from(descriptor).expect("an open descriptor is not negative"))]
+    }
+
+    fn backend(&self) -> ObservationBackend {
+        ObservationBackend::Inotify
     }
 }
