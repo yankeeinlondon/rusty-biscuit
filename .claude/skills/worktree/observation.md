@@ -14,7 +14,7 @@ directory of the tree, and the admin files in `ADMIN_FILES` plus
 deletion engine decides which are the operation's own.
 
 - **Lost coverage is sticky.** The first `CoverageLost` (`Overflow`,
-  `QueueFull`, `WatchLost { root }`, `ReadFailed`, `DrainTimedOut`) is returned by every later
+  `QueueFull`, `WatchLost { root }`, `ReadFailed`, `DeliveryStalled`, `DrainCeiling`) is returned by every later
   drain. Events received before the loss are still returned, for the report.
 - **Register before the usage query.** `register_handles(&mut OwnedHandles)`
   must run before `check_usage`. On Linux, Sniff reports each watch inside the
@@ -43,7 +43,7 @@ deletion engine decides which are the operation's own.
   - **`FSEventStreamFlushSync` alone is not a barrier** (1 of 50
     write-then-flush rounds missed the write). The drain writes a marker,
     flushes every 1 ms until the marker's event arrives (about 11 ms idle),
-    and `DRAIN_TIMEOUT` (5 s) without it is `CoverageLost::DrainTimedOut`.
+    and `DRAIN_TIMEOUT` (5 s) without it is `CoverageLost::DeliveryStalled`.
     Works with the checkout on another volume than the marker.
   - **One confirmed marker is not a barrier either** (2026-10-13).
     fseventsd does not keep the order changes were made in: in a burst of
@@ -98,7 +98,7 @@ deletion engine decides which are the operation's own.
   - The drain is a marker per watched directory: a hidden file
     `.wt-observe-<hex>-<n>` opened with `FILE_FLAG_DELETE_ON_CLOSE`, so a
     crash leaves nothing. Delivery is FIFO per handle; `DRAIN_TIMEOUT` (5 s)
-    without the marker is `DrainTimedOut`. `start` runs one barrier.
+    without the marker is `DeliveryStalled` (naming the watch). `start` runs one barrier.
   - A zero-byte completion and `ERROR_NOTIFY_ENUM_DIR` are `Overflow`; any
     other completion error, or a failed reissue, is `WatchLost { root }`. The
     session's own cancel (release, drop) is never read as a completion.
