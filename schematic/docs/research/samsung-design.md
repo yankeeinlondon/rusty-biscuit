@@ -1,5 +1,8 @@
 # Samsung Smart TV API (S95C-First) — Schematic Definition Design
 
+> Historical design research. Its constructor sketches are not current authoring guidance.
+> Use [definition builders](../definition-builders.md) for supported REST construction.
+
 > **Primary source precedence:** `homelab/docs/samsung-s95c.md` > `homelab/docs/samsung/samsung-smart-tv-ip-apis.md`
 > **Target generated REST client:** `SamsungSmartTv`
 > **Package area:** `schematic`

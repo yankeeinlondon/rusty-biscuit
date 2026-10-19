@@ -62,3 +62,6 @@ See [validation](../docs/generation/validation.md),
 [request inputs](../docs/generation/request-side.md), and
 [dependencies](../docs/dependencies.md) for behavior and checks. Generated
 sources belong to `schematic-schema` and are never edited by hand.
+
+See [the compiling authoring example](../docs/authoring-examples.md) for nominal models, public
+aliases, containers, and complete context-based API assembly.

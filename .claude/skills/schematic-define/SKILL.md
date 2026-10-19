@@ -364,10 +364,10 @@ They do not validate live provider HTTP integration behavior.
 
 Read these as needed:
 
-- `schematic/define/README.md` (authoritative type-level behavior)
+- `schematic/docs/definition-builders.md` (current definition behavior)
 - `schematic/docs/headers/README.md` (credential precedence: REST runtime vs WebSocket `Headers`)
 - `schematic/docs/io/openapi-extensions.md` (extension schema and examples)
-- `schematic/gen/README.md` (generated client structs, tag types, and `EndpointSpec` contracts)
+- `schematic/docs/generation/generated-clients.md` (generated client structs, tag types, and `EndpointSpec` contracts)
 - `schematic/docs/generation/request-side.md` (query, header, cookie, body, and credential placement)
 - `schematic/docs/runtime/README.md` (sending, response envelope, credentials, redirects, deadlines, hooks, redaction)
 - `schematic/docs/runtime/calling-an-api.md` (endpoint methods, setters, per-call overrides, `.full()`, `.build()?`, `CallError`)
@@ -447,3 +447,15 @@ normalizes supported source queries before this boundary. Gitea has one
 `GetGitTree` endpoint with optional Boolean `recursive`; there is no recursive
 request type. GitLab repository-file `ref` is a query input whose Rust name is
 `git_ref`. Query inputs never create another endpoint for the same method/path.
+
+## Authoring guidance maintenance
+
+Use `schematic/docs/authoring-examples.md` for the compiling nominal/alias/container
+and API example (included directly in schematic-define rustdoc). The generator
+README is an overview; its detailed reference lives in
+`schematic/docs/generation/generated-clients.md`. The create-schematic-api command
+teaches the same fallible context assembly. Keep these entry points aligned.
+The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
+Only four Success forms and ErrorSet::none exist; response/vocabulary extensions
+are planned. Reserve path_param/public/auth/deprecated/rate_limit and success
+stream/content-type names. No selector API is planned here.

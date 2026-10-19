@@ -110,3 +110,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## License
 
 AGPL-3.0-only
+
+See [the compiling authoring example](docs/authoring-examples.md) for nominal models, public
+aliases, containers, and complete context-based API assembly.

@@ -118,3 +118,15 @@ Nominal generic registrations must retain concrete public type arguments.
 Bitbucket declares its shipped `PaginatedResponse<Item>` implementations beside
 the model; registering one in a fresh context works independently of catalog
 assembly. Never stringify a generic parameter `T` into an emitted Rust path.
+
+## Authoring guidance maintenance
+
+Use `schematic/docs/authoring-examples.md` for the compiling nominal/alias/container
+and API example (included directly in schematic-define rustdoc). The generator
+README is an overview; its detailed reference lives in
+`schematic/docs/generation/generated-clients.md`. The create-schematic-api command
+teaches the same fallible context assembly. Keep these entry points aligned.
+The L1 `authoring_guidance` corpus rejects obsolete REST constructor examples.
+Only four Success forms and ErrorSet::none exist; response/vocabulary extensions
+are planned. Reserve path_param/public/auth/deprecated/rate_limit and success
+stream/content-type names. No selector API is planned here.

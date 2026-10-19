@@ -132,3 +132,6 @@ registration implementations live beside `PaginatedResponse`; a context can
 register one directly without first assembling the provider. Writing the
 literal path `PaginatedResponse<T>` inside a generic implementation would leave
 an unbound `T` in generated client code.
+
+[The compiling authoring example](authoring-examples.md) combines ordinary nominal
+registration, alias-first registration, nested containers, and complete API assembly.

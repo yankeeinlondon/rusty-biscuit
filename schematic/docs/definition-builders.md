@@ -120,3 +120,23 @@ pagination override. An explicit collection is resolved before root-array infere
 and the API default. OpenAI's overlay assigns this same endpoint field.
 
 An explicit environment mapping may leave credential fields unset. An empty mapping names no environment credentials; it remains distinct from omitting the mapping and deriving one from the authentication fields. When both declarations name the same credential kind, their names must agree, regardless of setter order.
+
+## Success and error authoring contract
+
+| Method | Accepted now |
+| --- | --- |
+| `returns(Success)` | Exactly one `Success::json(desc)`, `text()`, `binary()`, or `empty()`. |
+| `returns_json::<T>(&mut context)` | Typed JSON shorthand; registers T in the supplied context. |
+| `returns_text()`, `returns_binary()`, `returns_empty()` | Shorthands with String, bytes, or unit success. |
+| `errors(ErrorSet)` | Only `ErrorSet::none()`. |
+| API `default_errors(ErrorSet)` | Only `ErrorSet::none()`. |
+
+`Success` and `ErrorSet` are non-exhaustive. Lowering retains the existing
+single stored response; `ErrorSet::none()` does not disable runtime errors.
+Several successes, status/range error declarations, streaming success constructors,
+content-type setters on success descriptors, and GraphQL are **planned**.
+The names `path_param`, `public`, `auth`, `deprecated`, and `rate_limit` are
+reserved for **planned** vocabulary. Request content-type setters already work;
+they do not add success content negotiation. There is no route selector API.
+
+Start with [the compiling authoring example](authoring-examples.md).

@@ -8,7 +8,7 @@ Schematic generates Postman Collection v2.1.0 JSON files from API definitions. C
 # Generate all artifacts (Rust + OpenAPI + Postman)
 just -f schematic/justfile generate
 
-# Generate only Postman collections
+# Generate Rust and Postman collections
 just -f schematic/justfile generate-postman
 
 # Single API
@@ -153,3 +153,13 @@ let apis = vec![&api1, &api2];
 let collection = build_postman_collection_grouped(&apis, "ollama");
 let path = write_postman_grouped(&apis, "ollama", Path::new("postman"), false)?;
 ```
+
+## Authoring inputs
+
+Postman export consumes the same checked module-group assembly as Rust and
+OpenAPI generation. Use [definition builders](../definition-builders.md) and
+[typed registration](../typed-registration.md); do not fill a separate registry.
+Parameters keep their declared query, header, cookie, or body location. Paths
+contain placeholders, with query inputs represented separately. Authentication
+comes from the effective API policy; runtime origin/redaction settings are not
+Postman transport enforcement.

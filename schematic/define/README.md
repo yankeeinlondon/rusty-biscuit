@@ -45,3 +45,6 @@ The Rust API documentation covers REST models, `Headers`, form fields,
 WebSocket messages and lifecycle, `ModelCatalog`, and `TypeRef`. Enable the
 `openapi` feature for OpenAPI import/export. The
 [definitions crate](../definitions/README.md) provides shipped APIs.
+
+See [the compiling authoring example](../docs/authoring-examples.md) for nominal models, public
+aliases, containers, and complete context-based API assembly.
