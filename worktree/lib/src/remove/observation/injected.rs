@@ -290,6 +290,10 @@ impl Backend for InjectedBackend {
         waited
     }
 
+    fn queued_loss(&self) -> Option<CoverageLost> {
+        self.shared.queue.loss()
+    }
+
     fn handles(&self) -> Vec<(EvidenceKind, u64)> {
         self.shared.handles.lock().unwrap().clone()
     }

@@ -339,6 +339,22 @@ fn an_interrupted_admin_release_keeps_the_watch() {
     assert!(injector.admin_released());
 }
 
+/// A loss during the release's wait reaches the diagnostics at the
+/// unregistration stage, though no drain follows; the release still
+/// completes, leaving the decision to unregistration's direct reread.
+#[test]
+fn a_loss_during_the_admin_release_is_recorded_in_the_diagnostics() {
+    let layout = Layout::new();
+    let (mut observation, injector) = confirming(&layout);
+    observation.enter_stage(ObservationStage::Unregistration);
+    injector.at(SECOND, Scripted::Overflow);
+
+    assert_eq!(observation.release_admin(&|| false), Ok(()));
+
+    let expected = ObservationLoss { stage: ObservationStage::Unregistration, reason: CoverageLost::Overflow, entries_since_drain: None };
+    assert_eq!(observation.diagnostics().loss, Some(expected));
+}
+
 /// An interrupt while the move is labeled is reported by the next drain,
 /// even if that drain's own wait completes.
 #[test]

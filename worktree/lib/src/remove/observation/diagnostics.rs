@@ -96,6 +96,8 @@ pub(crate) struct RoundTrips {
 }
 
 impl RoundTrips {
+    // Linux's adapter confirms no markers, so outside tests nothing records there.
+    #[cfg(any(target_os = "macos", windows, test))]
     pub fn record(&mut self, round_trip: Duration) {
         self.last = Some(round_trip);
         self.longest = Some(self.longest.map_or(round_trip, |longest| longest.max(round_trip)));

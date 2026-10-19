@@ -624,6 +624,10 @@ impl Backend for FsEvents {
         waited
     }
 
+    fn queued_loss(&self) -> Option<CoverageLost> {
+        self.shared.queue.loss()
+    }
+
     fn handles(&self) -> Vec<(EvidenceKind, u64)> {
         Vec::new()
     }

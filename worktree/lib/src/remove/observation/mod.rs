@@ -410,6 +410,12 @@ pub(crate) trait Backend: Send {
     /// deletes it. Its later disappearance is not coverage loss. When
     /// interrupted, the directory stays watched.
     fn release_admin(&mut self, interrupted: &dyn Fn() -> bool) -> Waited;
+    /// A loss recorded but not yet drained, left in place. Nothing drains
+    /// after [`release_admin`](Self::release_admin), so this is how a loss
+    /// its wait received reaches the diagnostics.
+    fn queued_loss(&self) -> Option<CoverageLost> {
+        None
+    }
     /// Handles this adapter holds that a usage query of the checkout reports.
     fn handles(&self) -> Vec<(EvidenceKind, u64)>;
     #[allow(missing_docs)]
@@ -586,9 +592,15 @@ impl Observation {
     /// [`WaitInterrupted`] when the interrupt ended the wait for the admin
     /// directory's last changes; it is still watched, and the caller must
     /// not go on to unregister.
+    ///
+    /// ## Notes
+    ///
+    /// A loss the wait receives is recorded in the diagnostics but does not
+    /// stop the release: unregistration's direct reread of the index and
+    /// HEAD decides whether it proceeds.
     pub fn release_admin(&mut self, interrupted: &dyn Fn() -> bool) -> Result<(), WaitInterrupted> {
         let waited = self.backend.release_admin(interrupted);
-        self.record(None);
+        self.record(self.backend.queued_loss().as_ref());
         match waited {
             Waited::Done => Ok(()),
             Waited::Interrupted => Err(WaitInterrupted),
@@ -749,6 +761,12 @@ impl EventQueue {
     /// Whether a loss is recorded and not yet taken; a wait ends on it.
     pub fn has_loss(&self) -> bool {
         self.lock().lost.is_some()
+    }
+
+    /// The recorded loss, if any, left in place.
+    #[cfg(any(target_os = "macos", windows, test))]
+    pub fn loss(&self) -> Option<CoverageLost> {
+        self.lock().lost.clone()
     }
 
     /// Removes and returns the recorded loss, if any.
