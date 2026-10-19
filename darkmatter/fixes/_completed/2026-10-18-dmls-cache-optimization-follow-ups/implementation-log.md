@@ -42,35 +42,36 @@ packages:
     - biscuit-file
     - dmls
 human_review: false
-message_to_agent: |-
-    Phase 3 wired searched candidates into DMLS. Facts for Phase 4 (docs,
-    skill, comment sweep, final gates):
-
-    - Already current (updated in Phase 3, re-check rather than rewrite):
-      `docs/lsp/indexing.md` registry-change table row for searched
-      locations, the "Each preparation records" paragraph (concrete example,
-      R7 carry, recursive `%` limitation), and "Watching schema folders"
-      (absent folder watched from its nearest existing ancestor with `<rel>`
-      and `<rel>/*`, re-registered once it exists). Still missing there: the
-      Mermaid diagram of probe -> fingerprint -> watch -> re-prepare that the
-      plan asks for.
-    - `.claude/skills/darkmatter/dmls.md` watch and trigger-registry bullets
-      are updated; `schema.md` was not touched.
-    - Comment sweep: `registry.rs` module header and `Dependencies` docs are
-      updated; `watch.rs` `schema_watch_registration` doc is updated. Check
-      `ResolvedSchema` / `ResolvedPayload` / `file_payload_memo` docs from
-      Phases 1-2 for drift only.
-    - Departure from the plan: no "event's parent equals a candidate's
-      parent" rule in `scope_affected` (it would invalidate on any sibling
-      file); events at a candidate or at a folder above one are enough. Absent
-      schema roots now use the same absent-folder watch form. Recorded in the
-      Phase 3 log.
-    - New public type `dmls::workspace::watch::WatchedFolder`;
-      `TriggerRegistries::watch_folders()` / `OverlayState::trigger_watch_folders()`
-      now return `BTreeSet<WatchedFolder>`. No consumer outside `dmls`.
-    - Phase 2's library changes (`assemble.rs`, `payload_memo_tests.rs`) are
-      still uncommitted in this worktree alongside Phase 3's.
-
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+source_code:
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/detailed_resolution.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/searched_tests.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+documentation:
+    - biscuit-file/docs/topics/file-references.md
+    - darkmatter/docs/lsp/indexing.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-10-18-dmls-cache-optimization-follow-ups (4 phases)
@@ -411,3 +412,53 @@ test(watch::tests)'` → 36 passed; `cargo nextest run -p dmls --test l1 -E
   in `just test`. No library symbol changed in this phase.
 
 Phase 3 status: implementation complete, ready for review.
+
+## Phase 4
+
+### What changed
+
+- `darkmatter/docs/lsp/indexing.md`: re-checked the payload-sharing, registry-change, and
+  "Watching schema folders" sections Phase 3 updated against the code
+  (`file_payload_memo::inputs_fingerprint`, `Dependencies`, `schema_watch_registration`);
+  they were current: searched locations, the absent-folder watch from its nearest existing ancestor
+  and its re-registration, fallback-save and server-rescan limits, and the recursive `%` limitation
+  (R1). Added the missing Mermaid flowchart (probe → record → fingerprint / watch →
+  event → stale → prepare again → nearer file selected) after the concrete
+  `Fields@shared/types.yaml` example. No link to this fix or its spec.
+- `.claude/skills/darkmatter/schema.md`: the imports bullet now says dependencies are canonical,
+  hashed files and `ResolvedSchema::searched` is a separate lexical list (possibly absent; `%` adds
+  nothing) that propagates into `ResolvedPayload` and is never hashed as a file. `dmls.md` was
+  already current from Phase 3.
+- Comment sweep: `ResolvedSchema::searched`, `ResolvedPayload::searched`, the `file_payload_memo`
+  module doc and `inputs_fingerprint`, `TriggerRegistry::searched_locations`, the `registry.rs` module
+  header, `Dependencies`, and the watch docs all match the code.
+  **Drift found and fixed** (code taken as correct): `ResolvedSchema::imports` and
+  `ResolvedSchema::examples` in `lib/src/markdown/schemas/resolve.rs` said "the invalidation wiring
+  itself is deferred", but both lists are consumed as dependency edges by
+  `EffectiveSchema::dependencies` and by `ResolvedPayload::dependencies` (payload memo and DMLS
+  registry). Reworded to state that a change invalidates a cached effective schema or resolved
+  payload. Comment-only; no behavior change.
+- Consumers of changed `pub` items: no struct literal of `ResolvedSchema` exists outside
+  `resolve.rs` (`grep -rln 'ResolvedSchema {'`; the one test hit is a return type), and Claudine
+  names neither `ResolvedSchema` nor `searched`. Nothing to fix.
+
+### Requirement → test mapping
+
+Phase 4 changes no behavior (documentation, skill, and doc comments only), so it adds no tests. The
+acceptance behaviors the diagram and docs describe are covered by the Phase 1–3 tests listed
+above (`payload_memo_tests`, `searched_tests`, `dmls` `searched_candidates`, registry and watch
+unit tests), all of which ran green in this phase's `just test`.
+
+### Gates
+
+- `just lint` (darkmatter): pass.
+- `just test` (darkmatter): 10566 passed, 0 failed, 10 skipped (pre-existing), first run, no reruns.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- CI scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py` → `packages: [darkmatter, test-toolkit]`, `change_class: package`,
+  so the gates were required and were run.
+- Dependents: the only source edit is a doc-comment rewording in `resolve.rs`, which cannot change a
+  dependent's compile or behavior; dependent-package tests were not run for that reason.
+- Cross-OS: not run; no cross-OS risk in a comment and docs change.
+
+Phase 4 status: implementation complete, ready for review.

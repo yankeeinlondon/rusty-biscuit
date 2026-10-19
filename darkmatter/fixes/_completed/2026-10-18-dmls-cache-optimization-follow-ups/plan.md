@@ -42,6 +42,36 @@ packages:
     - darkmatter
     - biscuit-file
     - dmls
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+source_code:
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/detailed_resolution.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/searched_tests.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/searched_candidates.rs
+documentation:
+    - biscuit-file/docs/topics/file-references.md
+    - darkmatter/docs/lsp/indexing.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+completed_phase: 4
+implemented: true
 ---
 
 # Plan: DMLS cache optimization follow-ups
@@ -82,7 +112,7 @@ to editor invalidation and watching (`dmls`), and document it.
 - [x] Unchanged/unrelated inputs keep hits; ready lookups do no reads, hashes,
       or payload resolution; existing isolation, capacity (32), LRU, and
       embedded tests stay green.
-- [ ] `just test` and `just lint` pass in `darkmatter/`; docs, skill, and
+- [x] `just test` and `just lint` pass in `darkmatter/`; docs, skill, and
       comments updated. Terminal state: *implementation complete, ready for
       review* (the author, not the agent, moves the fix to `_completed`).
 
@@ -286,25 +316,25 @@ counters.
 
 Goal: current-state docs match behavior; no drift.
 
-- [ ] **`docs/lsp/indexing.md`** — update payload-sharing and registry-change
+- [x] **`docs/lsp/indexing.md`** — update payload-sharing and registry-change
   sections: covered search locations, absent-folder handling and watch
   advance, fallback-mode limits, and the explicit recursive `%` limitation
   (R1). Developer-audience wording with a compact example and a Mermaid diagram
   of probe → fingerprint → watch → re-prepare. No link to this fix or its spec.
-- [ ] **Skill** — update `.claude/skills/darkmatter/` (schema.md/dmls.md) if
+- [x] **Skill** — update `.claude/skills/darkmatter/` (schema.md/dmls.md) if
   dependency propagation guidance changes (mention the separate searched list).
-- [ ] **Comment sweep** — `ResolvedSchema`, `ResolvedPayload`, `file_payload_memo`
+- [x] **Comment sweep** — `ResolvedSchema`, `ResolvedPayload`, `file_payload_memo`
   doc, `Dependencies`, module header at `registry.rs` ~39, watch docs; fix
   drifted claims (treat code as correct) and note any drift found.
-- [ ] **Final gates** — `just test`, `just lint` in `darkmatter/`; check
+- [x] **Final gates** — `just test`, `just lint` in `darkmatter/`; check
   consumers of changed `pub` items (`ResolvedSchema` field) with
   Sniff/GitNexus (Claudine) and fix any struct-literal breakages.
-- [ ] Update the implementation log; leave the fix in place (no move to
+- [x] Update the implementation log; leave the fix in place (no move to
   `_completed`, no `just complete`); do not commit unless told.
 
 ### Checkpoint 4
 
-- [ ] All "Done when" boxes above checked; report "implementation complete,
+- [x] All "Done when" boxes above checked; report "implementation complete,
   ready for review".
 
 ## Open items for the author
