@@ -67,6 +67,43 @@ skills_files_updated_during_phase_3:
 packages:
   - worktree
   - worktree-cli
+source_files_during_phase_4:
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/tests/remove_recovery.rs
+docs_updated_during_phase_4:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/lifecycle.md
+source_files_during_phase_5:
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/lifecycle/tests/startup_warning.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_macos_stall_after_the_move_points_at_fseventsd.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_slow_startup_warns_with_its_duration.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_names_the_fsevents_flags_that_dropped_changes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_watch_that_never_delivered_refuses_with_its_reason.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_windows_ceiling_names_the_watched_folder.snap
+docs_updated_during_phase_5:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/os/SKILL.md
 ---
 
 # Plan: `wt remove` under a slow or overrun change watcher
@@ -98,7 +135,7 @@ Done means all of the following:
 - [ ] Delayed progress can exceed the old 5 s total; silence stalls at 30 s;
       repeated progress cannot pass 5 min; Ctrl-C ends a wait immediately.
 - [ ] Sticky coverage loss is unchanged and no force flag bypasses it.
-- [ ] A retry after confirmed deletions needs no extra consent for the
+- [x] A retry after confirmed deletions needs no extra consent for the
       resulting ` D` entries; every other dirty shape still asks.
 - [ ] Reports carry the new diagnostics; version-4 reports still load, with
       earlier attempts preserved.
@@ -317,7 +354,7 @@ doc comment.
 
 ### Tasks
 
-- [ ] **Resume consent calculation.** In `lifecycle.rs` / `lifecycle/resume.rs`
+- [x] **Resume consent calculation.** In `lifecycle.rs` / `lifecycle/resume.rs`
       add the function from R9:
     - Validate the operation first; read every attempt's journal. An unreadable
       or invalid journal follows the existing recovery refusal path and enables
@@ -330,25 +367,25 @@ doc comment.
       staged additions with absent working file, modifications, untracked
       files, and protected included files keep ordinary consent. A missing
       directory does not cover its descendants.
-- [ ] **Fingerprint binding.** Keep the raw inventory and full fingerprint,
+- [x] **Fingerprint binding.** Keep the raw inventory and full fingerprint,
       including raw index entries, as the change-detection input; bind approval
       to both raw and explained views so the CLI's view and the lifecycle
       recheck agree. A file recreated after the report, or a new staged
       change while consent is pending, invalidates approval.
-- [ ] **Lock-time recheck.** Repeat the calculation under the operation lock
+- [x] **Lock-time recheck.** Repeat the calculation under the operation lock
       before further deletion, capture a fresh surviving-entry deletion
       inventory, and repeat usage and branch checks.
-- [ ] **CLI wiring.** `cli/src/commands/remove/{mod,policy,report}.rs` use the
+- [x] **CLI wiring.** `cli/src/commands/remove/{mod,policy,report}.rs` use the
       library calculation for the retry's report and policy decision, and
       the retry summary states how many confirmed earlier deletions were
       excluded. Journal counts and reports are unchanged. First-attempt flow is
       untouched.
-- [ ] **Library tests (L1).** Stop after confirmed deletion, retry, no extra
+- [x] **Library tests (L1).** Stop after confirmed deletion, retry, no extra
       consent for resulting ` D`; records spread over several attempts;
       uncertain and externally absent entries; staged changes; a recreated
       path (file, symlink, directory); unreadable journal; a changed path or
       index between report and recheck refuses.
-- [ ] **CLI test (L1).** One noninteractive retry through the real CLI
+- [x] **CLI test (L1).** One noninteractive retry through the real CLI
       without `--force-worktree` completes; a counterpart containing new work
       refuses. No terminal or browser opens or takes focus.
 
@@ -363,7 +400,7 @@ justified or turned into a refusal.
 
 ### Validation checkpoint
 
-- [ ] `just test worktree` and `just test worktree-cli` pass on macOS.
+- [x] `just test worktree` and `just test worktree-cli` pass on macOS.
 
 ## Phase 5: CLI messages and documentation
 
@@ -371,7 +408,7 @@ Wave 1 runs the messaging and the docs concurrently.
 
 ### Wave 1
 
-- [ ] **CLI messages.** In `cli/src/commands/remove/recovery.rs`, render
+- [x] **CLI messages.** In `cli/src/commands/remove/recovery.rs`, render
       `DeliveryStalled`, `DrainCeiling`, and the macOS flag payload through
       `biscuit-terminal` components (consult its `Prose`/`UnorderedList`
       skill).
@@ -383,7 +420,7 @@ Wave 1 runs the messaging and the docs concurrently.
     - Assert messages at the existing rendering boundary and exit classes (4
       for startup failure; pre-move loss follows the refusal path; post-move
       stop is exit 1 even with zero deletions).
-- [ ] **Docs.**
+- [x] **Docs.**
     - `worktree/docs/cli/remove.md`: waiting limits, startup warning, loss
       reasons, manual fseventsd troubleshooting (`sudo killall fseventsd`, with
       the system-wide effect, never automatic), resume consent, report fields;
@@ -400,7 +437,7 @@ Wave 1 runs the messaging and the docs concurrently.
 
 ### Validation checkpoint
 
-- [ ] `just test worktree-cli`, `just lint`, and the repo's docs checks for the
+- [x] `just test worktree-cli`, `just lint`, and the repo's docs checks for the
       edited kinded documents pass.
 
 ## Phase 6: Cross-OS verification and macOS sample

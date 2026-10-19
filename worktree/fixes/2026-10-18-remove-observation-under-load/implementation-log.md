@@ -67,14 +67,51 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/worktree/observation.md
   - .claude/skills/worktree/lifecycle.md
+source_files_during_phase_4:
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/tests/remove_recovery.rs
+docs_updated_during_phase_4:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/worktree/lifecycle.md
+source_files_during_phase_5:
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/lifecycle/tests/startup_warning.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_macos_stall_after_the_move_points_at_fseventsd.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_slow_startup_warns_with_its_duration.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_names_the_fsevents_flags_that_dropped_changes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_watch_that_never_delivered_refuses_with_its_reason.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_windows_ceiling_names_the_watched_folder.snap
+docs_updated_during_phase_5:
+  - worktree/docs/cli/remove.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/observation.md
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/os/SKILL.md
 message_to_agent: |-
-  Phase 3 landed the loss payload, the macOS drain interval (512), observation diagnostics, and report v5. Facts for Phase 4 onward:
-  - Diagnostics API: `Observation::diagnostics()` / `diagnostics_handle()` -> `ObservationDiagnostics { backend, startup_ms, last_round_trip_ms, longest_round_trip_ms, loss: Option<ObservationLoss { stage, reason: CoverageLost, entries_since_drain }> }`. The lifecycle copies it into `OperationReport.observation` (and `EarlierAttempt.observation` on resume) via `Attempt::observed_by`.
-  - Startup confirmation loss is now `ObservationError::NotDelivering(Box<ObservationDiagnostics>)` (exit 4 via `Refusal::Observation`); `ObservationError::diagnostics()` gives the CLI the details without a report. The CLI still renders only its `Display` text; Phase 5 should render the diagnostics (stage, reason, round trips) through biscuit-terminal components.
-  - macOS loss is `CoverageLost::FsEventsDropped { raw, flags }`; its Display is "FSEvents could not report every change (KernelDropped, ...; flags 0x..)". Phase 5's CLI messages should key off the variant, not the text.
-  - Slow-startup warning (Phase 5): `startup_ms` is available on `observation.diagnostics()` right after `(env.observe)(...)` in `run_with` and `resume.rs::deletion`, but the lifecycle runs on to the move without returning to the CLI, so warning "before moving anything" needs a new hook (for example an `Environment` callback); none exists yet.
-  - Found, not fixed: a loss recorded during `release_admin`'s barrier stays queued and no later drain returns it (all marker-based adapters), so unregistration proceeds on its direct index/HEAD reread alone and the loss is not in the diagnostics. Pre-existing; decide in review or Phase 5 whether `unregister_quarantine` should drain (or check the queue) after `release_admin`.
-  - Phase 2's wording gap still stands for Phase 5: an interrupt during a resumed attempt's observation startup refuses as `Refusal::Interrupted` ("before anything was moved").
+  Phase 5 landed the CLI messages and the docs pass. Facts for Phase 6:
+  - macOS sample: a stop now prints a `Watching stopped {stage}: {reason}.` line from `report.observation.loss` (FSEvents flag names plus hex mask, entries since the previous drain). Read the loss straight from `report.json` `observation.loss` for the sample record. A startup over 1 s prints `Warning: Confirming that the checkout is being watched for changes took N s.` before the move.
+  - New API: `Environment::slow_startup: &dyn Fn(Duration)` and `lifecycle::SLOW_STARTUP` (1 s). Every `Environment` construction needs the field. `recovery::refusal_error`/`refusal_markup` take `resumed: bool`. `Refusal::Interrupted` now reads "interrupted before it changed anything".
+  - Cross-OS so far: `just cross-check worktree --os windows` passed 872 (1 skipped) and `worktree-cli` passed 654 (43 skipped). No Linux or WSL2 rig run yet.
+  - Tier trap: a test module first named `slow_startup` was silently out of L1 (a segment starting `slow_`) on the Windows rig and in CI. It is now `startup_warning`. Check new module names the same way.
+  - Load-sensitive (pre-existing, not touched here): `fsevents::tests::the_ceiling_spans_every_marker_round_of_a_busy_drain` failed once under a load average of about 20 ("expected the ceiling, got None after 1039 events"). Its 100 µs feeder thread can be descheduled long enough for a marker round to go quiet. It passed 3/3 alone. If it flakes in Phase 6, make the feeder deterministic rather than retrying.
+  - Still open, for the author: a loss recorded during the `release_admin` barrier stays queued and is missing from the diagnostics (pre-existing; not changed).
 ---
 
 # Implementation Log for 2026-10-18-remove-observation-under-load (6 phases)
@@ -426,3 +463,247 @@ back through `read_report` itself.
   change is `Backend::backend()` for inotify. The interval there is unchanged
   (2,048), and the portable diagnostics tests run on Linux CI. I did not run
   a Linux or WSL2 rig check; Phase 6 owns that evidence.
+
+## Phase 4
+
+### What changed
+
+- **Library calculation (R9, R10).** `lifecycle.rs` gains `ResumeConsent
+  { raw, inventory, excluded, fingerprint }` beside `consent_state`, and a
+  private `explain_deletions(raw, deleted, absent)`. It drops a dirty entry
+  only when its porcelain status is exactly ` D`, its path is in the set of
+  journal paths with a durable `Deleted` result, and `absent` confirms the path
+  is gone. Paths are compared as `Path` (component equality: exact,
+  case-sensitive, no prefix, and Git's `/` matches a Windows journal's `\`).
+  A deleted directory explains nothing beneath it.
+- **Public entry (resume.rs).** `resume_consent(base, &id)` opens the store,
+  reads and validates the record, and then calls `resume_consent_in`. That
+  function opens the quarantine through the verified-identity handle
+  (`open_root`) and reads every attempt's journal with `store.recover`. An
+  unreadable or invalid journal is `Refusal::Store` and enables no
+  exclusion. It then runs `consent_state` on the quarantine with the
+  record's branch, explains deletions by inspecting each path without
+  following links through that handle (an inspection error is not absence),
+  and binds the fingerprint.
+- **Fingerprint binding.** `inventory::bind_excluded(raw_fingerprint,
+  excluded)` is a length-prefixed BLAKE3 record of the raw
+  `Inventory::fingerprint` (raw dirty entries, their content, and the whole
+  index, as before) plus the sorted excluded paths. A retry's `Approval`
+  carries the explained `inventory` and this fingerprint.
+- **Lock-time recheck.** `recheck` now takes the fresh `(Inventory, String)`
+  from a closure: `consent_state` of the original on a first attempt, and
+  `resume_consent_in` in `Resumed::deletion`, which runs under the operation
+  lock that `resume_with` takes before inspecting. The usage check,
+  tip check, fresh `DeletionInventory` capture, and index binding run
+  as before.
+- **CLI wiring (mod.rs).** On a `Quarantined` retry, `run` calls
+  `resume_consent` and replaces `facts.inventory`, `facts.reported`, and a
+  new `facts.excluded` count. The report and policy read `facts.inventory`,
+  so they use the explained view with no change of their own.
+  `retry_markup` adds "N tracked file(s) this removal already deleted is/are
+  not asked about again." A failure maps through `recovery::refusal_error`.
+  First attempts and other retry resolutions are untouched; journal counts
+  and reports are unchanged.
+- **Docs and skill.** `docs/cli/remove.md`'s retry paragraph now states the
+  exemption and its limits. `.claude/skills/worktree/lifecycle.md` corrects
+  the stale instruction to approve a retry from `consent_state` of the
+  quarantine, which is now refused, and adds the raw-versus-explained
+  bullet. The library's `Approval` and `ResumeRequest` field docs were
+  updated with the behavior.
+
+### Departures from the plan
+
+- The plan names `cli/src/commands/remove/{mod,policy,report}.rs`. Only
+  `mod.rs` changed. `policy.rs` and `report.rs` already take their inventory
+  from `Facts`, so they share the library calculation without edits.
+- Existing resume tests in `lifecycle/tests.rs` approved a retry with
+  `consent_state(quarantine)`. They now use a `resume_approval(&id)` fixture
+  helper, since a bound fingerprint is required. Two tests that refuse
+  before the recheck (a replaced quarantine and a recreated original) keep
+  `approval_at`.
+- The CLI's `Facts::local` still runs one `git status` on the quarantine
+  before `resume_consent` runs its own. That is one extra Git call per
+  retry, which I left in place to keep the change surgical.
+
+### Requirement → test mapping
+
+Library tests are L1 in-process against real repositories
+(`lib/src/remove/lifecycle/tests/resume_consent.rs`, F2: real Git, real
+filesystem, real journal; injected observer). The CLI tests are L1 through
+the real `wt` binary (`cli/tests/remove_recovery.rs`, Unix-only like the
+rest of that file).
+
+| Requirement | Test |
+| --- | --- |
+| Stop after confirmed deletion, retry, no extra consent for the ` D` entries (spec's original case) | `a_retry_asks_nothing_for_tracked_files_its_own_deletions_removed` (raw shows ` D` for 3 paths, explained has none, `needs_consent` false; `resume` with `discard_files: false` completes; journal entry kept as attempt 1 `Deleted`) |
+| Records spread over several attempts | `confirmed_deletions_from_several_attempts_are_all_excluded` (attempt 1 deletes `src/*`, attempt 2 deletes `README.md`, attempt 3 excludes all three and completes without consent; asserts attempts 1 and 2 in the report) |
+| `ExternallyAbsent` and `Uncertain` keep consent; unreadable journal refuses | `only_a_confirmed_result_explains_a_missing_file_and_an_unreadable_journal_refuses` (control, `externally_absent` rewrite, journal cut before results, garbage journal leads to `Refusal::Store(Journal)` from both `resume_consent` and `resume`, exit class Refused; restored control) |
+| Staged deletion, recreated file / directory / symlink, staged add with absent file keep consent | `staged_and_recreated_paths_keep_consent` (`D `, ` M`, ` D` with an empty directory at the path, which shows the no-follow inspection matters, ` T` (Unix), `AD`) |
+| A changed path or index between the report and the recheck refuses | `a_change_between_the_report_and_the_retry_refuses` (recreated file, then a staged change, each `Refusal::Changed` with nothing deleted; the unchanged state then completes on the same approval) |
+| Only exact ` D` is explained | `only_an_unstaged_deletion_is_explained` (13 porcelain shapes) |
+| Exact per-path matching: no result, present, parent directory, other case, native separator | `a_path_is_explained_only_by_its_own_confirmed_result` (and only paths with a result are inspected) |
+| CLI: noninteractive retry without `--force-worktree` completes | `a_retry_needs_no_consent_for_files_the_removal_already_deleted` (a real first `wt remove` deletes the tracked `deep/sub/tracked.txt`, then stops on an unwritable `locked/` one level up; the retry exits 0, prints the count line, does not list the file, and closes the record) |
+| CLI: counterpart with new work refuses | `a_retry_with_new_work_beside_files_the_removal_already_deleted_refuses` (exit 3, lists `new-work.txt` only, keeps everything) |
+
+Regression proof: with the four changed source files restored to `HEAD`
+(test files kept), both CLI tests fail. The first fails on exit 3 instead of
+0. Reapplying the saved patch restored them.
+
+The CLI stop needs an unwritable directory, so both CLI tests probe and skip
+when the user can write into a read-only directory (root). This follows
+`a_repair_that_is_not_verified_refuses_even_with_every_force_flag`.
+
+### Input robustness
+
+The journal and porcelain loaders are unchanged, so no new loader matrix
+applies. The new code has no `filter_map(.. as_str())`, no `.ok()` on a
+journal or porcelain parse, and no `unwrap_or_default()`. The one
+`matches!(present(relative), Ok(false))` treats an inspection error as
+present (consent kept), as the spec requires.
+
+### Gates
+
+- Targeted while building: `remove::lifecycle::tests` (58 tests, including
+  the 7 new ones) and `--test remove_recovery` (8) passed.
+- `just lint` (worktree area): clean.
+- `just test` (worktree area, macOS): **1583 passed, 15 skipped**, with no
+  failures and no reruns.
+- `just check-tier-coverage worktree`: 0 stranded.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` gave `packages: [worktree,
+  worktree-cli, test-toolkit, darkmatter]` and `change_class: package`.
+  - `darkmatter` (it reads the skill file):
+    `cargo nextest run -E 'test(/shipped_schema_corpus/)'` passed 9.
+  - `test-toolkit`, lint-only `archive-path-guard`: `just archive-path-guard`
+    in `tools/test-toolkit` passed 2 (full-tree mode). A first attempt that
+    fed the raw scope JSON as `BISCUIT_ARCHIVE_GUARD_PLAN` panicked on the
+    plan format; that was my invocation, not a guard failure.
+- Dependents: only `worktree-cli` depends on `worktree`, and the area's
+  `just test` covers it.
+- Cross-OS: path matching is Windows-sensitive, so I ran
+  `just cross-check worktree --os windows`, which passed **869, 1 skipped**,
+  all 7 `resume_consent` tests included (the multi-attempt test proves the
+  `\` versus `/` match). `just cross-check worktree-cli --os windows`
+  passed **647, 43 skipped**; the new CLI tests are Unix-only. No Linux or
+  WSL2 rig run; Phase 6 owns that evidence.
+- No skipped or pre-existing failures.
+
+## Phase 5
+
+### What changed
+
+- **Slow-startup hook (library).** `lifecycle::SLOW_STARTUP` (1 s) and
+  `Environment::slow_startup: &dyn Fn(Duration)`. `report_slow_startup` calls
+  it at most once per attempt, right after observation starts: in `run_with`
+  before the move, and in `Resumed::deletion` before further deletion. It
+  fires only when `startup_ms` is over 1 s, and the removal goes on. The CLI
+  prints `recovery::slow_startup_markup` to stderr. `Observation::started_after`
+  is now `pub(crate)`, so tests can fake a startup time.
+- **Loss rendering (CLI, `recovery.rs`).** Keyed on the `CoverageLost` and
+  `ObservationStage` variants, never on `to_string()`.
+  - A stop after the move adds `Watching stopped {stage}: {reason}.` with
+    the FSEvents flag names and hex mask, entries since the previous drain,
+    and the watched place.
+  - Windows names the place: the checkout's path, the folder holding it, or
+    Git's record.
+  - A stall or ceiling adds "Nothing is known to have been lost" and the
+    longest confirmed round trip. On macOS only, it also adds the fseventsd
+    line: "may be delayed; wt does not restart it", pointing at the
+    troubleshooting docs.
+  - `NotDelivering` refusals (exit 4) show the same reason. A stall or
+    ceiling gets a "run it again" remedy.
+  - Locations, the retry line, and the `Full report:` line are unchanged.
+  - The output is Prose markup rendered by biscuit-terminal's `Prose`, like
+    the rest of this module. No list component was needed.
+- **Retry wording (carried from Phases 2 and 4).**
+  `refusal_error`/`refusal_markup` take `resumed`. A refusal on a resumed
+  attempt (`resume_consent` failure, or a lifecycle refusal on a retry) says
+  "stopped before deleting more of worktree X". `Refusal::Interrupted` reads
+  "interrupted before it changed anything", which is true for both attempt
+  kinds.
+- **Docs and skills** (a subagent did the docs pass; I reviewed it).
+  - `docs/cli/remove.md` gained these sections: waiting limits (table and
+    Mermaid), the startup warning, the loss reasons, and fseventsd
+    troubleshooting (`sudo killall fseventsd`, manual and system-wide).
+  - It also has one "What a retry asks again" resume-consent section, which
+    replaces the Phase 4 paragraph, and the report fields.
+  - The claim that a macOS marker proves every earlier change arrived is
+    corrected.
+  - Skills: `observation.md` and `lifecycle.md`. `os/macos.md` has a new
+    stuck-fseventsd section, and `os/SKILL.md` a symptom row for it.
+  - README is unchanged: its overview is still accurate.
+- **Comment drift found and fixed** (comment lines only):
+  - `deletion.rs` `//!` said only a lost watch or a full queue stops
+    deletion. Any `CoverageLost` does.
+  - `observation/mod.rs` `//!`'s list of loss causes was missing the
+    FSEvents flags and unconfirmed delivery.
+  - `resume`'s doc did not mention the consent recheck under the lock.
+  - I found no drift in `fsevents.rs` or `read_directory_changes.rs`.
+
+### Departures and notes
+
+- The plan put the slow-startup threshold under "CLI messages". The
+  threshold lives in the library (`SLOW_STARTUP`), because the lifecycle runs
+  on to the move without returning to the CLI. The CLI only renders.
+- There is no admin path in the report, so Windows names Git's record in
+  words. A startup refusal has no report yet, so it names "the checkout" or
+  "the folder holding the checkout" without a path.
+- **Tier trap:** the new library test module was first called
+  `slow_startup`, and a segment starting with `slow_` takes a test out of L1.
+  The Windows rig's L1 listing showed 869 tests, the same count as Phase 4.
+  I renamed the module to `startup_warning`, and the rig then ran 872.
+- **Load-sensitive, pre-existing:**
+  `fsevents::tests::the_ceiling_spans_every_marker_round_of_a_busy_drain`
+  failed once in `just test` at a load average of about 20 (other sessions
+  on the host): "expected the ceiling, got None after 1039 events". It passed
+  3/3 alone, and the next full `just test` was green. It is not touched by
+  this phase.
+- Not done (pre-existing, author's call): a loss recorded during the
+  `release_admin` barrier stays queued and is not in the diagnostics.
+
+### Requirement → test mapping
+
+The boundary is the CLI's markup builders: library values are rendered
+through biscuit-terminal `Prose`, F1, L1 (`cli/tests/remove_recovery_report.rs`).
+The hook is tested at the lifecycle boundary, with real Git, a real
+filesystem, and the injected observer (F2, L1,
+`lib/src/remove/lifecycle/tests/startup_warning.rs`).
+
+| Requirement | Test |
+| --- | --- |
+| A slow startup warns once, before the move, and does not refuse | `startup_warning::a_slow_startup_is_reported_once_before_the_move_and_the_removal_completes` (1500 ms; checkout untouched and not moved at call time; removal completes) |
+| The 1 s boundary, a fast startup, and an untimed one do not warn | `startup_warning::a_startup_of_at_most_one_second_is_not_reported` (1000 ms, 5 ms, none) |
+| A resumed attempt warns once, before further deletion | `startup_warning::a_resumed_attempts_slow_startup_is_reported_once_before_its_deletion` |
+| Warning text and duration format | `a_slow_startup_warns_with_its_duration` (1.6 s, 12.3 s; snapshot) |
+| macOS flags, mask, and stage are shown; no fseventsd line for a drop; retry and full-report lines kept; a stop with zero deletions is exit 1 | `a_stop_names_the_fsevents_flags_that_dropped_changes` |
+| macOS stall: fseventsd line, "nothing known lost", round trip | `a_macos_stall_after_the_move_points_at_fseventsd` |
+| Windows ceiling names the watched folder; no fseventsd line | `a_windows_ceiling_names_the_watched_folder` |
+| No loss (absent diagnostics, or diagnostics with no loss) adds no line | `a_stop_without_a_loss_adds_no_watching_line` |
+| Startup failure: reason, remedy, exit 4 (stall on FsEvents; Overflow keeps the old remedy) | `a_watch_that_never_delivered_refuses_with_its_reason` |
+| A resumed refusal says "before deleting more" | `a_resumed_refusal_says_it_stopped_before_deleting_more` |
+| Interrupt wording through the real CLI | `remove_recovery::an_interrupt_before_the_move_removes_nothing` (assertion updated) |
+
+No parser, schema, or loader changed, so the input robustness matrix does
+not apply.
+
+### Gates
+
+- `just lint` (worktree area): clean.
+- `just test` (worktree area, macOS): first run had 1 failure, the
+  load-sensitive fsevents test above. It passed 3/3 alone. The rerun gave
+  **1593 passed, 15 skipped**, with the 3 `startup_warning` tests included.
+- `just check-tier-coverage worktree`: 0 stranded.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` gave `packages: [worktree,
+  worktree-cli, test-toolkit, darkmatter]` and `change_class: package`. The
+  tree still holds Phase 4's uncommitted changes.
+  - `darkmatter` (reads the skill files):
+    `cargo nextest run -E 'test(/shipped_schema_corpus/)'` passed 9.
+  - `test-toolkit`: `just archive-path-guard` passed 2.
+  - `worktree-cli` is covered by the area's `just test`; it is the only
+    dependent of `worktree`.
+- Docs: `md validate refs` on the edited Markdown files found 0 issues.
+  None of them has `kind` frontmatter.
+- Cross-OS (Windows rig): `just cross-check worktree --os windows` passed
+  **872, 1 skipped**, and `just cross-check worktree-cli --os windows` passed
+  **654, 43 skipped**. No Linux or WSL2 run; Phase 6 owns that evidence.
