@@ -99,6 +99,10 @@ Shapes are stable across runs; absolute times are not, so none are kept here.
   and `lint` cache; test tiers consume a verified archive and restore nothing.
   A cold build is not a cache-key bug, and never add a cache to a consumer: a
   restored cache can make a silent rebuild look fast.
+- **A pre-push receipt from an older head counts only when its
+  gate-input identity is unchanged:** the `git ls-tree` entries of the
+  package's build closure plus that gate's global inputs, recomputed over both
+  trees rather than read from the receipt.
 - **A push to `main` cancels the in-flight `main` run**
   (`concurrency.group` in `.github/workflows/ci.yml` is keyed on the ref, and
   `main`'s ref is constant). Pull requests use their own merge ref and the

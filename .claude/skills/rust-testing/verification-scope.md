@@ -31,7 +31,9 @@ such as `.config/nextest.toml` already selects the whole workspace in
 How CI derives and gates its scope (package metadata, per-package cells,
 evidence reuse, the pre-push hook) is owned by the `rust-devops` skill and
 the repository `CLAUDE.md`; a test author needs only that a test added to a
-package runs in that package's own cell.
+package runs in that package's own cell. CI's own suites follow the same rule:
+`repo-deps` (`scripts/`) owns the planner and `scripts/ci/test_*.py`
+contracts, and `test-toolkit` owns `ci_workflow_contracts`.
 
 ## When work is split across agents
 
