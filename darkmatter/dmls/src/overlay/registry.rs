@@ -356,7 +356,7 @@ impl Preparation {
     /// Scans the document's roots and reads its payload dependencies' hashes.
     /// Does all of a preparation's I/O, and touches no shared state.
     pub fn run(mut self) -> Prepared {
-        work_counters::record_registry_scan();
+        let _scan = work_counters::record_registry_scan();
         let mut deps = Dependencies::default();
         let result = scan_with_source(&self.context, &[], &mut self.roots);
         if let Ok(roots) = SchemaRoots::for_document(&self.context) {

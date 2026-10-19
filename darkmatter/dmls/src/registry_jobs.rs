@@ -19,10 +19,13 @@
 //!                         └──installed, but changed meanwhile──────┘ (queued again)
 //! ```
 //!
-//! The [`RegistryQueue`] has two lanes. Document jobs, which requests wait
-//! on, always run before a workspace pass starts, and a running pass runs
-//! any document job that arrives before each of its probes, so a request
-//! waits for at most the probe in progress. The workspace lane is one slot:
+//! The [`RegistryQueue`] has three lanes: documents, startup phases, and
+//! one workspace slot. Document jobs, which requests wait on, always run
+//! before a pass starts, and a running pass (a startup phase or a workspace
+//! pass) runs any document job that arrives before each of its probes, so a
+//! request waits for at most the probe in progress. The worker runs one job
+//! at a time, so no two of its preparations overlap. The workspace lane is
+//! one slot:
 //!
 //! ```text
 //! Idle ──schedule──▶ Queued ──worker starts the pass──▶ Running ──pass ends──▶ Idle
@@ -35,23 +38,40 @@
 //! Any number of schedules while a pass is queued, or while one runs, add
 //! nothing beyond one pass, and a follow-up pass reads the workspace scopes
 //! when it starts, so it covers every change scheduled before then.
+//!
+//! Startup runs as two [`StartupPhase`]s on the same worker, coordinated by
+//! the dispatch thread through completion messages ([`PendingRegistries::begin_startup`]):
+//!
+//! ```text
+//! server start ──▶ Initial queued ─┐
+//!                                  ├─ both done ──▶ Discovered queued (only when discovery
+//! file discovery (own thread) ─────┘                 found new repositories) ──▶ ready
+//! ```
+//!
+//! Discovery's file list is installed as soon as it arrives; only the
+//! `schema registry ready` line waits for the last phase. Startup counts as
+//! one outstanding job from server start until then, so an observer never
+//! sees zero between the phases.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
+use std::thread::ThreadId;
+use std::time::Duration;
 
 use crossbeam_channel::Sender;
 use lsp_server::RequestId;
 use lsp_types::Uri;
 
 use crate::index_build::Waiter;
-use crate::overlay::RegistryNeed;
+use crate::overlay::{RegistryNeed, RegistrySummary};
 use crate::router::StartupEvent;
 
-/// Which preparation a [`RegistryJob`] (or startup) ran.
+/// Which preparation a [`RegistryJob`] ran.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegistryJobKind {
-    /// Startup's preparation of the workspace scopes.
+    /// Startup's preparation of the workspace scopes (both phases; reported
+    /// once, after the last).
     Startup,
     /// The workspace scopes again, after a refresh marked them stale.
     Workspace,
@@ -59,10 +79,23 @@ pub enum RegistryJobKind {
     Document,
 }
 
+/// One of startup's two preparation passes over the workspace scopes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupPhase {
+    /// The scopes known without a listing: each workspace folder and the
+    /// packages and package areas inside it.
+    Initial,
+    /// The scopes of the repositories file discovery found below the
+    /// folders. Runs only when discovery changed the repository set.
+    Discovered,
+}
+
 /// Work for the registry worker.
 pub(crate) enum RegistryJob {
     /// Prepare every stale workspace scope.
     Workspace,
+    /// Prepare every stale workspace scope for a startup phase.
+    Startup(StartupPhase),
     /// Prepare one document's registry.
     Document(Box<RegistryNeed>),
 }
@@ -79,6 +112,7 @@ enum WorkspaceSlot {
 
 struct Lanes {
     documents: VecDeque<RegistryNeed>,
+    startup: VecDeque<StartupPhase>,
     workspace: WorkspaceSlot,
     closed: bool,
 }
@@ -97,6 +131,7 @@ impl RegistryQueue {
         Self {
             lanes: Mutex::new(Lanes {
                 documents: VecDeque::new(),
+                startup: VecDeque::new(),
                 workspace: WorkspaceSlot::Idle,
                 closed: false,
             }),
@@ -119,6 +154,21 @@ impl RegistryQueue {
             return false;
         }
         lanes.documents.push_back(need);
+        self.ready.notify_one();
+        true
+    }
+
+    /// Queues a startup phase.
+    ///
+    /// ## Returns
+    ///
+    /// Whether it was queued: `false` once the queue is closed.
+    fn push_startup(&self, phase: StartupPhase) -> bool {
+        let mut lanes = self.lanes();
+        if lanes.closed {
+            return false;
+        }
+        lanes.startup.push_back(phase);
         self.ready.notify_one();
         true
     }
@@ -148,8 +198,9 @@ impl RegistryQueue {
         }
     }
 
-    /// The worker's next job, waiting for one: a queued document first, else
-    /// a queued workspace pass, which this marks running.
+    /// The worker's next job, waiting for one: a queued document first, then
+    /// a queued startup phase, else a queued workspace pass, which this
+    /// marks running.
     ///
     /// ## Returns
     ///
@@ -162,6 +213,9 @@ impl RegistryQueue {
             }
             if let Some(need) = lanes.documents.pop_front() {
                 return Some(RegistryJob::Document(Box::new(need)));
+            }
+            if let Some(phase) = lanes.startup.pop_front() {
+                return Some(RegistryJob::Startup(phase));
             }
             if lanes.workspace == WorkspaceSlot::Queued {
                 lanes.workspace = WorkspaceSlot::Running;
@@ -208,15 +262,49 @@ pub(crate) struct Pending {
     pub refresh: Option<Uri>,
 }
 
+/// Where startup's preparation is, between server start and the
+/// `schema registry ready` line.
+#[derive(Default)]
+struct StartupProgress {
+    /// The initial phase finished.
+    initial_done: bool,
+    /// File discovery's result arrived: whether it changed the repository
+    /// set.
+    discovered: Option<bool>,
+    /// The discovered-scopes phase was queued.
+    discovered_queued: bool,
+    /// The discovered-scopes phase finished.
+    discovered_done: bool,
+    /// The phases' preparation time so far, without queue waits, gate
+    /// waits, or interrupting document jobs.
+    preparing: Duration,
+    /// The registry summary at the end of the last finished phase.
+    summary: RegistrySummary,
+    /// The thread the last finished phase ran on.
+    thread: Option<ThreadId>,
+}
+
+/// Startup's preparation finished: what its one registry line reports.
+pub(crate) struct StartupReady {
+    pub summary: RegistrySummary,
+    pub preparing: Duration,
+    /// The worker thread that ran the phases.
+    pub thread: ThreadId,
+}
+
 /// The document preparations queued or running, keyed by document path, and
 /// the worker's job queue. One job serves every need for a document until
 /// its result is installed.
 pub(crate) struct PendingRegistries {
     queue: Arc<RegistryQueue>,
     pending: HashMap<PathBuf, Pending>,
-    /// Jobs that will report a completion: each queued document job, plus
-    /// the workspace pass queued or running and its scheduled follow-up.
+    /// Jobs that will report a completion: each queued document job, the
+    /// workspace pass queued or running and its scheduled follow-up, and
+    /// startup (one job for both phases, until it is ready).
     outstanding: usize,
+    /// `Some` from [`begin_startup`](Self::begin_startup) until startup is
+    /// ready or the server shuts down.
+    startup: Option<StartupProgress>,
     /// The [`StartupHooks::observer`](crate::StartupHooks::observer), told
     /// of every change to `outstanding`.
     observer: Option<Sender<StartupEvent>>,
@@ -224,7 +312,83 @@ pub(crate) struct PendingRegistries {
 
 impl PendingRegistries {
     pub fn new(queue: Arc<RegistryQueue>, observer: Option<Sender<StartupEvent>>) -> Self {
-        Self { queue, pending: HashMap::new(), outstanding: 0, observer }
+        Self { queue, pending: HashMap::new(), outstanding: 0, startup: None, observer }
+    }
+
+    /// Queues startup's initial phase. Startup counts as one outstanding
+    /// job until [`startup_phase_finished`](Self::startup_phase_finished) or
+    /// [`startup_discovered`](Self::startup_discovered) reports it ready.
+    pub fn begin_startup(&mut self) {
+        if self.queue.push_startup(StartupPhase::Initial) {
+            self.startup = Some(StartupProgress::default());
+            self.added();
+        }
+    }
+
+    /// Whether startup's preparation is still under way.
+    pub fn starting(&self) -> bool {
+        self.startup.is_some()
+    }
+
+    /// Records a finished startup phase, `preparing` long, after which the
+    /// prepared registries summarize as `summary`.
+    ///
+    /// ## Returns
+    ///
+    /// Startup's result when this was its last phase. The caller reports it
+    /// and then calls [`finished`](Self::finished).
+    pub fn startup_phase_finished(
+        &mut self,
+        phase: StartupPhase,
+        preparing: Duration,
+        summary: RegistrySummary,
+        thread: ThreadId,
+    ) -> Option<StartupReady> {
+        let progress = self.startup.as_mut()?;
+        match phase {
+            StartupPhase::Initial => progress.initial_done = true,
+            StartupPhase::Discovered => progress.discovered_done = true,
+        }
+        progress.preparing += preparing;
+        progress.summary = summary;
+        progress.thread = Some(thread);
+        self.advance_startup()
+    }
+
+    /// Records file discovery's result: whether it changed the repository
+    /// set, which then needs the discovered-scopes phase.
+    ///
+    /// ## Returns
+    ///
+    /// Startup's result when nothing else remains, as for
+    /// [`startup_phase_finished`](Self::startup_phase_finished).
+    pub fn startup_discovered(&mut self, repositories_changed: bool) -> Option<StartupReady> {
+        let progress = self.startup.as_mut()?;
+        progress.discovered = Some(repositories_changed);
+        self.advance_startup()
+    }
+
+    /// Queues the discovered-scopes phase once both the initial phase and
+    /// discovery are done, or ends startup when no phase remains.
+    fn advance_startup(&mut self) -> Option<StartupReady> {
+        let progress = self.startup.as_mut()?;
+        let (true, Some(changed)) = (progress.initial_done, progress.discovered) else {
+            return None;
+        };
+        if changed && !progress.discovered_done {
+            if !progress.discovered_queued {
+                progress.discovered_queued = self.queue.push_startup(StartupPhase::Discovered);
+            }
+            if progress.discovered_queued {
+                return None;
+            }
+        }
+        let progress = self.startup.take()?;
+        Some(StartupReady {
+            summary: progress.summary,
+            preparing: progress.preparing,
+            thread: progress.thread?,
+        })
     }
 
     /// Schedules a pass over the workspace scopes, merged with one already
@@ -284,8 +448,16 @@ impl PendingRegistries {
         })
     }
 
-    /// Removes every waiting request, at shutdown.
-    pub fn drain_waiters(&mut self) -> Vec<Waiter> {
+    /// Stops at shutdown: the worker takes no further job, startup is no
+    /// longer awaited, nothing counts as outstanding, and every waiting
+    /// request is handed back to be answered once.
+    pub fn shut_down(&mut self) -> Vec<Waiter> {
+        self.queue.close();
+        self.startup = None;
+        if self.outstanding > 0 {
+            self.outstanding = 0;
+            self.report();
+        }
         self.pending.values_mut().flat_map(|pending| std::mem::take(&mut pending.waiters)).collect()
     }
 }
@@ -314,13 +486,16 @@ mod tests {
     /// The worker's next job without waiting: `None` when nothing is queued.
     fn take(queue: &RegistryQueue) -> Option<String> {
         let lanes = queue.lanes();
-        let idle = lanes.documents.is_empty() && lanes.workspace != WorkspaceSlot::Queued;
+        let idle = lanes.documents.is_empty()
+            && lanes.startup.is_empty()
+            && lanes.workspace != WorkspaceSlot::Queued;
         drop(lanes);
         if idle {
             return None;
         }
         Some(match queue.next().expect("queue open") {
             RegistryJob::Workspace => "workspace".to_string(),
+            RegistryJob::Startup(phase) => format!("{phase:?}"),
             RegistryJob::Document(need) => need.path.file_name().unwrap().to_string_lossy().into_owned(),
         })
     }
@@ -400,5 +575,88 @@ mod tests {
         assert!(!queue.schedule_workspace());
         assert!(queue.next_document().is_none());
         assert!(queue.next().is_none());
+    }
+
+    #[test]
+    fn documents_run_before_a_startup_phase_and_a_startup_phase_before_a_workspace_pass() {
+        let queue = RegistryQueue::new();
+        queue.schedule_workspace();
+        assert!(queue.push_startup(StartupPhase::Initial));
+        queue.push_document(need("doc.md"));
+
+        assert_eq!(take(&queue).as_deref(), Some("doc.md"));
+        assert_eq!(take(&queue).as_deref(), Some("Initial"));
+        assert_eq!(take(&queue).as_deref(), Some("workspace"));
+        queue.finish_workspace();
+        assert_eq!(take(&queue), None);
+    }
+
+    fn pending() -> (Arc<RegistryQueue>, PendingRegistries) {
+        let queue = Arc::new(RegistryQueue::new());
+        (Arc::clone(&queue), PendingRegistries::new(queue, None))
+    }
+
+    fn finish_phase(pending: &mut PendingRegistries, phase: StartupPhase, ms: u64) -> Option<StartupReady> {
+        let summary = RegistrySummary { roots: ms as usize, ..RegistrySummary::default() };
+        pending.startup_phase_finished(phase, Duration::from_millis(ms), summary, std::thread::current().id())
+    }
+
+    #[test]
+    fn the_discovered_phase_waits_for_both_the_initial_phase_and_discovery() {
+        for discovery_first in [false, true] {
+            let (queue, mut pending) = pending();
+            pending.begin_startup();
+            assert_eq!(take(&queue).as_deref(), Some("Initial"));
+            assert_eq!(pending.outstanding, 1);
+
+            let first = if discovery_first {
+                pending.startup_discovered(true)
+            } else {
+                finish_phase(&mut pending, StartupPhase::Initial, 10)
+            };
+            assert!(first.is_none());
+            assert_eq!(take(&queue), None, "the second phase waits for the other half");
+            let second = if discovery_first {
+                finish_phase(&mut pending, StartupPhase::Initial, 10)
+            } else {
+                pending.startup_discovered(true)
+            };
+            assert!(second.is_none(), "a discovered phase still remains");
+            assert_eq!(take(&queue).as_deref(), Some("Discovered"));
+            assert!(pending.starting());
+            assert_eq!(pending.outstanding, 1, "startup stays outstanding between its phases");
+
+            let ready = finish_phase(&mut pending, StartupPhase::Discovered, 5).expect("startup is ready");
+            assert_eq!(ready.preparing, Duration::from_millis(15), "both phases' preparation time");
+            assert_eq!(ready.summary.roots, 5, "the summary after the last phase");
+            assert!(!pending.starting());
+            assert_eq!(take(&queue), None, "no third phase");
+        }
+    }
+
+    #[test]
+    fn discovery_that_changes_no_repository_ends_startup_after_the_initial_phase() {
+        let (queue, mut pending) = pending();
+        pending.begin_startup();
+        assert_eq!(take(&queue).as_deref(), Some("Initial"));
+        assert!(finish_phase(&mut pending, StartupPhase::Initial, 7).is_none(), "discovery is still running");
+        let ready = pending.startup_discovered(false).expect("nothing else remains");
+        assert_eq!(ready.preparing, Duration::from_millis(7));
+        assert_eq!(take(&queue), None, "no discovered phase");
+        pending.finished();
+        assert_eq!(pending.outstanding, 0);
+    }
+
+    #[test]
+    fn shutdown_during_startup_releases_it_and_takes_no_further_phase() {
+        let (queue, mut pending) = pending();
+        pending.begin_startup();
+        assert_eq!(take(&queue).as_deref(), Some("Initial"));
+        assert!(pending.shut_down().is_empty());
+        assert!(!pending.starting());
+        assert_eq!(pending.outstanding, 0, "startup is no longer awaited");
+        assert!(finish_phase(&mut pending, StartupPhase::Initial, 1).is_none());
+        assert!(pending.startup_discovered(true).is_none());
+        assert!(queue.next().is_none(), "the worker stops");
     }
 }

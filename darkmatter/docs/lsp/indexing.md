@@ -28,54 +28,66 @@ references resolve. [DMLS Configuration](./configuration.md) covers the
 ### What happens, in order
 
 The `initialize` handshake completes before any indexing starts, so the
-editor gets its capabilities at once. Then one background thread
-(`spawn_startup` in [`router.rs`](../../dmls/src/router.rs)) does three things
-in order:
+editor gets its capabilities at once. Then two things start at the same
+time:
 
-1. **Prepare the schema registry of the known scopes.** It loads the trigger
-   schemas of every workspace scope it can name without a listing
-   (`OverlayState::prepare_workspace_registries`; the scopes are described
-   [below](#which-scopes-are-prepared)). Each scope is prepared as if for a
-   document named `<scope>/.dmls-workspace`, through the same five roots
-   that document would search. That name is only a key; DMLS never reads
-   such a file, it does not need to exist, and no Markdown file is read.
-2. **List the files.** It walks each workspace folder and records the paths
-   of Markdown and YAML files. It reads no file contents. The same walk
-   records every directory that holds a `.git` entry (a directory, or the
-   `.git` file of a linked worktree or submodule): the repositories inside
-   the folders.
-3. **Prepare the repositories the walk found.** Each one, with the packages
-   and package areas inside it, is prepared the same way. Scopes step 1
-   already prepared are fresh and are not prepared again.
+- **The registry worker prepares the schema registry of the known scopes**
+  (the *initial phase*). It loads the trigger schemas of every workspace
+  scope it can name without a listing (the scopes are described
+  [below](#which-scopes-are-prepared)). Each scope is prepared as if for a
+  document named `<scope>/.dmls-workspace`, through the same five roots
+  that document would search. That name is only a key; DMLS never reads
+  such a file, it does not need to exist, and no Markdown file is read.
+  This is the same worker that prepares documents' registries (see
+  [Preparing registries off the dispatch thread](#preparing-registries-off-the-dispatch-thread)),
+  so a request's document job runs before the rest of startup's scopes.
+- **File discovery lists the files** on its own thread (`spawn_startup` in
+  [`router.rs`](../../dmls/src/router.rs)). It walks each workspace folder
+  and records the paths of Markdown and YAML files, reading no file
+  contents. The same walk records every directory that holds a `.git`
+  entry (a directory, or the `.git` file of a linked worktree or
+  submodule): the repositories inside the folders.
 
-Only after step 3 does the dispatch thread log the one
+As soon as discovery returns, the dispatch thread installs the file list,
+logs its line, and re-publishes the open documents' diagnostics, whatever
+the registry worker is doing: the list is what releases
+[withheld path diagnostics](#diagnostics-that-wait-for-the-list) and lets an
+index build start. Once **both** discovery and the initial phase are done,
+and only if discovery found repositories DMLS did not know, the dispatch
+thread queues the *discovered phase*: each new repository, with the packages
+and package areas inside it, is prepared the same way. Scopes already
+prepared are fresh and are not prepared again.
+
+After the last phase, the dispatch thread logs the one
 [schema registry line](#schema-registry-lines), so its counts cover every
-startup scope; then it installs the file list and logs its line. Both are
-installed between client messages and re-publish diagnostics for the open
-documents. Meanwhile the dispatch thread keeps answering requests, edits,
-cancellation, and shutdown. Waiting for the walk delays only the log line:
-no request waits for it, because a document's own registry is prepared on
-the registry worker whatever startup is doing (see
-[Requests wait only for what they need](#requests-wait-only-for-what-they-need)).
+startup scope, and re-publishes diagnostics for the open documents.
+Meanwhile it keeps answering requests, edits, cancellation, and shutdown.
+No request waits for startup as a whole; a shutdown during either phase
+answers waiting requests and stops the worker without waiting for startup
+to finish.
 
 ```mermaid
-flowchart TD
-    H["initialize handshake completes"] --> D["dispatch thread<br/>answers requests and notifications"]
-    H --> S["background startup thread"]
-    S --> R["1. prepare the trigger registry of each<br/>workspace folder, package, and package area"]
-    R --> W["2. list Markdown and YAML paths<br/>and repositories (no contents read)"]
-    W --> N["3. prepare the repositories found<br/>and the scopes inside them"]
-    N -->|"installed"| RL["log: schema registry ready<br/>refresh open documents' diagnostics"]
-    RL --> WL["install the list, log: workspace files listed<br/>refresh open documents' diagnostics"]
-    D --> O["didOpen: parse the buffer,<br/>then the targets it references"]
-    D --> P["a document's registry is not prepared:<br/>the registry worker prepares it;<br/>its requests and diagnostics wait for it"]
-    D --> F["references, rename, file rename,<br/>workspace symbols: fill or revalidate the index store"]
+sequenceDiagram
+    participant D as dispatch thread
+    participant W as registry worker
+    participant F as file discovery
+    par
+        D->>W: initial phase: folders, packages, package areas
+    and
+        D->>F: list Markdown and YAML paths and repositories
+    end
+    F-->>D: discovery result
+    Note over D: install the list now, log: workspace files listed,<br/>refresh open documents' diagnostics
+    W-->>D: initial phase done
+    D->>W: discovered phase (only when new repositories were found)
+    W-->>D: discovered phase done
+    Note over D: log: schema registry ready,<br/>refresh open documents' diagnostics
 ```
 
 | Step | Reads file contents? | When |
 | --- | --- | --- |
-| Schema registry | the YAML files directly inside the schema roots, plus the payload, import, and example files their triggers name | first, on the startup thread, and again for the repositories the walk found |
-| File list | no | between the two registry steps, on the startup thread |
+| Schema registry | the YAML files directly inside the schema roots, plus the payload, import, and example files their triggers name | at once, on the registry worker, and again for the repositories the walk found once both are done |
+| File list | no | at once, on the discovery thread, beside the initial phase; installed as soon as it returns |
 | Open documents | the editor's buffers | as the editor opens them |
 | Referenced targets | each target, once until it changes | the first time a feature needs its headings or transclusions |
 | Index store | every listed Markdown file (parsed only where its row is missing or out of date) | the first references, rename, file-rename, or workspace-symbols request |
@@ -178,10 +190,14 @@ job on the **registry worker**, a background thread
   are published when it finishes. Schedules merge: any number made while a
   pass is queued add nothing, and any number made while one runs add a
   single follow-up pass, which reads the scopes when it starts.
-- Document jobs come first. The worker starts a workspace pass only when no
-  document job is queued, and a running pass, before each scope it prepares,
-  first runs every document job queued meanwhile. A request therefore waits
-  for at most the one scope in progress, never for a whole pass.
+- Document jobs come first, then startup's phases, then a workspace pass.
+  The worker starts a pass only when no document job is queued, and a
+  running pass (a startup phase or a workspace pass), before each scope it
+  prepares, first runs every document job queued meanwhile. A request
+  therefore waits for at most the one scope in progress, never for a whole
+  pass.
+- The worker is the only thread that prepares registries and runs one job
+  at a time, so no two preparations ever overlap.
 
 ```mermaid
 sequenceDiagram
@@ -201,8 +217,7 @@ sequenceDiagram
 
 A preparation holds the overlay lock only twice, briefly: to copy the cached
 root contents, and to install its result. It scans the roots and reads the
-payloads with the lock released, so a lookup never waits for it; startup's
-preparation of the workspace scopes works the same way. A result is
+payloads with the lock released, so a lookup never waits for it. A result is
 installed in one step, and only when no preparation of the same document
 that began later has installed already. A change that arrives while a
 preparation runs, and touches what it read, leaves the installed registry
@@ -1030,7 +1045,7 @@ The code is `workspace_identifier` in
 | `failed_triggers` | files that declare `kind: trigger-schema` but fail to load: the envelope does not load, or a prepared scope failed to resolve the payload (a missing or unparseable payload file, or an import or example it names that does not resolve) |
 | `unclassified` | other YAML files in searched folders |
 | `failed_scopes` | prepared scopes whose last preparation failed |
-| `elapsed_ms` | wall time to prepare every startup scope's registry, including loading trigger payloads; the file-list walk between the two preparation steps is not included |
+| `elapsed_ms` | time spent preparing every startup scope's registry, including loading trigger payloads; the file-list walk, queue waits, and document jobs that ran between startup's scopes are not included |
 
 The counting rules:
 

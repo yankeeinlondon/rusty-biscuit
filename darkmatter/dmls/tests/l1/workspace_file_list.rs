@@ -131,7 +131,14 @@ fn path_diagnostics_wait_for_the_file_list() {
     let mut fixture = LspFixture::start_with_file_list_gate(&workspace);
     fixture.initialize_unlisted(watched_params(workspace.path()));
     open(&fixture, &uri(&source), text);
-    let early = codes(&latest(&mut fixture, &uri(&source)));
+    // Startup counts as an outstanding registry job until discovery returns,
+    // so `latest`'s flush would wait for the gated walk; a document request
+    // alone settles the open's diagnostics (the document has no frontmatter,
+    // so it queues no registry job).
+    let response = fixture.request("textDocument/documentSymbol", json!({ "textDocument": { "uri": uri(&source) } }));
+    assert!(response.error.is_none(), "{response:?}");
+    let early = fixture.take_buffered_diagnostics(&uri(&source)).expect("diagnostics were published");
+    let early = codes(early["diagnostics"].as_array().expect("diagnostics array"));
     let duplicate = "dm.links.duplicate_heading".to_string();
     assert_eq!(early, vec![duplicate.clone(), duplicate.clone()], "before the list: {early:?}");
 

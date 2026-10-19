@@ -18,6 +18,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
@@ -61,7 +62,9 @@ use crate::index_build::{Build, FactsPlan, IndexBuildState, PassTotals, Trigger,
 use crate::index_store::{PassReport, WorkspaceFacts};
 use crate::overlay::{OverlayState, RegistryNeed, RegistrySummary};
 use crate::providers::{DocumentContext, ProviderRegistry};
-use crate::registry_jobs::{PendingRegistries, RegistryJob, RegistryJobKind, RegistryQueue};
+use crate::registry_jobs::{
+    PendingRegistries, RegistryJob, RegistryJobKind, RegistryQueue, StartupPhase, StartupReady,
+};
 use crate::request_timing::{
     CompletionEvent, MessageKind, Outcome, RequestTimings, Stage, Wait, document_uri,
 };
@@ -148,7 +151,7 @@ pub struct StartupHooks {
     pub index_round_gate: Option<Receiver<()>>,
     /// When set, the registry worker waits, after reporting
     /// [`StartupEvent::RegistryPreparing`] and before preparing each job
-    /// (startup's preparation excepted), until this receives a message or
+    /// (startup's phases excepted), until this receives a message or
     /// disconnects, so a test can hold a preparation while it talks to the
     /// server.
     pub registry_gate: Option<Receiver<()>>,
@@ -157,6 +160,14 @@ pub struct StartupHooks {
     /// preparing each probe, until this receives a message or disconnects,
     /// so a test can hold a pass between two probes.
     pub registry_probe_gate: Option<Receiver<()>>,
+    /// When set, each probe preparation a startup phase runs on the
+    /// registry worker waits, after reading its inputs and reporting
+    /// [`StartupEvent::StartupProbePreparing`] and before installing its
+    /// result, until this receives a message or disconnects, so a test can
+    /// hold startup's preparation in flight while discovery, requests, and
+    /// changes proceed. A probe that is still fresh prepares nothing and
+    /// does not wait.
+    pub startup_probe_gate: Option<Receiver<()>>,
     /// Receives a [`StartupEvent`] as each background step completes.
     pub observer: Option<Sender<StartupEvent>>,
 }
@@ -166,8 +177,10 @@ pub struct StartupHooks {
 pub enum StartupEvent {
     /// Every startup workspace scope's trigger registry is prepared,
     /// including those of the repositories the file-list walk found, and the
-    /// registry line is logged. Follows the walk and precedes
-    /// [`FileListInstalled`](Self::FileListInstalled).
+    /// registry line is logged. Follows
+    /// [`FileListInstalled`](Self::FileListInstalled) and the last
+    /// [`StartupPhaseFinished`](Self::StartupPhaseFinished), and precedes the
+    /// startup [`RegistryPrepared`](Self::RegistryPrepared).
     RegistryReady,
     /// The workspace file list is installed and open documents' diagnostics
     /// were refreshed against it.
@@ -182,6 +195,12 @@ pub enum StartupEvent {
     /// probe (sent from the worker, after it ran the document jobs waiting
     /// then and before the [`StartupHooks::registry_probe_gate`] wait).
     WorkspaceProbePreparing,
+    /// A startup phase on the registry worker read a probe's inputs and is
+    /// about to install its result (sent from the worker, before the
+    /// [`StartupHooks::startup_probe_gate`] wait).
+    StartupProbePreparing(StartupPhase),
+    /// The dispatch thread handled the end of a startup phase.
+    StartupPhaseFinished(StartupPhase),
     /// A trigger-registry preparation finished on `thread` and the dispatch
     /// thread handled its result: answered the requests and published the
     /// diagnostics that waited on it.
@@ -200,10 +219,12 @@ pub enum StartupEvent {
 /// A result background work hands to the dispatch thread, which owns every
 /// index mutation.
 enum Internal {
-    /// Startup prepared the workspace scopes' trigger registries.
-    RegistryReady {
+    /// The registry worker finished a startup phase, `preparing` long, after
+    /// which the prepared registries summarize as `summary`.
+    StartupPhase {
+        phase: StartupPhase,
+        preparing: Duration,
         summary: RegistrySummary,
-        elapsed_ms: u128,
         thread: std::thread::ThreadId,
     },
     /// The registry worker finished a job: `path` is the document a
@@ -291,11 +312,15 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         observer: options.startup.observer.clone(),
         gate: options.startup.registry_gate,
         probe_gate: options.startup.registry_probe_gate,
+        startup_probe_gate: options.startup.startup_probe_gate,
         roots: roots.clone(),
         overlay: Arc::clone(&overlay),
         contexts: Arc::clone(&contexts),
+        clock: Arc::clone(&options.clock),
         dispatch: dispatch.clone(),
     });
+    let mut registries = PendingRegistries::new(registry_jobs, options.startup.observer.clone());
+    registries.begin_startup();
     spawn_startup(StartupWork {
         internal: internal_tx.clone(),
         sender: connection.sender.clone(),
@@ -303,8 +328,6 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         workspace_config: config.effective().workspace.clone(),
         progress_enabled: profile.supports_work_done_progress,
         gate: options.startup.file_list_gate,
-        overlay: Arc::clone(&overlay),
-        contexts: Arc::clone(&contexts),
         clock: Arc::clone(&options.clock),
         dispatch,
     });
@@ -325,10 +348,7 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         contexts,
         manifests,
         schema_watch_fallback: false,
-        registries: std::cell::RefCell::new(PendingRegistries::new(
-            registry_jobs,
-            options.startup.observer.clone(),
-        )),
+        registries: std::cell::RefCell::new(registries),
         timings: RequestTimings::start(Arc::clone(&options.clock)),
         clock: options.clock,
         workspace,
@@ -415,31 +435,20 @@ struct StartupWork {
     workspace_config: crate::config::WorkspaceConfig,
     progress_enabled: bool,
     gate: Option<Receiver<()>>,
-    overlay: Arc<OverlayState>,
-    contexts: Arc<RepositoryContexts>,
     clock: Arc<dyn Clock>,
     dispatch: tracing::Dispatch,
 }
 
-/// Spawns startup's background work, in order: the trigger registries of
-/// the workspace scopes known without a listing (each folder, and the
-/// packages and package areas inside it), then the file-list walk, which
-/// reads no file contents and reports `window/workDoneProgress`, then the
-/// scopes of the repositories the walk found below the folders. Only then is
-/// the registry line's summary sent, so the one line counts every startup
-/// scope; its `elapsed_ms` is the two preparations' time, not the walk's.
-/// Each result goes to the dispatch thread, which logs and installs it. The
-/// registries are prepared without holding the overlay lock across their
-/// I/O, so the dispatch thread's lookups never wait for it, and a document's
-/// own registry is prepared on the registry worker whatever startup is
-/// doing, so no request waits for the walk.
+/// Spawns startup's file discovery: the file-list walk, which reads no file
+/// contents, finds the repositories below the workspace folders, and
+/// reports `window/workDoneProgress`. It starts at once and prepares no
+/// registry; startup's preparation runs on the registry worker meanwhile
+/// (see [`crate::registry_jobs`]). The dispatch thread installs the list as
+/// soon as it arrives and, once the worker's initial phase is done too,
+/// queues the discovered repositories' phase.
 fn spawn_startup(work: StartupWork) {
     std::thread::spawn(move || {
         let _logging = tracing::dispatcher::set_default(&work.dispatch);
-        let started = work.clock.now();
-        work.overlay.prepare_workspace_registries(&work.roots, &work.contexts);
-        let mut preparing = work.clock.now().saturating_duration_since(started);
-
         if let Some(gate) = work.gate {
             let _ = gate.recv();
         }
@@ -448,19 +457,6 @@ fn spawn_startup(work: StartupWork) {
         let started = work.clock.now();
         let report = list_files(&work.roots, &work.workspace_config);
         let elapsed_ms = work.clock.now().saturating_duration_since(started).as_millis();
-
-        let started = work.clock.now();
-        if work.overlay.set_workspace_repositories(report.repositories.clone()) {
-            work.overlay.prepare_workspace_registries(&work.roots, &work.contexts);
-        }
-        preparing += work.clock.now().saturating_duration_since(started);
-        let summary = work.overlay.trigger_registry_summary();
-        let thread = std::thread::current().id();
-        let _ = work.internal.send(Internal::RegistryReady {
-            summary,
-            elapsed_ms: preparing.as_millis(),
-            thread,
-        });
         let _ = work.internal.send(Internal::FileList { report, elapsed_ms, progress: reporter });
     });
 }
@@ -471,21 +467,25 @@ struct RegistryWorker {
     observer: Option<Sender<StartupEvent>>,
     gate: Option<Receiver<()>>,
     probe_gate: Option<Receiver<()>>,
+    startup_probe_gate: Option<Receiver<()>>,
     roots: Vec<PathBuf>,
     overlay: Arc<OverlayState>,
     contexts: Arc<RepositoryContexts>,
+    clock: Arc<dyn Clock>,
     dispatch: tracing::Dispatch,
 }
 
-/// Spawns the thread that prepares trigger registries for the dispatch
-/// thread (see [`crate::registry_jobs`]) and reports each job's result
-/// through the dispatch loop.
+/// Spawns the thread that prepares every trigger registry the server
+/// prepares (see [`crate::registry_jobs`]) and reports each job's result
+/// through the dispatch loop. One thread, one job at a time, so no two
+/// server preparations overlap.
 ///
-/// Document jobs come first. A workspace pass builds its probe list when it
-/// starts, from the repositories and contexts current then, and before each
-/// probe (the first included) runs every document job waiting, reporting
-/// each as it finishes, so a request parked on its document waits for at
-/// most the probe in progress. A probe is never interrupted.
+/// Document jobs come first, then startup phases, then a workspace pass. A
+/// pass (startup phase or workspace) builds its probe list when it starts,
+/// from the repositories and contexts current then, and before each probe
+/// (the first included) runs every document job waiting, reporting each as
+/// it finishes, so a request parked on its document waits for at most the
+/// probe in progress. A probe is never interrupted.
 ///
 /// ## Returns
 ///
@@ -500,6 +500,7 @@ fn spawn_registry_worker(work: RegistryWorker) -> Arc<RegistryQueue> {
             let listening = match job {
                 RegistryJob::Document(need) => work.run_document(*need),
                 RegistryJob::Workspace => work.run_workspace(&jobs),
+                RegistryJob::Startup(phase) => work.run_startup(phase, &jobs),
             };
             if !listening {
                 return;
@@ -538,23 +539,72 @@ impl RegistryWorker {
     /// Whether the dispatch loop still listens.
     fn run_workspace(&self, queue: &RegistryQueue) -> bool {
         self.hold();
-        if !self.run_waiting_documents(queue) {
-            return false;
-        }
-        for probe in self.overlay.workspace_probes(&self.roots, &self.contexts) {
-            if !self.run_waiting_documents(queue) {
-                return false;
-            }
+        let before_probe = || {
             if let Some(observer) = &self.observer {
                 let _ = observer.send(StartupEvent::WorkspaceProbePreparing);
             }
             if let Some(gate) = &self.probe_gate {
                 let _ = gate.recv();
             }
-            self.overlay.prepare_workspace_probe(&probe, &self.roots, &self.contexts);
+        };
+        if self.run_pass(queue, &before_probe, &|| {}).is_none() {
+            return false;
         }
         queue.finish_workspace();
         self.report(RegistryJobKind::Workspace, None)
+    }
+
+    /// Runs one startup phase, yielding to document jobs between probes, and
+    /// reports its preparation time and the registry summary after it.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the dispatch loop still listens.
+    fn run_startup(&self, phase: StartupPhase, queue: &RegistryQueue) -> bool {
+        let before_install = || {
+            if let Some(observer) = &self.observer {
+                let _ = observer.send(StartupEvent::StartupProbePreparing(phase));
+            }
+            if let Some(gate) = &self.startup_probe_gate {
+                let _ = gate.recv();
+            }
+        };
+        let Some(preparing) = self.run_pass(queue, &|| {}, &before_install) else {
+            return false;
+        };
+        let summary = self.overlay.trigger_registry_summary();
+        let thread = std::thread::current().id();
+        self.internal.send(Internal::StartupPhase { phase, preparing, summary, thread }).is_ok()
+    }
+
+    /// Prepares every workspace probe, running the document jobs waiting
+    /// before the probe list is built and before each probe. The test seams
+    /// `before_probe` (before each probe) and `before_install` (inside a
+    /// probe preparation that ran, before its install) report and wait on
+    /// gates.
+    ///
+    /// ## Returns
+    ///
+    /// The time spent building the probe list and preparing probes (with
+    /// `before_install` included, so a gated preparation reads long), or
+    /// `None` once the dispatch loop no longer listens.
+    fn run_pass(&self, queue: &RegistryQueue, before_probe: &dyn Fn(), before_install: &dyn Fn()) -> Option<Duration> {
+        if !self.run_waiting_documents(queue) {
+            return None;
+        }
+        let started = self.clock.now();
+        let probes = self.overlay.workspace_probes(&self.roots, &self.contexts);
+        let mut preparing = self.clock.now().saturating_duration_since(started);
+        for probe in probes {
+            if !self.run_waiting_documents(queue) {
+                return None;
+            }
+            before_probe();
+            let started = self.clock.now();
+            self.overlay.prepare_workspace_probe(&probe, &self.roots, &self.contexts, before_install);
+            preparing += self.clock.now().saturating_duration_since(started);
+        }
+        Some(preparing)
     }
 
     /// Runs every document job queued now.
@@ -697,10 +747,24 @@ impl ServerState {
     ///
     /// The Markdown paths that joined or left the list.
     fn install_listing(&self, report: DiscoveryReport) -> Vec<PathBuf> {
-        let complete = report.is_complete();
-        if self.overlay.set_workspace_repositories(report.repositories) {
+        let (repositories_changed, changed) = self.install_file_list(report);
+        if repositories_changed {
             self.prepare_workspace_registries();
         }
+        changed
+    }
+
+    /// [`install_listing`](Self::install_listing) without queuing any
+    /// preparation, for startup, whose discovered-scopes phase covers a
+    /// changed repository set.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the repository set changed, and the Markdown paths that
+    /// joined or left the list.
+    fn install_file_list(&self, report: DiscoveryReport) -> (bool, Vec<PathBuf>) {
+        let complete = report.is_complete();
+        let repositories_changed = self.overlay.set_workspace_repositories(report.repositories);
         let markdown = report.files.into_iter().collect();
         let yaml = report.yaml.into_iter().collect();
         let changed = {
@@ -710,7 +774,7 @@ impl ServerState {
             changed
         };
         self.facts_changed(changed.iter().cloned());
-        changed
+        (repositories_changed, changed)
     }
 
     /// Lists the workspace again on the dispatch thread (a rescan, or a
@@ -1589,13 +1653,13 @@ impl Router {
 
     fn install_internal(&mut self, event: Internal) {
         match event {
-            Internal::RegistryReady { summary, elapsed_ms, thread } => {
-                log_registry_ready(&summary, elapsed_ms, &self.state.workspace);
-                // Preparation may have found a failing trigger file, whose
-                // diagnostic this publishes.
-                self.state.refresh_all_diagnostics();
-                self.notify_observer(StartupEvent::RegistryReady);
-                self.notify_observer(StartupEvent::RegistryPrepared { job: RegistryJobKind::Startup, thread });
+            Internal::StartupPhase { phase, preparing, summary, thread } => {
+                self.state.publish_trigger_transitions();
+                self.notify_observer(StartupEvent::StartupPhaseFinished(phase));
+                let ready = self.state.registries.borrow_mut().startup_phase_finished(phase, preparing, summary, thread);
+                if let Some(ready) = ready {
+                    self.finish_startup(ready);
+                }
             }
             Internal::RegistryPrepared { job, path, thread } => {
                 self.finish_registry_job(path);
@@ -1610,16 +1674,38 @@ impl Router {
                     workspace = %self.state.workspace,
                     "workspace files listed"
                 );
-                self.state.install_listing(report);
+                // Installed now, whatever startup's preparation is doing:
+                // the list releases withheld path diagnostics and the index
+                // build.
+                let (repositories_changed, _) = self.state.install_file_list(report);
+                let starting = self.state.registries.borrow().starting();
+                if repositories_changed && !starting {
+                    self.state.prepare_workspace_registries();
+                }
                 self.state.refresh_all_diagnostics();
                 progress.end();
                 self.notify_observer(StartupEvent::FileListInstalled);
                 if matches!(&self.index_build, IndexBuildState::Building(build) if build.awaiting_list) {
                     self.start_index_round();
                 }
+                let ready = self.state.registries.borrow_mut().startup_discovered(repositories_changed);
+                if let Some(ready) = ready {
+                    self.finish_startup(ready);
+                }
             }
             Internal::IndexRound { build, facts } => self.finish_index_round(build, facts),
         }
+    }
+
+    /// Logs the startup registry line once startup's last phase is done and
+    /// publishes the trigger-file diagnostics preparation found, then
+    /// retires startup's outstanding job.
+    fn finish_startup(&mut self, ready: StartupReady) {
+        log_registry_ready(&ready.summary, ready.preparing.as_millis(), &self.state.workspace);
+        self.state.refresh_all_diagnostics();
+        self.state.registries.borrow_mut().finished();
+        self.notify_observer(StartupEvent::RegistryReady);
+        self.notify_observer(StartupEvent::RegistryPrepared { job: RegistryJobKind::Startup, thread: ready.thread });
     }
 
     fn notify_observer(&self, event: StartupEvent) {
@@ -1900,9 +1986,11 @@ impl Router {
         true
     }
 
-    /// Answers every request waiting for a trigger registry at shutdown.
+    /// Stops the registry worker at shutdown, releases startup's
+    /// coordination, and answers every request waiting for a trigger
+    /// registry once.
     fn abandon_registry_waiters(&mut self) {
-        let waiters = self.state.registries.borrow_mut().drain_waiters();
+        let waiters = self.state.registries.borrow_mut().shut_down();
         for waiter in waiters {
             self.answer_waiter(waiter, ErrorCode::ServerCancelled, "the server is shutting down", Outcome::Cancelled);
         }

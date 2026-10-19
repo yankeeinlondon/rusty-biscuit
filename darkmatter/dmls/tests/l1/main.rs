@@ -44,6 +44,7 @@ mod schema_yaml_spellings;
 mod shell_suffixes;
 mod standalone_stdio;
 mod startup_log_lines;
+mod startup_preparation;
 mod stdio_subprocess;
 mod strict_mode_recovery_spike;
 mod style_markdown_parity;
