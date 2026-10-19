@@ -154,11 +154,12 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
     .unwrap();
 
     let captured = RefCell::new(Vec::new());
+    // The cap is the seventh pass, so only that pass reads `loop.is_last`.
     let result = run_loop(
         &source.resolved_path,
         &config,
         seed,
-        LoopExecutionOptions::default(),
+        LoopExecutionOptions { max_iterations: Some(7), ..LoopExecutionOptions::default() },
         |ctx| {
             let mut options = PrepareOptions::new(crate::test_support::context())
                 .with_layered_overrides(
@@ -237,13 +238,17 @@ fn seeded_loop_reports_honest_error_for_non_numeric_control_variable() {
     .unwrap();
 
     assert_eq!(result.iteration_count, 1);
-    match result.error {
-        Some(CompositionError::InvalidIncrementType {
+    let Some(CompositionError::LoopEvaluationFailed { property, iteration: 1, source, .. }) = result.error else {
+        panic!("expected a located action failure, got {:?}", result.error);
+    };
+    assert_eq!(property, "loop.action");
+    match *source {
+        CompositionError::InvalidIncrementType {
             property,
             found,
             value_excerpt,
             ..
-        }) => {
+        } => {
             assert_eq!(property, "area");
             assert_eq!(found, "string");
             assert!(

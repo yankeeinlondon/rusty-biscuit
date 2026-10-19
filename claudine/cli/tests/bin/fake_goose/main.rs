@@ -12,6 +12,9 @@
 //! - `sleep:<ms>` sleeps, then exits 0;
 //! - `hang` sleeps for ten minutes.
 //!
+//! Marker mode can append a body update to `FAKE_INLINE_DOCUMENT` for inline
+//! composition tests that require the provider to edit its target.
+//!
 //! Each launch writes `launch-<n>.txt` (its prompt) and `pid-<n>.txt` into
 //! `FAKE_DIR`, and `done-<n>.txt` only when it exits on its own.
 
@@ -32,6 +35,10 @@ fn main() {
             .open(marker)
             .expect("open PROVIDER_MARKER");
         writeln!(log, "run").expect("record the launch");
+        if let Some(document) = env::var_os("FAKE_INLINE_DOCUMENT") {
+            let mut file = fs::OpenOptions::new().append(true).open(document).expect("open inline document");
+            writeln!(file, "Agent-written body.").expect("update inline document");
+        }
         println!("done");
         return;
     }

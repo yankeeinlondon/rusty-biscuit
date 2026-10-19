@@ -1,25 +1,19 @@
 ---
 sequence: ./parsing-crates.yaml
-$schema:
-    index: number -> the numeric index of this sequence
-    is_first: boolean -> flag indicating whether we are on the first item in sequence
-    is_last: boolean -> flag indicating whether we are on the last item in sequence
-    next: { name: string, filepath: string }
-    state: { name: string, filepath: string }
 ---
 ## Context
 
-::block when="is_first"
-Your job is to review the detailed research on the Rust crate "{{state.name}}" located at "{{state.filepath}}". 
+::block when="seq.is_first"
+Your job is to review the detailed research on the Rust crate "{{seq.name}}" located at "{{seq.filepath}}".
 
-Once you've digested the information on "{{state.name}}", then proceed to review the on the Rust crate "{{next.name}}" located at: "{{state.filepath}}".
+Once you've digested the information on "{{seq.name}}", then proceed to review the on the Rust crate "{{seq.next.name}}" located at: "{{seq.filepath}}".
 
 You should now have a good foundational knowledge of to think about parsing in Rust though obviously it's still really only grounded in two crates so if you wish to do any additional research to round out your understanding then you should take the time to do that.
 ::end-block
-::block when="!is_last"
+::block when="!seq.is_last"
 
 ::end-block
-::block when="is_last"
+::block when="seq.is_last"
 
 ::end-block
 
@@ -36,7 +30,7 @@ The overall task is to build a comprehensive overview document for how to implem
 
 
 
-::block when="is_last"
+::block when="seq.is_last"
 
 
 ::end-block

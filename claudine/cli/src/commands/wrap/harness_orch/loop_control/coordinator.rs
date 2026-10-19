@@ -229,7 +229,17 @@ impl ActiveDocumentCoordinator {
                 .expect("resolved proxy target always has an authoring directory")
         });
 
-        prompt_state.overlay = handoff.overlay().clone();
+        // The source document authored the `with`, so its values keep the
+        // source's context. Named from the handoff, not the prompt state: an
+        // adopted handoff's state may already point at the target.
+        let authoring = handoff.provenance().source_path();
+        let origin = prompt_state
+            .invocation_context
+            .as_ref()
+            .and_then(|invocation| invocation.derive_source(authoring).ok())
+            .map(|source| source.file_resolution_context().clone())
+            .unwrap_or_else(|| prompt_state.file_resolution_context().for_source(authoring));
+        prompt_state.overlay = claudine::composition::AnchoredOverlay::new(handoff.overlay().clone(), &origin);
         // A retry overlay belongs to the source's retried attempt, never the
         // target's.
         prompt_state.pending_retry_overlay = None;

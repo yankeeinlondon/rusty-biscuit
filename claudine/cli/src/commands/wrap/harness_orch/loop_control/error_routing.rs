@@ -140,6 +140,12 @@ pub(super) fn emit_blocked_finalize_with_err(
     err: &LifecycleErrorInfo,
     loop_start: std::time::Instant,
 ) -> Option<CompositionError> {
+    if claudine::composition::lifecycle::cancellation::requested() {
+        run_cancelled_prompt_cleanup(
+            guard, materialized, source_path, repo_root, term, effect_engine, loop_start,
+        );
+        return None;
+    }
     let terminal = if guard.provider_launched() {
         LifecycleSignal::Failure
     } else {
@@ -207,6 +213,12 @@ pub(super) fn emit_failure_finalize_with_err(
     err: &LifecycleErrorInfo,
     loop_start: std::time::Instant,
 ) -> Option<CompositionError> {
+    if claudine::composition::lifecycle::cancellation::requested() {
+        run_cancelled_prompt_cleanup(
+            guard, materialized, source_path, repo_root, term, effect_engine, loop_start,
+        );
+        return None;
+    }
     let failure_outcome = run_lifecycle_event(
         guard,
         LifecycleSignal::Failure,
@@ -550,4 +562,50 @@ pub(super) fn handle_terminal_evaluation_error(
         Some(early),
         term,
     ))
+}
+
+/// Cancellation owns the terminal route and cannot dispatch recovery controls.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_cancelled_prompt_cleanup(
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    loop_start: std::time::Instant,
+) {
+    let cause = claudine::composition::lifecycle::cancellation::cause()
+        .unwrap_or(claudine::composition::lifecycle::cancellation::CancellationCause::Interrupt);
+    let err = cause.error();
+    for signal in [LifecycleSignal::Cancelled, LifecycleSignal::Finalize] {
+        let cleanup = run_lifecycle_event(
+            guard, signal, materialized, source_path, repo_root,
+            term, effect_engine, Some(&err), loop_start,
+        );
+        for info in cleanup.evaluation_error.iter().chain(cleanup.action_error.iter()) {
+            guard.emitter().emit_warn(&info.msg, term);
+        }
+        if let Some(StackControl::Error { reason }) = &cleanup.control {
+            let info = LifecycleErrorInfo::from_action_failure("error",
+                reason.clone().unwrap_or_else(|| "cancellation cleanup failed".into()));
+            guard.emitter().emit_warn(&info.msg, term);
+        }
+        if let Some(control) = &cleanup.control {
+            let action = match control {
+                StackControl::Retry { .. } => Some("retry"),
+                StackControl::Resume { .. } => Some("resume"),
+                StackControl::Proxy { .. } => Some("proxy"),
+                StackControl::Defer { .. } => Some("defer"),
+                _ => None,
+            };
+            if let Some(action) = action {
+                let error = CompositionError::LifecycleCancellationRecovery {
+                    source_path: source_path.to_path_buf(), action: action.into(),
+                };
+                let info = LifecycleErrorInfo::from_composition_error(&error);
+                guard.emitter().emit_warn(&info.msg, term);
+            }
+        }
+    }
 }

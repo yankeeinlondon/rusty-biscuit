@@ -1,6 +1,5 @@
 pub mod actions;
 pub mod agents;
-pub mod budget;
 pub mod completions;
 pub mod compose;
 pub mod config_tui;
@@ -18,6 +17,7 @@ pub mod init_wizard;
 pub mod link_display;
 pub mod logs;
 pub mod mcp;
+pub(crate) mod prep_target;
 pub mod providers;
 pub mod schema_interactive;
 pub mod sequence;

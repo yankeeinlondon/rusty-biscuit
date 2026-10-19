@@ -456,6 +456,29 @@ pub(crate) mod test_support {
             FileResolutionContext::from_snapshot(root, None, HashMap::new()).for_source(path),
         )
     }
+
+    /// Writes Claudine's schema `bundle` (`(file name, text)` pairs including
+    /// `claudine.yaml`) into `dir`, plus the `claudine.yaml` trigger's payload
+    /// as the plain `$schema` document `claudine-payload.yaml`, and returns
+    /// that document's path.
+    ///
+    /// A schema extension cannot load a trigger envelope, so a unit test that
+    /// types a document by Claudine's catalog through an extension points it
+    /// at the payload; the payload's relative imports resolve against the
+    /// copied libraries.
+    pub(crate) fn claudine_payload_extension(dir: &Path, bundle: &[(&str, &str)]) -> PathBuf {
+        for (name, text) in bundle {
+            std::fs::write(dir.join(name), text).expect("write schema file");
+        }
+        let (_, trigger) = bundle
+            .iter()
+            .find(|(name, _)| *name == "claudine.yaml")
+            .expect("the bundle holds claudine.yaml");
+        let start = trigger.find("\n$schema:").expect("the trigger has a `$schema` payload") + 1;
+        let path = dir.join("claudine-payload.yaml");
+        std::fs::write(&path, &trigger[start..]).expect("write payload");
+        path
+    }
 }
 
 #[cfg(test)]

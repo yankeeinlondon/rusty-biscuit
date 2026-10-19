@@ -319,7 +319,7 @@ fn event_stack_items_keep_their_signal_rooted_spelling() {
 
 #[test]
 fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
-    for invalid in ["outputs", "a.b"] {
+    for invalid in ["seq", "a.b"] {
         let action = set_action(
             vec![("valid", json!("resolved")), (invalid, json!("refused"))],
             false,
@@ -373,7 +373,7 @@ fn a_batch_refusal_stops_the_stack_without_exposing_a_partial_write() {
     // a refused batch always stops the stack.
     let config = config(json!({
         "success": [
-            { "set": { "stable": "changed", "outputs": "refused" } },
+            { "set": { "stable": "changed", "seq": "refused" } },
             { "message": "stable={{stable}}" },
         ],
     }));
@@ -405,7 +405,7 @@ fn bundle_no_error_cannot_suppress_its_set_failure() {
     let config = config(json!({
         "success": [
             { "when": "true", "then": [
-                { "set": { "stable": "changed", "outputs": "refused" }, "info": "bundled", "no_error": true },
+                { "set": { "stable": "changed", "seq": "refused" }, "info": "bundled", "no_error": true },
             ]},
             { "message": "stable={{stable}}" },
         ],
@@ -591,7 +591,7 @@ fn set_writes_no_file() {
 /// the runtime layer is left clean.
 #[test]
 fn set_refuses_every_reserved_root_key() {
-    for key in ["state", "previous", "next", "outputs", "sequence_id"] {
+    for key in ["seq", "group", "loop"] {
         let mut destinations = Map::new();
         destinations.insert(key.to_string(), json!("hijacked"));
         let config = config(json!({ "success": [{ "set": Value::Object(destinations) }] }));
@@ -678,7 +678,7 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
         vec![Emitted::Message("phase=build".to_string())]
     );
 
-    let refused = config(json!({ "success": [{ "set": { "outputs": "hijacked" } }] }));
+    let refused = config(json!({ "success": [{ "set": { "seq": "hijacked" } }] }));
     let recorder = Recorder::default();
     let context = ctx(
         LifecycleSignal::Success,
@@ -693,20 +693,18 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
     assert!(context.execute_event(&refused).action_error.is_some());
 }
 
-/// `outputs` is readable through `last(outputs)` at event time and reflects
+/// `seq.outputs` is readable through `last(seq.outputs)` at event time and reflects
 /// what the executor committed — the temporal view the spec assigns to
 /// `success`/`finalize`.
 #[test]
 fn last_outputs_reads_the_committed_accumulator() {
-    let config = config(json!({"success": {"message": "prev={{ last(outputs) }}"}}));
+    let config = config(json!({"success": {"message": "prev={{ last(seq.outputs) }}"}}));
     let runtime = RuntimeState::new();
     runtime.append_output("first run\n");
     runtime.append_output("second run");
 
     let base = map(json!({}));
-    let mut seeded = base.clone();
-    seeded.insert("outputs".into(), runtime.outputs_value());
-    let live = std::sync::Mutex::new(seeded);
+    let live = std::sync::Mutex::new(base.clone());
     let (_dir, engine) = temp_engine();
 
     let (_, events) = run_event(

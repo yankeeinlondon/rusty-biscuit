@@ -8,15 +8,22 @@
 //!   children) and returns every command that *could* execute under *any*
 //!   document state. It also resolves `::code` and `::toc-linking` targets
 //!   passively (see [`PreflightTargetEdge`]) so a broken reference fails here
-//!   as it does for `::file`.
+//!   as it does for `::file`. Alongside the resolved-byte entries it keeps
+//!   one [`ShellCandidate`] per command site: the authored template typed by
+//!   the owning document, each placeholder's timing, and whether the site may
+//!   run as resolved bytes. A placeholder whose value is `null` fails here
+//!   with `ShellExpansionError::MissingValue`, before anything runs.
 //! - [`approval`] turns that collection into the deduped *approval set* the
 //!   orchestrator boundary hands back as the execution membership source.
 //!
 //! Condition-**aware** execution stays in the inline shell-expansion stage,
-//! gated by `ComposeOptions::pre_approved_commands`. The governing invariant is
+//! gated by `ComposeOptions::pre_approved_commands`, a [`ShellPreApprovals`]
+//! of resolved bytes and template shapes. The governing invariant is
 //! `execution_set ⊆ approval_set`: because approval is a superset of anything
 //! reachable under any state, the execution-time gate degrades to a pure
-//! membership check that never prompts.
+//! membership check that never prompts. A site proves membership by its
+//! resolved bytes or by its authored shape, never by adding bytes it
+//! resolved at execution.
 //!
 //! See [`darkmatter/features/2026-06-16-compose-pipe-2/tech-design.md`] for the
 //! full design.
@@ -33,6 +40,7 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion;
 use crate::markdown::compose::icmp::PlannedIcmpProbe;
 use crate::markdown::compose::{ComposeWarning, DeferredCapabilities};
+use crate::markdown::compose::shell_expansion::template::{ModeRequirement, ShellCandidate, ShellPreApprovals};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
 use std::path::{Path, PathBuf};
@@ -238,8 +246,14 @@ impl PreflightGraphNode {
 #[derive(Debug, Clone, Default)]
 pub struct ComposePreflightReport {
     /// Deduped source entries, one per unique normalized command, in the order
-    /// they were first discovered.
+    /// they were first discovered. A site whose value is late has no resolved
+    /// bytes and contributes no entry; it is in [`Self::candidates`] only.
     pub entries: Vec<ShellCommandEntry>,
+    /// One record per command site, in discovery order and never merged by
+    /// bytes: the authored template typed by the owning document's schema,
+    /// each placeholder's timing, the site's resolved bytes when it may run
+    /// as them, and whether it can be approved only as a template.
+    pub candidates: Vec<ShellCandidate>,
     /// Non-fatal warnings raised during collection.
     pub warnings: Vec<ComposeWarning>,
     /// ICMP probes the document graph could send, in discovery order and
@@ -301,23 +315,67 @@ pub(crate) fn validate_pre_approved(
     };
 
     let ctx = markdown.source_context_for_errors();
-    let entries = if options.is_frontmatter_surface_only() {
+    let (entries, candidates) = if options.is_frontmatter_surface_only() {
         collect::frontmatter_shell_commands(markdown, options)?
     } else {
-        collect::collect_effects(markdown, options)?.0
+        let collected = collect::collect_effects(markdown, options)?;
+        (collected.entries, collected.candidates)
     };
-    for entry in &entries {
-        if !approved.contains(&entry.normalized) {
-            return Err(ShellExpansionError::NotPreApproved {
-                ctx: Box::new(ctx),
-                command: entry.raw_command.clone(),
-                origin: entry.origin.clone(),
-                source_desc: format!(" (in {})", entry.source_file.display()),
-            }
-            .into());
+    if let Some((command, origin, source_file)) = first_unapproved(&entries, &candidates, approved) {
+        return Err(ShellExpansionError::NotPreApproved {
+            ctx: Box::new(ctx),
+            command,
+            origin,
+            source_desc: format!(" (in {})", source_file.display()),
         }
+        .into());
     }
     Ok(())
+}
+
+/// The first discovered command `approved` does not authorize, as its
+/// display command, origin, and file.
+///
+/// A template-required site must have its shape approved. Every
+/// resolved-byte entry must have its bytes approved, unless every site that
+/// resolves to those bytes is approved by its shape instead. Membership is
+/// only ever read here: no fresh bytes join the approved set.
+fn first_unapproved(
+    entries: &[ShellCommandEntry],
+    candidates: &[ShellCandidate],
+    approved: &ShellPreApprovals,
+) -> Option<(String, crate::markdown::compose::ShellCommandOrigin, PathBuf)> {
+    for candidate in candidates {
+        if candidate.requirement == ModeRequirement::TemplateRequired && !candidate.authorized_by(approved) {
+            return Some((
+                candidate.display_command(),
+                candidate.site.origin.clone(),
+                candidate.site.source_file.clone(),
+            ));
+        }
+    }
+    let mut by_shape = std::collections::HashSet::new();
+    let mut by_bytes_only = std::collections::HashSet::new();
+    for candidate in candidates {
+        let Some(keys) = &candidate.resolved else {
+            continue;
+        };
+        let shape_approved = candidate.shape().is_some_and(|shape| approved.contains_template(&shape));
+        for key in keys {
+            if shape_approved {
+                by_shape.insert(key.as_str());
+            } else {
+                by_bytes_only.insert(key.as_str());
+            }
+        }
+    }
+    entries
+        .iter()
+        .find(|entry| {
+            let key = entry.normalized.as_str();
+            !approved.contains_exact(key) && !(by_shape.contains(key) && !by_bytes_only.contains(key))
+        })
+        .map(|entry| (entry.raw_command.clone(), entry.origin.clone(), entry.source_file.clone()))
 }
 
 impl Markdown {
@@ -349,14 +407,14 @@ impl Markdown {
         &self,
         request: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<ComposePreflightReport> {
-        let (entries, icmp_probes, deferred_context, preflight_graph) =
-            collect::collect_effects(self, request)?;
+        let collected = collect::collect_effects(self, request)?;
         Ok(ComposePreflightReport {
-            entries,
+            entries: collected.entries,
+            candidates: collected.candidates,
             warnings: Vec::new(),
-            icmp_probes,
-            preflight_graph,
-            deferred_context,
+            icmp_probes: collected.icmp,
+            preflight_graph: collected.graph,
+            deferred_context: collected.capabilities,
         })
     }
 }

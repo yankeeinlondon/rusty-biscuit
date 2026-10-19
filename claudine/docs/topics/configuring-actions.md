@@ -77,6 +77,9 @@ redact private preparation text.
 { "type": "speak", "message": "Tool {{tool_name}} completed on {{git.branch}}" }
 ```
 
+The provider and voice come from the [`tts` setting](#text-to-speech-settings-tts);
+`speak` actions run only when `tts` is `true` or an object.
+
 ### `log`
 
 Write the event payload to a log target. When no target is specified, defaults to a daily-rotated JSONL file under `~/.claudine/logs/`.
@@ -376,6 +379,66 @@ Shell environment variables are available via `{{env.VAR_NAME}}` with optional d
 ```
 
 The single-pipe `|` form is no longer supported (see the migration note in unified-events.md §3.7).
+
+## Text-to-speech settings (`tts`)
+
+The top-level `tts` key in `~/.claudine/config.json` (JSON5 accepted) chooses
+how Claudine speaks. It is read in three places: hook [`speak`](#speak)
+actions, the voice that composition lifecycle `say`/`speak` plays with, and
+[pre-warm](flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm),
+which synthesizes lifecycle phrases into the audio cache before their events
+fire. It is a user-scope setting only; it is never a frontmatter key.
+
+`tts` is either a boolean or an object:
+
+```json5
+{ tts: true }                                                      // hook speech on, default provider
+{ tts: false }                                                     // hook speech off (the default)
+{ tts: { provider: "kokoro", voice: "af_heart" } }                 // hook speech on, this provider and voice
+{ tts: { provider: "kokoro", voice: "af_heart", prewarm: false } } // same, without pre-warm
+{ tts: { prewarm: false } }                                        // default provider, without pre-warm
+```
+
+Every key of the object is optional:
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `provider` | string | the default provider | the TTS provider (`say`, `kokoro`, `espeak`, `elevenlabs`, …); absent selects the default provider, as `true` does |
+| `voice` | string or `{ male, female }` | absent | a voice ID, or one voice per gender |
+| `gender` | `male` \| `female` | `female` | which voice of a `{ male, female }` pair is used |
+| `prewarm` | boolean | `true` | `false` turns pre-warm off |
+
+What each shape does:
+
+| Value | Hook `speak` actions | Lifecycle `say` voice | Pre-warm |
+| --- | --- | --- | --- |
+| `tts` absent | off | auto-detected | on |
+| `true` | on, auto-detected provider | auto-detected | on |
+| `false` | off | auto-detected | on |
+| object with `provider`, no `prewarm` | on, with the object's provider and voice | the object's provider and voice | on |
+| object with `provider` and `prewarm: false` | as the same object without `prewarm` | as the same object without `prewarm` | off |
+| object without `provider` (for example `{ prewarm: false }`) | on, with the default provider, as `true` | as `true` | per its `prewarm` (on when absent) |
+
+Lifecycle `say` plays under every shape: `false` silences hook speech only, so
+it leaves lifecycle speech and its pre-warming on. `prewarm` exists only in the
+object form, so turning pre-warm off always writes an object, and an object
+also turns hook `speak` actions on. A user with `tts: false` who wants
+pre-warm off therefore gets hook speech with the default provider as well.
+
+The value is validated strictly when `config.json` loads:
+
+- an unknown key in the object (for example `enabled` or `pre_warm`) is
+  rejected;
+- an explicit `null` for `tts`, `provider`, or `prewarm` is rejected, not read
+  as absent;
+- a wrong type (`tts: "say"`, `provider: 1`, `prewarm: "no"`) is rejected;
+- `{}` loads as an object with every key at its default;
+- a key written twice keeps its last value, as every key in `config.json` does.
+
+The configuration editor's TTS tab keeps `prewarm` when you change the
+object's provider, voice, or gender, and when it saves. Switching the tab's
+toggle to a boolean replaces the object, which restores pre-warm's default of
+on.
 
 ## Messaging Configuration
 

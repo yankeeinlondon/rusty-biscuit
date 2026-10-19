@@ -293,7 +293,7 @@ const BEFORE_AN_OPTION: [Preceding; 5] = [
 
 /// Options whose value slot offers candidates on a clean line, so their rows
 /// prove suggestions survive as well as disappear.
-const OPTIONS_WITH_CANDIDATES: [&str; 5] = ["--debug", "--provider", "--exclude", "--on-rate-limit", "--budget-ledger"];
+const OPTIONS_WITH_CANDIDATES: [&str; 4] = ["--debug", "--provider", "--exclude", "--on-rate-limit"];
 
 /// The value slot of one owned option and its aliases, separate or attached,
 /// empty and partial, after each kind of preceding line: a clean line offers
@@ -402,22 +402,22 @@ shared_option_value_tests!(
     sequence_option_values_follow_the_words_before_them,
     "sequence",
     ValueForm::Separate,
-    [fail_fast = "--fail-fast", budget_ledger = "--budget-ledger"]
+    []
 );
 shared_option_value_tests!(
     sequence_attached_option_values_follow_the_words_before_them,
     "sequence",
     ValueForm::Attached,
-    [fail_fast = "--fail-fast", budget_ledger = "--budget-ledger"]
+    []
 );
 
 /// The per-option tests above name every owned option; a new one must be added.
 #[test]
 fn every_owned_value_option_has_a_test() {
-    const COVERED: [&str; 18] = [
+    const COVERED: [&str; 16] = [
         "--debug", "--provider", "--exclude", "--include", "--model", "--output", "--append-system-prompt",
         "--replace-system-prompt", "--timeout", "--step-timeout", "--stall-timeout", "--operation", "--set",
-        "--use", "--max-iterations", "--on-rate-limit", "--fail-fast", "--budget-ledger",
+        "--use", "--max-iterations", "--on-rate-limit",
     ];
     let declared: Vec<&str> = OWNED_VALUE_OPTIONS.iter().map(|option| option.spellings[0]).collect();
     assert_eq!(declared, COVERED);

@@ -204,7 +204,7 @@ fn a_target_only_command_prompts_while_a_shared_command_reuses_the_approval() {
         .as_ref()
         .expect("the target's approvals are folded into the carried input layers");
     assert!(
-        approved.contains("echo target-only"),
+        approved.contains_exact("echo target-only"),
         "the target-only command is approved for execution; got {approved:?}",
     );
 }
@@ -228,9 +228,9 @@ fn approved_bytes_equal_the_bytes_a_with_value_resolves_to() {
     let (context, handler) = recording_context(&target, Some(dir.path()));
 
     let mut state = prompt_state(&target);
-    state.overlay.insert(
-        "flag".to_string(),
-        serde_json::Value::String("from-overlay".to_string()),
+    state.overlay = claudine::composition::AnchoredOverlay::new(
+        [("flag".to_string(), serde_json::Value::String("from-overlay".to_string()))].into_iter().collect(),
+        state.file_resolution_context(),
     );
 
     preflight_harness_document(&mut state, context.shell_options(), dir.path())

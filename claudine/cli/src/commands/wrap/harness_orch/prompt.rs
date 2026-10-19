@@ -86,9 +86,9 @@ pub(crate) fn find_wrapper_harness_source(
 ///
 /// The authored-layer half of overlay assembly. The bootstrap read before
 /// target `initialize` and the stabilized reread after it see the same
-/// immutable mapping. [`harness_prepare_options`] also carries non-null overlay
-/// values through the caller-supplied override layer so file references retain
-/// their launch-area resolution provenance.
+/// immutable mapping. [`harness_prepare_options`] also carries the overlay as
+/// the lowest data layer with each value's authoring origin, so a file value
+/// resolves from the file whose `with` authored it.
 ///
 /// Precedence, low to high: authored frontmatter < `proxy.with` < a pending
 /// `retry.with` ([`active_overlay`]) < the caller's `key=value`/`--set`. Null removal lands here because an override object
@@ -105,22 +105,19 @@ fn load_overlaid_source(
     claudine::composition::ResolvedCompositionSource,
     claudine::composition::CompositionError,
 > {
-    load_overlaid_document(&state.source_path, &state.original_ref, &active_overlay(state))
+    load_overlaid_document(&state.source_path, &state.original_ref, active_overlay(state).values())
 }
 
 /// The overlay this document's next read applies: the retained `proxy.with`
 /// overlay, with a pending `retry.with` overlay layered key-wise on top (a
-/// shared key takes the retry's value).
-fn active_overlay(
-    state: &HarnessPromptState,
-) -> std::borrow::Cow<'_, indexmap::IndexMap<String, serde_json::Value>> {
+/// shared key takes the retry's value). The retry was authored by this
+/// document's own lifecycle, so its values keep this document's context.
+fn active_overlay(state: &HarnessPromptState) -> std::borrow::Cow<'_, claudine::composition::AnchoredOverlay> {
     match state.pending_retry_overlay.as_ref() {
         None => std::borrow::Cow::Borrowed(&state.overlay),
-        Some(retry) => {
-            let mut merged = state.overlay.clone();
-            merged.extend(retry.iter().map(|(key, value)| (key.clone(), value.clone())));
-            std::borrow::Cow::Owned(merged)
-        }
+        Some(retry) => std::borrow::Cow::Owned(state.overlay.layered(
+            &claudine::composition::AnchoredOverlay::new(retry.clone(), state.file_resolution_context()),
+        )),
     }
 }
 

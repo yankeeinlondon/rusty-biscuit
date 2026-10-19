@@ -340,7 +340,7 @@ impl<'a> NamedTypeScope<'a> {
             .borrow_mut()
             .entry(path.to_path_buf())
             .or_insert_with(|| {
-                let text = std::fs::read_to_string(path).ok()?;
+                let text = crate::work_counters::read_to_string(path).ok()?;
                 let document = parse_standalone_schema_document(&text, path).ok().flatten();
                 Some(Arc::new(ExternalFile { text, document }))
             })

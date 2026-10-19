@@ -178,7 +178,9 @@ A `ComposeContext` captured on its own (`ComposeContext::capture_for_document`
 and its siblings) reads no process environment either: its `env` starts empty,
 so `ctx.agent` is `"unknown"` until a request installs the snapshot's
 environment over it. No expression reads the live process environment, so
-`env` does not change during a composition.
+`env` does not change during a composition, except at the one point a host
+asks to change it (see [Choosing the body's environment from the
+frontmatter](#choosing-the-bodys-environment-from-the-frontmatter)).
 
 A host that runs several documents in one process gives each document its own
 request, built from a snapshot captured when that document starts. A later
@@ -187,6 +189,45 @@ each stays internally consistent. Claudine works this way: every sequence step,
 group leg, and `proxy` target is its own document with its own captured map
 (see Claudine's [composition](../../../claudine/docs/topics/composition.md)
 topic).
+
+### Choosing the body's environment from the frontmatter
+
+Sometimes the environment a body should render with depends on the
+document's own frontmatter. Claudine, for example, picks the provider a prompt
+launches on from its `agent`, and the body's `{{ env.AGENT }}` must name that
+provider, even when `agent` is a `$( … )` command. Composing the document twice
+would run every command twice, so Darkmatter offers one call instead:
+`Markdown::compose_with_frontmatter_hook`.
+
+```mermaid
+flowchart LR
+    A["frontmatter: interpolation,<br/>schema check, $( … ) commands"] --> B["hook(frontmatter, env)"]
+    B --> C["body stages and transclusions<br/>read the env the hook left"]
+```
+
+The hook is called once, for the request's root document only, after every
+frontmatter value has resolved and before any body stage runs. It receives the
+resolved frontmatter and the request's environment, and may change that
+environment. The body, every file it transcludes, and its `as_markdown()`
+content then read the changed environment. Frontmatter values have already
+resolved, so a frontmatter value that reads `env` keeps what it read. An error
+from the hook ends the composition before the body renders.
+
+```rust
+# use darkmatter::markdown::Markdown;
+# use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
+let md: Markdown = "---\nagent: goose\n---\nYou are {{ env.AGENT }}.\n".into();
+let request = ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(std::env::temp_dir()))?;
+
+let (composed, _report) = md.compose_with_frontmatter_hook(&request, &mut |frontmatter, env| {
+    if let Some(agent) = frontmatter.as_map().get("agent").and_then(|value| value.as_str()) {
+        env.insert("AGENT".to_string(), agent.to_string());
+    }
+    Ok(())
+})?;
+assert!(composed.content().contains("You are goose."));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ### The environment shell children start from
 

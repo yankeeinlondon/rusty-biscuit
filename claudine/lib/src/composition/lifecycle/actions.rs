@@ -1,8 +1,8 @@
 //! Typed action model for lifecycle stacks.
 //!
-//! A **stack** is any place the lifecycle action grammar is accepted: the six
+//! A **stack** is any place the lifecycle action grammar is accepted: the seven
 //! events (`initialize`, `start`, `blocked`, `success`, `failure`,
-//! `finalize`), the `loop:` block's lifecycle concerns, and a sequence task's
+//! `finalize`, `cancelled`), the `loop:` block's lifecycle concerns, and a sequence task's
 //! `setup:`/`teardown:`. Each parses into an ordered list of
 //! [`LifecycleNode`]s: a leaf [`LifecycleAction`], or a
 //! [`LifecycleConditional`] whose `then`/`else` bodies are themselves ordered
@@ -16,8 +16,9 @@
 //!
 //! [`LifecycleActionKind`] mirrors the action inventory:
 //!
-//! - [`LifecycleControlAction`] — the flow-control directives. One ends the
-//!   whole event, so it is the last item of its list.
+//! - [`LifecycleControlAction`] — the flow-control directives. Every one
+//!   except `prep` ends the whole event, so it is the last item of its list;
+//!   `prep` returns to the item after it.
 //! - [`CommunicationAction`] — `say`/`speak`/`effect`/`message`/`notify`/
 //!   `stderr`/`stdout`/`info`/`warn`/`success`.
 //! - [`ShellAction`] — bespoke shell commands.
@@ -26,7 +27,7 @@
 //! - [`ExpressionFunctionAction`] — read-only Darkmatter expression
 //!   functions invoked for their result.
 
-use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder};
+use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 use darkmatter::markdown::compose::{ResolvedShellValue, check_frontmatter_shell_value};
 use indexmap::IndexMap;
@@ -120,12 +121,19 @@ impl LifecycleAction {
     pub fn is_lifecycle_control(&self) -> bool {
         matches!(self.kind, LifecycleActionKind::LifecycleControl(_))
     }
+
+    /// Returns `true` when this action is a directive that ends its event, so
+    /// nothing may follow it unconditionally in its list. `prep` is the one
+    /// directive that returns.
+    pub fn ends_event(&self) -> bool {
+        matches!(&self.kind, LifecycleActionKind::LifecycleControl(control) if !control.returns())
+    }
 }
 
 /// The typed body of a lifecycle action.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LifecycleActionKind {
-    /// Lifecycle control action — terminates stack processing for the event.
+    /// Lifecycle control action — a flow-control directive.
     LifecycleControl(LifecycleControlAction),
 
     /// Communication action (TTS / sound / message / status line).
@@ -147,7 +155,9 @@ pub enum LifecycleActionKind {
 /// A flow-control directive.
 ///
 /// The first one reached **ends the entire event**, wherever it sits — at a
-/// stack root or inside a nested `then`/`else` body. The "Where valid" matrix
+/// stack root or inside a nested `then`/`else` body — except `prep`, a
+/// returning call after which the event continues
+/// ([`LifecycleControlAction::returns`]). The "Where valid" matrix
 /// that governs which events each variant may appear in is encoded in
 /// [`LifecycleControlAction::is_valid_for`].
 #[derive(Debug, Clone, PartialEq)]
@@ -214,6 +224,38 @@ pub enum LifecycleControlAction {
         /// Optional human-readable reason.
         reason: Option<Expr>,
     },
+
+    /// `break` / `break: "reason"` — end the nearest enclosing loop.
+    ///
+    /// Firing outside every loop is
+    /// [`CompositionError::LifecycleBreakWithoutLoop`].
+    ///
+    /// [`CompositionError::LifecycleBreakWithoutLoop`]: crate::composition::CompositionError::LifecycleBreakWithoutLoop
+    Break {
+        /// Optional reason recorded as the loop's outcome. An authored `""`
+        /// is an explicit empty reason, distinct from `None`.
+        reason: Option<Expr>,
+        /// Exit code when the loop it ends is the root invocation's; authored
+        /// `0..=255`, `0` when omitted.
+        code: u8,
+    },
+
+    /// `prep: "@target.md"` — run another primitive to completion, then
+    /// continue the event with the next item.
+    ///
+    /// The thread's installed [`PrepRunner`](crate::composition::lifecycle::prep::PrepRunner)
+    /// runs the target; a target that did not return successfully fails the
+    /// event with [`CompositionError::LifecyclePrepFailed`].
+    ///
+    /// [`CompositionError::LifecyclePrepFailed`]: crate::composition::CompositionError::LifecyclePrepFailed
+    Prep {
+        /// File reference expression resolving to the target. A literal is
+        /// never empty.
+        target: Expr,
+        /// Frontmatter overlay for the target, with `proxy.with` semantics.
+        /// Empty when `with:` was omitted or authored as `{}`.
+        with: WithOverlay,
+    },
 }
 
 impl LifecycleControlAction {
@@ -227,27 +269,27 @@ impl LifecycleControlAction {
             Self::Retry { .. } => "retry",
             Self::Resume { .. } => "resume",
             Self::Defer { .. } => "defer",
+            Self::Break { .. } => "break",
+            Self::Prep { .. } => "prep",
         }
+    }
+
+    /// Returns `true` for a directive that returns to the next item instead of
+    /// ending its event: only `prep`.
+    pub fn returns(&self) -> bool {
+        matches!(self, Self::Prep { .. })
     }
 
     /// Returns `true` when this control action is permitted in the given
     /// event per the spec's "Where valid" matrix.
     ///
-    /// Flow control is **universal**: `Stop`, `Error`, `Retry`, `Resume`,
-    /// `Defer`, and `Proxy` are valid in **every** event. Flow control reacts
-    /// to *state* — an error, a missing file, an `env` value, frontmatter — and
-    /// an error is just one kind of state (e.g. a `success` stack may `resume`
-    /// the agent because an expected artifact was not produced).
-    ///
-    /// `Skip` is the **one** placement-restricted action: a whole-document
-    /// opt-out is only coherent at `initialize`, before anything has run.
-    ///
-    /// Differences that look event-specific are **runtime capability**, not
-    /// placement, and are checked at runtime rather than here: `Resume` needs a
-    /// live provider session (pre-launch it surfaces `ResumeWithoutSession`),
-    /// and `Retry`'s re-entry point (re-run pre-flight vs. re-invoke the
-    /// provider) is derived from whether the provider had launched.
+    /// Cancellation cleanup permits only `Stop`. Other events permit recovery
+    /// directives, with `Skip` restricted to initialization. Provider-session
+    /// requirements and recovery re-entry points are checked at runtime.
     pub fn is_valid_for(&self, event: LifecycleSignal) -> bool {
+        if event == LifecycleSignal::Cancelled {
+            return matches!(self, Self::Stop);
+        }
         match self {
             Self::Skip => matches!(event, LifecycleSignal::Initialize),
             _ => true,
@@ -286,7 +328,9 @@ pub enum WithValue {
 ///
 /// The command bytes are fixed once, at preflight, from early-binding values;
 /// the result is produced each time the action executes. See
-/// [`ResolvedShellValue`] for the two lifetimes.
+/// [`ResolvedShellValue`] for the two lifetimes. A value approved by its shape
+/// ([`Self::template`]) runs its template instead, reading its placeholders
+/// when the action executes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetShellValue {
     /// The value as authored (trimmed), suffixes included.
@@ -294,6 +338,10 @@ pub struct SetShellValue {
     /// The approved command bytes; `None` until preflight resolves them. An
     /// unresolved value never runs.
     pub resolved: Option<ResolvedShellValue>,
+    /// The authored command as a typed template, recorded by preflight when
+    /// it holds a placeholder. Its approval decides whether the value runs
+    /// its bytes or its template.
+    pub template: Option<super::shell_template::LifecycleShellTemplate>,
 }
 
 /// The message of a shell-value parse error, without the directive location
@@ -369,7 +417,7 @@ impl RuntimeSet {
             if key.is_empty() {
                 return Err(RuntimeSetError::EmptyKey);
             }
-            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
+            if super::parse::is_dynamic_with_key(key) {
                 return Err(RuntimeSetError::DynamicKey(key.clone()));
             }
         }
@@ -387,6 +435,7 @@ impl RuntimeSet {
                     WithValue::Shell(Box::new(SetShellValue {
                         authored: text.trim().to_string(),
                         resolved: None,
+                        template: None,
                     })),
                 );
                 continue;
@@ -494,7 +543,7 @@ impl WithOverlay {
     /// the key.
     pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, WithOverlayError> {
         for key in authored.keys() {
-            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
+            if super::parse::is_dynamic_with_key(key) {
                 return Err(WithOverlayError::DynamicKey(key.clone()));
             }
         }
@@ -662,6 +711,8 @@ impl CommunicationChannel {
 /// A shell action.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellAction {
+    /// Authored bytes retained for approval eligibility after interpolation.
+    pub authored_command: Option<String>,
     /// The shell command expression. The spec example uses string literals,
     /// but the model accepts any expression so interpolation can compose the
     /// command at runtime.
@@ -669,10 +720,14 @@ pub struct ShellAction {
     /// Message to emit when the command exits non-zero.
     pub on_error: Option<Expr>,
     /// `true` once pre-flight (C3) has stamped `command` and `on_error` with
-    /// their resolved bytes. Those bytes are what was approved and are run as
+    /// their resolved bytes. A command approved as those bytes runs them as
     /// they stand: anything the resolution inserted is data and is never
     /// interpolated again at event time.
     pub pre_resolved: bool,
+    /// The authored `command` as a typed template, recorded by pre-flight
+    /// when it holds a placeholder. Its approval decides whether the action
+    /// runs the stamped bytes or the template.
+    pub template: Option<super::shell_template::LifecycleShellTemplate>,
 }
 
 /// A side-effect action — a Darkmatter effect verb invoked by name with

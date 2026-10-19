@@ -5,7 +5,7 @@ context: |-
     use both as a way to better describe our future needs as well as our current component library while hopefully aligning our design toward existing practices in the TUI space.
 style_guide: "@biscuit-tui/style-guide/style-guide.md"
 ---
-::block when="state.name == "Design Language"
+::block when="seq.name == 'Design Language'"
 
 ## Context
 
@@ -57,17 +57,17 @@ Deliver the style guide as a well‑structured document with sections, clear hea
 ::block when="component"
 ## Context
 
-You are responsible for evaluating the "{{state.name}}" component in **biscuit-tui**. It is described as:
+You are responsible for evaluating the "{{seq.name}}" component in **biscuit-tui**. It is described as:
 
-{{state.desc}}
+{{seq.desc}}
 
-And you can find more complete documentation for it at: {{state.documentation}}
+And you can find more complete documentation for it at: {{seq.documentation}}
 
 ## Task
 
 Your task is to write the review document: 
 
-- @biscuit-tui/style-guide/reviews/{{state.name}}-review.md
+- @biscuit-tui/style-guide/reviews/{{seq.name}}-review.md
 
 This document is meant to be a **review** of the current component. This review fits into two main components:
 

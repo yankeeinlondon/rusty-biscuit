@@ -5,7 +5,7 @@
 //!
 //! Human output uses `TerminalRenderable` components; `--json` prints exactly
 //! one JSON document on stdout with no presentation escapes. Nothing here
-//! reaches the network, starts an agent, or changes delivery behavior.
+//! changes delivery behavior; `run` starts Claudine for prepared research.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ use messenger::research::{Context, Diagnostic, Loader, ResearchError, Scope, Wor
 use serde::Serialize;
 use serde_json::json;
 
-use super::research_lifecycle::{self as lifecycle, CheckRunArgs, CleanupArgs, PrepareArgs, PromoteArgs, RejectArgs, RunsArgs};
+use super::research_lifecycle::{self as lifecycle, CheckRunArgs, CleanupArgs, PrepareArgs, PromoteArgs, RejectArgs, RunArgs, RunsArgs};
 
 /// Success.
 pub const EXIT_OK: i32 = 0;
@@ -109,11 +109,20 @@ pub enum ResearchCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Select due platforms and prepare budgeted refresh runs (requires limits).
+    /// Select due platforms and prepare refresh runs (requires limits).
     Prepare(PrepareArgs),
+    /// Run a prepared run's sequence under the fleet lock (one run at a time).
+    Run(RunArgs),
+    /// Reserve one agent launch (used by prepared prompt start hooks).
+    #[command(hide = true)]
+    AdmitAgent {
+        run_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Judge a run's stage outputs, validate its candidate, and compute its delta.
     CheckRun(CheckRunArgs),
-    /// List local refresh runs, their stages, and their budget ledgers.
+    /// List local refresh runs, their stages, and their runner outcomes.
     Runs(RunsArgs),
     /// Publish a reviewed run: human approval, or a verified unchanged renewal.
     Promote(PromoteArgs),
@@ -156,8 +165,10 @@ pub fn run(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> i3
         ResearchCommand::Validate { json, .. }
         | ResearchCommand::Generate { json, .. }
         | ResearchCommand::Report { json, .. }
-        | ResearchCommand::Recover { json } => *json,
+        | ResearchCommand::Recover { json }
+        | ResearchCommand::AdmitAgent { json, .. } => *json,
         ResearchCommand::Prepare(args) => args.json,
+        ResearchCommand::Run(args) => args.json,
         ResearchCommand::CheckRun(args) => args.json,
         ResearchCommand::Runs(args) => args.json,
         ResearchCommand::Promote(args) => args.json,
@@ -198,6 +209,8 @@ fn execute(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> Re
         }
         ResearchCommand::Recover { json } => recover(&loader, json),
         ResearchCommand::Prepare(args) => lifecycle::prepare(&loader, args, &today),
+        ResearchCommand::Run(args) => lifecycle::run(&loader, args),
+        ResearchCommand::AdmitAgent { run_id, json } => lifecycle::admit_agent(&loader, &run_id, json),
         ResearchCommand::CheckRun(args) => lifecycle::check(&loader, args, &today),
         ResearchCommand::Runs(args) => lifecycle::runs(&loader, args),
         ResearchCommand::Promote(args) => lifecycle::promote(&loader, args, &today),

@@ -16,7 +16,7 @@ sequence:
       agent: gemini
     - name: closure
       agent: codex
-agent: "{{state.agent}}"
+agent: "{{seq.agent}}"
 prompt: |-
 
     ## Context

@@ -123,6 +123,18 @@ fn commit_resolved_proxy(
     source_path: PathBuf,
     resolved: PathBuf,
 ) -> Result<ProxyHandoff, ProxyCommitError> {
+    // A handoff to a document with an active `prep` call on this branch closes
+    // the same cycle a call to it would.
+    if crate::composition::lifecycle::prep::proxy_reaches_an_active_caller(&resolved) {
+        let mut chain = crate::composition::lifecycle::prep::active_chain();
+        chain.extend(ledger.chain().iter().cloned());
+        return Err(ProxyCommitError::Rejected(CompositionError::LifecycleProxyCycle {
+            source_path,
+            target: request.target().to_string(),
+            chain: chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+            limit: crate::composition::MAX_PROXY_HOPS,
+        }));
+    }
     // Bind before matching so the `LedgerMut` temporary is dropped here: the
     // rejection arm below needs to read the chain back off the ledger.
     let decision = ledger

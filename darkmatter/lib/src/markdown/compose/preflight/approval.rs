@@ -1,8 +1,11 @@
 //! Approval-set boundary export.
 //!
-//! Turns the condition-blind collection into the deduped normalized approval
-//! set the orchestrator boundary authorizes and hands back as the execution
-//! membership source. Policy validation (builtin/user blacklist, whitelist) and
+//! Turns the condition-blind collection into the deduped normalized
+//! resolved-byte approval set the orchestrator boundary authorizes and hands
+//! back as the execution membership source. Template-mode sites carry no
+//! resolved bytes; they are authorized by shape from
+//! [`ComposePreflightReport::candidates`](super::ComposePreflightReport::candidates).
+//! Policy validation (builtin/user blacklist, whitelist) and
 //! the single batched prompt live with the caller — Darkmatter discovers, the
 //! caller authorizes — so this module only normalizes and dedupes.
 

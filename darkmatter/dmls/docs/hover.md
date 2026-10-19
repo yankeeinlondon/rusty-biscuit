@@ -173,7 +173,7 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 
 | Provider (in order)  | Hovers on                                            | Content                                                                                                   |
 |----------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| substrate (Markdown) | a link                                               | graph-sourced target preview (no disk read)                                                               |
+| substrate (Markdown) | a link                                               | graph-sourced target preview (an unopened target is read once, then cached)                               |
 | wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview                                                                         |
 | frontmatter          | a frontmatter key or its value                       | schema type/required/enum/default/description; or a `ctx.*` generated-key annotation                      |
 | DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
@@ -182,7 +182,7 @@ Because the chain stops at the first non-empty hover, a schema-defined frontmatt
 
 ## Passivity
 
-Hover is read-only like every DMLS request: it resolves local files and reads the in-memory graph, but never executes a shell command (`$(...)`, `::shell`), fetches a remote URL, or mutates anything. A `$()` or `::shell` hover *explains* what compose would do and whether policy allows it — it never does it.
+Hover is read-only like every DMLS request: it resolves local files and reads the in-memory graph (parsing a link's unopened target the first time a hover needs it), but never executes a shell command (`$(...)`, `::shell`), fetches a remote URL, or mutates anything. A `$()` or `::shell` hover *explains* what compose would do and whether policy allows it — it never does it.
 
 ## Testing
 

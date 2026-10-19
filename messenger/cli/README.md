@@ -59,12 +59,14 @@ the gitignored `messenger/.research-state/`.
 messenger research prepare [PLATFORM…] --max-seconds N --max-invocations N [--force] [--observed-version IFACE=VER] [--json]
 messenger research prepare --dry-run [PLATFORM…]        # show which platforms are due, and why; writes nothing
 messenger research prepare --resume RUN_ID              # rerun a failed, interrupted, or exhausted run (max 2)
+messenger research run RUN_ID [--json]                  # run a prepared run's sequence under the fleet lock
 messenger research check-run RUN_ID [--through validation|review] [--json]
-messenger research runs [--platform P] [--json]         # local runs, stages, budget ledgers
+messenger research runs [--platform P] [--json]         # local runs, stages, and runner outcomes
 messenger research promote RUN_ID… --approved-by NAME   # publish reviewed runs together
 messenger research promote RUN_ID --renewal             # verified unchanged renewal only
 messenger research reject RUN_ID --by NAME --reason TEXT  # neither may be blank; NAME is one line
 messenger research cleanup [--older-than DAYS] [--apply]  # preview by default (30 days)
+messenger research cleanup --recover RUN_ID             # mark a stale active run interrupted
 ```
 
 `prepare` selects platforms that are missing, expired, forced, invalid, or
@@ -77,15 +79,18 @@ limits are required and have no default; they are checked before anything is
 written. Each run gets its own directory under
 `messenger/.research-state/runs/<platform>/<run_id>/` with separately prepared
 inputs per pass (discovery never sees previous research or curated sources)
-and a Claudine sequence document. `prepare` prints the `claudine budget init`
-and `claudine sequence --yolo --budget-ledger …` commands to run from the
-repository root: the prepared inputs and the sequence's checks name only
-repository-relative paths. For the same reason `prepare` (and `--resume`)
+and a Claudine sequence document. `prepare` prints the
+`messenger research run RUN_ID` command to run from the repository root: the
+Messenger-owned runner holds the fleet lock for the whole execution (one
+research run at a time), runs the sequence, and records what it observed in
+the run record. For the same reason `prepare` (and `--resume`)
 refuses, with exit `2` and nothing written, a root inside a Git work tree that
-is not its top level; a root outside any Git repository is allowed. One
-shared fleet lock keeps platforms one at a time. A resumption reuses the same ledger,
-so it never adds budget, and it is refused (exit `1`) while another run for
-the platform is open or has an unreadable record.
+is not its top level; a root outside any Git repository is allowed. Cleanup,
+promotion, and stale-run recovery are refused (exit `1`) while a runner holds
+the fleet lock, and a resumption is refused (exit `1`) while another run for
+the platform is open or has an unreadable record. A crashed runner leaves a
+launched `active` record that `messenger research runs` reports as stale;
+`cleanup --recover RUN_ID` marks it `interrupted`, never silently.
 
 `check-run` runs inside the sequence as a `shell:` step. It judges each pass
 by what it wrote, never by an exit code: discovery suggestions with their

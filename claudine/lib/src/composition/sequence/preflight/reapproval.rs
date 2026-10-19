@@ -1,14 +1,14 @@
-//! Re-checking preflight-approved shell text under a later document's
-//! environment.
+//! Re-checking preflight-resolved shell text under a later document's
+//! environment, and the one approval-scope resolver sequence preflight uses.
 //!
-//! Sequence preflight resolves every task `shell:`, `setup:`, and `teardown:`
-//! command once, under the launch environment, and approves that exact text.
-//! Each task and group leg later captures its own environment. Until shell
-//! template approval exists, an approval covers only the text it approved, so
-//! a task re-resolves each approved command under its own map before anything
-//! runs: identical text runs as approved, and changed text is refused
-//! ([`CompositionError::SequenceShellApprovalChanged`]). A stale approval never
-//! authorizes new text.
+//! Sequence preflight resolves each task `shell:`, `setup:`, and `teardown:`
+//! command selected for resolved-byte execution once, under the launch
+//! environment. Each task and group leg later captures its own environment, so
+//! a task re-resolves each such command under its own map before anything
+//! runs: identical text runs as resolved, and changed text is refused
+//! ([`CompositionError::SequenceShellApprovalChanged`]). Resolved text never
+//! authorizes new text. Template-mode commands have no record here, including
+//! later-task commands whose values already exist at approval time.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -72,15 +72,23 @@ impl PreflightApproval {
         &self.approved
     }
 
-    /// Refuse the command when `environment` resolves it to text other than
-    /// the approved text.
+    /// Refuse the command when `environment` and the invocation's current
+    /// `runtime_writes` resolve it to text other than the approved text.
+    ///
+    /// The writes are layered over the values preflight resolved from, so a
+    /// command an earlier loop pass changed through a runtime `set` or a loop
+    /// action is refused rather than run with its first pass's bytes.
     ///
     /// ## Errors
     ///
     /// [`CompositionError::SequenceShellApprovalChanged`] when the text
     /// differs, or the resolution failure when the command no longer
     /// resolves under `environment`.
-    pub fn verify(&self, environment: &DocumentEnvironment) -> Result<(), CompositionError> {
+    pub fn verify(
+        &self,
+        environment: &DocumentEnvironment,
+        runtime_writes: &darkmatter::markdown::FrontmatterMap,
+    ) -> Result<(), CompositionError> {
         let basis = &self.basis;
         let mut state_context = basis.state_context.clone();
         *state_context.env_mut() = environment.vars().clone();
@@ -90,7 +98,14 @@ impl PreflightApproval {
             .file_resolution_context
             .clone()
             .with_env(environment.vars().clone());
-        let state = early_binding_state(&basis.frontmatter, state_context)?;
+        let frontmatter = if runtime_writes.is_empty() {
+            Arc::clone(&basis.frontmatter)
+        } else {
+            let mut current = (*basis.frontmatter).clone();
+            current.extend(runtime_writes.iter().map(|(key, value)| (key.clone(), value.clone())));
+            Arc::new(current)
+        };
+        let state = early_binding_state(&frontmatter, state_context)?;
         let resolved = compose_shell_text(
             &basis.authored,
             &basis.origin,
@@ -111,37 +126,40 @@ impl PreflightApproval {
                 &basis.authored,
                 basis.runtime_context.env(),
                 environment.vars(),
+                runtime_writes.iter()
+                    .filter(|(key, value)| basis.frontmatter.get(*key) != Some(*value))
+                    .map(|(key, _)| key.as_str()),
             ),
         })
     }
 }
 
-/// Builds a [`PreflightApproval`] for one resolved command.
-pub(super) struct ApprovalRecord<'a> {
-    pub(super) stage: TaskStage,
-    pub(super) authored: &'a str,
-    pub(super) approved: &'a str,
-    pub(super) origin: &'a Path,
-    pub(super) label: &'a str,
-    pub(super) frontmatter: &'a Arc<HashMap<String, Value>>,
-    pub(super) state: &'a EffectiveState,
-    pub(super) runtime_context: &'a ComposeContext,
-    pub(super) file_resolution_context: &'a biscuit_file::FileResolutionContext,
+/// Everything one resolved command was resolved from, before its stage is
+/// known.
+pub(super) struct ApprovalRecordOwned {
+    pub(super) authored: String,
+    pub(super) approved: String,
+    pub(super) origin: PathBuf,
+    pub(super) label: String,
+    pub(super) frontmatter: Arc<HashMap<String, Value>>,
+    pub(super) state_context: ComposeContext,
+    pub(super) runtime_context: ComposeContext,
+    pub(super) file_resolution_context: biscuit_file::FileResolutionContext,
 }
 
-impl ApprovalRecord<'_> {
-    pub(super) fn into_approval(self) -> PreflightApproval {
+impl ApprovalRecordOwned {
+    pub(super) fn into_approval(self, stage: TaskStage) -> PreflightApproval {
         PreflightApproval {
-            stage: self.stage,
-            approved: self.approved.to_string(),
+            stage,
+            approved: self.approved,
             basis: Arc::new(ApprovalBasis {
-                authored: self.authored.to_string(),
-                origin: self.origin.to_path_buf(),
-                label: self.label.to_string(),
-                frontmatter: Arc::clone(self.frontmatter),
-                state_context: self.state.context().clone(),
-                runtime_context: self.runtime_context.clone(),
-                file_resolution_context: self.file_resolution_context.clone(),
+                authored: self.authored,
+                origin: self.origin,
+                label: self.label,
+                frontmatter: self.frontmatter,
+                state_context: self.state_context,
+                runtime_context: self.runtime_context,
+                file_resolution_context: self.file_resolution_context,
             }),
         }
     }
@@ -171,6 +189,52 @@ pub(super) fn compose_shell_text(
     runtime_context: &ComposeContext,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<String, CompositionError> {
+    let composed = compose_approval_value(
+        &Value::String(raw.to_string()),
+        origin,
+        state,
+        runtime_context,
+        file_resolution_context,
+    )?
+    .map_err(|e| shell_resolution_failure(raw, label, e))?;
+    Ok(match composed {
+        Value::String(s) => s,
+        other => other.to_string(),
+    })
+}
+
+/// The typed preflight failure for a shell string that did not resolve.
+pub(super) fn shell_resolution_failure(
+    raw: &str,
+    label: &str,
+    error: darkmatter::markdown::MarkdownError,
+) -> CompositionError {
+    CompositionError::SequenceShellResolution {
+        command: raw.to_string(),
+        task: label.to_string(),
+        message: error.to_string(),
+        source: Some(Box::new(error)),
+    }
+}
+
+/// Resolve every `{{ … }}` span in `value` under the sequence approval scope,
+/// against early-binding values only: a whole-value span keeps its type.
+///
+/// Every approval-time read sequence preflight makes goes through here — shell
+/// text, each placeholder of a template, and a prompt task's `with` — so they
+/// all see the same scope and values.
+///
+/// ## Errors
+///
+/// The outer error is a resolution context that could not be built; the inner
+/// one is the composition failure, for the caller to name.
+pub(super) fn compose_approval_value(
+    value: &Value,
+    origin: &Path,
+    state: &EffectiveState,
+    runtime_context: &ComposeContext,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<Result<Value, darkmatter::markdown::MarkdownError>, CompositionError> {
     let resolution_ctx = super::super::super::document_expression_resolution_context(
         origin,
         Some(runtime_context),
@@ -179,38 +243,27 @@ pub(super) fn compose_shell_text(
     )?;
     let (view, globals) =
         runtime_bindings(LifecycleScope::SequenceShellApproval, LifecycleValues::default());
-    let composed = darkmatter::markdown::compose::subtree::SubtreeCompose::new(
-        &Value::String(raw.to_string()),
-        state,
-    )
-    .with_resolution_context(resolution_ctx)
-    .with_globals(globals)
-    .with_binding_view(view)
-    .compose()
-    .map_err(|e| CompositionError::SequenceShellResolution {
-        command: raw.to_string(),
-        task: label.to_string(),
-        message: e.to_string(),
-        source: Some(Box::new(e)),
-    })?;
-    Ok(match composed {
-        Value::String(s) => s,
-        other => other.to_string(),
-    })
+    Ok(darkmatter::markdown::compose::subtree::SubtreeCompose::new(value, state)
+        .with_resolution_context(resolution_ctx)
+        .with_globals(globals)
+        .with_binding_view(view)
+        .compose())
 }
 
-/// Name the variables the command mentions whose values differ between the
-/// approval's map and the document's.
-fn changed_variables(
+/// Name the environment variables and runtime values the command mentions
+/// whose values differ from what preflight resolved it with.
+fn changed_variables<'a>(
     authored: &str,
-    approved: &HashMap<String, String>,
-    document: &HashMap<String, String>,
+    approved: &'a HashMap<String, String>,
+    document: &'a HashMap<String, String>,
+    runtime: impl Iterator<Item = &'a str>,
 ) -> String {
     let mut changed: Vec<&str> = approved
         .keys()
         .chain(document.keys())
         .filter(|name| approved.get(*name) != document.get(*name))
         .map(String::as_str)
+        .chain(runtime)
         .filter(|name| authored.contains(name))
         .collect();
     changed.sort_unstable();

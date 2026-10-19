@@ -140,18 +140,27 @@ fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file()
         format!("{portable_package}/fixes/case/spec.md"),
         "the specification mention must identify the caller's spec; prompt:\n{absent_design_prompt}"
     );
-    // Paths derived from the caller's file project to the repository-relative
-    // display form, whatever spelling the temp repository carries.
-    for expected in [
-        "**Iteration:** 4",
-        "**Review:** @packages/example/fixes/case/review-4.md",
-        "**Log File:** packages/example/fixes/case/log.md",
-    ] {
-        assert!(
-            absent_design_prompt.contains(expected),
-            "the target omitted {expected:?}; prompt:\n{absent_design_prompt}"
-        );
-    }
+    assert!(
+        absent_design_prompt.contains("**Iteration:** 4"),
+        "the target omitted the iteration; prompt:\n{absent_design_prompt}"
+    );
+    // `dirname` of the absolute caller file keeps its absolute anchor, so the
+    // derived siblings are absolute paths beside the caller's spec.
+    let derived = |prompt: &str, label: &str| -> String {
+        let line = prompt
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(label))
+            .unwrap_or_else(|| panic!("the target omitted {label:?}; prompt:\n{prompt}"));
+        canonical_portable(std::path::Path::new(line.trim()))
+    };
+    assert_eq!(
+        derived(&absent_design_prompt, "- **Review:** @"),
+        format!("{portable_package}/fixes/case/review-4.md"),
+    );
+    assert_eq!(
+        derived(&absent_design_prompt, "- **Log File:** "),
+        format!("{portable_package}/fixes/case/log.md"),
+    );
     assert!(
         !absent_design_prompt.contains("**Design:**"),
         "an absent optional design must not render; prompt:\n{absent_design_prompt}"
@@ -161,9 +170,10 @@ fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file()
     let _ = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
     let present_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
-    assert!(
-        present_design_prompt.contains("**Design:** @packages/example/fixes/case/design.md"),
-        "the target must derive a present design beside the caller's spec; prompt:\n{present_design_prompt}"
+    assert_eq!(
+        derived(&present_design_prompt, "- **Design:** @"),
+        format!("{portable_package}/fixes/case/design.md"),
+        "the target must derive a present design beside the caller's spec",
     );
 }
 
@@ -465,7 +475,7 @@ fn a_sequence_prompt_task_proxy_reads_the_invocation_wide_caller_file() {
 }
 
 #[test]
-fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
+fn sequence_task_with_and_cli_file_inputs_keep_distinct_authoring_origins() {
     let fixture = CliProcessFixture::named("caller-file-sequence-layer-origins");
     fixture.initialize_repository();
     fixture.seed_user_config();
@@ -480,7 +490,7 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
     let sequence = package.join("sequence.md");
     write(
         &sequence,
-        "---\nsequence:\n  - name: mixed\n    prompt: prompts/router.md\n    params:\n      task_spec: task/spec.md\n---\nSequence.\n",
+        "---\nsequence:\n  - name: mixed\n    prompt: prompts/router.md\n    with:\n      task_spec: task/spec.md\n---\nSequence.\n",
     );
     write(
         &package.join("prompts/router.md"),
@@ -530,7 +540,7 @@ fn a_sequence_cli_setter_shadows_the_same_named_task_file_param() {
     let sequence = fixture.cwd().join("sequence.md");
     write(
         &sequence,
-        "---\nsequence:\n  - name: consume\n    prompt: router.md\n    params:\n      spec: task/spec.md\n---\nSequence.\n",
+        "---\nsequence:\n  - name: consume\n    prompt: router.md\n    with:\n      spec: task/spec.md\n---\nSequence.\n",
     );
     write(
         &fixture.cwd().join("router.md"),
@@ -577,7 +587,7 @@ fn a_sequence_runtime_mutation_shadows_the_same_named_task_file_param() {
     let sequence = fixture.cwd().join("sequence.md");
     write(
         &sequence,
-        "---\nsequence:\n  - name: mutate\n    prompt: mutator.md\n  - name: consume\n    prompt: router.md\n    params:\n      spec: task/spec.md\n---\nSequence.\n",
+        "---\nsequence:\n  - name: mutate\n    prompt: mutator.md\n  - name: consume\n    prompt: router.md\n    with:\n      spec: task/spec.md\n---\nSequence.\n",
     );
     write(
         &fixture.cwd().join("mutator.md"),
@@ -627,7 +637,7 @@ fn a_sequence_reserved_overlay_shadows_a_same_named_caller_file_input() {
     );
     write(
         &fixture.cwd().join("target.md"),
-        "---\n$schema:\n  state:\n    - file(required)\n    - object(required)\nreserved_name: \"{{ state.name }}\"\nstart:\n    - {append_line: ['events.log', 'winner={{ reserved_name }}']}\n---\nTarget.\n",
+        "---\n$schema:\n  state:\n    - file(required)\n    - object(required)\nreserved_name: \"{{ seq.name }}\"\nstart:\n    - {append_line: ['events.log', 'winner={{ reserved_name }}']}\n---\nTarget.\n",
     );
 
     let assertion = fixture

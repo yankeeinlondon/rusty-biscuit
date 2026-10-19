@@ -19,6 +19,23 @@ use common::drain_interrupt::{DrainCommand, PENDING_REPORT};
 use common::webhook_listener::{ListenerMode, WebhookListener};
 use std::time::Duration;
 
+#[test]
+fn shared_drain_documents_pass_the_binding_catalog_without_starting_a_listener() {
+    use claudine::composition::lifecycle::{bindings, parse_lifecycle_config};
+    for command in [DrainCommand::Compose, DrainCommand::InlineCompose, DrainCommand::Sequence] {
+        let fixture = CliProcessFixture::named("drain-document-corpus");
+        command.prepare(fixture.home(), fixture.bin_dir(), fixture.cwd());
+        let path = fixture.cwd().join("drain-interrupt.md");
+        let markdown: darkmatter::markdown::Markdown = std::fs::read_to_string(&path).unwrap().into();
+        let frontmatter = serde_json::Value::Object(markdown.frontmatter().as_map().iter()
+            .map(|(key, value)| (key.clone(), value.clone())).collect());
+        let lifecycle = parse_lifecycle_config(&frontmatter, &path).unwrap();
+        bindings::reject_removed_sequence_reads(&path, bindings::AuthoredDocument {
+            frontmatter: &frontmatter, body: markdown.content(), body_line_offset: markdown.frontmatter_line_count(),
+        }, None, Some(&lifecycle)).unwrap();
+    }
+}
+
 /// Ceiling on every wait for a notice, a request, or an exit.
 const WAIT: Duration = Duration::from_secs(60);
 

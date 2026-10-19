@@ -56,9 +56,12 @@ use darkmatter::markdown::compose::expression::{
     evaluate, is_truthy, scalar_string,
 };
 use darkmatter::markdown::compose::subtree::{SubtreeCompose, layered_session};
+use darkmatter::markdown::compose::shell_expansion::template::{
+    FilledChain, HoleEvaluator, LookupEvaluator, TemplateShape, fill_template,
+};
 use darkmatter::markdown::compose::{
     ComposeContext, ComposeOptions, CurrentAuthority, EffectiveState, EffectiveStateBuilder,
-    ResolvedShellValue, execute_resolved_shell_values,
+    ResolvedShellValue, ShellExpansionError, execute_shell_values_with,
 };
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
@@ -143,6 +146,20 @@ pub enum StackControl {
         message: String,
         /// Additional attempts beyond the original (default `1`).
         max_attempts: u32,
+    },
+
+    /// End the nearest enclosing loop after the interrupted pass's cleanup.
+    ///
+    /// The executor has already recorded the break in that loop's
+    /// [`LoopBreakSlot`](crate::composition::looping::LoopBreakSlot): this
+    /// control only ends the event. Every primitive between the `break` and
+    /// its loop reads the slot.
+    Break {
+        /// Evaluated reason, if one was authored.
+        reason: Option<String>,
+        /// The process exit code when the loop it ends is the root
+        /// invocation's.
+        code: u8,
     },
 
     /// Push this prompt onto the deferred-execution queue.
@@ -253,7 +270,8 @@ impl LifecycleExprError {
 
 /// A shell command refused by the lifecycle boundary or unable to start.
 /// A command that ran and exited nonzero is reported through
-/// [`ShellRunner::run`]'s `Ok` arm. Spawn failures retain their I/O source.
+/// [`ShellRunner::run`]'s (or [`ShellRunner::run_structured`]'s) `Ok` arm.
+/// Spawn failures retain their I/O source.
 #[derive(Debug, thiserror::Error)]
 pub enum ShellRunError {
     /// The lifecycle has not crossed the preflight boundary.
@@ -285,6 +303,16 @@ pub enum ShellRunError {
         #[source]
         source: darkmatter::markdown::compose::ContextBuildError,
     },
+    /// A template-mode program is not a native executable on the child's
+    /// search path, so no segment of its command started.
+    #[error("{reason}")]
+    Target {
+        /// The program word as authored.
+        program: String,
+        /// Why it cannot run without an interpreter.
+        #[source]
+        reason: Box<darkmatter::markdown::compose::shell_expansion::template::TemplateTargetError>,
+    },
 }
 
 /// Abstraction over running an approved shell command.
@@ -296,6 +324,29 @@ pub trait ShellRunner: Sync {
     /// Return the exit code, or [`ShellRunError`] when execution is prohibited
     /// or the process could not be started.
     fn run(&self, command: &str) -> Result<i32, ShellRunError>;
+
+    /// Run a template-mode command whose every argument is already filled,
+    /// validated, and checked against the blacklists, and return the exit code
+    /// of the last segment that ran.
+    ///
+    /// Each program is started directly, never through a shell, under the
+    /// same contract as [`Self::run`]: inherited standard streams, the same
+    /// working directory and environment, and no deadline.
+    ///
+    /// ## Errors
+    ///
+    /// [`ShellRunError::BeforePreflight`] where shell execution is prohibited,
+    /// [`ShellRunError::Target`] when a program is not a native executable
+    /// (nothing starts then), or [`ShellRunError::Spawn`].
+    fn run_structured(&self, chain: &FilledChain) -> Result<i32, ShellRunError>;
+
+    /// Whether this runner may start a command at all.
+    ///
+    /// A template-mode site asks before it reads any placeholder, so a
+    /// prohibited route reports the prohibition rather than a value error.
+    fn ensure_permitted(&self) -> Result<(), ShellRunError> {
+        Ok(())
+    }
 
     /// Execute one `set` action's whole-value `$( … )` assignments and return
     /// each destination's value, in order.
@@ -322,11 +373,10 @@ pub trait ShellRunner: Sync {
 
 /// One `set` action's shell assignments, ready to execute.
 pub struct ShellValueRequest<'a> {
-    /// The preflight-resolved values, in authored order.
+    /// The approved values, in authored order.
     pub values: &'a [&'a ResolvedShellValue],
-    /// The pre-write state every value reads: a ternary's condition and value
-    /// branches evaluate against it. Command bytes never do; they were fixed at
-    /// preflight.
+    /// The pre-write state for conditions, value branches, and template-mode
+    /// placeholders. Resolved-byte commands stay fixed at preflight.
     pub state: &'a Map<String, Value>,
     /// The composition source, for diagnostics and file references.
     pub source_path: &'a Path,
@@ -334,15 +384,25 @@ pub struct ShellValueRequest<'a> {
     pub context: ComposeContext,
     /// The request's file-resolution context.
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    /// Reads a template-mode value's placeholders against [`Self::state`]
+    /// with the event's globals, exactly as the action's other values read.
+    pub holes: Option<&'a dyn HoleEvaluator>,
+    /// The shell policy root a template-mode value was approved under; its
+    /// user blacklist judges the filled command.
+    pub policy_root: Option<&'a Path>,
 }
 
 /// Runs a `set` action's shell values through Darkmatter in a fresh result
 /// cache, so a command two values name runs once and nothing is reused from an
 /// earlier event.
 ///
-/// Each value's commands are exactly the bytes preflight approved, so they are
-/// its pre-approved set; a lifecycle `shell` action runs its approved bytes on
-/// the same terms. Commands run in the request's launch directory, as a
+/// A resolved-byte value's commands are exactly the bytes preflight approved,
+/// so they are its pre-approved set; a lifecycle `shell` action runs its
+/// approved bytes on the same terms. A template-mode value
+/// ([`ResolvedShellValue::template`]) is pre-approved by its shape instead:
+/// its placeholders are read through [`ShellValueRequest::holes`], each fills
+/// one argument, and the filled command meets both blacklists before it
+/// starts. Commands run in the request's launch directory, as a
 /// lifecycle `shell` action does, and from `child_environment` when one is
 /// given (otherwise they inherit this process's).
 ///
@@ -354,15 +414,22 @@ pub fn execute_set_shell_values(
     request: &ShellValueRequest<'_>,
     child_environment: Option<&EnvBaseline>,
 ) -> Result<Vec<(String, Value)>, ShellRunError> {
-    let approved = request
-        .values
-        .iter()
-        .flat_map(|value| value.commands())
-        .collect();
+    let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+    for value in request.values {
+        match value.template() {
+            Some(template) => {
+                approved.insert_template(TemplateShape::from_template(template));
+            }
+            None => approved.extend_exact(value.commands()),
+        }
+    }
     let mut options = ComposeOptions::new_with_context(request.context.clone())
         .with_source_file(request.source_path)
         .with_pre_approved_commands(approved)
         .with_shell_working_directory(request.file_resolution_context.request_cwd());
+    if let Some(policy_root) = request.policy_root {
+        options = options.with_shell_policy_root(policy_root);
+    }
     if let Some(environment) = child_environment {
         options = options.with_shell_child_environment(environment.shell_child_environment());
     }
@@ -374,7 +441,7 @@ pub fn execute_set_shell_values(
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    execute_resolved_shell_values(request.values, state, &compose_request)
+    execute_shell_values_with(request.values, state, &compose_request, request.holes)
         .map_err(|source| ShellRunError::Value { source })
 }
 
@@ -385,6 +452,14 @@ pub struct DisabledShellRunner;
 
 impl ShellRunner for DisabledShellRunner {
     fn run(&self, _command: &str) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::BeforePreflight)
+    }
+
+    fn run_structured(&self, _chain: &FilledChain) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::BeforePreflight)
+    }
+
+    fn ensure_permitted(&self) -> Result<(), ShellRunError> {
         Err(ShellRunError::BeforePreflight)
     }
 
@@ -404,6 +479,10 @@ pub struct SystemShellRunner;
 impl ShellRunner for SystemShellRunner {
     fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         run_system_shell(command, None)
+    }
+
+    fn run_structured(&self, chain: &FilledChain) -> Result<i32, ShellRunError> {
+        super::structured_shell::run_filled_chain(chain, None)
     }
 
     fn for_child_environment(&self, environment: &EnvBaseline) -> Option<Box<dyn ShellRunner>> {
@@ -437,6 +516,10 @@ impl ShellRunner for DocumentShellRunner {
         run_system_shell(command, Some(&self.environment))
     }
 
+    fn run_structured(&self, chain: &FilledChain) -> Result<i32, ShellRunError> {
+        super::structured_shell::run_filled_chain(chain, Some(&self.environment))
+    }
+
     fn run_values(
         &self,
         request: &ShellValueRequest<'_>,
@@ -454,11 +537,8 @@ fn run_system_shell(command: &str, environment: Option<&EnvBaseline>) -> Result<
         command: command.to_string(),
         source: std::io::Error::other(error),
     })?;
-    let status = cmd.status().map_err(|source| ShellRunError::Spawn {
-        command: command.to_string(),
-        source,
-    })?;
-    Ok(status.code().unwrap_or(-1))
+    super::super::sequence::task::run_owned_lifecycle_command(&mut cmd)
+        .map_err(|source| ShellRunError::Spawn { command: command.to_string(), source })
 }
 
 /// `program` as a child starting from `environment`, or inheriting this
@@ -510,8 +590,9 @@ pub struct StackExecutionContext<'a> {
     /// The event being processed.
     pub signal: LifecycleSignal,
     /// The binding scope expressions evaluate in; `None` is the event
-    /// `signal` names. A sequence task's `setup:`/`teardown:` stack sets its
-    /// own scope ([`Self::in_scope`]) because it reuses the step's context.
+    /// `signal` names. A sequence `side_effect:` task's action sets its own
+    /// scope ([`Self::in_scope`]) because it runs in the step's context, not in
+    /// a document event.
     pub scope: Option<LifecycleScope>,
     /// Composed frontmatter — the base namespace for expression evaluation.
     pub frontmatter: &'a Map<String, Value>,
@@ -559,6 +640,8 @@ pub struct StackExecutionContext<'a> {
     /// scope the group scheduler enters and leaves, which is why it arrives as
     /// a borrowed map rather than a snapshot type.
     pub group: Option<&'a Map<String, Value>>,
+    /// Complete lexical sequence position; runtime outputs remain live.
+    pub seq: Option<&'a Value>,
     /// The `loop` global: the enclosing loop iteration's values, in scope for
     /// the loop gate and every event of one iteration. `None` is known to be
     /// outside any loop, where reading `loop` is unavailable.
@@ -649,6 +732,22 @@ impl StackExecutionContext<'_> {
         self.execute_stack(nodes)
     }
 
+    /// Evaluate a task's `when:` guard against this context's frontmatter and
+    /// bindings, with the lifecycle `when` truthiness rule.
+    ///
+    /// The guard is read-only: it runs no stack and dispatches nothing.
+    ///
+    /// ## Errors
+    ///
+    /// The parse or evaluation failure. A guard that raises is never read as
+    /// false.
+    pub fn evaluate_task_guard(&self, condition: &str) -> Result<bool, crate::composition::error::TaskGuardFailure> {
+        let expr = darkmatter::markdown::compose::expression::parse_condition(condition)?;
+        self.eval_expr(&expr, self.frontmatter)
+            .map(|value| is_truthy(&value))
+            .map_err(|error| LifecycleCause::new(error).into())
+    }
+
     /// Dispatch one action as a task's `side_effect:` primary and return the
     /// value the effect produced.
     ///
@@ -736,6 +835,7 @@ impl StackExecutionContext<'_> {
     /// the event's memo.
     pub fn with_signal(&self, signal: LifecycleSignal) -> StackExecutionContext<'_> {
         StackExecutionContext {
+            seq: self.seq,
             signal,
             scope: if signal == self.signal { self.scope } else { None },
             frontmatter: self.frontmatter,
@@ -777,6 +877,7 @@ impl StackExecutionContext<'_> {
         err: &'a LifecycleErrorInfo,
     ) -> StackExecutionContext<'a> {
         StackExecutionContext {
+            seq: self.seq,
             signal: self.signal,
             scope: self.scope,
             frontmatter: self.frontmatter,
@@ -875,6 +976,7 @@ impl StackExecutionContext<'_> {
         prepared: &'b ComposeContext,
     ) -> StackExecutionContext<'b> {
         StackExecutionContext {
+            seq: self.seq,
             signal: self.signal,
             scope: self.scope,
             frontmatter: self.frontmatter,
@@ -903,12 +1005,16 @@ impl StackExecutionContext<'_> {
     /// This scope's binding view and a runtime entry for every lifecycle
     /// global it declares, from the catalog.
     fn bindings(&self) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
+        let mut snapshot = self.runtime_state.map_or_else(Default::default, |runtime| runtime.snapshot());
+        if let Some(seq) = self.seq { snapshot.seq = Some(seq.clone()); }
+        let seq = snapshot.sequence_value();
         runtime_bindings_in_loop(
             self.binding_scope(),
             LifecycleValues {
                 err: self.err,
                 timing: self.timing,
                 group: self.group,
+                seq: Some(&seq),
             },
             self.loop_values,
         )
@@ -965,6 +1071,7 @@ impl StackExecutionContext<'_> {
         let context = self.early_binding_context(scan_hint);
         EffectiveStateBuilder::new()
             .with_frontmatter(frontmatter)
+            .with_name_coercion_keys(super::super::sequence::reserved::NAME_COERCION_KEYS.iter().map(|key| key.to_string()).collect())
             .with_context(context)
             // Every event builds its own state, so every event starts fresh
             // evaluation scopes: a `current.<key>` read in a later event
@@ -988,11 +1095,7 @@ impl StackExecutionContext<'_> {
     fn eval_expr(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, &expr.to_string());
         let (view, globals) = self.bindings();
-        let lookup = layered_session(&state, globals, Some(view), Some(self.resolution_context()?))
-            .map_err(|error| {
-                LifecycleExprError::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))
-            })?;
-        evaluate(expr, &lookup).map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
+        evaluate_expr_in(expr, &state, view, globals, Some(self.resolution_context()?))
     }
 
     /// Interpolate a string's `{{ … }}` spans at event-time through Darkmatter's
@@ -1013,13 +1116,7 @@ impl StackExecutionContext<'_> {
     ) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, s);
         let (view, globals) = self.bindings();
-        let value = Value::String(s.to_string());
-        SubtreeCompose::new(&value, &state)
-            .with_globals(globals)
-            .with_binding_view(view)
-            .with_resolution_context(self.resolution_context()?)
-            .compose()
-            .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
+        interpolate_text_in(s, &state, view, globals, Some(self.resolution_context()?))
     }
 
     /// Evaluate one action operand at event time.
@@ -1035,7 +1132,9 @@ impl StackExecutionContext<'_> {
         fm: &Map<String, Value>,
     ) -> Result<Value, LifecycleExprError> {
         match expr {
-            Expr::StringLiteral(text) if text.contains("{{") => self.resolve_string_value(text, fm),
+            Expr::StringLiteral(text) if is_template_operand(expr) => {
+                self.resolve_string_value(text, fm)
+            }
             _ => self.eval_expr(expr, fm),
         }
     }
@@ -1235,6 +1334,10 @@ impl StackExecutionContext<'_> {
         working: &mut Map<String, Value>,
     ) -> Result<Option<StackControl>, ActionFailure> {
         match &action.kind {
+            // `prep` returns: the event continues with the next item.
+            LifecycleActionKind::LifecycleControl(LifecycleControlAction::Prep { target, with }) => {
+                self.run_prep(target, with, &location, working).map(|()| None)
+            }
             LifecycleActionKind::LifecycleControl(control) => self
                 .resolve_control(control, location, working)
                 .map(Some)
@@ -1260,7 +1363,7 @@ impl StackExecutionContext<'_> {
                 Ok(None)
             }
             LifecycleActionKind::Shell(shell) => {
-                self.run_shell_action(shell, working).map(|()| None)
+                self.run_shell_action(shell, property, working).map(|()| None)
             }
             LifecycleActionKind::RuntimeSet(set) => {
                 // `property` is the `set` verb's own authored path.
@@ -1336,15 +1439,31 @@ impl StackExecutionContext<'_> {
     /// (subject to `no_error` upstream). Initialization and preflight prohibitions
     /// are unsuppressible. `on_error` is emitted as a warning status line before
     /// a dispatch error propagates.
+    ///
+    /// A site approved by its shape runs its template
+    /// ([`Self::run_shell_template`]); one approved in neither mode is refused.
     fn run_shell_action(
         &self,
         shell: &super::actions::ShellAction,
+        property: &str,
         fm: &Map<String, Value>,
     ) -> Result<(), ActionFailure> {
         if self.signal == LifecycleSignal::Initialize {
             return Err(ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
                 "shell", &ShellRunError::BeforePreflight,
             )));
+        }
+        if let Some(site) = &shell.template {
+            match site.mode() {
+                Some(super::shell_template::LifecycleShellMode::ResolvedBytes) => {}
+                Some(super::shell_template::LifecycleShellMode::Template { policy_root }) => {
+                    return self.run_shell_template(shell, site, policy_root.as_deref(), property, fm);
+                }
+                None => {
+                    self.ensure_shell_permitted("shell")?;
+                    return Err(self.not_approved("shell", property, &site.template().authored));
+                }
+            }
         }
         let command = self.render_shell_text(shell, &shell.command, fm).map_err(|error| {
             ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error("shell", error))
@@ -1372,6 +1491,138 @@ impl StackExecutionContext<'_> {
                 LifecycleErrorInfo::from_error_or_action("shell", &spawn_err),
             )),
         }
+    }
+
+    /// Run a shell action approved by its shape.
+    ///
+    /// Every placeholder is read from the state current now, checked against
+    /// its declared type, and filled into exactly one argument; the whole
+    /// filled command then meets the built-in and user blacklists, and only
+    /// then does any segment start. A value that is missing or rejected, a
+    /// blacklisted fill, and a program that needs an interpreter are
+    /// evaluation errors: `no_error` cannot suppress them, and their message
+    /// never shows a value. A non-zero exit is a dispatch error, as for bytes.
+    fn run_shell_template(
+        &self,
+        shell: &super::actions::ShellAction,
+        site: &super::shell_template::LifecycleShellTemplate,
+        policy_root: Option<&Path>,
+        property: &str,
+        fm: &Map<String, Value>,
+    ) -> Result<(), ActionFailure> {
+        self.ensure_shell_permitted("shell")?;
+        let template = site.template();
+        let authored = template.authored.as_str();
+        let chain = self
+            .with_hole_evaluator(fm, authored, |holes| fill_template(template, holes, site.late_values()))
+            .map_err(|error| ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error("shell", error)))?
+            .map_err(|error| {
+                let ctx = self.template_context(authored);
+                self.template_refusal(property, authored, error.into_shell_error(&ctx, authored, &template_origin(property)))
+            })?;
+        let blacklist = crate::harness::shell::user_blacklist(policy_root);
+        if let Some(reason) = darkmatter::markdown::compose::shell_expansion::check_filled_chain(&chain, &blacklist) {
+            let error = ShellExpansionError::Blacklisted {
+                ctx: Box::new(self.template_context(authored)),
+                command: authored.to_string(),
+                reason,
+                origin: template_origin(property),
+            };
+            return Err(self.template_refusal(property, authored, error));
+        }
+        match self.shell_runner.run_structured(&chain) {
+            Ok(0) => Ok(()),
+            Ok(code) => {
+                if let Some(on_error) = &shell.on_error {
+                    if let Ok(text) = self.render_shell_text(shell, on_error, fm) {
+                        self.emitter.emit_warn(&text, self.term);
+                    }
+                }
+                // The authored text: the filled arguments may hold a secret.
+                Err(ActionFailure::Dispatch(LifecycleErrorInfo::from_action_failure(
+                    "shell",
+                    format!("command `{authored}` exited with code {code}"),
+                )))
+            }
+            Err(ShellRunError::BeforePreflight) => Err(ActionFailure::Evaluation(
+                LifecycleErrorInfo::from_error_or_action("shell", &ShellRunError::BeforePreflight),
+            )),
+            Err(ShellRunError::Target { reason, .. }) => {
+                let error = ShellExpansionError::TemplateTarget {
+                    ctx: Box::new(self.template_context(authored)),
+                    command: authored.to_string(),
+                    reason,
+                    origin: template_origin(property),
+                };
+                Err(self.template_refusal(property, authored, error))
+            }
+            Err(spawn_err) => Err(ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(
+                "shell", &spawn_err,
+            ))),
+        }
+    }
+
+    /// The runner's prohibition, if any, as the unsuppressible error a shell
+    /// prohibition always is.
+    fn ensure_shell_permitted(&self, verb: &str) -> Result<(), ActionFailure> {
+        self.shell_runner.ensure_permitted().map_err(|error| {
+            ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(verb.to_string(), &error))
+        })
+    }
+
+    /// A site with a placeholder that pre-flight approved in neither mode.
+    fn not_approved(&self, verb: &str, property: &str, authored: &str) -> ActionFailure {
+        ActionFailure::Evaluation(
+            LifecycleErrorInfo::from_action_failure(
+                verb.to_string(),
+                format!(
+                    "`{property}` runs `{authored}`, which pre-flight never approved as its bytes or \
+                     its shape, so it cannot run"
+                ),
+            )
+            .at_property(property.to_string()),
+        )
+    }
+
+    /// A template-mode failure that refused the command before it ran:
+    /// unsuppressible, with Darkmatter's typed cause kept for `err.*`.
+    fn template_refusal(&self, property: &str, authored: &str, error: ShellExpansionError) -> ActionFailure {
+        let message = error.to_string();
+        let diagnostic = CompositionError::LifecycleShellTemplateRefused {
+            source_path: self.source_path.to_path_buf(),
+            property: property.to_string(),
+            command: authored.to_string(),
+            message,
+            source: Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error))),
+        };
+        ActionFailure::Evaluation(
+            LifecycleErrorInfo::from_composition_error(&diagnostic).at_property(property.to_string()),
+        )
+    }
+
+    /// The authored command as the excerpt a template diagnostic shows.
+    fn template_context(&self, authored: &str) -> biscuit_terminal::errors::SourceContext {
+        biscuit_terminal::errors::SourceContext::new(
+            self.source_path.to_path_buf(),
+            self.source_path.to_path_buf(),
+            authored.to_string(),
+        )
+    }
+
+    /// Run `f` with an evaluator that reads a placeholder against `fm` and
+    /// this event's globals, exactly as every other action expression reads.
+    fn with_hole_evaluator<R>(
+        &self,
+        fm: &Map<String, Value>,
+        scan_hint: &str,
+        f: impl FnOnce(&dyn HoleEvaluator) -> R,
+    ) -> Result<R, LifecycleExprError> {
+        let state = self.build_state(fm, scan_hint);
+        let (view, globals) = self.bindings();
+        let session = layered_session(&state, globals, Some(view), Some(self.resolution_context()?)).map_err(
+            |error| LifecycleExprError::Evaluate(Box::new(ExpressionError::Binding(Box::new(error)))),
+        )?;
+        Ok(f(&LookupEvaluator::new(&session)))
     }
 
     /// The text of a shell action's `command` or `on_error`.
@@ -1549,7 +1800,10 @@ impl StackExecutionContext<'_> {
     /// Run a `set` action's whole-value `$( … )` values against the pre-write
     /// `snapshot`.
     ///
-    /// A value preflight never resolved does not run. A runner that prohibits
+    /// A value preflight never resolved does not run, nor does one approved in
+    /// neither mode. A value approved by its shape runs its template, its
+    /// placeholders read from `snapshot` with the event's globals; a refusal of
+    /// its value, blacklisted fill, or program is an evaluation error. A runner that prohibits
     /// shell execution, and a user interruption, are evaluation errors that
     /// `no_error` cannot suppress; a command that fails is a dispatch error.
     fn run_set_shell_values(
@@ -1558,8 +1812,9 @@ impl StackExecutionContext<'_> {
         property: &str,
         snapshot: &Map<String, Value>,
     ) -> Result<Vec<(String, Value)>, ActionFailure> {
-        let mut values = Vec::new();
+        let mut values: Vec<std::borrow::Cow<'_, ResolvedShellValue>> = Vec::new();
         let mut authored = String::new();
+        let mut policy_root = None;
         for (key, shell) in set.shell_values() {
             let Some(resolved) = shell.resolved.as_ref() else {
                 return Err(ActionFailure::Evaluation(
@@ -1574,17 +1829,50 @@ impl StackExecutionContext<'_> {
                 ));
             };
             authored.push_str(&shell.authored);
-            values.push(resolved);
+            // A value approved by its shape runs its template; one approved in
+            // neither mode never runs.
+            match shell.template.as_ref().map(|site| (site, site.mode())) {
+                None | Some((_, Some(super::shell_template::LifecycleShellMode::ResolvedBytes))) => {
+                    values.push(std::borrow::Cow::Borrowed(resolved));
+                }
+                Some((site, Some(super::shell_template::LifecycleShellMode::Template { policy_root: root }))) => {
+                    self.ensure_shell_permitted("set")?;
+                    policy_root = root.or(policy_root);
+                    let value = resolved.clone().with_template(site.template().clone());
+                    values.push(std::borrow::Cow::Owned(match site.late_values() {
+                        Some(late) => value.with_late_values(late.clone()),
+                        None => value,
+                    }));
+                }
+                Some((site, None)) => {
+                    self.ensure_shell_permitted("set")?;
+                    return Err(self.not_approved("set", &format!("{property}.{key}"), &site.template().authored));
+                }
+            }
         }
-        let request = ShellValueRequest {
-            values: &values,
-            state: snapshot,
-            source_path: self.source_path,
-            context: self.early_binding_context(&authored),
-            file_resolution_context: self.file_resolution_context,
+        let values: Vec<&ResolvedShellValue> = values.iter().map(std::convert::AsRef::as_ref).collect();
+        let run = |holes: Option<&dyn HoleEvaluator>| {
+            let request = ShellValueRequest {
+                values: &values,
+                state: snapshot,
+                source_path: self.source_path,
+                context: self.early_binding_context(&authored),
+                file_resolution_context: self.file_resolution_context,
+                holes,
+                policy_root: policy_root.as_deref(),
+            };
+            self.shell_runner.run_values(&request)
         };
-        match self.shell_runner.run_values(&request) {
-            Ok(results) if !crate::interrupt::interrupted() => Ok(results),
+        // Placeholders read the pre-write snapshot, as every other value does.
+        let templated = values.iter().any(|value| value.template().is_some());
+        let outcome = if templated {
+            self.with_hole_evaluator(snapshot, &authored, |holes| run(Some(holes)))
+                .map_err(|error| ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error("set", error)))?
+        } else {
+            run(None)
+        };
+        match outcome {
+            Ok(results) if !super::cancellation::requested() => Ok(results),
             Ok(_) => Err(ActionFailure::Evaluation(
                 LifecycleErrorInfo::from_action_failure(
                     "set",
@@ -1595,7 +1883,14 @@ impl StackExecutionContext<'_> {
             Err(error @ ShellRunError::BeforePreflight) => Err(ActionFailure::Evaluation(
                 LifecycleErrorInfo::from_error_or_action("set", &error).at_property(property.to_string()),
             )),
-            Err(error) if crate::interrupt::interrupted() => Err(ActionFailure::Evaluation(
+            // A template value refused before it ran (missing or rejected
+            // value, blacklisted fill, interpreter target) is an input error,
+            // never a command failure `no_error` may absorb.
+            Err(ShellRunError::Value { source }) if templated && template_input_refusal(&source) => {
+                let command = source.command().unwrap_or_default().to_string();
+                Err(self.template_refusal(property, &command, source))
+            }
+            Err(error) if super::cancellation::requested() => Err(ActionFailure::Evaluation(
                 LifecycleErrorInfo::from_error_or_action("set", &error).at_property(property.to_string()),
             )),
             Err(error) => Err(ActionFailure::Dispatch(
@@ -1822,6 +2117,67 @@ impl StackExecutionContext<'_> {
                 delay: self.render_message(delay, fm).map_err(classify)?,
                 reason: self.eval_opt_string(reason.as_ref(), fm).map_err(classify)?,
             },
+            // A `break` belongs to the innermost loop around this page. With
+            // none, it is a run-time error of the event, which `no_error`
+            // cannot suppress, so it is never read as `stop`.
+            C::Break { reason, code } => {
+                let Some(ambient) = self.loop_values else {
+                    let mut info = LifecycleErrorInfo::from_composition_error(
+                        &CompositionError::LifecycleBreakWithoutLoop {
+                            source_path: self.source_path.to_path_buf(),
+                            property: location.path().to_string(),
+                        },
+                    );
+                    info.reason = LifecycleEvaluationReason::BreakWithoutLoop;
+                    return Err(info);
+                };
+                let reason = self.eval_opt_string(reason.as_ref(), fm).map_err(classify)?;
+                ambient.breaks.record(crate::composition::looping::LoopBreak { reason: reason.clone(), code: *code });
+                StackControl::Break { reason, code: *code }
+            }
+            C::Prep { .. } => unreachable!("`prep` is a returning action, run by `run_prep`"),
+        })
+    }
+
+    /// Run a `prep` call to completion through this thread's target runner.
+    ///
+    /// The target and the whole overlay evaluate first, as `proxy`'s do, so
+    /// an evaluation failure calls nothing. A target that did not return
+    /// successfully is a dispatch failure of this event, with the target's
+    /// failure as its cause: the event takes its ordinary error route, and
+    /// `no_error` suppresses it as it does a failed shell action.
+    fn run_prep(
+        &self,
+        target: &Expr,
+        with: &WithOverlay,
+        location: &ActionLocation,
+        fm: &Map<String, Value>,
+    ) -> Result<(), ActionFailure> {
+        let target = self
+            .render_message(target, fm)
+            .map_err(|error| ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error("prep", error)))?;
+        let overlay = self.resolve_with_overlay(with, &target, location, fm).map_err(ActionFailure::Evaluation)?;
+        let property = location.path().to_string();
+        let Some(runner) = super::prep::current() else {
+            return Err(ActionFailure::Evaluation(LifecycleErrorInfo::from_composition_error(
+                &CompositionError::LifecyclePrepUnavailable { source_path: self.source_path.to_path_buf(), property },
+            )));
+        };
+        let call = super::prep::PrepCall {
+            target: &target,
+            overlay: &overlay,
+            caller: self.source_path,
+            file_resolution_context: self.file_resolution_context,
+            property: &property,
+        };
+        runner.run(&call).map_err(|failure| {
+            ActionFailure::Dispatch(LifecycleErrorInfo::from_composition_error(&CompositionError::LifecyclePrepFailed {
+                source_path: self.source_path.to_path_buf(),
+                property: property.clone(),
+                target: target.clone(),
+                message: failure.message,
+                snapshot: failure.snapshot,
+            }))
         })
     }
 
@@ -2053,6 +2409,87 @@ fn push_proxy_with_scan_content(value: &WithValue, content: &mut String) {
             }
         }
     }
+}
+
+/// Whether an action operand is a template, interpolated once by
+/// [`interpolate_text_in`], rather than an expression evaluated by
+/// [`evaluate_expr_in`]: an authored literal body carrying `{{ … }}` spans.
+pub(super) fn is_template_operand(expr: &Expr) -> bool {
+    matches!(expr, Expr::StringLiteral(text) if text.contains("{{"))
+}
+
+/// Evaluate one action operand against an established state, as lifecycle
+/// playback does: a template is interpolated, every other expression yields
+/// data that is never scanned again.
+///
+/// Shared by event-time playback and pre-warm's speculative resolution, so
+/// both produce the same text from the same inputs.
+pub(super) fn evaluate_operand_in(
+    expr: &Expr,
+    state: &EffectiveState,
+    view: Arc<BindingView>,
+    globals: HashMap<String, RuntimeBinding<'static>>,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<Value, LifecycleExprError> {
+    match expr {
+        Expr::StringLiteral(text) if is_template_operand(expr) => {
+            interpolate_text_in(text, state, view, globals, resolution_context)
+        }
+        _ => evaluate_expr_in(expr, state, view, globals, resolution_context),
+    }
+}
+
+/// The origin a lifecycle template diagnostic names: the authored property.
+fn template_origin(property: &str) -> darkmatter::markdown::compose::ShellCommandOrigin {
+    darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter {
+        key: property.to_string(),
+        line: None,
+    }
+}
+
+/// Whether a `set` value's failure refused a template command before it ran.
+fn template_input_refusal(error: &ShellExpansionError) -> bool {
+    matches!(
+        error,
+        ShellExpansionError::MissingValue { .. }
+            | ShellExpansionError::TemplateValueRejected { .. }
+            | ShellExpansionError::TemplateGrammar { .. }
+            | ShellExpansionError::TemplateTarget { .. }
+            | ShellExpansionError::Blacklisted { .. }
+    )
+}
+
+fn evaluate_expr_in(
+    expr: &Expr,
+    state: &EffectiveState,
+    view: Arc<BindingView>,
+    globals: HashMap<String, RuntimeBinding<'static>>,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<Value, LifecycleExprError> {
+    let lookup = layered_session(state, globals, Some(view), resolution_context).map_err(|error| {
+        LifecycleExprError::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))
+    })?;
+    evaluate(expr, &lookup).map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
+}
+
+fn interpolate_text_in(
+    text: &str,
+    state: &EffectiveState,
+    view: Arc<BindingView>,
+    globals: HashMap<String, RuntimeBinding<'static>>,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<Value, LifecycleExprError> {
+    let value = Value::String(text.to_string());
+    let compose = SubtreeCompose::new(&value, state)
+        .with_globals(globals)
+        .with_binding_view(view);
+    let compose = match resolution_context {
+        Some(context) => compose.with_resolution_context(context),
+        None => compose,
+    };
+    compose
+        .compose()
+        .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
 }
 
 /// Refuse template syntax in a `with:` value that becomes lifecycle

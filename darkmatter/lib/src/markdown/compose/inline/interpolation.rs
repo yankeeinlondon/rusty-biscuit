@@ -91,6 +91,11 @@ pub(crate) fn run_stage(
 
     let data = data.after_edits(&result.edits, &result.output);
     body.origin = origin.as_ref().map(|origin| origin.after_edits(&result.edits, &result.output));
+    body.authored = body.authored.take().and_then(|authored| {
+        authored
+            .advanced(markdown.content(), &targets.edits, &targets.output)?
+            .advanced(&targets.output, &result.edits, &result.output)
+    });
     body.data = data;
     *markdown.content_mut() = result.output;
     report.add_warnings(result.warnings);

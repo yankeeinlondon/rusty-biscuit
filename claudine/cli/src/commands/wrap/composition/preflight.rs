@@ -103,6 +103,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
     let timing = LifecycleTiming::from_instants(document_start, None, std::time::Instant::now());
 
     let blocked_ctx = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Blocked,
         scope: None,
         frontmatter,

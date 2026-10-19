@@ -488,6 +488,7 @@ fn catalog(
             err,
             timing,
             group: None,
+            seq: None,
         },
     )
 }

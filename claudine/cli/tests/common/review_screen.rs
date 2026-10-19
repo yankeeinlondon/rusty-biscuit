@@ -13,7 +13,7 @@
 //! | 2 | `review` | `prompt` | `2 review` |
 //! | 3 | `note` | `side_effect` | none |
 //! | 4 | `review` | `task` | `4 review` |
-//! | 5 | `build` | `group` | `5 build` |
+//! | 5 | `build` | `group` (leg `member`) | `5 member` |
 //! | 6 | [`LONG_STEP_NAME`] | none (the body) | `6 …` |
 //! | 7 | `stage-last` | `shell` | none |
 //!
@@ -51,7 +51,7 @@ pub const LONG_STEP_NAME: &str = "summarize-everything-that-happened-in-this-seq
 pub const ROW_LABELS: [&str; 4] = [
     "2 review",
     "4 review",
-    "5 build",
+    "5 member",
     "6 summarize-everything-that-happened-in-this-sequence-run",
 ];
 
@@ -131,6 +131,12 @@ pub struct ReviewFixture {
 impl ReviewFixture {
     /// Stage the sequence, the fakes, the user config, and the launcher.
     pub fn stage(name: &str, editor: ModelEditor) -> Self {
+        Self::stage_with(name, editor, false)
+    }
+
+    /// [`Self::stage`], with step 4's task document declaring `agent: goose`
+    /// when `own_provider` is set, so its row is read-only.
+    pub fn stage_with(name: &str, editor: ModelEditor, own_provider: bool) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let fixture = CliProcessFixture::named(name);
         let cwd = fixture.cwd().to_path_buf();
@@ -169,7 +175,10 @@ impl ReviewFixture {
         );
 
         write(&cwd.join("review.md"), "Review token STEP2-REVIEW.\n");
-        write(&cwd.join("task-review.md"), "Task token STEP4-TASK.\n");
+        write(
+            &cwd.join("task-review.md"),
+            if own_provider { "---\nagent: goose\n---\nTask token STEP4-TASK.\n" } else { "Task token STEP4-TASK.\n" },
+        );
         write(&cwd.join("task.yaml"), "kind: task\nprompt: \"./task-review.md\"\n");
         write(&cwd.join("member.md"), "Group member token STEP5-GROUP.\n");
         write(
@@ -188,9 +197,9 @@ impl ReviewFixture {
                  \x20   - name: build\n\
                  \x20     group:\n\
                  \x20         name: build-group\n\
-                 \x20         execution: serial\n\
                  \x20         tasks:\n\
-                 \x20             - prompt: \"./member.md\"\n\
+                 \x20             - name: member\n\
+                 \x20               prompt: \"./member.md\"\n\
                  \x20   - name: {LONG_STEP_NAME}\n\
                  \x20   - name: stage-last\n\
                  \x20     shell: echo shell-last >> events.log\n\

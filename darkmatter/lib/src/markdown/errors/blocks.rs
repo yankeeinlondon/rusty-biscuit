@@ -645,12 +645,15 @@ pub(crate) fn parameter_binding_block(
 /// error (malformed `$schema`, unresolved reference, baseline build failure,
 /// etc.) rather than an instance validation failure. In that case the
 /// `summary` carries the underlying diagnostic and is rendered as a body
-/// line so authors see the root cause instead of an empty problem list.
+/// line so authors see the root cause instead of an empty problem list, and
+/// `preparation_hint` (the preparation error's own hint, when it has one)
+/// replaces the generic hint.
 pub(crate) fn schema_validation_failed_block(
     path: &std::path::Path,
     problems: &[ValidationProblem],
     summary: &str,
     description: &Option<String>,
+    preparation_hint: Option<&'static str>,
 ) -> StatusBlock {
     let path_attr = Prose::quoted_attr(&path.to_string_lossy());
     let path_escaped = Prose::escape_text(&path.to_string_lossy());
@@ -693,9 +696,9 @@ pub(crate) fn schema_validation_failed_block(
                 "schema validation failed",
             ))
             .body(Prose::new(body_lines.join("\n")).with_line_breaks(LineBreaks::Hard))
-            .hint(
+            .hint(preparation_hint.unwrap_or(
                 "Check that the document's $schema (or the baseline schema) is well-formed and resolvable.",
-            );
+            ));
     }
 
     // One bullet per problem. The category label is chosen from
@@ -1246,7 +1249,7 @@ mod tests {
     fn schema_validation_failed_block_renders_summary_when_problems_empty() {
         let path = std::path::PathBuf::from("/tmp/test/bad-schema.md");
         let summary = "schema could not be prepared: could not resolve ./missing.yaml";
-        let block = schema_validation_failed_block(&path, &[], summary, &None);
+        let block = schema_validation_failed_block(&path, &[], summary, &None, None);
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing summary: {out}");
         assert!(out.contains("could not resolve ./missing.yaml"), "missing detail: {out}");
@@ -1258,7 +1261,7 @@ mod tests {
     #[test]
     fn schema_validation_failed_block_handles_empty_summary() {
         let path = std::path::PathBuf::from("/tmp/test/empty.md");
-        let block = schema_validation_failed_block(&path, &[], "", &None);
+        let block = schema_validation_failed_block(&path, &[], "", &None, None);
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
     }
@@ -1288,7 +1291,7 @@ mod tests {
     fn schema_validation_failed_block_renders_problem_description() {
         let path = std::path::PathBuf::from("/tmp/test/post.md");
         let problem = problem_with_description(Some("The headline shown in listing pages"));
-        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None);
         let out = render_block(&block);
         assert!(out.contains("type"), "missing problem bullet: {out}");
         assert!(
@@ -1309,6 +1312,7 @@ mod tests {
             std::slice::from_ref(&problem),
             "",
             &doc_description,
+            None,
         );
         let out = render_block(&block);
         assert!(
@@ -1327,7 +1331,7 @@ mod tests {
     fn schema_validation_failed_block_omits_absent_problem_description() {
         let path = std::path::PathBuf::from("/tmp/test/post.md");
         let problem = problem_with_description(None);
-        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None);
         let out = render_block(&block);
         // The bullet is present, but no extra description text rides beneath it.
         assert!(out.contains("type"), "missing problem bullet: {out}");
@@ -1354,7 +1358,7 @@ mod tests {
             nested("/content_policy/0", ValidationProblemKind::Missing, Some("rule")),
             nested("", ValidationProblemKind::Missing, Some("title")),
         ];
-        let out = render_block(&schema_validation_failed_block(&path, &problems, "", &None));
+        let out = render_block(&schema_validation_failed_block(&path, &problems, "", &None, None));
         assert!(out.contains("invalid content_policy/1/rule: "), "{out}");
         assert!(out.contains("missing content_policy/0/rule: "), "{out}");
         assert!(out.contains("missing title: "), "{out}");

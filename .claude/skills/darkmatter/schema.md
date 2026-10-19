@@ -42,7 +42,8 @@ interpretation. Remedy it by wrapping the properties under the sole root
 `$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
 it uses the already-parsed YAML value and performs no additional I/O.
 
-Schema-trigger documents use `kind: schema-trigger`. Preserve the kinded root
+Schema-trigger documents use `kind: trigger-schema` (the envelope kind the
+parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.
 
 ## Composition and validation
@@ -444,7 +445,11 @@ For grammar or schema changes, cover:
   package, package area, `base_dir()`, `SCHEMAS_DIR`, `~/schemas`, each with a
   `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
   `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
-  states; DMLS and `md` share them through `triggers::scan(&ctx)`.
+  states; DMLS and `md` share them through `triggers::scan(&ctx)` (DMLS
+  calls `scan_with_source`, the same scan over its cached root contents;
+  `enumerate_root_files` is the one root listing). DMLS prepares workspace
+  registries at startup and serves them from memory until an input changes;
+  see [dmls.md](dmls.md) and `darkmatter/docs/lsp/indexing.md`.
 - `for_document` is fallible: only `NotFound`/`NotADirectory` (and the
   package/area/tree symlink policy) make a root `Absent`. Any other metadata
   failure (e.g. `PermissionDenied` on an ancestor) is `SchemaError::Io`
@@ -452,6 +457,17 @@ For grammar or schema changes, cover:
   and bare-name lookup never falls through to a less local root. DMLS turns
   that `Io` scan error into `SchemaOutcome::Failed` instead of keeping its
   last-good registry (last-good is only for trigger-file load errors).
+- `parse_trigger_envelope_from_str` is the one envelope classifier (discovery,
+  embedded bundles, DMLS authoring, payload-cycle checks); never add a
+  caller-side pre-check. Unparseable YAML is `Ok(None)` unless a provable
+  column-0 `kind: trigger-schema` line claims it (`claims_envelope` skips lines
+  inside multi-line quoted or block scalars and open flow collections), then
+  `SchemaError::TriggerEnvelopeYaml { message, line, column }` (column in
+  characters, BOM excluded) with a YAML hint, wrapped in `TriggerLoad` by
+  filesystem discovery and `EmbeddedTriggerLoad` for bundles; `TriggerMatch`
+  stays for grammar and shape errors. A malformed flow mapping is therefore unclaimed. BOM and
+  CRLF are normalized before parsing (libyaml rejects BOM + CRLF as two
+  documents). Tests: `lib/tests/l1/trigger_envelope_claim.rs`.
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and
@@ -465,6 +481,35 @@ For grammar or schema changes, cover:
   triggers); `&`, `^`, `~`, absolute from the document's own context. `@`,
   `vault:`, `%`, and `{{` anywhere are `TriggerMatch` definition errors naming
   the pattern.
+- Embedded trigger bundles (`EmbeddedSchemaBundle`, `schemas/embedded.rs`):
+  a host registers `(file name, &'static str)` pairs with
+  `DarkmatterSchemas::with_embedded_trigger_bundle` (or
+  `triggers::scan_with_embedded`); they are appended after the five roots,
+  and a bundle file is skipped when any root enumerated a file of that name
+  (the registry's private `claimed_names`). Bundle documents are keyed
+  `{bundle}/{name}`; `NamespaceSource::Embedded { documents, bundle }`
+  confines imports with `embedded::resolve_bundle_path`. Identity is
+  `TriggerSource::{File, Embedded { bundle, name }}`; load failures are
+  `SchemaError::EmbeddedTriggerLoad` (never `TriggerLoad`, whose path DMLS
+  publishes on). `SchemaOrigin { kind, source: Option<SchemaSourceId> }`:
+  read `file()` (real files only; DMLS links only `ReferencedFile` through
+  it) or `trigger_source()`. Embedded triggers add no dependency edges.
+  Tests: `tests/l1/schema_embedded_trigger_bundles.rs` (incl. the envelope
+  input matrix for block YAML and JSON syntax).
+- Large host payloads (Claudine's resolves to ~2.5 MB) are kept affordable by
+  process-wide memos, each holding its inputs alive and keyed by `Arc`
+  identity (plus value equality for small authored schemas): embedded
+  trigger loads (`discovery.rs::load_embedded_trigger`, successes only),
+  trigger merges (`mod.rs::merged_trigger_schema`), phase schemas
+  (`phase_json_schema`), and wrapped root-union arms (`wrapped_root_arms`).
+  Payload and layer JSON are `Arc<Value>`; a lone trigger layer is shared,
+  never cloned. `ValidatorCache` compiles a schema that names no
+  `darkmatter-file*` format and no `x-darkmatter-match` once for every
+  context (structural slot); a root union compiles only its arms
+  (`CompiledValidators::RootUnion`, so `EffectiveSchema::validator()` is
+  `None` for it). Coercion skips validating union arms when no arm changes
+  the value. Do not reintroduce a per-call clone, serialization, or
+  uncached compile of an effective schema.
 - A test fixture for roots builds its context with `build_resolution_context`
   from a `RequestSnapshot` carrying a fixture home and env, never
   `FileResolutionContext::new` (ambient `HOME` would add a real `~/schemas`).

@@ -53,10 +53,13 @@ pub(super) fn categorize_problems(
             | ValidationProblemKind::Type
             | ValidationProblemKind::Invalid => {
                 let top = top_level_pointer_segment(&problem.path);
+                // A Claudine control is hard at every phase: an invalid one
+                // blocks the launch rather than being cleaned away.
                 let hard_at_this_phase = top
                     .as_deref()
                     .map(|name| {
-                        is_required(shape, name)
+                        effective.is_some_and(|effective| super::bundle::is_claudine_owned(effective, name))
+                            || is_required(shape, name)
                             || (phase == Some(SchemaPhase::Launch) && is_eager(shape, name))
                     })
                     .unwrap_or(true);
@@ -541,7 +544,14 @@ pub fn build_schema_status_report_for_mode(
     }
 
     let callers = override_records(set_overrides, file_resolution_context, file_ref_fallback_dir);
-    let effective = load_effective_schema(source, file_ref_fallback_dir, file_resolution_context, &callers)?;
+    let snapshot = super::build_effective_instance(source, set_overrides);
+    let effective = load_effective_schema(
+        source,
+        Some(&snapshot),
+        file_ref_fallback_dir,
+        file_resolution_context,
+        &callers,
+    )?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
         // run validation, but without typed metadata for per-property

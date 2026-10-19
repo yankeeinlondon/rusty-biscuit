@@ -205,7 +205,7 @@ fn successive_sequence_steps_each_read_the_map_they_captured() {
 }
 
 #[test]
-fn serial_group_legs_each_capture_their_own_map() {
+fn bounded_group_legs_each_capture_their_own_map() {
     group_legs_row("doc-env-serial", "serial");
 }
 
@@ -217,11 +217,12 @@ fn parallel_group_legs_each_capture_their_own_map() {
 /// A group step whose two legs append what they read. The step captures
 /// first, then each leg in declaration order before any leg starts.
 fn group_legs_row(name: &str, execution: &str) {
+    let execution = if execution == "serial" { "max_parallel: 1\n      " } else { "" };
     let fixture = Fixture::new(name, &["step", "left", "right"]);
     let sequence = fixture.write_doc(
         "seq.md",
         &format!(
-            "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      execution: {execution}\n      tasks:\n        - name: left\n          {}        - name: right\n          {}---\n",
+            "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      {execution}tasks:\n        - name: left\n          {}        - name: right\n          {}---\n",
             appending_task("left").replace("\n  ", "\n          "),
             appending_task("right").replace("\n  ", "\n          "),
         ),
@@ -332,42 +333,40 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
     assert_eq!(fixture.captures(), 1, "re-entry captures nothing new");
 }
 
-/// Option A: a command sequence preflight approved runs only as approved. A
-/// later step whose map leaves the text identical runs it; one whose map
-/// changes the text is refused before it runs, naming the command.
+/// A first-task command sequence preflight approved as resolved bytes runs
+/// only as approved. A step whose map leaves the text identical runs it; one
+/// whose map changes the text is refused before it runs, naming the command.
+/// (A later task's command is approved by its shape instead, and its `>>`
+/// redirection would not be a valid template.)
 #[test]
-fn a_later_step_runs_approved_text_only_while_its_map_leaves_it_unchanged() {
+fn a_step_runs_approved_text_only_while_its_map_leaves_it_unchanged() {
     let command = "echo ran-{{ env.DOC_STABLE }}>>events.log";
     let fixture = Fixture::new("doc-env-approval", &["a"]);
     let sequence = fixture.write_doc(
         "seq.md",
         &format!(
-            "---\nsequence:\n  - name: first\n    {}  - name: second\n    shell: '{command}'\n---\n",
-            appending_task("first"),
+            "---\nsequence:\n  - name: first\n    shell: '{command}'\n  - name: second\n    {}---\n",
+            appending_task("second"),
         ),
     );
     let args = ["sequence", "--claude", "--yolo", sequence.to_str().unwrap()];
 
-    // Unchanged: the second step's map is the launch map.
-    let unchanged = fixture.run(&args, &[fixture.map("a"), json!({})]);
+    // Unchanged: the first step's map is the launch map.
+    let unchanged = fixture.run(&args, &[json!({}), fixture.map("a")]);
     assert_eq!(unchanged.code, Some(0), "{}", unchanged.output);
-    assert_eq!(fixture.events().last().map(String::as_str), Some("ran-stable"));
+    assert_eq!(fixture.events().first().map(String::as_str), Some("ran-stable"));
 
     // Changed elsewhere: another variable moved, the command text did not.
     fs::remove_file(fixture.cwd().join("events.log")).unwrap();
     let identical = fixture.run(&args, &[fixture.map("a"), fixture.map("a")]);
     assert_eq!(identical.code, Some(0), "{}", identical.output);
-    assert_eq!(fixture.events().last().map(String::as_str), Some("ran-stable"));
+    assert_eq!(fixture.events().first().map(String::as_str), Some("ran-stable"));
 
     // Changed text: refused before it runs.
     fs::remove_file(fixture.cwd().join("events.log")).unwrap();
-    let changed = fixture.run(&args, &[fixture.map("a"), json!({ "DOC_STABLE": "moved" })]);
+    let changed = fixture.run(&args, &[json!({ "DOC_STABLE": "moved" }), fixture.map("a")]);
     assert_ne!(changed.code, Some(0), "{}", changed.output);
-    assert_eq!(
-        fixture.events(),
-        vec![format!("first {}", fixture.reads("a"))],
-        "the changed command never ran"
-    );
+    assert!(fixture.events().is_empty(), "the changed command never ran: {:?}", fixture.events());
     let collapsed = changed.collapsed();
     for expected in ["echo ran-{{ env.DOC_STABLE }}", "was approved at sequence preflight"] {
         assert!(collapsed.contains(expected), "`{expected}` missing from:\n{}", changed.output);
@@ -390,7 +389,7 @@ fn a_prompt_task_and_its_transclusion_read_their_legs_map() {
     fixture.write_doc("prompt.md", &format!("---\n---\nprompt {READS}\n\n::file ./child.md\n"));
     let sequence = fixture.write_doc(
         "seq.md",
-        "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      execution: serial\n      tasks:\n        - name: left\n          prompt: ./prompt.md\n        - name: right\n          prompt: ./prompt.md\n---\n",
+        "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      max_parallel: 1\n      tasks:\n        - name: left\n          prompt: ./prompt.md\n        - name: right\n          prompt: ./prompt.md\n---\n",
     );
 
     let run = fixture.run(
@@ -468,36 +467,25 @@ const SHELL_MARK: &str = "$DOC_MARK";
 #[cfg(windows)]
 const SHELL_MARK: &str = "%DOC_MARK%";
 
-/// A `shell:` task whose `setup:` and `teardown:` each run a lifecycle `shell`
-/// action, all three appending what their child process sees, beside a
-/// `setup:` line reading the document's map through `env.*`.
+/// Each command in a shell task runs under the task's captured environment.
 fn shell_task(label: &str, indent: &str) -> String {
     let echo = |stage: &str| format!("echo {label}-{stage} {SHELL_MARK}>>events.log");
     format!(
-        "shell: '{shell}'\n\
-         {indent}setup:\n\
-         {indent}  - append_line: [events.log, '{label}-reads {READS}']\n\
-         {indent}  - shell: '{setup}'\n\
-         {indent}teardown:\n\
-         {indent}  - shell: '{teardown}'\n",
-        shell = echo("task"),
-        setup = echo("setup"),
-        teardown = echo("teardown"),
+        "shell:\n{indent}  - '{setup}'\n{indent}  - '{shell}'\n{indent}  - '{teardown}'\n",
+        shell = echo("task"), setup = echo("setup"), teardown = echo("teardown"),
     )
 }
 
 /// What a [`shell_task`] labelled `label` appends under map `map`, in order.
-fn shell_task_events(fixture: &Fixture, label: &str, map: &str) -> Vec<String> {
+fn shell_task_events(_fixture: &Fixture, label: &str, map: &str) -> Vec<String> {
     vec![
-        format!("{label}-reads {}", fixture.reads(map)),
         format!("{label}-setup {map}"),
         format!("{label}-task {map}"),
         format!("{label}-teardown {map}"),
     ]
 }
 
-/// A task's `shell:` command and its `setup:`/`teardown:` shell actions start
-/// from the map their step captured, the one its `env.*` reads.
+/// Every command in a shell list reads the step's captured environment.
 #[test]
 fn task_shells_start_from_the_map_their_step_captured() {
     let fixture = Fixture::new("doc-env-task-shell", &["a", "b"]);
@@ -523,7 +511,7 @@ fn task_shells_start_from_the_map_their_step_captured() {
 }
 
 #[test]
-fn serial_group_leg_shells_start_from_their_legs_map() {
+fn bounded_group_leg_shells_start_from_their_legs_map() {
     group_leg_shells_row("doc-env-serial-shell", "serial");
 }
 
@@ -534,13 +522,16 @@ fn parallel_group_leg_shells_start_from_their_legs_map() {
 
 /// A group step whose two `shell:` legs each run under the map they captured.
 fn group_leg_shells_row(name: &str, execution: &str) {
+    let execution = if execution == "serial" { "max_parallel: 1\n      " } else { "" };
     let fixture = Fixture::new(name, &["step", "left", "right"]);
     let sequence = fixture.write_doc(
         "seq.md",
         &format!(
-            "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      execution: {execution}\n      tasks:\n        - name: left\n          {}        - name: right\n          {}---\n",
-            shell_task("left", "          "),
-            shell_task("right", "          "),
+            "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      {execution}tasks:\n        - name: left\n          {}        - name: right\n          {}---\n",
+            // One log per leg: on Windows, two legs appending to one file at
+            // once fail with a sharing violation.
+            shell_task("left", "          ").replace("events.log", "left.log"),
+            shell_task("right", "          ").replace("events.log", "right.log"),
         ),
     );
 
@@ -550,7 +541,11 @@ fn group_leg_shells_row(name: &str, execution: &str) {
     );
 
     assert_eq!(run.code, Some(0), "{}", run.output);
-    let mut events = fixture.events();
+    let mut events: Vec<String> = ["left.log", "right.log"]
+        .iter()
+        .flat_map(|log| fs::read_to_string(fixture.cwd().join(log)).unwrap_or_default()
+            .lines().map(str::to_string).collect::<Vec<_>>())
+        .collect();
     // Parallel legs interleave; what each child saw is the contract.
     events.sort();
     let mut expected = shell_task_events(&fixture, "left", "left");
@@ -573,11 +568,15 @@ fn a_later_step_selects_its_model_and_starts_its_shells_from_its_own_map() {
         "claude",
         "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"s\",\"is_error\":false}'",
     );
+    fixture.write_doc(
+        "step.md",
+        &format!(
+            "---\nstart:\n        - set:\n              shell_mark: \"$(printenv DOC_MARK)\"\n        - shell: 'echo start-shell $DOC_MARK>>events.log'\n        - append_line: [\"events.log\", 'start set={{{{ shell_mark }}}} {READS}']\n---\nmodel={{{{ env.MODEL }}}} {READS}\n\n::shell printenv DOC_MARK\n"
+        ),
+    );
     let sequence = fixture.write_doc(
         "seq.md",
-        &format!(
-            "---\nsequence:\n  - name: first\n  - name: second\nstart:\n        - set:\n              shell_mark: \"$(printenv DOC_MARK)\"\n        - shell: 'echo start-shell $DOC_MARK>>events.log'\n        - append_line: [\"events.log\", 'start set={{{{ shell_mark }}}} {READS}']\n---\nmodel={{{{ env.MODEL }}}} {READS}\n\n::shell printenv DOC_MARK\n"
-        ),
+        "---\nsequence:\n  - { name: first, prompt: step.md }\n  - { name: second, prompt: step.md }\n---\n",
     );
     let map = |name: &str, model: &str| {
         let mut map = fixture.map(name);
@@ -635,7 +634,7 @@ fn each_prompt_leg_selects_its_model_from_its_own_map() {
     fixture.write_doc("prompt.md", "---\n---\nmodel={{ env.MODEL }}\n");
     let sequence = fixture.write_doc(
         "seq.md",
-        "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      execution: serial\n      tasks:\n        - name: left\n          prompt: ./prompt.md\n        - name: right\n          prompt: ./prompt.md\n---\n",
+        "---\nsequence:\n  - name: grouped\n    group:\n      name: legs\n      max_parallel: 1\n      tasks:\n        - name: left\n          prompt: ./prompt.md\n        - name: right\n          prompt: ./prompt.md\n---\n",
     );
     let map = |name: &str, model: &str| {
         let mut map = fixture.map(name);

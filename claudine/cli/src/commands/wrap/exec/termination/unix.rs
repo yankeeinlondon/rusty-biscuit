@@ -235,8 +235,16 @@ pub(crate) fn wait_with_signal_handling(
     // Polled rather than a blocking `wait` so this thread can show the
     // feedback for each press the handler counted.
     let mut announced = 0;
+    let mut cancelled = false;
     let status = loop {
         announce_presses(interrupts.presses(), &mut announced);
+        if claudine::composition::lifecycle::cancellation::requested()
+            && matches!(claudine::composition::lifecycle::cancellation::cause(),
+                Some(claudine::composition::lifecycle::cancellation::CancellationCause::SiblingFailure { .. }))
+        {
+            send_signal_to_child(child.id(), interrupts.child_in_own_pgroup(), libc::SIGKILL);
+            cancelled = true;
+        }
         if let Some(status) = child.try_wait()? {
             break status;
         }
@@ -244,8 +252,8 @@ pub(crate) fn wait_with_signal_handling(
     };
     interrupts.mark_child_exited();
     announce_presses(interrupts.presses(), &mut announced);
-    let code = exit_code_from_status(status);
-    let was_interrupted = interrupts.presses().load(Ordering::SeqCst) > 0;
+    let code = if cancelled { 130 } else { exit_code_from_status(status) };
+    let was_interrupted = cancelled || interrupts.presses().load(Ordering::SeqCst) > 0;
     let termination = if was_interrupted {
         claudine::harness::ProcessTermination::Interrupted
     } else {
@@ -335,20 +343,30 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
     let poll_interval = FEEDBACK_POLL;
     let grace_period = kill_grace;
     let mut announced = 0;
+    let mut cancelled = false;
 
     loop {
         announce_presses(interrupts.presses(), &mut announced);
+        if claudine::composition::lifecycle::cancellation::requested()
+            && matches!(claudine::composition::lifecycle::cancellation::cause(),
+                Some(claudine::composition::lifecycle::cancellation::CancellationCause::SiblingFailure { .. }))
+        {
+            send_signal_to_child(child.id(), interrupts.child_in_own_pgroup(), libc::SIGKILL);
+            cancelled = true;
+        }
         if let Some(status) = child.try_wait()? {
             // Mark the PID as reaped so a later press never signals a
             // recycled PID.
             interrupts.mark_child_exited();
             announce_presses(interrupts.presses(), &mut announced);
-            let code = if completion_requested {
+            let code = if cancelled {
+                130
+            } else if completion_requested {
                 0
             } else {
                 exit_code_from_status(status)
             };
-            let was_interrupted = interrupts.presses().load(Ordering::SeqCst) > 0;
+            let was_interrupted = cancelled || interrupts.presses().load(Ordering::SeqCst) > 0;
             let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
             } else if completion_requested {

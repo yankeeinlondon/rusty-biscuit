@@ -178,7 +178,7 @@ mod run_ledger {
     fn proxy_extends_the_ledger_and_never_resets_it() {
         let approvals = cache();
         approvals.lock().unwrap().insert(
-            "ls -la".to_string(),
+            darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact(None, "ls -la"),
             crate::harness::shell::CachedApprovalDecision::Allowed,
         );
         let mut ledger = RunLedger::new(doc("router"), approvals);
@@ -194,7 +194,7 @@ mod run_ledger {
         // Command-wide timing and the approval cache are invocation state:
         // they outlive every document in the chain.
         assert_eq!(ledger.command_started(), anchor);
-        assert!(ledger.approval_cache().lock().unwrap().contains_key("ls -la"));
+        assert!(ledger.approval_cache().lock().unwrap().contains_key(&darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact(None, "ls -la")));
     }
 
     #[test]

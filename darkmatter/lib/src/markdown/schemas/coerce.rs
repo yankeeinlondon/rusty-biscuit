@@ -491,12 +491,18 @@ fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
 /// when the committed candidate equals `value`, so an already-valid value is
 /// not reported as changed.
 fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
+    let candidates: Vec<(&Value, Option<Value>)> = arms
+        .iter()
+        .map(|arm| (arm, coercion_target(arm).and_then(|target| coerce_value(&target, value))))
+        .collect();
+    // An unchanged candidate is never committed, so when no arm changes the
+    // value there is nothing to decide, and no arm needs validating.
+    if candidates.iter().all(|(_, candidate)| candidate.is_none()) {
+        return None;
+    }
     let mut valid_candidates: Vec<Value> = Vec::new();
-    for arm in arms {
-        let candidate = match coercion_target(arm) {
-            Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
-            None => value.clone(),
-        };
+    for (arm, candidate) in candidates {
+        let candidate = candidate.unwrap_or_else(|| value.clone());
         let Some(validator) = coercion_validator(arm) else {
             continue;
         };

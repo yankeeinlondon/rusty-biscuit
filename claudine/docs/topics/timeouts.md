@@ -817,9 +817,40 @@ establish the cause. The existing 120 s processing budget is unchanged.
 
 Authors will handle this condition through the existing failure/finalize
 diagnostic interface. Printing a retained answer will not convert an
-unconfirmed transaction into success; recovery and `fail_fast` will retain
-their existing rules. See the [planned lifecycle example](flow-control/lifecycle.md#planned-delayed-completion-diagnostic).
+unconfirmed transaction into success. An unhandled failure stops a sequence;
+a group with `fail_fast: false` can handle an optional leg failure. Existing
+loop continuation and lifecycle recovery rules still apply. See the [planned lifecycle example](flow-control/lifecycle.md#planned-delayed-completion-diagnostic).
 This planned behavior does not change terminal delivery after abandonment.
+
+## Timeouts inside containers
+
+A task timeout is a failure, not cancellation. The task's `failure` handler gets
+first chance to recover; an unhandled failure reaches its enclosing sequence or
+group after child cleanup. An atomic group (`fail_fast: true`, the default)
+stops admitting legs, cancels running legs that declare `cancelled`, and waits
+for the rest before firing its own `failure` and `finalize`. A tolerant group
+(`fail_fast: false`) handles leg failures, including timeouts, and lets other
+legs finish. Its terminal events can inspect `group.failed` and
+`group.legs.<name>.err`.
+
+```yaml
+group:
+  name: optional-check
+  fail_fast: false
+  tasks:
+    - name: check
+      shell: just check
+      timeout: 45s
+  finalize:
+    - warn: "Failed checks: {{ as_csv(group.failed) }}"
+```
+
+Ctrl-C instead interrupts all running primitives, settles descendants, and
+runs `cancelled` then `finalize`; exit status remains 130. A timeout in cleanup
+is a secondary cleanup error and cannot turn cancellation into recovery.
+Atomic results isolate in-memory state only: timed-out commands may already
+have edited shared files or performed external work. See
+[Sequences — Cancellation](flow-control/sequences.md#cancellation).
 
 ## Subagent diagnostics in error reports
 
@@ -1136,8 +1167,7 @@ second source:
 3. **Synthesized subagent lifecycle (legacy path, removed).** Earlier
    releases synthesized `SubagentStart` → `SubagentStop` from the
    `task` `tool_use` payload at completion time. That path was removed
-   on 2026-05-12 (fix: `2026-05-12-opencode-stderr-returns`) in favor
-   of the stderr-promoted lifecycle below; it is documented here only
+   in favor of the stderr-promoted lifecycle below; it is documented here only
    to clarify why the NDJSON parser no longer emits subagent events
    for `task` completions.
 4. **Stderr-promoted activity and lifecycle.** Claudine opts the
@@ -1248,7 +1278,7 @@ reserved for malformed `loop:` frontmatter and **never** appears for
 runtime failures.
 
 ```text
-Error: loop iteration 2 of fixes/.../plan.md: step_timeout (exit code 1)
+Error: loop iteration 2 of prompts/review.md: step_timeout (exit code 1)
        ↳ no stream activity for 30m 0s; terminating due to step_timeout
 ```
 

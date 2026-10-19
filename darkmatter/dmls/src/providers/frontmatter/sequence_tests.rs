@@ -1,5 +1,5 @@
 //! Sequence descent (spec D6) through the frontmatter provider: typed schema
-//! paths, the shipped Claudine predicate typing, the per-pass shape memo, and
+//! paths, Claudine's predicate typing (from `claudine/schemas/`), the per-pass shape memo, and
 //! the hover/completion/navigation boundary at real list items versus
 //! synthetic item positions.
 
@@ -20,28 +20,46 @@ use crate::source_map::{PositionEncoding, SourceMap};
 
 use FmPathSegment::{Index, Key};
 
-fn claudine_schema_path() -> PathBuf {
-    biscuit_test_harness::manifest_dir!().join("../docs/schemas/claudine.yaml")
+/// The Claudine schema files the `claudine.yaml` catalog's payload reads.
+const CLAUDINE_BUNDLE: [(&str, &str); 4] = [
+    ("claudine.yaml", include_str!("../../../../../claudine/schemas/claudine.yaml")),
+    ("lifecycle.yaml", include_str!("../../../../../claudine/schemas/lifecycle.yaml")),
+    ("action.yaml", include_str!("../../../../../claudine/schemas/action.yaml")),
+    ("linking.yaml", include_str!("../../../../../claudine/schemas/linking.yaml")),
+];
+
+/// A temporary folder holding Claudine's catalog payload as a plain `$schema`
+/// document beside the libraries it imports, and that document's path.
+fn claudine_schema() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = crate::context::test_support::claudine_payload_extension(dir.path(), &CLAUDINE_BUNDLE);
+    (dir, path)
 }
 
-/// The shipped Claudine extension baseline's resolved shape (imports expanded).
-fn claudine_root() -> SchemaShape {
-    let path = claudine_schema_path();
+/// The resolved shape (imports expanded) of the schema file at `path`.
+fn resolved_root(path: &Path) -> SchemaShape {
     let base = path.parent().unwrap();
     let resolved = resolve_schema(
         &Value::String(path.to_string_lossy().into_owned()),
         base,
         &FileResolutionContext::new(base),
     )
-    .expect("shipped Claudine schema resolves");
+    .unwrap_or_else(|error| panic!("{} resolves: {error}", path.display()));
     match resolved.simplified {
         Some(SimplifiedSchema::Single(shape)) => shape,
-        other => panic!("Claudine baseline is a single shape: {other:?}"),
+        other => panic!("{} is a single shape: {other:?}", path.display()),
     }
 }
 
+/// Claudine's catalog payload's resolved shape.
+fn claudine_root() -> SchemaShape {
+    let (_dir, path) = claudine_schema();
+    resolved_root(&path)
+}
+
 /// Runs `f` with an overlay-backed context for `text` at `/w/prompts/doc.md`,
-/// with the shipped Claudine extension active when `claudine` is set.
+/// with Claudine's catalog payload active as an extension when `claudine` is
+/// set.
 fn with_ctx<R>(text: &str, claudine: bool, f: impl FnOnce(&DocumentContext) -> R) -> R {
     let uri: Uri = "file:///w/prompts/doc.md".parse().unwrap();
     with_ctx_at(Path::new("/w/prompts/doc.md"), uri, Path::new("/w"), text, claudine, f)
@@ -57,12 +75,14 @@ fn with_ctx_at<R>(
     f: impl FnOnce(&DocumentContext) -> R,
 ) -> R {
     let mut config = DmlsConfig::default();
-    if claudine {
+    let _schemas = claudine.then(|| {
+        let (dir, path) = claudine_schema();
         config.schema.extensions.insert(
             "claudine".to_string(),
-            SchemaExtensionConfig { path: claudine_schema_path(), globs: vec!["**/*.md".to_string()] },
+            SchemaExtensionConfig { path, globs: vec!["**/*.md".to_string()] },
         );
-    }
+        dir
+    });
     let roots = [root.to_path_buf()];
     let state = OverlayState::default();
     let resolution = if root == Path::new("/w") {
@@ -104,38 +124,48 @@ fn hover_text(hover: &Hover) -> &str {
 
 #[test]
 fn nested_shape_consumes_array_index_against_item_type() {
+    // A stack is `item-1[] | bundle`: an index descends the array arm's item
+    // type, whose first inline-object arm is `communicate`; a bare key
+    // descends the `bundle` arm.
     let root = claudine_root();
     let item = nested_shape(&root, &[Key("initialize"), Index(0)]).expect("list item shape");
-    for key in ["when", "then", "else", "no_error"] {
+    for key in ["say", "notify", "info"] {
         assert!(item.properties.contains_key(key), "{key} on the list item");
     }
-    let when = def_at_path(&root, &[Key("initialize"), Index(0), Key("when")])
-        .expect("initialize[0].when resolves");
-    assert!(is_expression_def(when));
-    let nested = def_at_path(&root, &[Key("failure"), Index(0), Key("else"), Index(1), Key("when")])
-        .expect("failure[0].else[1].when resolves");
-    assert!(is_expression_def(nested));
-    assert!(def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("when")]).is_some());
+    assert!(!item.properties.contains_key("no_error"), "the item is not the bundle arm");
+    let bundle = nested_shape(&root, &[Key("failure")]).expect("bundle shape");
+    assert!(is_expression_def(bundle.properties.get("when").expect("failure.when")));
+    let nested = def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("say")])
+        .expect("loop.gate[3].say resolves");
+    assert!(!is_expression_def(nested));
 }
 
 #[test]
 fn nested_shape_fails_closed_on_mismatched_segments() {
-    let root = claudine_root();
-    // A key where the array item is required (`loop.gate` is list-only).
-    assert!(nested_shape(&root, &[Key("loop"), Key("gate")]).is_none());
-    assert!(def_at_path(&root, &[Key("loop"), Key("gate"), Key("when")]).is_none());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("types.yaml");
+    std::fs::write(
+        &path,
+        "$schema:\n  steps: \"{ when: expression, say: string }[]\"\n  opts:\n    level: string\n",
+    )
+    .unwrap();
+    let root = resolved_root(&path);
+    assert!(def_at_path(&root, &[Key("steps"), Index(0), Key("when")]).is_some());
+    // A key where the array item is required (`steps` is list-only).
+    assert!(nested_shape(&root, &[Key("steps")]).is_none());
+    assert!(def_at_path(&root, &[Key("steps"), Key("when")]).is_none());
     // An index under a non-array property.
-    assert!(nested_shape(&root, &[Key("loop"), Index(0)]).is_none());
+    assert!(nested_shape(&root, &[Key("opts"), Index(0)]).is_none());
     // A leading index, and a nested index SimplifiedSchema cannot declare.
     assert!(nested_shape(&root, &[Index(0)]).is_none());
-    assert!(nested_shape(&root, &[Key("loop"), Key("gate"), Index(0), Index(0)]).is_none());
+    assert!(nested_shape(&root, &[Key("steps"), Index(0), Index(0)]).is_none());
     // A key literally named `0` is not an index.
-    assert!(nested_shape(&root, &[Key("loop"), Key("gate"), Key("0")]).is_none());
+    assert!(nested_shape(&root, &[Key("steps"), Key("0")]).is_none());
 }
 
 #[test]
 fn union_arms_are_chosen_by_array_crossing() {
-    // `exit_expressions: exit-expression[] | exit-expression-layer`.
+    // `exit_expressions` is a rule array or a `{ mode, rules }` layer.
     let root = claudine_root();
     let layer = nested_shape(&root, &[Key("exit_expressions")]).expect("non-array layer arm");
     assert!(layer.properties.contains_key("mode"));
@@ -213,15 +243,17 @@ fn context_aware_walk_selects_discriminated_arm_inside_array_items() {
 
 #[test]
 fn transparent_crossing_serves_key_only_authoring_ancestry() {
-    let text = "---\nloop:\n  gate:\n    - when: ok\n---\n\nbody\n";
+    // `then` exists only on the conditional arm of `loop.gate`'s array items,
+    // never on its non-array `bundle` arm.
+    let text = "---\nloop:\n  gate:\n    - when: ok\n      then: [stop]\n---\n\nbody\n";
     with_ctx(text, true, |ctx| {
         let shape = known_shape(ctx);
-        let keys = [Key("loop"), Key("gate"), Key("when")];
+        let keys = [Key("loop"), Key("gate"), Key("then")];
         let mut transparent = ShapeMemo::new(ArrayCrossing::Transparent);
         assert!(def_at_path_ctx(ctx, &shape, &keys, &mut transparent).is_some());
         let mut explicit = ShapeMemo::new(ArrayCrossing::Explicit);
         assert!(def_at_path_ctx(ctx, &shape, &keys, &mut explicit).is_none());
-        let indexed = [Key("loop"), Key("gate"), Index(0), Key("when")];
+        let indexed = [Key("loop"), Key("gate"), Index(0), Key("then")];
         assert!(def_at_path_ctx(ctx, &shape, &indexed, &mut explicit).is_some());
         assert!(def_at_path_ctx(ctx, &shape, &indexed, &mut transparent).is_none());
     });
@@ -231,28 +263,64 @@ fn transparent_crossing_serves_key_only_authoring_ancestry() {
 
 #[test]
 fn shipped_claudine_predicates_are_expression_typed() {
-    let root = claudine_root();
-    for path in [
-        vec![Key("initialize"), Index(0), Key("when")],
-        vec![Key("failure"), Index(2), Key("when")],
-        vec![Key("failure"), Index(0), Key("then"), Index(1), Key("when")],
-        vec![Key("failure"), Index(0), Key("else"), Index(0), Key("when")],
-        vec![Key("loop"), Key("while")],
-        vec![Key("loop"), Key("until")],
-        vec![Key("loop"), Key("gate"), Index(0), Key("when")],
-    ] {
-        let def = def_at_path(&root, &path).unwrap_or_else(|| panic!("{path:?} resolves"));
-        assert!(is_expression_def(def), "{} is expression-typed", format_dotted(&path));
-    }
-    // Verb values are interpolated, not conditions.
-    for path in [
-        vec![Key("success"), Key("say")],
-        vec![Key("success"), Index(0), Key("say")],
-        vec![Key("loop"), Key("say")],
-    ] {
-        let def = def_at_path(&root, &path);
-        assert!(def.is_none_or(|def| !is_expression_def(def)), "{}", format_dotted(&path));
-    }
+    // A conditional is one arm of a stack item's union, so the predicates
+    // resolve through the context-aware walk that selects it.
+    let text = concat!(
+        "---\n",
+        "initialize:\n",
+        "  - when: a\n",
+        "    then: [stop]\n",
+        "failure:\n",
+        "  - when: b\n",
+        "    then:\n",
+        "      - say: x\n",
+        "      - when: c\n",
+        "        then: [stop]\n",
+        "    else:\n",
+        "      - when: d\n",
+        "        then: [stop]\n",
+        "  - say: y\n",
+        "  - when: e\n",
+        "    then: [stop]\n",
+        "success:\n",
+        "  say: done\n",
+        "  when: f\n",
+        "loop:\n",
+        "  while: g\n",
+        "  until: h\n",
+        "  say: z\n",
+        "  gate:\n",
+        "    - when: i\n",
+        "      then: [stop]\n",
+        "---\n\nbody\n",
+    );
+    with_ctx(text, true, |ctx| {
+        let shape = known_shape(ctx);
+        let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
+        for path in [
+            vec![Key("initialize"), Index(0), Key("when")],
+            vec![Key("failure"), Index(2), Key("when")],
+            vec![Key("failure"), Index(0), Key("then"), Index(1), Key("when")],
+            vec![Key("failure"), Index(0), Key("else"), Index(0), Key("when")],
+            vec![Key("success"), Key("when")],
+            vec![Key("loop"), Key("while")],
+            vec![Key("loop"), Key("until")],
+            vec![Key("loop"), Key("gate"), Index(0), Key("when")],
+        ] {
+            let def = def_at_path_ctx(ctx, &shape, &path, &mut memo)
+                .unwrap_or_else(|| panic!("{path:?} resolves"));
+            assert!(is_expression_def(&def), "{} is expression-typed", format_dotted(&path));
+        }
+        // Verb values are interpolated, not conditions.
+        for path in [
+            vec![Key("success"), Key("say")],
+            vec![Key("failure"), Index(1), Key("say")],
+            vec![Key("loop"), Key("say")],
+        ] {
+            let def = def_at_path_ctx(ctx, &shape, &path, &mut memo);
+            assert!(def.is_none_or(|def| !is_expression_def(&def)), "{}", format_dotted(&path));
+        }
+    });
 }
 
 #[test]

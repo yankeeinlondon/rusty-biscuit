@@ -417,9 +417,15 @@ Phase {{phase}}
     );
 
     // The explicit gate error fails the composition: claudine reports a non-zero
-    // outcome. The authored reason surfaces in the rendered error.
+    // outcome. The authored reason surfaces in the rendered error, which wraps
+    // inside the error panel, so match over a border-free, whitespace-collapsed copy.
+    let flat = pane
+        .split_whitespace()
+        .filter(|word| *word != "┃")
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
-        pane.contains("gate rejected final state"),
+        flat.contains("gate rejected final state"),
         "the gate error reason must surface in the run output; pane:\n{pane}"
     );
 }

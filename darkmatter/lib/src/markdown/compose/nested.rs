@@ -92,7 +92,7 @@ pub(crate) struct NestedCompose {
 
 struct Scope {
     /// The calling pipeline's options, without this handle (no `Arc` cycle).
-    options: crate::markdown::compose::ComposeRequest,
+    options: Mutex<crate::markdown::compose::ComposeRequest>,
     /// The calling pipeline's runtime, forked while its node is on the stack.
     runtime: Mutex<PipelineRuntime>,
     /// The root document as it entered the pipeline, when this document owns
@@ -134,7 +134,7 @@ impl NestedCompose {
         let root_gate = super::pipeline::preflight_gate_applies(options, runtime).then(|| document.clone());
         let nested = Self {
             scope: Arc::new(Scope {
-                options: snapshot,
+                options: Mutex::new(snapshot),
                 runtime: Mutex::new(runtime.clone_for_child()),
                 root_gate,
                 outcome: Mutex::default(),
@@ -142,6 +142,12 @@ impl NestedCompose {
         };
         options.nested_compose = NestedComposeSlot::Active(nested.clone());
         Some(nested)
+    }
+
+    /// Makes `env` the environment content composed through this handle
+    /// sees from now on, as the calling document's body does.
+    pub(crate) fn align_environment(&self, env: &std::collections::HashMap<String, String>) {
+        *lock(&self.scope.options).context_mut().env_mut() = env.clone();
     }
 
     /// Folds every nested child's report, depth, and context groups into the
@@ -180,17 +186,17 @@ impl NestedCompose {
         let mut child = Markdown::with_frontmatter(frontmatter, body);
 
         let mut runtime = lock(&self.scope.runtime).clone_for_child();
+        let mut options = lock(&self.scope.options).clone();
         if let Some(root) = &self.scope.root_gate
             && !runtime.preflight_validated().load(Ordering::Acquire)
         {
-            if let Err(error) = super::preflight::validate_pre_approved(root, &self.scope.options) {
+            if let Err(error) = super::preflight::validate_pre_approved(root, &options) {
                 let message = format!("the pre-approved command gate failed: {error}");
                 lock(&self.scope.outcome).restored.get_or_insert(error);
                 return Err(violation(message));
             }
             runtime.preflight_validated().store(true, Ordering::Release);
         }
-        let mut options = self.scope.options.clone();
         // Relative references resolve against the root document (R11), not
         // the transcluded document that happens to call the function.
         if let Some((source, derivation, opening)) = runtime.root_source.clone() {
@@ -211,7 +217,7 @@ impl NestedCompose {
         let options = options.derive(|options| options.with_request_context(context));
 
         let node = format!("as_markdown#{}", NEXT_NODE.fetch_add(1, Ordering::Relaxed));
-        let result = child.run_compose_pipeline_node(options, &mut runtime, Some((node, PathBuf::from("as_markdown()"))));
+        let result = child.run_compose_pipeline_node(options, &mut runtime, Some((node, PathBuf::from("as_markdown()"))), None);
 
         let mut outcome = lock(&self.scope.outcome);
         outcome.deepest_seen = outcome.deepest_seen.max(runtime.transclusion.deepest_seen);
@@ -255,7 +261,7 @@ fn is_structural(error: &MarkdownError) -> bool {
                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
             )
     );
-    transclusion_limit || error.pre_approval_violation().is_some()
+    transclusion_limit || error.pre_approval_violation().is_some() || error.shell_input_violation().is_some()
 }
 
 fn violation(message: String) -> ExpressionError {

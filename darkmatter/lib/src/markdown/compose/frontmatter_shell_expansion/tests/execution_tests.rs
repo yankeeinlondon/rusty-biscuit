@@ -40,6 +40,7 @@ fn execute_frontmatter_shell_expansion(
         runtime,
         &mut provenance,
         &test_ctx(),
+        None,
     )
 }
 

@@ -115,12 +115,17 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// Parses `frontmatter` and fixes its lifecycle shell bytes, as canonical
-/// preparation does.
+/// preparation does, then approves every resolved command as its bytes.
 fn prepared(repo: &Repo, frontmatter: &Value) -> LifecycleConfig {
     let mut config = parse_lifecycle_config(frontmatter, &repo.source()).unwrap();
     let context = ComposeContext::capture_for_content(repo.dir.path(), "");
-    resolve_lifecycle_shell_commands(&mut config, frontmatter, &context, &repo.source(), crate::test_support::process_context(), None, crate::composition::lifecycle::bindings::EnclosingLoop::Outside)
+    resolve_lifecycle_shell_commands(&mut config, frontmatter, &context, &repo.source(), crate::test_support::process_context(), None, crate::composition::lifecycle::bindings::EnclosingLoop::Outside, None)
         .unwrap();
+    let approved = collect_lifecycle_shell_commands(&config)
+        .into_iter()
+        .map(|(command, _)| command)
+        .collect();
+    crate::composition::preflight::settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &approved, None);
     config
 }
 

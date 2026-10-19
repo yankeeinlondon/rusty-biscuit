@@ -142,15 +142,15 @@ macro_rules! task_stack_rejects {
     ($($test:ident: $stage:literal;)*) => {$(
         #[test]
         fn $test() {
-            // A referenced task file: its stacks are not sequence frontmatter,
-            // so only the lifecycle parser sees the span.
-            let task = format!("kind: task\nprompt: ./step.md\n{}:\n{}", $stage, conditional("  ", "then", BAD));
+            // Validate the authored prompt lifecycle through an external task.
+            let task = "kind: task\nprompt: ./step.md\n";
+            let prompt = format!("---\ntitle: step\n{}:\n{}---\nstep body\n", $stage, conditional("  ", "then", BAD));
             let run = run(
                 stringify!($test),
                 &[
                     ("sequence.md", "---\nsequence:\n  - name: only\n    task: ./task.yaml\n---\n"),
-                    ("task.yaml", &task),
-                    ("step.md", "---\ntitle: step\n---\nstep body\n"),
+                    ("task.yaml", task),
+                    ("step.md", &prompt),
                 ],
                 "sequence",
                 "sequence.md",
@@ -163,8 +163,8 @@ macro_rules! task_stack_rejects {
 }
 
 task_stack_rejects! {
-    sequence_rejects_a_malformed_mixed_span_in_task_setup_before_the_task_launches: "setup";
-    sequence_rejects_a_malformed_mixed_span_in_task_teardown_before_the_task_launches: "teardown";
+    sequence_rejects_a_malformed_mixed_span_in_prompt_start_before_the_task_launches: "start";
+    sequence_rejects_a_malformed_mixed_span_in_prompt_finalize_before_the_task_launches: "finalize";
 }
 
 macro_rules! compose_accepts {

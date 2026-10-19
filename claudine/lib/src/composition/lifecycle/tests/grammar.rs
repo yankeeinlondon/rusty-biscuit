@@ -387,6 +387,22 @@ fn a_sixth_level_is_a_typed_error_naming_its_path() {
     );
 }
 
+// Claudine's schema accepts `{}` as an empty bundle, so the parser is the only
+// layer that rejects an empty stack item.
+#[test]
+fn an_empty_stack_item_is_a_typed_error_naming_its_path() {
+    for (event, value, path) in [
+        ("start", json!([{}]), "start[0]"),
+        ("initialize", json!([{}]), "initialize[0]"),
+        ("failure", json!([{ "when": "fm.x", "then": [{}] }]), "failure[0].then[0]"),
+    ] {
+        let error = parse_err(json!({ event: value }));
+        assert_eq!(shape_property(&error), path, "{event}");
+        let CompositionError::LifecycleStackInvalidShape { message, .. } = &error else { unreachable!() };
+        assert!(message.contains("cannot be empty"), "{event}: {message}");
+    }
+}
+
 #[test]
 fn an_else_if_chain_counts_each_nested_when_and_siblings_do_not() {
     // Five levels through `else`, with sibling guards at every level.
@@ -851,4 +867,91 @@ fn removed_keys_win_over_every_other_shape_error() {
     // `stack` beside an unknown key and a root `when` still reports `stack`.
     let (path, ..) = removed(parse_err(json!({ "start": { "stack": [], "when": "x", "bogus": 1 } })));
     assert_eq!(path, "start.stack");
+}
+
+#[test]
+fn cancelled_parses_cleanup_actions_and_preserves_authored_paths() {
+    let config = parse_ok(json!({"cancelled": [
+        {"info": "cancelled"}, {"set": {"done": true}},
+        {"shell": "echo cleanup"}, "stop"
+    ]}));
+    assert!(!config.is_empty(), "cancelled must be retained, not ignored");
+    assert_eq!(action_paths(config.stack(signal_for("cancelled"))), [
+        "cancelled[0].info", "cancelled[1].set", "cancelled[2].shell", "cancelled[3].stop"
+    ]);
+}
+
+#[test]
+fn cancelled_rejects_null_instead_of_silently_opting_in() {
+    let error = parse_err(json!({"cancelled": null}));
+    assert_eq!(shape_property(&error), "cancelled");
+}
+
+#[test]
+fn cancelled_rejects_recovery_and_other_control_actions() {
+    for action in [json!("skip"), json!("error"), json!("retry"),
+        json!({"resume": "continue"}), json!({"proxy": "next.md"}),
+        json!({"defer": "1s"}), json!({"prep": "next.md"}), json!("break")] {
+        let error = parse_err(json!({"cancelled": [action.clone()]}));
+        assert!(matches!(error,
+            CompositionError::LifecycleActionPlacement { ref event, .. } if event == "cancelled"
+        ), "{action}: {error:?}");
+    }
+}
+
+#[test]
+fn cancelled_accepts_expression_families_and_validates_err_reads() {
+    let frontmatter = json!({"cancelled": [
+        {"ensure_file": ["cleanup.txt", "done"]},
+        {"number": "42"},
+        {"when": "err != null", "then": [{"info": "{{ err }}"}],
+            "else": [{"shell": "echo fallback"}]}
+    ]});
+    let config = parse_ok(frontmatter.clone());
+    assert_eq!(config.stack(signal_for("cancelled")).len(), 3);
+    validate_no_err_in_no_error_events(&frontmatter, &config, dummy_path()).unwrap();
+    validate_no_nested_spans_in_literals(&frontmatter, &config, dummy_path()).unwrap();
+    assert_eq!(collect_lifecycle_shell_commands(&config),
+        vec![("echo fallback".to_string(), "cancelled[2].else[0].shell.command".to_string())]);
+}
+
+#[test]
+fn cancelled_empty_stacks_and_invalid_shapes_are_distinct() {
+    for value in [json!([]), json!({})] {
+        assert!(parse_ok(json!({"cancelled": value})).stack(signal_for("cancelled")).is_empty());
+    }
+    for value in [json!(true), json!(4), json!("cleanup"), json!([1]), json!([{"info": "ok"}, 1])] {
+        assert!(matches!(parse_err(json!({"cancelled": value})),
+            CompositionError::LifecycleStackInvalidShape { .. }));
+    }
+}
+
+#[test]
+fn cancelled_terminal_reserves_finalize_and_carries_the_cause() {
+    let error = crate::composition::LifecycleErrorInfo::from_action_failure("interrupted", "cancelled".to_string());
+    let mut protocol = runtime::LifecycleCatchProtocol::new(
+        LifecycleSignal::Cancelled,
+        runtime::LifecycleCatchState {
+            terminal_slot: Some(LifecycleSignal::Cancelled), finalize_emitted: false,
+        },
+        Some(error.clone()),
+        executor::LifecycleEventOutcome::default(),
+    );
+    let cleanup = protocol.next_step().unwrap();
+    assert_eq!(cleanup.signal, LifecycleSignal::Finalize);
+    assert_eq!(cleanup.error.as_ref(), Some(&error));
+    assert!(protocol.record(LifecycleSignal::Finalize, executor::LifecycleEventOutcome::default()));
+    assert!(protocol.next_step().is_none());
+}
+
+#[test]
+fn an_empty_cancelled_stack_retains_the_cancellation_opt_in() {
+    assert!(parse_ok(json!({})).is_empty());
+    for value in [json!([]), json!({})] {
+        let config = parse_ok(json!({"cancelled": value}));
+        assert!(config.cancelled_declared);
+        assert!(!config.is_empty(), "an explicitly authored cancellation opt-in must survive an empty action stack");
+        assert!(!config.clone().is_empty(), "the downstream runtime receives the opt-in when configuration is cloned");
+        assert!(config.stack(signal_for("cancelled")).is_empty());
+    }
 }

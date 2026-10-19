@@ -295,6 +295,9 @@ fn emit_dry_run_outcome(
     crate::log::message("");
     crate::log::message(&dry_run::render_frontmatter(&render.frontmatter, term));
     crate::log::message(&dry_run::render_metadata_table(&render, term));
+    for target in attempt.request.prepared.lifecycle.literal_prep_targets() {
+        crate::log::message(&dry_run::render_prep_target(&target, term));
+    }
 
     if let Some(collector) = attempt.perf_collector.as_mut() {
         collector.set_dry_run();
@@ -401,7 +404,7 @@ fn resolve_selection_and_launch(
         if !silent && !request.header_emitted {
             crate::output::emit_execution_header(
                 provider,
-                request.yolo,
+                request.provider_yolo(),
                 request.session_interactive,
                 detail_requested,
                 request.repo,
@@ -453,7 +456,7 @@ fn prepare_environment_and_mcp(
         let silent = request.silent;
         let mcp_requested = request.mcp || !request.mcp_use.is_empty();
         let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
-        let yolo_enabled = request.yolo;
+        let yolo_enabled = request.provider_yolo();
         // Taken before the allow-list runs: once `build_child_env_with_launch`
         // has sanitized for this profile, a credential it stripped is
         // unrecoverable, and a rebuild onto a provider entitled to it could only
@@ -780,11 +783,11 @@ fn construct_argv_and_system_prompt(
 
         // `effective_yolo` is the single source of truth for whether the
         // provider's native bypass actually took effect on this launch.
-        // Reporter / badge surfaces should read this — never `request.yolo`
+        // Reporter / badge surfaces should read this — never the requested intent
         // (intent) on its own, since interactive OpenCode silently suppresses
         // the flag.
         let mut effective_yolo = false;
-        if request.yolo {
+        if request.provider_yolo() {
             let mut env_overrides = Vec::new();
             let outcome = profile.apply_yolo_for_mode(
                 &mut child_args,
@@ -806,7 +809,7 @@ fn construct_argv_and_system_prompt(
         // post-apply truth so the dispatch reporter (which stamps event
         // metadata from this var) reflects what actually landed, not what
         // was intended. `build_child_env_with_launch` set this from
-        // `request.yolo` before we knew the outcome — replace it now.
+        // the requested intent before we knew the outcome — replace it now.
         env_plan.env.insert(
             "YOLO".into(),
             if effective_yolo { "true" } else { "false" }.into(),
@@ -816,7 +819,7 @@ fn construct_argv_and_system_prompt(
         // as the last Claudine overlay, mirroring the direct wrapper's Stage 10.5.
         // Runs after the MCP fold above so it cannot be weakened by the MCP or
         // system-prompt writers; gated on YOLO having actually taken effect
-        // (`effective_yolo`, not `request.yolo`) plus non-interactive.
+        // (`effective_yolo`, not requested intent) plus non-interactive.
         crate::commands::wrap::wrapper_stages::apply_opencode_yolo_config_overlay(
             provider,
             effective_yolo,
@@ -830,7 +833,7 @@ fn construct_argv_and_system_prompt(
         tracing::debug!(
             target: "claudine::wrap::yolo",
             provider = %profile.provider(),
-            request_yolo = request.yolo,
+            request_yolo = request.provider_yolo(),
             effective_yolo,
             non_interactive = effective_non_interactive,
             child_args = ?crate::commands::wrap::env::redact_sensitive_args(&child_args),
@@ -1199,7 +1202,7 @@ fn construct_argv_and_system_prompt(
                     facets: lp::DocumentLaunchFacets {
                         provider,
                         non_interactive: effective_non_interactive,
-                        yolo_requested: request.yolo,
+                        yolo_requested: request.provider_yolo(),
                         is_inline,
                         model: target.model.clone(),
                         mcp_body_tags,
@@ -1309,6 +1312,12 @@ fn construct_lifecycle_runtime(
             request.yolo,
         );
 
+        let mut shell_options = shell_options;
+        if let Some(approved) = &request.closed_shell_approvals {
+            shell_options.closed_approvals = Some(approved.clone());
+            shell_options.approval_handler = None;
+        }
+
         // --- Lifecycle notification setup ------------------------------------
         // Constructed up here (rather than just before the guard) so the
         // `run_composition_body` call below can capture these by reference and route
@@ -1393,6 +1402,23 @@ fn construct_lifecycle_runtime(
             ctx
         };
 
+        // Every prepared document reaches this phase before its provider
+        // launches: an eager read, a stabilized reread, a loop iteration, a
+        // `proxy` target, and a sequence step. Submission never waits.
+        if let Some(invocation) = request.invocation_context.as_ref() {
+            claudine::composition::lifecycle::prewarm::collect_and_submit(
+                invocation.prewarm(),
+                &lifecycle_settings,
+                lifecycle,
+                || {
+                    claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                        &request.prepared.effective_frontmatter,
+                        lifecycle_context.clone(),
+                    )
+                },
+            );
+        }
+
         Ok(LifecyclePhase {
             shell_options,
             emitter,
@@ -1467,6 +1493,15 @@ fn execute_initialize_catch(
     )
 }
 
+/// Once initialization has entered, cancellation owns both terminal events.
+/// The guard keeps these events shell-free until `start` has been emitted.
+pub(super) fn cancel_before_start(
+    guard: &mut LifecycleRunGuard<'_>,
+    context: &StackExecutionContext<'_>,
+) -> bool {
+    guard.cancel_if_requested(context)
+}
+
 /// Run the launched document's `initialize` event and translate its control
 /// into the transition the harness loop's coordinator will consume.
 ///
@@ -1482,13 +1517,24 @@ pub(super) fn route_initialize(
 ) -> CompositionPhaseResult<DocumentTransition> {
     let routed = (|| -> Result<CompositionPhaseResult<DocumentTransition>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
+        if cancel_before_start(guard, init_ctx) {
+            return Ok(CompositionPhaseResult::Completed(Box::new(SingleCompositionOutcome {
+                exit_code: 130,
+                provider,
+                agent_perf: None,
+                iteration_signals: None,
+                terminal_signal: Some(LifecycleSignal::Cancelled),
+                final_output: None,
+                handoff: None,
+            })));
+        }
         let init_result =
             execute_initialize_catch(guard, init_ctx, source_path, term, init_outcome.clone())?;
         if let Some(setup_error) = init_result.setup_error.as_ref() {
             let message = if matches!(init_result.control, Some(StackControl::Error { .. })) {
                 setup_error.msg.clone()
             } else {
-                "lifecycle initialize failed".to_string()
+                format!("lifecycle initialize failed: {}", setup_error.msg)
             };
             return Err(eyre!(message));
         }
@@ -1548,6 +1594,36 @@ pub(super) fn route_initialize(
                     ));
                 }
                 (LifecycleTransitionDecision::Continue, StackControl::Stop) => {}
+                // The nearest loop's frame holds the break: nothing composes
+                // or launches, `finalize` runs once, and nothing is published.
+                (_, StackControl::Break { .. }) => {
+                    guard.defuse();
+                    let finalize = guard.execute_event(
+                        LifecycleSignal::Finalize,
+                        &init_ctx.with_signal(LifecycleSignal::Finalize),
+                    );
+                    if let Some(info) = finalize.evaluation_error.as_ref() {
+                        return Err(crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+                            source_path, "finalize", info, term,
+                        )
+                        .into());
+                    }
+                    if let Some(StackControl::Error { reason }) = finalize.control.as_ref() {
+                        return Err(eyre!(
+                            "{}",
+                            reason.as_deref().unwrap_or("lifecycle finalize marked the run as failed")
+                        ));
+                    }
+                    return Ok(CompositionPhaseResult::Completed(Box::new(SingleCompositionOutcome {
+                        exit_code: 0,
+                        provider,
+                        agent_perf: None,
+                        iteration_signals: None,
+                        terminal_signal: None,
+                        final_output: None,
+                        handoff: None,
+                    })));
+                }
                 (
                     LifecycleTransitionDecision::Abort(
                         LifecycleTransitionAbort::ResumeWithoutSession,
@@ -1743,6 +1819,7 @@ fn provider_run_handoff(
         std::time::Instant::now(),
     );
     let init_ctx = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),
@@ -1757,7 +1834,9 @@ fn provider_run_handoff(
             .as_ref()
             .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
-        loop_values: None,
+        // A document inside a looping container reads that loop, and a
+        // `break` in its `initialize` ends it.
+        loop_values: request.prepared.input_layers.loop_values.as_ref(),
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),

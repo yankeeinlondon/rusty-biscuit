@@ -17,6 +17,8 @@ mod position_fixtures;
 #[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
 
+mod approval_prompt;
+mod claudine_schema_bundle;
 mod clean;
 mod clean_fidelity;
 mod clean_frontmatter;
@@ -48,6 +50,7 @@ mod compose_schema;
 mod compose_schema_file_rewrite;
 mod compose_scope_matrix;
 mod compose_shell;
+mod compose_shell_template;
 mod compose_state_set;
 mod compose_terminal_detection;
 mod compose_transclusion;

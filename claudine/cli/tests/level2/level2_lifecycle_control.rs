@@ -595,7 +595,7 @@ fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str)
     pane
 }
 
-/// Like [`run_in_tmux_for`] but blocks until the `echo`-ed sentinel appears in
+/// Like [`run_in_tmux_for`] but blocks until the completion sentinel appears in
 /// the captured pane (i.e. the compose command has exited, success or error),
 /// then returns the pane. Used to assert on error output that writes nothing to
 /// `events.log`.
@@ -672,7 +672,7 @@ fn run_compose_await_exit_redirected(
     let sentinel = format!("L2_CTL_EXIT_{seq}");
     let env_prefix = staged_env_prefix(staged, path);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md}{redirect} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md}{redirect} ; printf 'L2_CTL_%s_%s\\n' EXIT {seq}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -684,15 +684,18 @@ fn run_compose_await_exit_redirected(
     let mut pane = String::new();
     while Instant::now() < deadline {
         pane = harness.capture().map(|f| f.plain).unwrap_or_default();
-        // The sentinel is echoed only after compose exits; ignore the command
-        // line itself (which also contains the literal token) by requiring it on
-        // its own output line.
+        // Split printf arguments keep the token out of the echoed command,
+        // even when the terminal wraps that command onto a line of its own.
         if pane.lines().any(|l| l.trim() == sentinel) {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
     kill_session_by_name(&session);
+    assert!(
+        pane.lines().any(|line| line.trim() == sentinel),
+        "compose did not reach its completion marker; pane:\n{pane}"
+    );
     pane
 }
 
@@ -3434,9 +3437,9 @@ fn stage_proxy_pair_gated(source_doc: &str, target_doc: &str, target_sentinel: &
 
 /// Run `claudine compose --goose <doc>` in a real tmux pane and block until the
 /// `marker` line has been recorded at least `expected` times (a looping run's
-/// terminal marker is not unique, so we settle on a count) or the total line
-/// count goes stable (a run that finished short of `expected` — e.g. a
-/// regression that dropped the target's loop). Bounded under the nextest
+/// terminal marker is not unique, so we settle on a count) or the run exits
+/// (a run that finished short of `expected` — e.g. a regression that dropped
+/// the target's loop). Bounded under the nextest
 /// slow-timeout so a non-producing run never hangs the suite.
 fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
@@ -3452,7 +3455,7 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
     let sentinel = format!("L2_CTL_SETTLE_{seq}");
     let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}:$?",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -3461,24 +3464,14 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
         .expect("send compose command");
 
     let deadline = Instant::now() + Duration::from_secs(30);
-    let mut last_total = 0usize;
-    let mut stable_since: Option<Instant> = None;
     while Instant::now() < deadline {
         let lines = event_lines(staged);
         if lines.iter().filter(|l| l.as_str() == marker).count() >= expected {
             std::thread::sleep(Duration::from_millis(200));
             break;
         }
-        let total = lines.len();
-        if total == last_total {
-            match stable_since {
-                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
-                Some(_) => {}
-                None => stable_since = Some(Instant::now()),
-            }
-        } else {
-            stable_since = None;
-            last_total = total;
+        if pane_shows_exit(&mut harness, &sentinel) {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -4631,7 +4624,7 @@ Body
 }
 
 /// Run a compose in a real tmux pane and settle on either `expected_lines`
-/// side-effect markers or a stable count (the run finished early). Unlike
+/// side-effect markers or the run's exit sentinel (the run finished early). Unlike
 /// [`run_in_tmux_for`], which breaks on the first sighting of one marker, this
 /// cannot stop mid-run on a document whose terminal events fire once **per
 /// iteration** — and it still returns when a buggy run produces fewer markers
@@ -4648,36 +4641,30 @@ fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
 /// outranks the target's authored `agent:`, which would make the assertion
 /// vacuous.
 fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: usize) -> String {
-    run_until_settled_with_params(
-        staged,
-        flags,
-        "",
-        expected_lines,
-        SettlePacing::default(),
-        &[],
-    )
+    run_until_settled_with_params(staged, flags, "", expected_lines, &[])
 }
 
-/// How long [`run_until_settled_with_params`] waits overall, and how long a
-/// stalled marker count must hold before it concludes the run finished short.
+/// How long [`run_until_settled_with_params`] waits for a run that neither
+/// reaches its marker count nor exits.
+const SETTLE_DEADLINE: Duration = Duration::from_secs(40);
+
+/// Whether the pane shows the `{sentinel}:<exit status>` line that a settle
+/// helper's command echoes once claudine has exited.
 ///
-/// The defaults suit the synthetic fixtures, whose iterations are a few hundred
-/// milliseconds apart. A document that does substantially more per-iteration
-/// work — schema validation, file-reference resolution, and composing a large
-/// body, as the shipped `implement-plan.md` does — needs a wider stability
-/// window, or the gap *between* two healthy iterations reads as "settled".
-struct SettlePacing {
-    deadline: Duration,
-    stable_for: Duration,
-}
-
-impl Default for SettlePacing {
-    fn default() -> Self {
-        Self {
-            deadline: Duration::from_secs(40),
-            stable_for: Duration::from_millis(1200),
-        }
-    }
+/// A run that ends *below* its expected marker count (e.g. errored after a few
+/// events) is detected this way, never by a pause in the count: pre-flight and
+/// proxy re-preparation can sit silent for seconds on a loaded runner. The
+/// typed command line also contains the sentinel and can wrap it onto a line
+/// of its own, so only the echoed status line counts.
+fn pane_shows_exit(harness: &mut TmuxHarness, sentinel: &str) -> bool {
+    harness.capture().is_ok_and(|frame| {
+        frame.plain.lines().any(|line| {
+            line.trim()
+                .strip_prefix(sentinel)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .is_some_and(|status| status.parse::<i32>().is_ok())
+        })
+    })
 }
 
 /// [`run_until_settled_with_flags`] plus trailing `key=value` composition
@@ -4690,7 +4677,6 @@ fn run_until_settled_with_params(
     flags: &str,
     params: &str,
     expected_lines: usize,
-    pacing: SettlePacing,
     ambient: &[(&str, &str)],
 ) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
@@ -4713,7 +4699,7 @@ fn run_until_settled_with_params(
         .strip_prefix(staged.workspace.path())
         .unwrap_or(&staged.md_file);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose {flags} {md} {params} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {flags} {md} {params} ; echo {sentinel}:$?",
         ws = staged.workspace.path().display(),
         md = invocation_path.display(),
     );
@@ -4721,30 +4707,15 @@ fn run_until_settled_with_params(
         .send_command_with_env(&cmd, &[])
         .expect("send compose command");
 
-    let deadline = Instant::now() + pacing.deadline;
-    let mut last_count = 0usize;
-    let mut stable_since: Option<Instant> = None;
+    let deadline = Instant::now() + SETTLE_DEADLINE;
     while Instant::now() < deadline {
         let count = event_lines(staged).len();
         if count >= expected_lines {
             std::thread::sleep(Duration::from_millis(150));
             break;
         }
-        // The stability break detects a run that settled *below* the expected
-        // marker count (e.g. errored after a few events). Guard it on `count > 0`
-        // so it never fires during startup: a proxied/adopted target does more
-        // pre-launch work (re-prep + staged bootstrap) before its first event
-        // than a direct run, and an unguarded window would false-break with an
-        // empty log while that setup is still in flight.
-        if count == last_count && count > 0 {
-            match stable_since {
-                Some(since) if since.elapsed() >= pacing.stable_for => break,
-                Some(_) => {}
-                None => stable_since = Some(Instant::now()),
-            }
-        } else {
-            stable_since = None;
-            last_count = count;
+        if pane_shows_exit(&mut harness, &sentinel) {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -5236,10 +5207,6 @@ fn run_shipped_optional_commit_message(commit_message: Option<&str>) -> (Vec<Str
         "--goose --yolo",
         &params,
         5,
-        SettlePacing {
-            stable_for: Duration::from_secs(15),
-            ..SettlePacing::default()
-        },
         &[("TTS_PROVIDER", "say")],
     );
     (event_lines(&staged), pane)
@@ -5328,17 +5295,6 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
     // for. The runner `cd`s into the workspace before invoking claudine.
     const PARAMS: &str = "spec=feature/spec.md plan=feature/plan.md";
 
-    // The shipped document re-validates its schema, re-resolves `@`-references,
-    // and re-composes a large body on every iteration, so under parallel L2 load
-    // healthy iterations sit seconds apart — wide enough that the default
-    // 1200ms stability window would read the gap between two good iterations as
-    // "the run settled early". The deadline stays at the default so two arms
-    // still fit inside the tier's 90s termination ceiling.
-    let pacing = || SettlePacing {
-        stable_for: Duration::from_secs(4),
-        ..SettlePacing::default()
-    };
-
     // Direct: `implement-plan.md` IS the invoked document.
     let direct = stage_shipped_implement_route("_implement/implement-plan.md", TOTAL_PHASES);
     let direct_pane = run_until_settled_with_params(
@@ -5346,7 +5302,6 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
         "--goose",
         PARAMS,
         EXPECTED_MARKERS,
-        pacing(),
         &[],
     );
     let direct_lines = event_lines(&direct);
@@ -5358,7 +5313,6 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
         "--goose",
         PARAMS,
         EXPECTED_MARKERS,
-        pacing(),
         &[],
     );
     let routed_lines = event_lines(&routed);
@@ -6436,12 +6390,10 @@ fn level2_lifecycle_proxy_inside_sequence_step_is_contained() {
     let sequence_doc = "---\n\
          title: sequence with a proxy step\n\
          sequence:\n  \
-         - alpha\n  \
-         - beta\n\
-         initialize:\n  \
-         - {proxy: '@target.md'}\n\
+         - {name: alpha, prompt: '@router.md'}\n  \
+         - {name: beta, prompt: '@router.md'}\n\
          ---\n\
-         sequence body {{ state }}\n";
+         sequence body {{ seq }}\n";
     let target_doc = "---\n\
          title: sequence proxy target\n\
          success:\n  \
@@ -6449,6 +6401,7 @@ fn level2_lifecycle_proxy_inside_sequence_step_is_contained() {
          ---\n\
          sequence proxy target body\n";
     let staged = stage_proxy_pair(sequence_doc, target_doc, true);
+    fs::write(staged.workspace.path().join("router.md"), SEQUENCE_STEP_ROUTER).unwrap();
 
     // Two steps, each proxying to the target once: 2 `target-ran` markers.
     let pane = run_sequence_until_target_runs(&staged, 2);
@@ -6514,15 +6467,14 @@ fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> Stri
 // path dropped. These two rows close that gap: a looping sequence target and a
 // target-authored `model:`, each compared against a direct invocation.
 
-/// A two-step sequence source whose every step hands its step off to the looping
-/// `target.md` at `initialize`.
+const SEQUENCE_STEP_ROUTER: &str = "---\ninitialize:\n  - {proxy: '@target.md'}\n---\nStep router\n";
+
+/// Two prompt tasks whose routing documents hand off to the looping target.
 const SEQ_LOOP_SOURCE: &str = "---\n\
      title: sequence with a looping proxy step\n\
      sequence:\n  \
-     - alpha\n  \
-     - beta\n\
-     initialize:\n  \
-     - {proxy: '@target.md'}\n\
+     - {name: alpha, prompt: '@router.md'}\n  \
+     - {name: beta, prompt: '@router.md'}\n\
      ---\n\
      sequence body\n";
 
@@ -6531,15 +6483,13 @@ const SEQ_LOOP_SOURCE: &str = "---\n\
 const SEQ_MODEL_SOURCE: &str = "---\n\
      title: sequence pinned-model launch facet\n\
      sequence:\n  \
-     - alpha\n  \
-     - beta\n\
-     initialize:\n  \
-     - {proxy: '@target.md'}\n\
+     - {name: alpha, prompt: '@router.md'}\n  \
+     - {name: beta, prompt: '@router.md'}\n\
      ---\n\
      sequence body\n";
 
 /// Run `claudine sequence --goose <doc>` in tmux and block until `events.log`
-/// holds `expected_lines` markers, or the marker count settles (so a run that
+/// holds `expected_lines` markers, or the run exits (so a run that
 /// produces *fewer* markers than expected surfaces the mismatch instead of
 /// burning the whole deadline). Returns the captured pane.
 fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String {
@@ -6556,7 +6506,7 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
     let sentinel = format!("L2_SEQSET_DONE_{seq}");
     let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} sequence --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} sequence --goose {md} ; echo {sentinel}:$?",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -6565,27 +6515,14 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
         .expect("send sequence command");
 
     let deadline = Instant::now() + Duration::from_secs(40);
-    let mut last_count = 0usize;
-    let mut stable_since: Option<Instant> = None;
     while Instant::now() < deadline {
         let count = event_lines(staged).len();
         if count >= expected_lines {
             std::thread::sleep(Duration::from_millis(150));
             break;
         }
-        // Guarded on `count > 0` so the settle detection never false-breaks
-        // during startup: a sequence step whose proxied target is re-prepared
-        // and staged does more pre-launch work before its first event than a
-        // direct step. See the note in `run_until_settled`.
-        if count == last_count && count > 0 {
-            match stable_since {
-                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
-                Some(_) => {}
-                None => stable_since = Some(Instant::now()),
-            }
-        } else {
-            stable_since = None;
-            last_count = count;
+        if pane_shows_exit(&mut harness, &sentinel) {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -6627,6 +6564,7 @@ fn level2_lifecycle_sequence_step_proxy_to_looping_target_owns_the_loop() {
     // Routed: a two-step sequence, each step proxying to the same looping target.
     // Per step: 1 target-init + 3 provider-ran + 3 target-finalize; two steps → 14.
     let routed = stage_proxy_pair(SEQ_LOOP_SOURCE, EQUIV_LOOP_TARGET, true);
+    fs::write(routed.workspace.path().join("router.md"), SEQUENCE_STEP_ROUTER).unwrap();
     let routed_pane = run_sequence_until_settled(&routed, 14);
     let routed_lines = event_lines(&routed);
 
@@ -6684,6 +6622,7 @@ fn level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle() {
     // Per step: sig=initialize, provider-ran, sig=success, env.MODEL, sig=finalize
     // = 5 markers; two steps → 10.
     let routed = stage_proxy_pair(SEQ_MODEL_SOURCE, EQUIV_PINNED_MODEL_TARGET, true);
+    fs::write(routed.workspace.path().join("router.md"), SEQUENCE_STEP_ROUTER).unwrap();
     let routed_pane = run_sequence_until_settled(&routed, 10);
     let routed_lines = event_lines(&routed);
 

@@ -12,6 +12,21 @@ pub(super) fn parse_short_form(
     source_file: &Path,
     property: &str,
 ) -> Result<LifecycleActionKind, CompositionError> {
+    // `break` and `prep` take one string operand at most; the generic
+    // one-argument-per-element list reading would accept `break: [reason]`.
+    if matches!(verb, "break" | "prep")
+        && let serde_json::Value::Array(items) = value
+        && !items.is_empty()
+    {
+        return Err(CompositionError::LifecycleInvalidArgs {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            action: verb.to_string(),
+            message: format!(
+                "`{verb}` takes a single string, not a list; use `{verb}: \"…\"` or the long form"
+            ),
+        });
+    }
     let args = classify_positional_value(verb, value, source_file, property)?;
     validate_positional_arity_and_build(signal, verb, args, source_file, property)
 }
@@ -70,6 +85,8 @@ pub(super) fn positional_operand_field(verb: &str) -> Option<&'static str> {
         "retry" => Some("max_attempts"),
         "resume" => Some("message"),
         "defer" => Some("delay"),
+        "break" => Some("reason"),
+        "prep" => Some("target"),
         "shell" => Some("command"),
         _ if CommunicationChannel::from_verb(verb).is_some() => Some("text"),
         _ => None,
@@ -135,6 +152,24 @@ pub(super) fn validate_positional_arity_and_build(
                 reason: None,
             }
         }
+        "break" => {
+            check_optional_positional_arity(verb, &args, 0, 1, source_file, property_name)?;
+            A::Break {
+                reason: args
+                    .into_iter()
+                    .next()
+                    .map(|reason| break_reason(reason, source_file, property_name))
+                    .transpose()?,
+                code: 0,
+            }
+        }
+        "prep" => {
+            check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
+            A::Prep {
+                target: prep_target(args.into_iter().next().expect("arity checked"), source_file, property_name)?,
+                with: WithOverlay::default(),
+            }
+        }
         _ => {
             // Not a control verb; fall through to communication / shell /
             // side-effect / expression-function dispatch.
@@ -168,9 +203,11 @@ fn build_non_control_positional_action(
     if verb == "shell" {
         check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
         return Ok(LifecycleActionKind::Shell(ShellAction {
+            authored_command: None,
             command: args.into_iter().next().expect("arity checked"),
             on_error: None,
             pre_resolved: false,
+            template: None,
         }));
     }
 
@@ -296,12 +333,22 @@ fn check_positional_signature(
 
 /// Suggest a known lifecycle verb that is close to the unknown `verb`.
 pub(super) fn did_you_mean_verb(verb: &str) -> Option<&'static str> {
+    closest_spelling(verb, all_lifecycle_verbs())
+}
+
+/// The candidate closest to the unknown `word` by case-insensitive edit
+/// distance, within a third of the word's length (at least 2). The first of
+/// equally close candidates wins.
+pub(crate) fn closest_spelling(
+    word: &str,
+    candidates: impl IntoIterator<Item = &'static str>,
+) -> Option<&'static str> {
     use darkmatter::catalog::levenshtein;
 
-    let normalized = verb.to_lowercase();
+    let normalized = word.to_lowercase();
     let threshold = (normalized.chars().count() / 3).max(2);
     let mut best: Option<(usize, &'static str)> = None;
-    for candidate in all_lifecycle_verbs() {
+    for candidate in candidates {
         let distance = levenshtein(&normalized, &candidate.to_lowercase());
         if distance <= threshold {
             if best.is_none_or(|(best_distance, _)| distance < best_distance) {
@@ -430,9 +477,11 @@ pub(super) fn build_action_from_params(
         let on_error = params_map.remove("on_error");
         reject_extra_params(verb, &params_map, property, source_file)?;
         return Ok(LifecycleActionKind::Shell(ShellAction {
+            authored_command: None,
             command,
             on_error,
             pre_resolved: false,
+            template: None,
         }));
     }
 
@@ -546,9 +595,77 @@ fn parse_lifecycle_control_long(
             })?,
             reason: params.remove("reason"),
         },
+        "break" => A::Break {
+            reason: params
+                .remove("reason")
+                .map(|reason| break_reason(reason, source_file, property))
+                .transpose()?,
+            code: match params.remove("code") {
+                None => 0,
+                Some(code) => break_code(&code).ok_or_else(|| {
+                    invalid_args(format!("`break.code` must be an integer from 0 to 255, got `{code}`"))
+                })?,
+            },
+        },
+        "prep" => A::Prep {
+            target: prep_target(
+                params.remove("target").ok_or_else(|| {
+                    invalid_args("`prep` requires a `target` parameter".to_string())
+                })?,
+                source_file,
+                property,
+            )?,
+            // An omitted `with:` and an authored `with: {}` are the same empty
+            // overlay, as for `proxy`.
+            with: with.unwrap_or_default(),
+        },
         _ => return Ok(None),
     };
     Ok(Some(control))
+}
+
+/// A `break` reason is text: a literal (`""` included) or an interpolation.
+fn break_reason(reason: Expr, source_file: &Path, property: &str) -> Result<Expr, CompositionError> {
+    match reason {
+        Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => Err(CompositionError::LifecycleInvalidArgs {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            action: "break".to_string(),
+            message: format!("`break.reason` must be a string, got `{reason}`"),
+        }),
+        reason => Ok(reason),
+    }
+}
+
+/// The `0..=255` integer a `break.code` expression is, if it is one. The long
+/// form only passes a YAML number here; a string, `null`, or a collection was
+/// refused before it became an expression.
+fn break_code(code: &Expr) -> Option<u8> {
+    match code {
+        Expr::NumberLiteral(value) if value.fract() == 0.0 && (0.0..=255.0).contains(value) => {
+            Some(*value as u8)
+        }
+        _ => None,
+    }
+}
+
+/// A `prep` target is a non-empty file reference or an interpolation.
+fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr, CompositionError> {
+    let message = match &target {
+        Expr::StringLiteral(text) if text.trim().is_empty() => {
+            "`prep.target` cannot be empty; name the document, group, or sequence to run".to_string()
+        }
+        Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {
+            format!("`prep.target` must be a file reference string, got `{target}`")
+        }
+        _ => return Ok(target),
+    };
+    Err(CompositionError::LifecycleInvalidArgs {
+        source_path: source_file.to_path_buf(),
+        property: property.to_string(),
+        action: "prep".to_string(),
+        message,
+    })
 }
 
 /// Collect key/value action arguments in the descriptor's positional order,

@@ -1,6 +1,6 @@
 //! Selection-hint parsing for composition frontmatter.
 //!
-//! Parses the `agent`, `model`, and `interactive` frontmatter properties into
+//! Parses the `agent`, `model`, `interactive`, and `yolo` frontmatter properties into
 //! the typed [`EffectiveSelectionHints`] the composition pipeline resolves
 //! against. Distinct from prompt preparation (`prepare.rs`): these functions
 //! only classify frontmatter values, they never compose the document.
@@ -10,7 +10,7 @@ use super::json_util::json_type_name;
 use super::types::{AgentHint, EffectiveSelectionHints, ModelHint};
 use crate::provider::Provider;
 
-/// Parse selection hints (`agent`, `model`) from a raw Markdown frontmatter
+/// Parse provider and session hints from a raw Markdown frontmatter
 /// without composing the document.
 ///
 /// The CLI calls this for *eager* target resolution — knowing which
@@ -21,8 +21,7 @@ use crate::provider::Provider;
 ///
 /// ## Errors
 ///
-/// Returns a [`CompositionError`] if either field is present but holds an
-/// unsupported type, or if `agent` references an unknown provider.
+/// Returns a [`CompositionError`] if a hint holds an unsupported type.
 pub fn parse_selection_hints_from_frontmatter(
     fm: &darkmatter::markdown::Frontmatter,
 ) -> Result<EffectiveSelectionHints, CompositionError> {
@@ -39,6 +38,7 @@ pub fn parse_selection_hints_from_frontmatter(
         agent,
         model,
         interactive,
+        yolo: map.get("yolo").map_or(Ok(None), parse_yolo_hint)?,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     })
@@ -117,6 +117,15 @@ pub(super) fn parse_agent_hint_full(
     Ok(result)
 }
 
+/// Whether an `agent` value is a hint at all, as the canonical parser reads
+/// it. Null and an empty list are no hint (the task has no `agent` of its
+/// own); an empty string is an invalid provider name, and a wrong-typed value
+/// is a hint that fails, so both are hints.
+#[must_use]
+pub(crate) fn agent_value_names_a_hint(value: &serde_json::Value) -> bool {
+    parse_agent_hint_full(value).map_or(true, |parsed| !parsed.valid.is_empty() || !parsed.invalid.is_empty())
+}
+
 /// Parse the `model` frontmatter value into a typed `ModelHint`.
 ///
 /// Accepts a single string or an array of strings. Model identifiers
@@ -168,6 +177,17 @@ pub fn parse_interactive_hint(
     }
 }
 
+/// Parse a document's provider bypass default; null means absent.
+pub(super) fn parse_yolo_hint(
+    value: &serde_json::Value,
+) -> Result<Option<bool>, CompositionError> {
+    match value {
+        serde_json::Value::Bool(value) => Ok(Some(*value)),
+        serde_json::Value::Null => Ok(None),
+        other => Err(CompositionError::YoloHintWrongType(json_type_name(other).to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +227,33 @@ mod tests {
 
         let hints = parse_selection_hints_from_frontmatter(md.frontmatter()).unwrap();
         assert_eq!(hints.interactive, Some(true));
+    }
+}
+
+#[cfg(test)]
+mod yolo_tests {
+    use super::*;
+    use darkmatter::markdown::Frontmatter;
+    use serde_json::json;
+
+    #[test]
+    fn yolo_defaults_and_cli_precedence() {
+        for (value, expected) in [(json!(true), true), (json!(false), false), (json!(null), false)] {
+            let mut fm = Frontmatter::new();
+            fm.insert("yolo", value).unwrap();
+            let hints = parse_selection_hints_from_frontmatter(&fm).unwrap();
+            assert_eq!(hints.yolo_enabled(false), expected);
+            assert!(hints.yolo_enabled(true));
+        }
+        assert!(!EffectiveSelectionHints::default().yolo_enabled(false));
+    }
+
+    #[test]
+    fn yolo_rejects_non_boolean_values() {
+        for value in [json!("true"), json!(1), json!([true]), json!({})] {
+            let mut fm = Frontmatter::new();
+            fm.insert("yolo", value).unwrap();
+            assert!(matches!(parse_selection_hints_from_frontmatter(&fm), Err(CompositionError::YoloHintWrongType(_))));
+        }
     }
 }

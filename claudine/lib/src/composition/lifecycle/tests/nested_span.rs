@@ -320,13 +320,11 @@ fn nested_span_error_renders_property_literal_rewrite_and_escape_hint() {
 fn single_pass_inventory_matches_the_authored_claudine_schema() {
     use std::collections::BTreeSet;
 
-    let schema_dir = biscuit_test_harness::manifest_dir!().join("../../darkmatter/docs/schemas");
-    let load = |name: &str| -> serde_json::Value {
-        let text = std::fs::read_to_string(schema_dir.join(name)).expect("schema readable");
-        biscuit_file::serde_yaml_ng::from_str(&text).expect("schema is YAML")
+    let load = |text: &str| -> serde_json::Value {
+        biscuit_file::serde_yaml_ng::from_str(text).expect("schema is YAML")
     };
-    let claudine = load("claudine.yaml");
-    let types = load("claudine-types.yaml");
+    let claudine = load(include_str!("../../../../../schemas/claudine.yaml"));
+    let lifecycle = load(include_str!("../../../../../schemas/lifecycle.yaml"));
 
     let schema_events: BTreeSet<&str> = claudine["$schema"]
         .as_object()
@@ -334,7 +332,7 @@ fn single_pass_inventory_matches_the_authored_claudine_schema() {
         .iter()
         .filter(|(_, value)| {
             value.as_str().is_some_and(|ty| {
-                ty.starts_with("lifecycle-event@") || ty.starts_with("loop-event@")
+                ["stack@", "initialize-stack@", "cancelled-stack@", "loop@"].iter().any(|prefix| ty.starts_with(prefix))
             })
         })
         .map(|(key, _)| key.as_str())
@@ -343,7 +341,7 @@ fn single_pass_inventory_matches_the_authored_claudine_schema() {
     assert_eq!(schema_events, signals);
 
     for predicate in ["while", "until"] {
-        let ty = types["$schema"]["loop-event"][predicate].as_str().unwrap();
+        let ty = lifecycle["types"]["loop"][predicate].as_str().unwrap();
         assert!(ty.starts_with("expression "), "loop.{predicate}: {ty}");
     }
 }

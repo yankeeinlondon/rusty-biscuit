@@ -75,6 +75,7 @@ impl LifecycleEmitter for Recorder {
 struct MockShell {
     code: i32,
     commands: Mutex<Vec<String>>,
+    chains: Mutex<Vec<FilledChain>>,
 }
 
 impl MockShell {
@@ -82,16 +83,26 @@ impl MockShell {
         Self {
             code,
             commands: Mutex::new(Vec::new()),
+            chains: Mutex::new(Vec::new()),
         }
     }
     fn commands(&self) -> Vec<String> {
         self.commands.lock().unwrap().clone()
+    }
+    /// Every template-mode command dispatched, as its filled chain.
+    fn chains(&self) -> Vec<FilledChain> {
+        self.chains.lock().unwrap().clone()
     }
 }
 
 impl ShellRunner for MockShell {
     fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         self.commands.lock().unwrap().push(command.to_string());
+        Ok(self.code)
+    }
+
+    fn run_structured(&self, chain: &FilledChain) -> Result<i32, ShellRunError> {
+        self.chains.lock().unwrap().push(chain.clone());
         Ok(self.code)
     }
 }
@@ -112,6 +123,13 @@ impl ShellRunner for SpawnFailShell {
     fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         Err(ShellRunError::Spawn {
             command: command.to_string(),
+            source: Self::io_error(),
+        })
+    }
+
+    fn run_structured(&self, chain: &FilledChain) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::Spawn {
+            command: chain.segments[0].program.clone(),
             source: Self::io_error(),
         })
     }
@@ -192,6 +210,7 @@ fn ctx<'a>(
     source_path: &'a Path,
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter,
@@ -257,6 +276,7 @@ fn ctx_with_live<'a>(
     source_path: &'a Path,
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter: base,
@@ -291,5 +311,6 @@ mod filesystem_lookup;
 mod mutation_visibility;
 mod runtime_set;
 mod set_shell_values;
+mod shell_templates;
 mod proxy_with_evaluation;
 mod retry_with_evaluation;

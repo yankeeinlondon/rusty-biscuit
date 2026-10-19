@@ -234,7 +234,13 @@ fn a_run_goes_from_preparation_to_promotion_through_the_binary() {
     let run = &prepared["runs"][0];
     let run_id = run["run_id"].as_str().expect("run id").to_string();
     let run_dir = fleet.path(run["run_dir"].as_str().expect("run dir"));
-    assert_eq!(run["commands"][0].as_array().expect("command")[..3], [json!("claudine"), json!("budget"), json!("init")]);
+    // One command: the Messenger-owned runner, which takes the fleet lock for
+    // the whole execution.
+    assert_eq!(
+        run["commands"].as_array().expect("commands"),
+        &[json!(["messenger", "research", "run", run_id])],
+        "prepare prints exactly the runner command"
+    );
     assert_eq!(fleet.docs(), docs, "preparing writes only the state area");
 
     // Nothing written yet: the check fails with exit 1, whatever an agent exited with.
@@ -243,7 +249,11 @@ fn a_run_goes_from_preparation_to_promotion_through_the_binary() {
     assert_eq!(json_out(&failed)["status"], "failed");
     let resumed = fleet.research("2026-09-18", &["prepare", "--resume", &run_id, "--json"]);
     assert_eq!(code(&resumed), 0, "{}", String::from_utf8_lossy(&resumed.stderr));
-    assert_eq!(json_out(&resumed)["runs"][0]["commands"].as_array().expect("commands").len(), 1, "a resumption keeps the ledger");
+    assert_eq!(
+        json_out(&resumed)["runs"][0]["commands"].as_array().expect("commands"),
+        &[json!(["messenger", "research", "run", run_id])],
+        "a resumption prints the same runner command"
+    );
 
     fake_passes(&fleet, &run_dir, "2026-09-18");
     let validated = fleet.research("2026-09-18", &["check-run", &run_id, "--through", "validation", "--json"]);
@@ -615,11 +625,142 @@ fn resume_refuses_a_root_that_became_a_subdirectory_of_a_git_work_tree() {
     let run_id = prepared["runs"][0]["run_id"].as_str().expect("run id").to_string();
     assert_eq!(code(&fleet.research("2026-09-18", &["check-run", &run_id, "--through", "validation"])), 1, "the run fails");
     let record = fleet.path(&format!("{STATE}/runs/discord/{run_id}/run.json"));
-    let before = fs::read(&record).expect("run record");
 
     git_init(fleet.dir.path());
     let refused = fleet.research("2026-09-18", &["prepare", "--resume", &run_id, "--json"]);
     assert_eq!(code(&refused), 2, "{}{}", stdout(&refused), String::from_utf8_lossy(&refused.stderr));
     assert!(json_out(&refused)["refused"].as_str().expect("refusal").contains("is not its top level"));
-    assert_eq!(fs::read(&record).expect("run record"), before, "a refused resumption changes nothing");
+    assert_eq!(fs::read(&record).expect("run record"), before(&record), "a refused resumption changes nothing");
+}
+
+fn before(record: &Path) -> Vec<u8> {
+    fs::read(record).expect("run record")
+}
+
+// ---- the runner -----------------------------------------------------------------
+
+/// `messenger research run` through the binary: refused while another runner
+/// holds the fleet lock, and a stale run is reported and recovered explicitly.
+#[test]
+fn the_runner_command_refuses_a_live_fleet_lock_and_reports_stale_runs() {
+    let fleet = Fleet::published();
+    let prepared = json_out(&fleet.research("2026-09-18", PREPARE));
+    let run_id = prepared["runs"][0]["run_id"].as_str().expect("run id").to_string();
+
+    // A live runner: the fleet lock is held, so the command cannot run.
+    let lock = fleet.path(&format!("{STATE}/runs/fleet.lock"));
+    fs::create_dir_all(lock.parent().expect("runs dir")).expect("mkdir");
+    let holder = fs::File::create(&lock).expect("fleet lock");
+    holder.try_lock().expect("hold the fleet lock");
+    let refused = fleet.research("2026-09-18", &["run", &run_id, "--json"]);
+    assert_eq!(code(&refused), 1, "a refused lifecycle step");
+    let message = json_out(&refused)["refused"].as_str().expect("refusal").to_string();
+    assert!(message.contains(&format!("{STATE}/runs/fleet.lock")), "{message}");
+    drop(holder);
+
+    // A prepared run is reported as not yet run, and cannot be recovered.
+    let runs = json_out(&fleet.research("2026-09-18", &["runs", "--json"]));
+    assert_eq!(runs["runs"][0]["note"].as_str().expect("note"), format!("prepared, not yet run (`messenger research run {run_id}`)").as_str());
+    let refused = fleet.research("2026-09-18", &["cleanup", "--recover", &run_id, "--json"]);
+    assert_eq!(code(&refused), 1);
+    assert!(json_out(&refused)["refused"].as_str().expect("refused").contains("was never launched"));
+
+    // A crashed runner leaves a stale run: reported, then recovered explicitly.
+    let record_path = fleet.path(&format!("{STATE}/runs/discord/{run_id}/run.json"));
+    let mut stale: Value = serde_json::from_slice(&before(&record_path)).expect("json");
+    // Mark the run launched, as a runner would have before dying.
+    stale["launched"] = json!(true);
+    fs::write(&record_path, serde_json::to_vec_pretty(&stale).expect("json")).expect("write");
+    let runs = json_out(&fleet.research("2026-09-18", &["runs", "--json"]));
+    let note = runs["runs"][0]["note"].as_str().expect("note").to_string();
+    assert!(note.starts_with("stale:") && note.contains(&format!("cleanup --recover {run_id}")), "{note}");
+    let recovered = fleet.research("2026-09-18", &["cleanup", "--recover", &run_id, "--json"]);
+    assert_eq!(code(&recovered), 0, "{}", String::from_utf8_lossy(&recovered.stderr));
+    let recovered = json_out(&recovered);
+    assert_eq!(recovered["run_id"], run_id.as_str());
+    assert_eq!(recovered["status"], "interrupted");
+    let human = stdout(&fleet.research("2026-09-18", &["runs"]));
+    assert!(human.contains("interrupted"), "{human}");
+}
+
+/// Runs a fake `claudine` from a private PATH so the runner's spawned command
+/// and exit-code mapping are observed end to end. Unix only: Windows cannot
+/// resolve a bare non-`exe` name from PATH for `CreateProcess`.
+#[cfg(unix)]
+#[test]
+fn the_runner_runs_the_sequence_command_and_maps_its_exit() {
+    let fleet = Fleet::published();
+    let prepared = json_out(&fleet.research("2026-09-18", PREPARE));
+    let run_id = prepared["runs"][0]["run_id"].as_str().expect("run id").to_string();
+    let run_dir = prepared["runs"][0]["run_dir"].as_str().expect("run dir").to_string();
+
+    let bin = tempfile::tempdir().expect("bin dir");
+    let fake = bin.path().join("claudine");
+    fs::write(
+        &fake,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CLAUDE_ARGV_FILE\"\nexit 130\n",
+    )
+    .expect("write the fake claudine");
+    let mut perms = fs::metadata(&fake).expect("metadata").permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    fs::set_permissions(&fake, perms).expect("chmod");
+    let argv_file = fleet.path(&format!("{run_dir}/fake-claudine-argv"));
+
+    let run = |id: &str| {
+        let path = std::env::join_paths([
+            bin.path(),
+            biscuit_test_harness::bin_exe!("messenger").parent().expect("bin dir"),
+        ])
+        .expect("PATH");
+        Command::new(biscuit_test_harness::bin_exe!("messenger"))
+            .arg("research")
+            .arg("--root")
+            .arg(fleet.root())
+            .args(["--today", "2026-09-18"])
+            .args(["run", id, "--json"])
+            .env("PATH", path)
+            .env("NO_COLOR", "1")
+            .env("CLAUDE_ARGV_FILE", &argv_file)
+            .output()
+            .expect("run messenger")
+    };
+
+    let output = run(&run_id);
+    assert_eq!(code(&output), 130, "{}{}", stdout(&output), String::from_utf8_lossy(&output.stderr));
+    let record: Value = serde_json::from_slice(&before(&fleet.path(&format!("{STATE}/runs/discord/{run_id}/run.json")))).expect("json");
+    assert_eq!(record["status"], "interrupted", "{record}");
+    assert_eq!(record["runner"], "interrupted", "{record}");
+    let argv = fs::read_to_string(&argv_file).expect("the fake claudine ran");
+    assert_eq!(
+        argv.lines().collect::<Vec<_>>(),
+        vec!["sequence".to_string(), "--yolo".to_string(), format!("{run_dir}/run.md")],
+        "the runner spawns the prepared sequence from the repository root"
+    );
+
+    // A second run of the interrupted run is refused; it needs a resumption.
+    let refused = run(&run_id);
+    assert_eq!(code(&refused), 1);
+    assert!(json_out(&refused)["refused"].as_str().expect("refused").contains("interrupted"));
+}
+
+#[test]
+fn agent_admission_cli_refuses_when_the_cap_is_spent() {
+    let fleet = Fleet::published();
+    let prepared = json_out(&fleet.research("2026-09-18", &["prepare", "discord", "--force", "--max-seconds", "60", "--max-invocations", "1", "--json"]));
+    let run_id = prepared["runs"][0]["run_id"].as_str().expect("run id");
+    let prompt = fs::read_to_string(fleet.path(&format!("{STATE}/runs/discord/{run_id}/inputs/discovery/prompt.md"))).expect("generated prompt");
+    let hook = prompt.lines().find_map(|line| line.strip_prefix("  - shell: messenger ")).expect("admission hook");
+    let args: Vec<_> = hook.split_whitespace().collect();
+    let invoke = || Command::new(biscuit_test_harness::bin_exe!("messenger"))
+        .args(&args).current_dir(fleet.root()).env("NO_COLOR", "1").output().expect("generated hook");
+    let first = invoke();
+    assert_eq!(code(&first), 0, "{}", String::from_utf8_lossy(&first.stderr));
+    let path = fleet.path(&format!("{STATE}/runs/discord/{run_id}/run.json"));
+    let admitted = before(&path);
+    assert_eq!(serde_json::from_slice::<Value>(&admitted).unwrap()["invocations"], 1);
+    let second = invoke();
+    assert_eq!(code(&second), 1);
+    assert!(String::from_utf8_lossy(&second.stderr).contains("agent-invocation limit"));
+    assert_eq!(before(&path), admitted, "refusal must not rewrite the record");
 }

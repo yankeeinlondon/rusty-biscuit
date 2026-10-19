@@ -3,14 +3,14 @@
 //! Every step is validated and approved here, before any step runs: `$schema`
 //! required-property gaps are aggregated across all steps so the user fixes the
 //! whole sequence in one edit, and every template and lifecycle shell command is
-//! resolved and approved so no approval prompt can interrupt a running sequence.
+//! discovered and approved without executing document shell stages.
 //!
 //! What this pass deliberately does **not** produce is a composed document per
 //! step. Each step composes at its turn against the *live* source and the
 //! accumulated runtime layers (see [`super::jit`]); a composition retained from
 //! here would be stale the moment an earlier step wrote back a body or `set` a
 //! value. The compose performed here is a validation probe whose result is
-//! discarded — only its diagnostics and its approved command bytes survive.
+//! discarded — only its diagnostics and approved bytes/shapes survive.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -39,7 +39,7 @@ pub(super) struct SequencePreflight {
     /// Every shell command approved across all steps, template and lifecycle
     /// alike. Handed to each just-in-time prepare as `pre_approved_commands`, so
     /// a running sequence never stops for an approval prompt.
-    pub(super) approved_commands: HashSet<String>,
+    pub(super) approved_commands: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     /// The user `--set` overrides after any interactive collection pass, so the
     /// values the user supplied here are the ones every step composes against.
     pub(super) resolved_overrides: Option<serde_json::Value>,
@@ -66,7 +66,7 @@ pub(super) fn run_phase_1c_with_schema(
     user_set_overrides: &Option<serde_json::Value>,
     ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
-    initial_cumulative_approved: HashSet<String>,
+    initial_cumulative_approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     interrupted: &Arc<AtomicBool>,
     silent: bool,
 ) -> Result<Option<SequencePreflight>> {
@@ -172,7 +172,7 @@ struct StepMissingContext {
 }
 
 enum Phase1cAttempt {
-    Success(HashSet<String>),
+    Success(darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals),
     Missing(Vec<StepMissingContext>),
     Interrupted,
 }
@@ -201,7 +201,7 @@ fn run_phase_1c_attempt(
     user_set_overrides: &Option<serde_json::Value>,
     ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
-    initial_cumulative_approved: HashSet<String>,
+    initial_cumulative_approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     interrupted: &Arc<AtomicBool>,
 ) -> Result<Phase1cAttempt> {
     let total_steps = plan.steps.len();
@@ -228,12 +228,18 @@ fn run_phase_1c_attempt(
         let env_overrides =
             super::jit::step_env_overrides(effective_fail_fast, ctx.shared, target.as_ref());
 
-        // Validation, approval, and composition run through the very same path
-        // execution uses at each step's turn, so a step that validates here
-        // cannot fail differently there for want of a second implementation.
+        // Share execution's option builder while keeping document shell stages
+        // passive until the step reaches its turn.
+        let step_context = StepComposeContext {
+            lifecycle_group: None,
+            loop_values: None,
+            validation_probe: true,
+            deferred_shell_roots: super::jit::sequence_shell_roots(step_index),
+            ..ctx.clone()
+        };
         match super::jit::compose_step(
             source,
-            ctx,
+            &step_context,
             &step_set_overrides,
             &env_overrides,
             std::mem::take(&mut cumulative_approved),

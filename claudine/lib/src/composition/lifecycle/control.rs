@@ -107,7 +107,9 @@ pub fn decide_control(
     provider_launched: bool,
 ) -> ControlDispatch {
     match control {
-        StackControl::Stop | StackControl::Skip | StackControl::Error { .. } => {
+        // A `break` ends its event like `stop`; its loop reads the break from
+        // the slot the executor recorded it in.
+        StackControl::Stop | StackControl::Skip | StackControl::Error { .. } | StackControl::Break { .. } => {
             ControlDispatch::Stop
         }
         StackControl::Retry {

@@ -11,9 +11,9 @@ $schema:
     pass_icon: string
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
-    is_last: boolean -> a boolean flag based on 
     in_loop: boolean -> set by the `review-loop` sequence; when true this step opts out once the spec is marked `implemented`
 yolo: true
+commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
@@ -56,11 +56,11 @@ initialize:
           - stderr: |-
                 The previous phase's agent has passed a message to this agent:
 
-                > {{frontmatter(log, 'message_to_agent')}}
+                > {{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
           - message: |-
                 The previous phase's agent has passed a message to this agent:
         
-                > {{frontmatter(log, 'message_to_agent')}}
+                > {{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
           - set:
                 epilog: "{{message_to_agent}}"
                 message_to_agent: null
@@ -142,7 +142,7 @@ You will log your implementation progress to: {{log}}
     - set `started_phase` to "{{phase}}"
 ::end-block
 
-::block when="is_last"
+::block when="loop.is_last"
 Now we need to update the specification file's frontmatter ({{spec}}):
 
 - set `implemented` to `true`

@@ -28,6 +28,7 @@ fn shared_args() -> SharedComposeArgs {
         sandbox: false,
         repo: false,
         dry_run: false,
+        dry_run_shell: false,
         quiet: false,
         silent: true,
         set: None,
@@ -38,6 +39,7 @@ fn shared_args() -> SharedComposeArgs {
         max_iterations: None,
         on_rate_limit: None,
         caller_arguments: Default::default(),
+        set_records: Default::default(),
         provider_tail: Default::default(),
         provider_tail_notices: Default::default(),
     }

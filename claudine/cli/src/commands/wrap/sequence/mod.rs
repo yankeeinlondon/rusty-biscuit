@@ -18,20 +18,23 @@ use tracing::info_span;
 use crate::commands::compose::SharedComposeArgs;
 use crate::log;
 
+mod container;
 mod iterate;
 mod jit;
 mod phase1c;
+mod providers;
 mod report;
 mod resolve;
 mod review;
 mod task_frames;
+mod task_prewarm;
 mod task_run;
 
 use jit::StepComposeContext;
 #[cfg(test)]
 use phase1c::find_first_unsupported;
 use phase1c::run_phase_1c_with_schema;
-use resolve::{apply_user_set_to_hints, dry_run_sequence_target, is_auto_selectable_state};
+use resolve::apply_user_set_to_hints;
 
 /// Exit code emitted when Ctrl+C is observed during a sequence run.
 /// Matches the standard `128 + SIGINT(2)` convention used by shells.
@@ -53,13 +56,18 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 
 /// Approve every shell command the preflight graph can reach.
 ///
-/// The graph's own commands arrive already resolved, so what the gate approves
-/// is byte-identical to what execution runs. Referenced prompt documents
-/// contribute their template `::shell` directives through the same pass, which
-/// is what makes "no approval prompts once the sequence starts" honest for work
-/// several hops from the sequence document. Schema verdicts are deferred during
-/// this discovery-only compose because prompt-task `params` bind just in time;
-/// the task's canonical prepare validates the resulting effective values.
+/// The graph's resolved-byte commands arrive already resolved, so what the
+/// gate approves is byte-identical to what runs; every other task command is
+/// approved by its typed shape. Referenced prompt documents contribute their
+/// `::shell` directives through the same pass, once per reference: each
+/// declares the sequence's late roots (and the task's late `with` keys) to
+/// Darkmatter's discovery, carries the task's approval-time `with` as data,
+/// and, for a later task, requires every command with a placeholder to be a
+/// template. That is what makes "no approval prompts once the sequence starts"
+/// honest for work several hops from the sequence document. Schema verdicts are
+/// deferred during this discovery-only compose because prompt-task `with`
+/// binds just in time; the task's canonical prepare validates the resulting
+/// effective values.
 #[allow(clippy::too_many_arguments, clippy::result_large_err)]
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
@@ -70,9 +78,13 @@ fn approve_preflight_graph(
     launch_area: Option<&std::path::Path>,
     invocation: &claudine::invocation_context::InvocationContext,
     graph_context: &darkmatter::markdown::compose::ComposeContext,
-) -> Result<HashSet<String>> {
-    if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
-        return Ok(HashSet::new());
+    closed: Option<&darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
+) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals> {
+    if graph.shell_commands.is_empty()
+        && graph.template_candidates.is_empty()
+        && graph.prompt_documents.is_empty()
+    {
+        return Ok(closed.cloned().unwrap_or_default());
     }
 
     let approval_options = super::apply_composition_shell_overrides(
@@ -85,6 +97,12 @@ fn approve_preflight_graph(
         shared.yolo,
     );
 
+    let mut approval_options = approval_options;
+    if let Some(approved) = closed {
+        approval_options.closed_approvals = Some(approved.clone());
+        approval_options.approval_handler = None;
+    }
+
     // The document the graph walk is composing, so a failure can name it.
     let composing = std::cell::RefCell::new(None::<std::path::PathBuf>);
     // This approval pass is one discovery run: every referenced document (and
@@ -92,10 +110,11 @@ fn approve_preflight_graph(
     // it. Extending through the invocation instead makes each extension a run
     // of its own, which re-observed the working tree once per prompt document.
     let approval_epoch = invocation.begin_document_epoch();
-    let compose_options = |path: &std::path::Path| -> Result<
+    let compose_options = |reference: &composition::PromptReference| -> Result<
         darkmatter::markdown::compose::ComposeRequest,
         claudine::composition::CompositionError,
     > {
+        let path = reference.path.as_path();
         composing.replace(Some(path.to_path_buf()));
         let source_context = invocation
             .derive_source(path)
@@ -119,7 +138,16 @@ fn approve_preflight_graph(
             // directives, and resolving a deferred `success:`/`failure:` read
             // -side file reference here would trip on a file that event has
             // not created yet.
-            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied());
+            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied())
+            .with_deferred_shell_roots(reference.deferred_shell_roots());
+        // The task's approval-time `with` reaches its document as data, as
+        // it does at the task's turn.
+        if !reference.with.is_empty() {
+            opts = composition::LayeredOverrides::data(Some(&serde_json::Value::Object(
+                reference.with.clone(),
+            )))
+            .apply_to(opts);
+        }
         if let Some(area) = launch_area {
             opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
         }
@@ -139,6 +167,42 @@ fn approve_preflight_graph(
                 }
             })?;
     Ok(result.approved_commands)
+}
+
+/// Submit every early lifecycle phrase the preflight graph reaches for TTS
+/// pre-warm, before step one launches.
+///
+/// Settings load only when pre-warm is live; submission never waits for
+/// synthesis.
+fn submit_preflight_prewarm(
+    graph: &composition::PreflightGraph,
+    source: &ResolvedCompositionSource,
+    user_set_overrides: Option<&serde_json::Value>,
+    repo_root: Option<&std::path::Path>,
+    invocation: &claudine::invocation_context::InvocationContext,
+    graph_context: &darkmatter::markdown::compose::ComposeContext,
+) {
+    let handle = invocation.prewarm();
+    if !handle.is_enabled() {
+        return;
+    }
+    // As lifecycle playback does, an unreadable configuration plays with the
+    // defaults.
+    let settings = claudine::dispatch::loader::load_claudine_config(None, repo_root)
+        .map(|config| claudine::dispatch::loader::bridge_tts_settings(&config))
+        .unwrap_or_default();
+    let caller_keys = user_set_overrides
+        .and_then(serde_json::Value::as_object)
+        .map(|setters| setters.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    claudine::composition::lifecycle::prewarm::submit_sequence_preflight(
+        handle,
+        &settings,
+        graph,
+        source,
+        caller_keys,
+        graph_context,
+    );
 }
 
 /// Whether static preflight failed because a prompt document's `::file`
@@ -194,6 +258,140 @@ pub(crate) fn execute_sequence(
     source_context: claudine::invocation_context::SourceContext,
     file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
+    use claudine::composition::lifecycle::{DefaultLifecycleEmitter, LifecycleRuntimeContext, LifecycleSignal, parse_lifecycle_config};
+    use claudine::composition::lifecycle::bindings::SequenceBinding;
+    use claudine::composition::lifecycle::executor::StackExecutionContext;
+    use claudine::composition::lifecycle::runtime::ContainerEventDecision;
+    use claudine::composition::lifecycle::context::LifecycleErrorInfo;
+    let runtime = Arc::new(composition::RuntimeState::new());
+    let seq = SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value();
+    runtime.set_sequence_binding(seq.clone());
+    let mut frontmatter: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter().map(|(k,v)| (k.clone(),v.clone())).collect();
+    if let Some(values) = user_set_overrides.as_ref().and_then(serde_json::Value::as_object) {
+        frontmatter.extend(values.clone());
+    }
+    let lifecycle = parse_lifecycle_config(&serde_json::Value::Object(frontmatter.clone()), &source.resolved_path)?;
+    let config = claudine::dispatch::loader::load_claudine_config(None, source_context.repository_root()).ok();
+    let settings = config.as_ref().map(claudine::dispatch::loader::bridge_tts_settings).unwrap_or_default();
+    let messaging = config.as_ref().map(claudine::dispatch::loader::bridge_messaging_settings).unwrap_or_else(|| claudine::messaging::RuntimeMessagingSettings { user: None, repo: None });
+    let term = log::terminal();
+    let emitter = DefaultLifecycleEmitter;
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let context = invocation.capture_launch_context(&requirements);
+    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(source_context.base_dir()).build();
+    let live = Mutex::new(frontmatter.clone());
+    let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,
+        source_path: &source.resolved_path, repo_root: source_context.repository_root(), launch_area: Some(file_resolution_context.request_cwd()), context: Some(&context) };
+    let stack = StackExecutionContext { seq: Some(&seq), signal: LifecycleSignal::Initialize, scope: None,
+        frontmatter: &frontmatter, live_frontmatter: Some(&live), runtime_state: Some(&runtime), err: None,
+        timing: None, current: Some(invocation.current_authority().memoized()), group: None, loop_values: None, base_dir: Some(source_context.base_dir()),
+        ctx_base_dir: Some(file_resolution_context.request_cwd()), prepared_context: Some(&context), file_resolution_context: &file_resolution_context,
+        effect_engine: &engine, shell_runner: invocation.shell_runner(), emitter: &emitter, term: &term,
+        source_path: &source.resolved_path, repo_root: source_context.repository_root(), messaging: &messaging, settings: &settings };
+    // A looping root allocates its loop before `initialize`, which already
+    // reads the first pass's values. A dry run previews one pass, with pass
+    // 1's values, and lists the root's `prep` targets without running them.
+    let frame = root_loop_frame(source, &frontmatter, shared, &invocation, &file_resolution_context, &context)?;
+    if shared.dry_run {
+        use claudine::composition::lifecycle::LifecycleEmitter as _;
+        if let (Some(frame), Some(value)) = (&frame, frontmatter.get("loop")) {
+            let location = claudine::composition::LoopLocation::document_root(&source.resolved_path);
+            if let Ok(block) = claudine::composition::parse_loop_block(value, claudine::composition::LoopOwner::Sequence, &location) {
+                emitter.emit_info(&claudine::composition::looping::dry_run_loop_note(&location.property, &block.config, frame.max()), &term);
+            }
+        }
+        for target in lifecycle.literal_prep_targets() {
+            log::message(&super::composition::dry_run::render_prep_target(&target, &term));
+        }
+    }
+    let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime), frame);
+    if !shared.dry_run {
+        match root.event(LifecycleSignal::Initialize, None)? {
+            ContainerEventDecision::Continue => {},
+            ContainerEventDecision::Skip => return Ok(0),
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
+            ContainerEventDecision::Finished { failed } => return Ok(if root.runner.is_cancelled() { 130 }
+                else if let Some(code) = (!failed).then(|| root.broken_exit_code()).flatten() { code }
+                else { i32::from(failed) }),
+            other => return Err(color_eyre::eyre::eyre!("invalid initialize transition: {other:?}")),
+        }
+    }
+    let mut startup_timings = startup_timings;
+    loop {
+        let outcome = execute_sequence_inner(source, plan.clone(), shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
+        if shared.dry_run { return outcome; }
+        let (signal, error) = match &outcome {
+            Ok(130) => {
+                root.runner.cancel(claudine::composition::lifecycle::cancellation::CancellationCause::Interrupt);
+                (LifecycleSignal::Cancelled, root.runner.primary_error().cloned())
+            },
+            Ok(0) => (LifecycleSignal::Success, None),
+            Ok(_) => (LifecycleSignal::Failure, root.child_error.take().or_else(|| Some(LifecycleErrorInfo::from_action_failure("sequence", "a sequence child failed")))),
+            Err(error) => (if root.started { LifecycleSignal::Failure } else { LifecycleSignal::Blocked }, Some(LifecycleErrorInfo::from_error_or_action("sequence", error.as_ref()))),
+        };
+        runtime.set_sequence_binding(seq.clone());
+        if root.pending.is_none() && matches!(signal, LifecycleSignal::Success | LifecycleSignal::Failure) {
+            root.record_pass(i32::from(signal == LifecycleSignal::Failure));
+        }
+        let decision = root.pending.take().map(Ok).unwrap_or_else(|| root.event(signal, error));
+        match decision? {
+            ContainerEventDecision::Retry { delay, overlay } => root.retry(delay, &overlay)?,
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
+            ContainerEventDecision::Finished { failed } => return if root.runner.is_cancelled() { Ok(130) } else if failed { outcome.and(Ok(1)) }
+                else { Ok(root.broken_exit_code().unwrap_or(0)) },
+            ContainerEventDecision::Skip => return Ok(0),
+            other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
+        }
+    }
+}
+
+/// The root sequence's loop frame, when its frontmatter declares `loop:`.
+///
+/// A templated `max` resolves once, here, against the root's values under
+/// the caller's setters; `--max-iterations`, then `CLAUDINE_MAX_ITERATIONS`,
+/// replaces the authored cap.
+#[allow(clippy::result_large_err)]
+fn root_loop_frame(
+    source: &ResolvedCompositionSource,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    shared: &SharedComposeArgs,
+    invocation: &claudine::invocation_context::InvocationContext,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    context: &darkmatter::markdown::compose::ComposeContext,
+) -> std::result::Result<Option<claudine::composition::looping::LoopFrame>, CompositionError> {
+    let Some(value) = frontmatter.get("loop") else { return Ok(None) };
+    let location = claudine::composition::LoopLocation::document_root(&source.resolved_path);
+    let mut config = claudine::composition::parse_loop_block(value, claudine::composition::LoopOwner::Sequence, &location)?.config;
+    let ambient = claudine::composition::LoopAmbient::new(1, true, false, serde_json::json!([]), 0);
+    let lookup = claudine::composition::LoopExpressionLookup::new(frontmatter, &ambient, file_resolution_context, &source.resolved_path)
+        .with_prepared_context(Some(context));
+    claudine::composition::resolve_templated_loop_max(&mut config, &lookup, &location)?;
+    let cap = match shared.max_iterations {
+        Some(cap) => Some(cap),
+        None => claudine::composition::resolve_max_iterations_from_env(invocation.document_environment(), &source.resolved_path)?,
+    };
+    claudine::composition::looping::LoopFrame::new(
+        &config, cap, claudine::composition::looping::LoopResultKind::Sequence, &source.resolved_path, &location.property,
+    )
+    .map(Some)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_sequence_inner(
+    source: &ResolvedCompositionSource,
+    plan: SequencePlan,
+    shared: &SharedComposeArgs,
+    user_set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
+    execution_options: SequenceExecutionOptions,
+    verbose: u8,
+    perf_enabled: bool,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    invocation: claudine::invocation_context::InvocationContext,
+    source_context: claudine::invocation_context::SourceContext,
+    file_resolution_context: biscuit_file::FileResolutionContext,
+    root: &mut container::RootRun<'_>,
+) -> Result<i32> {
     let silent = shared.silent;
 
     // Inline vs compose is decided once for the whole sequence by the
@@ -244,8 +442,8 @@ pub(crate) fn execute_sequence(
     if !silent {
         let term = log::terminal();
         let status = Status::from_prose(format!(
-            "<b>Sequence:</b> <yellow>{}</yellow> step(s), <i>fail_fast</i> is set to <blue>{}</blue>",
-            total_steps, effective_fail_fast
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s)",
+            total_steps
         ))
         .state(StatusState::Info);
         log::message(&status.render(&term));
@@ -275,16 +473,12 @@ pub(crate) fn execute_sequence(
         }
     };
 
-    // A budgeted run stops through the same flag when its budget runs out.
-    crate::budget::attach_stop_flag(&interrupted);
-
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
-    // ── Phase 1a: resolve target for every step (eager, pre-compose) ────
-    // Hints come from raw source frontmatter so {{env.AGENT}} resolves
-    // during per-step composition. User --set overrides on `agent`/`model`
-    // are honored if present at the top level of `--set`.
+    // The sequence document's own hints, with `--set` `agent`/`model` above
+    // them: what its body steps run on, and the outermost fallback for a
+    // task with no `agent` of its own (Phase 1a/1b below).
     let raw_hints =
         composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
     let raw_hints = apply_user_set_to_hints(raw_hints, user_set_overrides.as_ref())?;
@@ -307,9 +501,10 @@ pub(crate) fn execute_sequence(
     // resolved or a provider is launched: every referenced task, group,
     // catalog entry, and prompt document is loaded transitively; blocked
     // constructs are rejected; and every reachable shell command — including
-    // ones behind `when:` guards that read false today — is resolved to bytes
-    // and approved. A failure at this point is abort-all regardless of
-    // `fail_fast`, and `--dry-run` performs this identical walk.
+    // ones behind `when:` guards that read false today — is approved: the
+    // first task's as resolved bytes when every value exists now, every other
+    // command with a placeholder by its typed shape. A failure blocks the root
+    // container before any child starts; `--dry-run` performs the same walk.
     // One base launch context for the whole graph, captured before per-task
     // target selection: every launch-facing graph expression (`when:` guards,
     // command interpolation, task/group variable defaults) projects the
@@ -331,11 +526,20 @@ pub(crate) fn execute_sequence(
         graph_context.clone(),
         &prep_context.invocation,
         &prep_context.source_context,
+        user_set_overrides.as_ref(),
     )?;
     // A referenced prompt document composes only at its own turn, so its
     // single-pass lifecycle literals are checked here, before any approval
     // prompt or step can run.
     graph.validate_prompt_lifecycle_literals()?;
+    submit_preflight_prewarm(
+        &graph,
+        source,
+        user_set_overrides.as_ref(),
+        source_repo_root.as_deref(),
+        &prep_context.invocation,
+        &graph_context,
+    );
     let preflight_approved = approve_preflight_graph(
         &graph,
         source,
@@ -345,17 +549,27 @@ pub(crate) fn execute_sequence(
         Some(prep_context.launch_workspace.launch_cwd.as_path()),
         &prep_context.invocation,
         &graph_context,
+        root.approved.as_ref(),
     )?;
+    root.approved = Some(preflight_approved.clone());
+    // A retry's walk rereads referenced sources only to refuse commands the
+    // closed approval never saw; the task graph stays the first attempt's.
+    let graph = match &root.graph {
+        Some(first) => first.clone(),
+        None => {
+            root.graph = Some(graph.clone());
+            graph
+        }
+    };
+    if let Some(lifecycle) = &graph.root_lifecycle { root.runner.guard_mut().set_config(lifecycle.clone()); }
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
         ),
         None => claudine::model_catalog::ModelCatalogService::new(),
     };
-    // Phase 1 (2026-05-09-slow-prep): refresh is provider-scoped and only
-    // happens when a frontmatter `model` hint will actually be validated
-    // against the catalog. The previous unconditional `refresh_blocking()`
-    // shelled out to `opencode models` even for `--claude` runs.
+    // Selection refreshes no model catalog: prediction is read-only, and the
+    // shared resolver ranks against the cached and compiled listings.
     let favorite = prep_context
         .selection_config
         .as_ref()
@@ -369,210 +583,85 @@ pub(crate) fn execute_sequence(
     // out.md`) must still prompt as long as stderr is a terminal; gating on
     // stdout would wrongly abort that normal CLI pattern.
     let is_tty = std::io::stderr().is_terminal();
-    let provider_locked = explicit_provider.is_some();
-    let model_locked = cli_model.is_some();
 
-    // ── Phase 1a/1b: resolve a target (or leave a render state) per step ─
+    // ── Phase 1a/1b: decide every task's provider ─────────────────────────
     //
-    // Under --dry-run the legacy non-TTY resolver must NOT run: it either
-    // auto-picks a provider or returns a legacy selection error, both of
-    // which would stop the per-step dry-run seam in
-    // `execute_composition_request_inner` from rendering the unresolved /
-    // invalid / not-installed agent states the spec requires. Classify the
-    // shared frontmatter agent hint exactly like the direct compose
-    // --dry-run path instead: auto-selectable states get a concrete target
-    // so `{{env.AGENT}}` interpolates and the model resolves; every other
-    // state becomes `None` and the seam renders it from the installed
-    // snapshot. No picker fires and no agent-resolution failure aborts.
-    let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> = if shared
-        .dry_run
-    {
-        let target = dry_run_sequence_target(
-            explicit_provider,
-            &raw_hints,
+    // Each provider-launching task is classified from its own `agent`:
+    // predicted (resolved now; one that cannot resolve fails the run before
+    // any task starts, even behind a false `when:`), decided at launch, or
+    // missing a provider, which takes the nearest enclosing sequence
+    // document's `agent`. Only a task still missing one gates the run: a
+    // terminal reviews it, and anything else fails with
+    // `AgentResolutionFailed`. A graph of only shell and side-effect tasks
+    // has no site and needs no provider.
+    let caller_sets_agent = user_set_overrides
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|setters| setters.contains_key("agent"));
+    let sites = providers::collect_sites(&graph, &plan, &source.resolved_path, &raw_hints, caller_sets_agent);
+    let mut selections = providers::select(
+        sites,
+        &providers::SelectionInputs {
             snapshot,
+            catalog: &catalog,
             cli_model,
-            &catalog,
-            super::composition::ModelResolveMode::dry_run(silent),
-            prep_context.invocation.document_environment(),
-        );
-        (0..total_steps).map(|_| target.clone()).collect()
-    } else {
-        // Live path: every step shares the document-level `agent` hint, so
-        // classify it once and apply the same TTY-only gate the direct
-        // compose path enforces in `resolve_live_target_with_tty`
-        // (composition/mod.rs). The legacy non-TTY resolver is deliberately
-        // *not* used here: it ignores `agent_invalid` and silently falls back
-        // to the configured favorite/default, which would auto-run a provider
-        // for a state the dry-run table reports as prompting — the exact
-        // drift this feature exists to prevent. An explicit `--<provider>`
-        // flag still wins and bypasses the gate.
-        let shared_state = if explicit_provider.is_some() {
-            None
-        } else {
-            Some(claudine::composition::classify_agent_resolution(
-                &raw_hints, snapshot,
-            ))
+            explicit_provider,
+            favorite,
+            environment: prep_context.invocation.document_environment(),
+            silent,
+            dry_run: shared.dry_run,
+        },
+    )?;
+    if !shared.dry_run && !is_tty && let Some(unresolved) = selections.first_unresolved() {
+        let providers::TaskTarget::Unresolved { state, own_hint, .. } = &unresolved.target else {
+            unreachable!("first_unresolved returns an unresolved target");
         };
-
-        // No-TTY prompting-state gate: a prompting state (no agent, invalid
-        // scalar, not-installed scalar, multi-installed list, zero-installed
-        // list) in a no-TTY session aborts before any provider runs, emitting
-        // the same styled `AgentResolutionFailed` message the dry-run table
-        // predicts. Mirrors the non-TTY arm of `resolve_live_target_with_tty`.
-        if let Some(state) = &shared_state
-            && !is_auto_selectable_state(state)
-            && !is_tty
-        {
-            return Err(CompositionError::AgentResolutionFailed {
+        // A task naming an ambiguous list fails as that task; a task missing
+        // a provider fails as the sequence document that names none.
+        return Err(if *own_hint {
+            providers::launch_error(
+                unresolved,
+                claudine::composition::SequenceTaskProviderProblem::Unresolvable {
+                    state: state.clone(),
+                    installed: snapshot.runnable.clone(),
+                },
+            )
+        } else {
+            CompositionError::AgentResolutionFailed {
                 source_path: source.resolved_path.clone(),
-                state: state.clone(),
+                state: claudine::composition::classify_agent_resolution(&raw_hints, snapshot),
                 installed: snapshot.runnable.clone(),
             }
-            .into());
         }
-
-        let mut drafts: Vec<SequenceStepDraft> = Vec::with_capacity(total_steps);
-        let mut refreshed_providers: std::collections::BTreeSet<claudine::provider::Provider> =
-            std::collections::BTreeSet::new();
-
-        for step_index in 0..total_steps {
-            let step = &plan.steps[step_index];
-
-            // Picker plan scoped to the classified state. Reusing the compose
-            // path's `scoped_picker_plan_for_state` narrows
-            // `ListMultipleInstalled` to the installed-from-list providers;
-            // every other state offers all installed agents. Explicit-provider
-            // runs have no classified state and use the unscoped plan.
-            let provider_plan = match shared_state.as_ref() {
-                Some(state) => super::composition::scoped_picker_plan_for_state(
-                    state, &raw_hints, snapshot, favorite,
-                ),
-                None => claudine::composition::build_picker_plan_with_hints(
-                    &raw_hints, snapshot, favorite,
-                ),
-            }
-            .unwrap_or(claudine::composition::ProviderPickerPlan {
-                options: Vec::new(),
-                default_index: 0,
-            });
-
-            // Provisional provider for model probing and the review-screen
-            // default. Explicit flag wins; otherwise the classified state
-            // decides: auto-selectable states resolve directly, TTY prompting
-            // states fall back to the scoped plan's default (the user confirms
-            // or changes it on the review screen). No-TTY prompting states
-            // already aborted above.
-            let resolved_provider = if let Some(provider) = explicit_provider {
-                Some(provider)
-            } else {
-                match shared_state.as_ref() {
-                    Some(claudine::composition::AgentResolutionState::Selected { provider }) => {
-                        Some(*provider)
-                    }
-                    Some(claudine::composition::AgentResolutionState::ListOneInstalled {
-                        selected,
-                        ..
-                    }) => Some(*selected),
-                    _ => provider_plan
-                        .options
-                        .get(provider_plan.default_index)
-                        .map(|o| o.provider),
-                }
-            };
-
-            let (model, model_reason) = if let Some(provider) = resolved_provider {
-                // Refresh once per unique provider; every step shares the
-                // document-level hints, so one warning per provider as well.
-                let first_for_provider = refreshed_providers.insert(provider);
-                let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug(), step = step_index).entered();
-                super::composition::resolve_document_model(
-                    &catalog,
-                    provider,
-                    &raw_hints,
-                    cli_model,
-                    super::composition::ModelResolveMode {
-                        refresh: first_for_provider,
-                        warn: first_for_provider && !silent,
-                    },
-                    prep_context.invocation.document_environment(),
-                )
-            } else {
-                (
-                    None,
-                    claudine::composition::ModelResolutionReason::ProviderDefault,
-                )
-            };
-
-            drafts.push(SequenceStepDraft {
-                step_index,
-                step_name: step.name.clone(),
-                provider_plan,
-                proposed_model: model.clone(),
-                model_reason,
-                provider_locked,
-                model_locked,
-                resolved_provider,
-            });
+        .into());
+    }
+    if !shared.dry_run && review::needs_review(is_tty, &selections) {
+        // The state-specific pre-prompt message (a styled `Invalid Agent:`
+        // line, the zero-installed-list breakdown) shares its source of truth
+        // with the dry-run table cell and the no-TTY abort body.
+        let root_state = claudine::composition::classify_agent_resolution(&raw_hints, snapshot);
+        if let Some(markup) = super::composition::agent_prompt_message(&root_state, &source.resolved_path) {
+            log::message(&claudine::composition::agent_message_prose(markup).render(&log::terminal()));
         }
-
-        // ── Phase 1b: review (TTY) or resolve directly ────────────────────
-        //
-        // Auto-selectable states (`Selected` / `ListOneInstalled`) resolve to a
-        // provider without prompting and must bypass the review screen, exactly
-        // like direct compose's `resolve_live_target_with_tty` returns before
-        // the picker for those states. Only prompting states reach the review
-        // UI, and only on a TTY; an explicit `--<provider>` flag and the no-TTY
-        // case keep the deterministic baseline. Shell and side-effect steps get
-        // no row, so a sequence of only those never opens the table.
-        let provider_reason = if explicit_provider.is_some() {
-            claudine::composition::ProviderResolutionReason::ExplicitFlag
-        } else if matches!(
-            shared_state.as_ref(),
-            Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
-        ) {
-            claudine::composition::ProviderResolutionReason::FrontmatterList
-        } else {
-            claudine::composition::ProviderResolutionReason::FrontmatterSingle
-        };
-        let live_targets = review::live_targets(
-            review::needs_review(is_tty, shared_state.as_ref()),
-            &plan.steps,
-            drafts,
-            provider_reason,
-            |eligible| {
-                // The state-specific pre-prompt message (a styled `Invalid
-                // Agent:` line, the zero-installed-list breakdown) shares its
-                // source of truth with the dry-run table cell and the no-TTY
-                // abort body, so the three surfaces cannot drift. A plain
-                // picker state has no message.
-                if let Some(state) = shared_state.as_ref()
-                    && let Some(markup) =
-                        super::composition::agent_prompt_message(state, &source.resolved_path)
-                {
-                    log::message(
-                        &claudine::composition::agent_message_prose(markup).render(&log::terminal()),
-                    );
-                }
-                // The --dry-run arm above returns before this point, so the
-                // dry-run seam never invokes a picker.
-                super::selection_ui::review_sequence(eligible, &catalog)
-            },
-        )?;
-        let Some(live_targets) = live_targets else {
+        if !review::review_selections(&mut selections, |drafts| {
+            super::selection_ui::review_sequence(drafts, &catalog)
+        })? {
             return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
-        };
-        live_targets.into_iter().map(Some).collect()
-    };
+        }
+    }
+    if !silent && (shared.dry_run || verbose > 0) {
+        emit_provider_plan(&selections);
+    }
+    let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> =
+        (0..total_steps).map(|index| selections.root_target(index)).collect();
 
-    // The resolved-provider check for every step whose provider is already
-    // known, so a forwarded switch a step's provider types differently fails
-    // before step 1 runs. Steps decided at runtime are checked before their
-    // spawn. Sequence steps are never interactive.
+    // The resolved-provider check for every task whose provider is already
+    // known, so a forwarded switch a task's provider types differently fails
+    // before the first task runs. Tasks decided at launch are checked before
+    // their spawn. Sequence tasks are never interactive.
     if !shared.dry_run {
-        for (step, target) in plan.steps.iter().zip(&resolved_targets) {
-            if let Some(target) = target
-                && review::is_review_eligible(step)
+        for selection in selections.iter() {
+            if let Some(target) = selection.target.planned()
                 && let Some(profile) = super::profile::profile_for_provider(target.provider)
             {
                 super::provider_tail_report::SwitchContext::for_launch(profile, true)
@@ -601,6 +690,9 @@ pub(crate) fn execute_sequence(
     // No composition is *retained* here — execution re-composes each step at
     // its turn, and this context is what makes the two passes identical.
     let compose_ctx = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
         source_repo_root: source_repo_root.as_deref(),
         child_cwd: &prep_context.launch_workspace.child_cwd,
         launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
@@ -612,6 +704,10 @@ pub(crate) fn execute_sequence(
         invocation: &prep_context.invocation,
         // Each step opens its own run at its turn.
         run_evidence: None,
+        deferred_shell_roots: Default::default(),
+        loop_values: None,
+        validation_probe: false,
+        document_shell_values: None,
     };
 
     let Some(validated) = run_phase_1c_with_schema(
@@ -654,10 +750,11 @@ pub(crate) fn execute_sequence(
     // ── Phase 2: compose and execute each step, at its turn ────────────
     drop(_preflight_span);
 
-    let run_context = iterate::SequenceRunContext {
+    let mut run_context = iterate::SequenceRunContext {
         plan: &plan,
         graph: &graph,
         resolved_targets: &resolved_targets,
+        task_selections: &selections,
         selection: resolve::StepSelection {
             raw_hints: &raw_hints,
             catalog: &catalog,
@@ -674,21 +771,99 @@ pub(crate) fn execute_sequence(
         silent,
         verbose,
         perf_enabled,
+        loop_values: None,
     };
-    let (summary, interrupt_observed) =
-        iterate::run_sequence_steps(&run_context, &mut perf_accumulator)?;
+    // One pass of the root runs its steps. A looping root settles each
+    // successful pass's terminal event, `finalize`, and gate here and enters
+    // the next; the last pass, and any pass that did not succeed, settles in
+    // the caller as a root without a loop does.
+    loop {
+        run_context.loop_values = root.loop_values();
+        if !shared.dry_run {
+            root.enter_pass();
+            root.started = true;
+            let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
+            if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
+                root.pending = Some(decision);
+                return Ok(1);
+            }
+        }
+        let (summary, interrupt_observed) =
+            iterate::run_sequence_steps(&run_context, &mut perf_accumulator, &root.runtime)?;
 
-    if let Some(acc) = perf_accumulator.as_mut() {
-        acc.set_invocation_work(&prep_context.invocation.work_snapshot());
+        if let Some(step) = summary.steps.iter().find(|step| !step.success) {
+            let mut error = claudine::composition::lifecycle::context::LifecycleErrorInfo::from_action_failure(
+                "sequence", step.error.clone().unwrap_or_else(|| "a sequence child failed".into()));
+            error.snapshot = step.error_snapshot.clone();
+            root.child_error = Some(error);
+        }
+        if let Some(acc) = perf_accumulator.as_mut() {
+            acc.set_invocation_work(&prep_context.invocation.work_snapshot());
+        }
+
+        let looping = !shared.dry_run && root.frame.is_some();
+        let code = report::emit_sequence_summary(
+            &summary,
+            if looping { None } else { perf_accumulator.take() },
+            &interrupted,
+            interrupt_observed,
+            silent,
+            shared.dry_run,
+        )?;
+        if !looping || code != 0 {
+            emit_perf(perf_accumulator.take());
+            return Ok(code);
+        }
+        root.runtime.set_sequence_binding(
+            claudine::composition::lifecycle::bindings::SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value(),
+        );
+        root.record_pass(0);
+        let settled = root.settle_pass()?;
+        if !matches!(settled, claudine::composition::lifecycle::runtime::ContainerEventDecision::Finished { failed: false })
+            || root.runner.is_cancelled()
+        {
+            root.pending = Some(settled);
+            emit_perf(perf_accumulator.take());
+            return Ok(code);
+        }
+        match root.finish_pass() {
+            Ok(claudine::composition::looping::ContainerPassEnd::Continue) => {}
+            Ok(claudine::composition::looping::ContainerPassEnd::Complete | claudine::composition::looping::ContainerPassEnd::Broken(_)) => {
+                root.pending = Some(claudine::composition::lifecycle::runtime::ContainerEventDecision::Finished { failed: false });
+                emit_perf(perf_accumulator.take());
+                return Ok(0);
+            }
+            // The loop owner failed after the pass settled: nothing re-enters
+            // the pass's events, and the root fails with it.
+            Err(error) => {
+                root.pending = Some(claudine::composition::lifecycle::runtime::ContainerEventDecision::Finished { failed: true });
+                emit_perf(perf_accumulator.take());
+                return Err(error.into());
+            }
+        }
     }
+}
 
-    report::emit_sequence_summary(
-        &summary,
-        perf_accumulator,
-        &interrupted,
-        interrupt_observed,
-        silent,
-    )
+/// List each provider-launching task with the provider it is predicted to
+/// run, or how its provider is decided: always under `--dry-run`, and under
+/// `--verbose` for a live run.
+fn emit_provider_plan(selections: &providers::TaskSelections) {
+    let rows = providers::plan_rows(selections);
+    if rows.is_empty() {
+        return;
+    }
+    let term = log::terminal();
+    log::message(&Status::from_prose("<b>Providers:</b>".to_string()).state(StatusState::Info).render(&term));
+    for row in rows {
+        log::message(&Status::from_prose(row).state(StatusState::Info).render(&term));
+    }
+}
+
+/// Emit a looping root's `--perf` report once, after its last pass.
+fn emit_perf(accumulator: Option<crate::perf::SequencePerfAccumulator>) {
+    if let Some(accumulator) = accumulator {
+        crate::perf::emit_report(&accumulator.into_report());
+    }
 }
 
 #[cfg(test)]

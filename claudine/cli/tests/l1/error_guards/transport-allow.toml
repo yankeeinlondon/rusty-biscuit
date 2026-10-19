@@ -166,10 +166,18 @@ biscuit-contract's InferenceError is a ratified cross-package contract with a St
 [[allow]]
 shape = "format_context"
 file = "lib/src/composition/looping/config.rs"
-symbol = "resolve_loop_config"
+symbol = "parse_on_rate_limit"
 tag = "retained"
 reason = """
-The value is already a `String`: `OnRateLimit::parse` returns `Result<Self, String>` and constructs its message inline from an unrecognized literal. No typed error is ever created, so none is dropped. The other hits in this function interpolate `json_type_name(...)`, a `&'static str` type label."""
+The value is already a `String`: `OnRateLimit::parse` returns `Result<Self, String>` and constructs its message inline from an unrecognized literal. No typed error is ever created, so none is dropped. The other hit in this function interpolates `json_type_name(...)`, a `&'static str` type label."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/looping/dsl.rs"
+symbol = "parse_actions"
+tag = "retained"
+reason = """
+`message` is the action grammar's own prose (`ActionError = String`), built inline by the DSL parser from the authored text; no typed error exists below it. The format prefixes the authored key path so the located `LoopInvalid` names the element."""
 
 [[allow]]
 shape = "format_context"
@@ -298,11 +306,3 @@ symbol = "QwenSemanticStreamParser::feed_line"
 tag = "retained"
 reason = """
 Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
-
-[[allow]]
-shape = "to_string_collapse"
-file = "cli/src/budget/mod.rs"
-symbol = "run_with_ledger"
-tag = "retained"
-reason = """
-The typed error is not collapsed: `run_with_ledger` returns the sequence's `Result` unchanged (`result?`) after closing the ledger. The string copy goes only into the budget ledger's persisted `stop_reason`, a JSON text field other tools read, which is a final record rather than a transport."""

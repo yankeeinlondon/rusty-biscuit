@@ -61,6 +61,7 @@ fn lifecycle_file_functions_reuse_all_request_resolution_inputs() {
     let harness = Harness::default();
     let fm = Map::new();
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &fm,
@@ -134,6 +135,7 @@ fn ctx_capture_follows_ctx_base_dir_not_base_dir() {
     let source_path = ctx_root.join("prompt.md");
 
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &fm,
@@ -230,6 +232,7 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
     let fm = Map::new();
 
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: &fm,
@@ -306,6 +309,7 @@ fn file_exists_resolves_against_base_dir_after_chdir() {
     let source_path = prompt_dir.path().join("prompt.md");
 
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: &fm,
@@ -387,6 +391,7 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
     let fm = map(json!({ "spec": "plan.md" }));
     let source_path = prompt_dir.path().join("prompt.md");
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: &fm,
@@ -458,6 +463,7 @@ fn frontmatter_reads_resolve_against_base_dir() {
     let source_path = prompt_dir.path().join("prompt.md");
 
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: &fm,
@@ -530,6 +536,7 @@ fn regression_path_only_under_launch_area_does_not_resolve() {
     let source_path = prompt_dir.path().join("prompt.md");
 
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: &fm,
@@ -602,6 +609,7 @@ fn source_local_candidate_ignores_same_named_launch_file() {
     let source_path = prompt_dir.path().join("prompt.md");
 
     let context = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: &fm,

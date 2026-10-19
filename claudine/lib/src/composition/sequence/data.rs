@@ -1,6 +1,7 @@
 //! Data-file loading, offset traversal, and operator application.
 //!
-//! Every supported sequence data format (YAML, JSON, JSON5, JSONL, NDJSON) is
+//! Every supported sequence source (Markdown frontmatter, YAML, JSON, JSON5,
+//! JSONL, NDJSON) is
 //! loaded into one common [`serde_json::Value`] model so the offset and
 //! operator layers above never branch on file format. The line-delimited
 //! formats are the exception the model has to carry: their root is always the
@@ -82,8 +83,22 @@ pub struct LoadedDocument {
 /// ## Errors
 ///
 /// Returns [`CompositionError::SequenceExternalLoad`] carrying the typed
-/// lower-layer parse cause.
+/// lower-layer parse cause, including [`SequenceLoadCause::DuplicateKey`] for
+/// a JSON, JSON5, JSONL, or NDJSON object that repeats a key (YAML and
+/// frontmatter reject one in their own parser).
 pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
+    if path.extension().and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
+    {
+        let markdown = darkmatter::markdown::Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
+            path: path.to_path_buf(),
+            source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
+        })?;
+        return Ok(LoadedDocument {
+            value: super::super::prepare::frontmatter_to_value(markdown.frontmatter()),
+            orders: markdown.frontmatter().mapping_orders().clone(),
+        });
+    }
     let format = SourceFormat::for_path(path);
     let context = || biscuit_file::to_portable_string(path);
 
@@ -111,12 +126,16 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
                     source: SequenceLoadCause::Json5(e),
                 }
             })?;
-            let orders = json5.deserialize_raw::<MappingOrders>().map_err(|e| {
-                CompositionError::SequenceExternalLoad {
-                    context: context(),
-                    source: SequenceLoadCause::Json5(e),
-                }
-            })?;
+            let json5_failure = |e| CompositionError::SequenceExternalLoad {
+                context: context(),
+                source: SequenceLoadCause::Json5(e),
+            };
+            // `serde_json::Value` keeps the last of two equal keys, so the
+            // raw text is checked before that conversion is trusted.
+            if let DuplicateScan(Some(duplicate)) = json5.deserialize_raw::<DuplicateScan>().map_err(json5_failure)? {
+                return Err(duplicate.into_error(context(), None));
+            }
+            let orders = json5.deserialize_raw::<MappingOrders>().map_err(json5_failure)?;
             Ok(LoadedDocument {
                 value: json5.as_json_value().clone(),
                 orders,
@@ -143,18 +162,112 @@ fn load_line_delimited(path: &Path) -> Result<Value, CompositionError> {
         if line.is_empty() {
             continue;
         }
-        let value: Value = serde_json::from_str(line).map_err(|e| {
-            CompositionError::SequenceExternalLoad {
-                context: biscuit_file::to_portable_string(path),
-                source: SequenceLoadCause::JsonLine {
-                    line: offset + 1,
-                    source: e,
-                },
-            }
-        })?;
+        let line_failure = |e| CompositionError::SequenceExternalLoad {
+            context: biscuit_file::to_portable_string(path),
+            source: SequenceLoadCause::JsonLine {
+                line: offset + 1,
+                source: e,
+            },
+        };
+        if let DuplicateScan(Some(duplicate)) = serde_json::from_str::<DuplicateScan>(line).map_err(line_failure)? {
+            return Err(duplicate.into_error(biscuit_file::to_portable_string(path), Some(offset + 1)));
+        }
+        let value: Value = serde_json::from_str(line).map_err(line_failure)?;
         items.push(value);
     }
     Ok(Value::Array(items))
+}
+
+/// The first key a JSON-family document repeats within one object, found by
+/// deserializing the raw text, since the `serde_json::Value` model has
+/// already kept only the last value.
+struct DuplicateScan(Option<DuplicateKey>);
+
+/// A repeated key and the path of the object that holds it.
+struct DuplicateKey {
+    path: String,
+    key: String,
+}
+
+impl DuplicateKey {
+    fn into_error(self, context: String, line: Option<usize>) -> CompositionError {
+        CompositionError::SequenceExternalLoad {
+            context,
+            source: SequenceLoadCause::DuplicateKey {
+                key: self.key,
+                path: if self.path.is_empty() { "<root>".to_string() } else { self.path },
+                line,
+            },
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for DuplicateScan {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::DeserializeSeed::deserialize(ScanAt(String::new()), deserializer).map(DuplicateScan)
+    }
+}
+
+/// Scans the value at one path; the path names nested objects in errors.
+struct ScanAt(String);
+
+impl ScanAt {
+    fn child(&self, segment: &str) -> Self {
+        if self.0.is_empty() { Self(segment.to_string()) } else { Self(format!("{}.{segment}", self.0)) }
+    }
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for ScanAt {
+    type Value = Option<DuplicateKey>;
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for ScanAt {
+    type Value = Option<DuplicateKey>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_i128<E>(self, _: i128) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_u128<E>(self, _: u128) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_unit<E>(self) -> Result<Self::Value, E> { Ok(None) }
+    fn visit_none<E>(self) -> Result<Self::Value, E> { Ok(None) }
+
+    fn visit_some<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut first = None;
+        let mut index = 0usize;
+        while let Some(found) = seq.next_element_seed(Self(format!("{}[{index}]", self.0)))? {
+            first = first.or(found);
+            index += 1;
+        }
+        Ok(first)
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut seen = std::collections::HashSet::new();
+        let mut first = None;
+        while let Some(key) = map.next_key::<String>()? {
+            let child = self.child(&key);
+            if !seen.insert(key.clone()) && first.is_none() {
+                first = Some(DuplicateKey { path: self.0.clone(), key });
+            }
+            first = first.or(map.next_value_seed(child)?);
+        }
+        Ok(first)
+    }
 }
 
 /// Walk a dot-notation offset path into a loaded document.

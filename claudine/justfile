@@ -67,6 +67,10 @@ sanity:
 test-cli *args="": _ensure-md
     @just _test claudine-cli --features test-fixtures {{ args }}
 
+# Opt-in checks of live internal prompts; excluded from ordinary L1 and CI.
+test-prompts *args="": _ensure-md
+    @just _test claudine-cli --features prompt-tests,test-fixtures --test prompts {{ args }}
+
 # test just the Claudine Library
 test-library *args="":
     @just _test claudine {{ args }}

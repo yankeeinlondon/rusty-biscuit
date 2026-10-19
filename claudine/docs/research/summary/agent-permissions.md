@@ -18,10 +18,10 @@ prompt: |-
 
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 
-  ::block when="state.name == 'draft'"
+  ::block when="seq.name == 'draft'"
   - Iterate over the first three research documents to develop a point of view on how to write this document and then produce an initial draft of the document
   ::end-block
-  ::block when="state.name == 'iterate'"
+  ::block when="seq.name == 'iterate'"
 
   - Note: the initial draft has already been created — it is the body of `@claudine/docs/research/summary/agent-permissions.md` (everything below the frontmatter); read it from there
   - Act as an orchestrator and iterate over each remaining provider's research document:
@@ -29,7 +29,7 @@ prompt: |-
   - Once every remaining provider has been incorporated, your final response is the fully updated draft
   ::end-block
 
-  ::block when="state.name == 'finalize'"
+  ::block when="seq.name == 'finalize'"
 
   The document has now gone through several rounds of improvement and your task is just to make sure the document is consistent in tone and detail and that nothing looks incorrect or incomplete. The current draft is the body of `@claudine/docs/research/summary/agent-permissions.md` (everything below the frontmatter); read it from there, make any adjustments, and your final response will be considered the finalized summary document.
   ::end-block

@@ -19,4 +19,4 @@ pub(crate) const RETIRED_LOOP_NAMES: [(&str, &str); 5] = [
 pub(crate) const EXPRESSION_RESERVED_ROOTS: &[&str] = &["true", "false", "fm", "env"];
 
 /// Frontmatter properties that loop set actions cannot mutate.
-pub(crate) const SET_ACTION_BLOCKLIST: &[&str] = &["loop", "replace"];
+pub(crate) const SET_ACTION_BLOCKLIST: &[&str] = &["seq", "group", "loop", "replace"];

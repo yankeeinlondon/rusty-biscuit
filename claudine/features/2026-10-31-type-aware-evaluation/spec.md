@@ -33,6 +33,7 @@ human_review: false
 pipeline_step: 21
 formerly: 2026-09-16-expression-type-system
 depends-on:
+    - 2026-10-16-type-narrowing
     - 2026-10-28-schema-enhancements
 related:
     - 2026-10-16-core-schema-types
@@ -65,7 +66,7 @@ Phase B's rules are inputs to this spec and are not restated: the argument-type 
 
 ### 1. Phase C — the variable-type projection becomes complete
 
-Phase B built one Darkmatter library function that maps each top-level variable to a design-time type, covering only single-shape SimplifiedSchema declarations and typing everything else `unknown`. Phase C **extends that same function**; it never builds a second projection, and no consumer (DMLS, Claudine, the CLI) walks schema syntax itself.
+Phase B built one Darkmatter library function that maps each top-level variable to a design-time type, covering only single-shape SimplifiedSchema declarations and typing everything else `unknown`. That function is the declared-type layer of `TypeScope` (`2026-10-16-type-narrowing`). Phase C **extends that same function**; it never builds a second projection, and no consumer (DMLS, Claudine, the CLI) walks schema syntax itself.
 
 | Source of a variable | Phase B | After this spec |
 |---|---|---|
@@ -100,26 +101,13 @@ With this, worked-example rows f and i of Phase B become exact: `min(length(coun
 
 ### 2. Phase D — flow-sensitive narrowing
 
-Inside code that a guard protects, a variable's design-time type is refined. Narrowing is static only: it never rewrites a stored value, proves that a file exists, or grants any access.
+_Amended 2026-10-16._ Flow-sensitive narrowing is delivered by `2026-10-16-type-narrowing`, before this spec, as `TypeScope`: one Darkmatter scope that every consumer reads, with guards narrowing both sides, equality narrowing to literals of every scalar type, and one subtype relation. Its guard table and rules (stable subjects, short-circuit flow, limited truthiness evidence, predicates observing original values, conservative exclusions, impossible branches remaining checked, and the lifetime of a fact) are normative there and are not restated here. Phase B's rows g and h are exact from that fix onward.
 
-| Guard | Where it narrows | Effect |
-|---|---|---|
-| Truthiness of a bare variable or path: `x ? a : b`, `::block when="x"`, `x && f(x)` | the true branch, the block body, the right operand | `null` is removed from `x`'s type |
-| `!x ? a : b` | the false branch | as above |
-| A predicate call with a registered **true-implies** fact (`is_file_type(x)`; a host predicate declaring the same fact) | the true side only | `x` is suitable for the fact's type (for example a `file` parameter) |
-| A predicate call with a registered **true-iff** fact (`is_number`, `is_string`, `is_boolean`, `is_null`, `is_array`, `is_object`) | both sides | the true side narrows `x` to the fact's type; the false side removes that type from `x`'s union |
+This spec extends `TypeScope`; it never builds a second narrowing engine:
 
-Facts are the Rust-registered narrowing facts Phase B records; a boolean result alone never implies a fact. Narrowing composes through `&&`, nested ternaries, and nested conditional blocks.
-
-- **Stable subjects.** Facts apply only to a resolved variable or a path with constant members/indices. Equivalent bare and `fm` paths share a fact only when both resolve to the same document binding. `is_number(length(x))` proves nothing about `x`; dynamic index expressions and repeated function calls are not stable subjects. Parentheses preserve facts, and `!` swaps the true and false facts.
-- **Short-circuit flow.** The right side of `a && b` receives facts from `a` being true; the right side of `a || b` receives facts from `a` being false. A compound guard carries only facts valid for every route reaching its branch: `is_number(x) || is_string(x)` can prove `number | string`, but `is_number(x) || ready` cannot prove a type for `x`. After a guarded region, restore the incoming type except for facts common to every exit.
-- **Truthiness is limited evidence.** A true bare-variable guard removes `null`; a false guard does not prove `null`, because zero, false, and empty values can also be falsy. Removing null from `unknown` is an internal non-null fact, not a new schema type, and still does not establish compatibility with a concrete parameter. Preserve the evaluator's existing truthiness and value-returning `||` behavior.
-- **Predicates observe original values.** Registered facts identify the parameter position and the runtime value family they test. They must hold for the original argument before any conversion; a predicate that converts arbitrary text to a number cannot claim that its input was a number. Narrowing preserves compatible refinements and constraints, but a family predicate does not invent item types, object members, or file existence.
-- **Conservative exclusions.** A false true-iff result removes matching alternatives from a finite declared union. When the remaining possibilities cannot be represented precisely (for example `unknown` excluding strings), retain `unknown` rather than inventing a concrete type. A true predicate can still establish its tested family from `unknown`.
-- **Impossible branches remain checked.** If a guard contradicts the incoming type, keep checking calls in that branch using the incoming type for that contradictory subject. There is no empty type that makes every call acceptable. With `flag: boolean(required)`, `is_number(flag) ? min(flag, 5) : 0` still rejects the document, as does a false conditional block containing `min(flag, 5)`. This preserves Phase B's rule that a call known to be invalid is an error even in code that will not run.
-- **Lifetime of a fact.** Facts end at the guarded region and never persist across lifecycle events, loop iterations, retries, or proxy handoffs. A `set` write invalidates facts for the destination and overlapping ancestor/descendant paths before checking subsequent actions. A write whose destination cannot be determined statically discards document-property facts. Re-entering a guard computes its facts again; runtime and editor analysis must not trust a stale fact after mutation.
-
-Phase B's rows g and h become exact: `is_number(foo) ? min(foo, 5) : 0` and `is_string(foo) ? 0 : min(foo, 5)` (with `foo: string | number`) are category 1.
+- **New facts register into the scope's fact registry.** `is_file_type` (section 3) registers a true-implies fact, and host predicates register theirs through section 5's contract, into the same registry built-ins use.
+- **The projection extensions of section 1 are the scope's declared-type layer.** A guard narrows whatever type section 1 projects, including nested paths, host globals, and call return types.
+- **Expression types read the scope.** The `c ? a : b` and `x || y` rows of section 1 compute each operand's type from the scope as narrowed for that operand.
 
 Runtime and editor analysis agree on every narrowing: the same library code computes it for composition and for DMLS.
 
@@ -231,7 +219,7 @@ Every command that exposes an affected control (`md compose`, explicit `md rende
 - **Access and disabled features.** `host=HOST` is an allowance only; `--deny host=HOST` is a usage error rather than a new revocation API. `--deny all` does not revoke explicit host consent. A disabled feature produces no diagnostics from work it did not perform; selecting a denial does not re-enable it. Its skipped checks must not be described as passing validation.
 - **Blocking.** `--deny all` makes every reported warning and error blocking except recoveries explicitly selected by a more specific allowance. Informational notices never block; diagnostics that are off stay off. Denial never executes a branch that would not run, and an allowance never makes an invalid runtime call valid.
 - **Stopping.** When a blocking diagnostic becomes known, the command stops before further work or effects, using passive analysis before effectful steps where it can establish the problem. It does not reorder the pipeline or roll back effects already done. These rules do not override a host's workflow decisions.
-- **Available analysis inputs.** Passive checking uses the resolved declarations and registered binding view available at that stage. It does not execute an expression, shell, or lifecycle action to discover a type. Once preparation supplies the declarations, check all authored calls before expression evaluation; for a newly reached transcluded document, check before evaluating that child. Do not promise rejection before earlier pipeline stages required to obtain the analysis inputs. Later writes invalidate facts as described in section 2.
+- **Available analysis inputs.** Passive checking uses the resolved declarations and registered binding view available at that stage. It does not execute an expression, shell, or lifecycle action to discover a type. Once preparation supplies the declarations, check all authored calls before expression evaluation; for a newly reached transcluded document, check before evaluating that child. Do not promise rejection before earlier pipeline stages required to obtain the analysis inputs. Later writes invalidate facts as `2026-10-16-type-narrowing` §8 describes.
 - **Output on failure.** A failed command never writes a composed document to standard output.
 - **Removed spellings.** The old flags are removed in the same change with no aliases; using one is a usage error. Repository scripts, examples, docs, tests, and shell completions are updated together. The `darkmatter-cli` package owns parsing and migration; the library keeps owning composition behavior and diagnostic meaning.
 
@@ -298,9 +286,11 @@ All criteria are L1 tests run with nextest through `just test` in `darkmatter/` 
 
 **Phase D — narrowing**
 
+Criteria 9, 10, and 12 are first met by `2026-10-16-type-narrowing`; here they must still hold once section 1's projection and section 5's host facts extend `TypeScope`. A review confirms no narrowing logic exists outside `TypeScope`.
+
 9. `is_number(foo) ? min(foo, 5) : 0` and `is_string(foo) ? 0 : min(foo, 5)`, with `foo: string | number`, make the guarded `min` call category 1 through the compatibility API, in DMLS, and at composition.
 10. With `x: number` (optional), `x ? min(x, 5) : 0`, `x && min(x, 5)`, and a `::block when="x"` body calling `min(x, 5)` are category 1 for the guarded call; the same call unguarded is category 2.
-11. `is_string(foo) ? 0 : min(foo, 5)` narrows only through a true-iff fact: a test-registered predicate with a true-implies fact does not narrow its false branch.
+11. `is_string(foo) ? 0 : min(foo, 5)` narrows only through a true-iff fact: a test-registered predicate with a true-implies fact does not narrow its false branch. `is_file_type` and a test-registered host predicate register their facts into `TypeScope`'s fact registry, and their narrowing appears identically in composition, DMLS, and the shell template hole type.
 12. Narrowing never mutates a stored value: compare the state immediately before and after analysis/evaluation in fixtures with no authored writes, separately from existing schema normalization. Authored source bytes remain unchanged. Composition may still materialize eligible optional properties and execute authored `set` actions; those changes must not be attributed to narrowing.
 
 **File predicates and guarded calls**

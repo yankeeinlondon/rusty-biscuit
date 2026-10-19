@@ -34,6 +34,7 @@ pipeline_step: 17
 formerly: 2026-09-22-lifecycle-events
 depends-on:
     - 2026-10-26-task-inputs-and-providers
+    - 2026-10-16-type-narrowing
 related:
     - 2026-10-18-fm-namespace
     - 2026-10-20-lifecycle-grammar
@@ -254,6 +255,11 @@ Darkmatter's preflight. A failed host check is a preflight failure and fires
 `failed` (`blocked` in Claudine). The approval set stays condition-blind, and
 `execution_set ⊆ approval_set` still holds. The shell audit now also covers
 lifecycle shell commands in documents run by `md compose`.
+
+The audit reads each placeholder's presence and template-hole type from the
+`TypeScope` at its site (`2026-10-16-type-narrowing`). A value missing at
+preflight but proven present by an enclosing `when:` is approved as a typed
+template and checked when its branch runs, under both hosts.
 
 Claudine's sequence-wide, front-loaded approval inventory stays a Claudine
 feature, but it runs Darkmatter's preflight collection for each task document
@@ -653,6 +659,7 @@ provider catalog, or rendezvous.
 | Catch protocol and control admission (`runtime.rs`, `control.rs`) | Loop engine (driving the `loop` iteration gate) and sequence/group coordination |
 | Event registry, host names, positions, roles; Darkmatter's five events | Claudine's registrations (`success`, `failure`, `loop`), its names (`start`, `blocked`), its host checks, its host globals catalog |
 | The binding catalog's generic part (`err`, `timing` availability per event) | Claudine's `seq`/`loop`/`group` availability rules |
+| The lifecycle walk's `TypeScope` extension (`when:` → `then:`/`else:`), already Darkmatter's `TypeScope::assume` | The sequence task `when:` extension, through the same `TypeScope::assume` |
 | The `md` host (`md compose`) | Claudine's provider hooks and their separate 16-event model (untouched) |
 
 Temporary re-exports from Claudine are acceptable during the move. Two
@@ -976,6 +983,10 @@ planner still schedules the required cells for packages whose code changes.
     An ignored action's operand and payload cause no effects, while malformed
     supported actions and forbidden supported actions still fail. Test the
     schema fallback with those same cases.
+23. **Narrowing survives the move.** The `2026-10-16-type-narrowing`
+    conformance matrix passes without its assertions being edited, and a
+    guarded lifecycle shell under `md compose` behaves as it does under
+    Claudine.
 
 ## Open questions
 
