@@ -558,6 +558,44 @@ mod tests {
     use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
 
     #[test]
+    fn png_at_width_ignores_scale_and_keeps_aspect_ratio() {
+        let graph = GraphExpression::parse("north -> south", GraphInputSyntax::Auto)
+            .unwrap()
+            .with_scale(3);
+        let svg_artifact = graph
+            .diagram
+            .render(&RenderRequest {
+                format: OutputFormat::Svg,
+                scale: 1,
+                target_width: None,
+                transparent_background: graph.transparent_background,
+            })
+            .unwrap();
+        let svg = std::fs::read_to_string(&svg_artifact.path).unwrap();
+        let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).unwrap();
+        let (svg_w, svg_h) = (tree.size().width(), tree.size().height());
+
+        // A zero scale clamps to one: the scale path yields the native size.
+        let unscaled = GraphExpression::parse("north -> south", GraphInputSyntax::Auto)
+            .unwrap()
+            .with_scale(0);
+        let (path, _) = unscaled.render_to_cached_png().unwrap();
+        let img = image::open(&path).expect("rendered PNG should decode");
+        assert_eq!(img.width(), svg_w.round() as u32);
+        assert_eq!(img.height(), svg_h.round() as u32);
+
+        let (path, _) = graph.render_to_cached_png_at_width(300).unwrap();
+        let img = image::open(&path).expect("rendered PNG should decode");
+        assert_eq!(img.width(), 300, "target width must win over the graph's scale");
+        let exact_h = 300.0 * svg_h / svg_w;
+        assert!(
+            (img.height() as f32 - exact_h).abs() <= 1.0,
+            "height {} should be within one pixel of {exact_h}",
+            img.height()
+        );
+    }
+
+    #[test]
     fn test_parse() {
         let graph = GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto);
         assert!(graph.is_ok());

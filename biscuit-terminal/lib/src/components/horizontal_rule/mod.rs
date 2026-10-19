@@ -1728,6 +1728,22 @@ mod tests {
 
     #[test]
     #[cfg(feature = "image")]
+    fn test_rasterize_rule_svg_draws_an_opaque_line_on_transparent_ground() {
+        let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("red");
+        let svg = hr.render_image_svg(160, 16, "white");
+        let png = rasterize_svg_to_png(svg.as_bytes()).expect("rule SVG should rasterize");
+        let img = image::load_from_memory(&png)
+            .expect("rule PNG should decode")
+            .to_rgba8();
+        assert_eq!((img.width(), img.height()), (160, 16));
+        // The first dash starts at x=0 on the center line; the top row is
+        // outside the stroke and must stay transparent.
+        assert_eq!(img.get_pixel(4, 8).0, [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(4, 0).0[3], 0);
+    }
+
+    #[test]
+    #[cfg(feature = "image")]
     fn test_rasterize_svg_to_png_fails_on_garbage() {
         let result = rasterize_svg_to_png(b"<not-an-svg>");
         assert!(

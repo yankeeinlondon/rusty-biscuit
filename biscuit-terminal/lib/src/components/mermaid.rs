@@ -737,6 +737,34 @@ impl From<&str> for MermaidDiagram {
 mod tests {
     use super::*;
 
+    fn png_size(path: &std::path::Path) -> (u32, u32) {
+        let img = image::open(path).expect("rendered PNG should decode");
+        (img.width(), img.height())
+    }
+
+    #[test]
+    fn renderer_png_at_width_ignores_scale_and_keeps_aspect_ratio() {
+        let renderer = MermaidRenderer::new("flowchart LR\n    Left --> Right").with_scale(3);
+        let natural = renderer.natural_size().expect("natural size should measure");
+        let (path, _) = renderer.render_to_cached_png_at_width(300).unwrap();
+        let (w, h) = png_size(&path);
+        assert_eq!(w, 300, "target width must win over the renderer's scale");
+        let exact_h = 300.0 * natural.height / natural.width;
+        assert!(
+            (h as f32 - exact_h).abs() <= 1.0,
+            "height {h} should be within one pixel of {exact_h}"
+        );
+    }
+
+    #[test]
+    fn renderer_png_at_zero_width_clamps_to_one_pixel() {
+        let renderer = MermaidRenderer::new("flowchart LR\n    Up --> Down");
+        let (path, _) = renderer.render_to_cached_png_at_width(0).unwrap();
+        let (w, h) = png_size(&path);
+        assert_eq!(w, 1);
+        assert!(h >= 1, "height must be at least one pixel");
+    }
+
     #[test]
     fn test_mermaid_renderer_new() {
         let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");

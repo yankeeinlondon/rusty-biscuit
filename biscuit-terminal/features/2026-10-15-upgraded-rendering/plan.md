@@ -89,7 +89,7 @@ Phase exit: rulings logged; spike outcome logged; corpus frozen with provenance;
 
 One task: the workspace has one lockfile, so the bump is inherently serial.
 
-- [ ] **Bump rasterizer deps** —
+- [x] **Bump rasterizer deps** —
   - Set the `resvg` range to the 0.48.1-compatible release in `biscuit-visualized/src/Cargo.toml` and `biscuit-terminal/lib/Cargo.toml`, keeping both optional under their existing `image` features; update the workspace lockfile; leave `mermaid-rs-renderer` at 0.3.1 with `default-features = false` for this phase.
   - Verify with `cargo tree` (features resolved) that exactly one `resvg` and one `usvg` version appear workspace-wide, the Mermaid crate pulls no `png`/`scene`/`usvg` path, and `biscuit-terminal/cli` has no direct `resvg` dependency.
   - Continue using `resvg`'s `usvg` re-export; add no direct `usvg` dependency.
@@ -98,23 +98,23 @@ One task: the workspace has one lockfile, so the bump is inherently serial.
 
 Concurrent — the three tasks touch separate file surfaces.
 
-- [ ] **Adapt visualized raster** —
+- [x] **Adapt visualized raster** —
   - Port `biscuit-visualized/src/src/raster/{mod,png}.rs` to the 0.48 APIs (font-database handling, `usvg::Options`/`Tree` parsing, render call) per the resvg 0.48 changelog.
   - Preserve the lazy `OnceLock` system-font initialization, uniform-scale `target_width` rendering with exact aspect ratio and minimum-one pixel sizing, the scale path, `available_font_families`, and both PNG entry points' public signatures.
-- [ ] **Adapt terminal SVG paths** —
+- [x] **Adapt terminal SVG paths** —
   - Port `biscuit-terminal/lib/src/components/terminal_image/mod.rs` `load_svg` and the `horizontal_rule` SVG rendering to the 0.48 APIs; preserve the premultiplied-to-straight RGBA demultiply loop and the default-options behavior (no system-font loading — that existing limitation stands and is out of scope to fix).
   - Preserve zero-dimension and parse-failure error paths.
-- [ ] **Verify feature matrix** —
+- [x] **Verify feature matrix** —
   - `cargo check` on the pinned toolchain for both packages with and without their `image` features, plus a default CLI build; record results in the log.
 
 #### Wave 5
 
 Concurrent — test writing and the comparison run are independent.
 
-- [ ] **Rasterizer regressions** —
+- [x] **Rasterizer regressions** —
   - Focused behavioral tests, not font-dependent pixel snapshots: PNG output exactly `target_width` wide with height within integer pixel rounding of the aspect ratio; scale ≥ 1 behavior; transparent vs opaque background alpha; graph artifacts (expression and DOT) still render with preserved labels and correct dimensions.
   - Terminal: a partially transparent shape SVG demultiplied without dark fringes (assert interior pixel color and per-channel alpha math through the public image result); `horizontal_rule` SVG still renders; `target_width` precedence over `scale` and minimum-one sizing preserved in the component paths.
-- [ ] **Comparison leg B** —
+- [x] **Comparison leg B** —
   - Re-render the corpus on Mermaid 0.3.1 + resvg 0.48.1 with the identical configuration, fonts, and isolated cache as leg A; categorize each input (parse / SVG geometry / PNG rasterization / unchanged) so improvements attribute to the rasterizer stage.
   - Attach before/after SVG+PNG evidence per investigated defect to the log (a successful render alone is not proof of fidelity); record remaining rasterization defects for the comparison experiment.
 

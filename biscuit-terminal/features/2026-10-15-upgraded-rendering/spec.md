@@ -26,11 +26,12 @@ packages:
     - biscuit-visualized
     - biscuit-terminal
     - biscuit-terminal-cli
-implemented: false
+implemented: true
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-15
 review_iterations: 0
+implemented_by: "claude/opus"
 ---
 
 # Upgraded Diagram Rendering

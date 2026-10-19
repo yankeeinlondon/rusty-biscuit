@@ -17,13 +17,15 @@ clap = { version = "4", features = ["derive"], optional = true }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 thiserror = "2.0"
 tempfile = "3"
-resvg = { version = "0.45", optional = true }
+resvg = { version = "0.48.1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 # `default-features = false`: we rasterize with our own resvg, so the crate's
 # `png` (a second resvg/usvg) and `cli` (clap) features are unused.
-mermaid-rs-renderer = { version = "0.3.1", default-features = false, optional = true }
+# Pinned to a fork of v0.3.1 whose only change is `fontdb` 0.23 → 0.24, so
+# Mermaid's text measurement and usvg 0.48 share one fontdb version.
+mermaid-rs-renderer = { git = "https://github.com/yankeeinlondon/mermaid-rs-renderer", rev = "479c71ab2ba833b05d34927ed19864293170cee1", default-features = false, optional = true }
 layout-rs = "0.1"
 
 [dev-dependencies]
