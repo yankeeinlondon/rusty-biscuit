@@ -485,10 +485,13 @@ fn assert_empty_agent_list_fails_preflight(name: &str, frontmatter: &str, with: 
     assert_eq!(run.code, Some(1), "stderr:\n{}", run.stderr);
     assert!(run.launches.is_empty(), "a task launched, the earlier one included: {:?}", run.launches);
     assert!(run.stderr.contains("task provider selection failed"), "stderr:\n{}", run.stderr);
-    assert!(run.stderr.contains(&format!("`{property}` in")), "stderr:\n{}", run.stderr);
-    // The rendered diagnostic wraps long lines, so match unbroken fragments.
+    // The rendered diagnostic wraps where the temp path's length puts it, so
+    // match prose on a border-free, whitespace-collapsed copy and the path on
+    // an unbroken fragment.
+    let flat = run.stderr.split_whitespace().filter(|word| *word != "┃").collect::<Vec<_>>().join(" ");
+    assert!(flat.contains(&format!("`{property}` in")), "stderr:\n{}", run.stderr);
     assert!(run.stderr.contains(&format!("/cwd/{hint_file}")), "stderr:\n{}", run.stderr);
-    assert!(run.stderr.contains("needs at least one entry"), "stderr:\n{}", run.stderr);
+    assert!(flat.contains("needs at least one entry"), "stderr:\n{}", run.stderr);
     assert!(!run.stderr.contains("could not be evaluated"), "stderr:\n{}", run.stderr);
     assert!(!run.stderr.contains("is not valid"), "the launch schema reported it: {}", run.stderr);
 }
