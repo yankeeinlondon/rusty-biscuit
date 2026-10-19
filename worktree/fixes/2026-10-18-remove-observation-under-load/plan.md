@@ -104,6 +104,54 @@ skills_files_updated_during_phase_5:
   - .claude/skills/worktree/lifecycle.md
   - .claude/skills/os/macos.md
   - .claude/skills/os/SKILL.md
+source_files_during_phase_6:
+  - worktree/lib/src/remove/observation/diagnostics.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/os/linux.md
+source_code:
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_macos_stall_after_the_move_points_at_fseventsd.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_slow_startup_warns_with_its_duration.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_names_the_fsevents_flags_that_dropped_changes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_watch_that_never_delivered_refuses_with_its_reason.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_windows_ceiling_names_the_watched_folder.snap
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+  - worktree/lib/src/remove/lifecycle/tests/startup_warning.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/observation/diagnostics.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/inventory/tests.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/wait.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/quarantine/unregister/tests.rs
+documentation:
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/linux.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/worktree/observation.md
+  - worktree/docs/cli/remove.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: `wt remove` under a slow or overrun change watcher
@@ -132,16 +180,16 @@ Four changes, in dependency order:
 
 Done means all of the following:
 
-- [ ] Delayed progress can exceed the old 5 s total; silence stalls at 30 s;
+- [x] Delayed progress can exceed the old 5 s total; silence stalls at 30 s;
       repeated progress cannot pass 5 min; Ctrl-C ends a wait immediately.
-- [ ] Sticky coverage loss is unchanged and no force flag bypasses it.
+- [x] Sticky coverage loss is unchanged and no force flag bypasses it.
 - [x] A retry after confirmed deletions needs no extra consent for the
       resulting ` D` entries; every other dirty shape still asks.
-- [ ] Reports carry the new diagnostics; version-4 reports still load, with
+- [x] Reports carry the new diagnostics; version-4 reports still load, with
       earlier attempts preserved.
-- [ ] Docs and skills listed in the spec are updated, and the macOS 100k-entry
+- [x] Docs and skills listed in the spec are updated, and the macOS 100k-entry
       sample result is in the implementation log.
-- [ ] `just test` and `just lint` pass in `worktree/` on macOS, and the
+- [x] `just test` and `just lint` pass in `worktree/` on macOS, and the
       evidence rules cover Linux, native Windows, and WSL2.
 
 ## Phase 1: Rulings and wait-policy core
@@ -444,21 +492,21 @@ Wave 1 runs the messaging and the docs concurrently.
 
 ### Tasks
 
-- [ ] **Cross-OS evidence.** Load the `os` skill. Obtain L1 evidence for
+- [x] **Cross-OS evidence.** Load the `os` skill. Obtain L1 evidence for
       `worktree` and `worktree-cli` on Linux, native Windows, and WSL2 through
       the existing recipes and receipts, with no new CI environment or
       performance gate. The Windows and WSL2 legs follow the repo's
       fixed-forward rule.
-- [ ] **macOS 100k-entry sample.** Once, on this host: generate a checkout with
+- [x] **macOS 100k-entry sample.** Once, on this host: generate a checkout with
       at least 100,000 entries (no parallel build), run `wt remove`, and
       record completion, any loss flags from the new diagnostics, and elapsed
       time in the implementation log, using the incident rates (about 6,600 and
       7,000 deletions per second) only as context. Do not add a slow L2 test
       or CI fixture.
-- [ ] **If 512 still loses coverage.** Record the result, do not claim
+- [x] **If 512 still loses coverage.** Record the result, do not claim
       success, and hand the interval or pacing question to the author; a
       larger investigation is the author's decision.
-- [ ] **Implementation log.** Write `implementation-log.md` in this
+- [x] **Implementation log.** Write `implementation-log.md` in this
       directory: departures from the spec (with docs corrected), the sample
       result, and the evidence per OS. The agent's terminal state is
       "implementation complete, ready for review"; it does not move the fix to
@@ -466,5 +514,5 @@ Wave 1 runs the messaging and the docs concurrently.
 
 ### Validation checkpoint
 
-- [ ] Every Done item above is checked, or the open item is named in the
+- [x] Every Done item above is checked, or the open item is named in the
       implementation log.

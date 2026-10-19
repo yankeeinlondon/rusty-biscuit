@@ -23,12 +23,13 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-18
-review_iterations: 0
-completed: false
+review_iterations: 1
+completed: true
 human_review: false
-implemented: false
+implemented: true
 related:
     - 2026-10-01-remove-busy-folder
+implemented_by: "claude/opus"
 ---
 
 # `wt remove` gives up when the change watcher is slow or overrun

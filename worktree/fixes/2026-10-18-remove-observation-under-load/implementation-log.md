@@ -41,7 +41,6 @@ skills_files_updated_during_phase_2:
 packages:
   - worktree
   - worktree-cli
-human_review: false
 source_files_during_phase_3:
   - worktree/lib/src/remove/observation/diagnostics.rs
   - worktree/lib/src/remove/observation/mod.rs
@@ -104,14 +103,107 @@ skills_files_updated_during_phase_5:
   - .claude/skills/worktree/lifecycle.md
   - .claude/skills/os/macos.md
   - .claude/skills/os/SKILL.md
-message_to_agent: |-
-  Phase 5 landed the CLI messages and the docs pass. Facts for Phase 6:
-  - macOS sample: a stop now prints a `Watching stopped {stage}: {reason}.` line from `report.observation.loss` (FSEvents flag names plus hex mask, entries since the previous drain). Read the loss straight from `report.json` `observation.loss` for the sample record. A startup over 1 s prints `Warning: Confirming that the checkout is being watched for changes took N s.` before the move.
-  - New API: `Environment::slow_startup: &dyn Fn(Duration)` and `lifecycle::SLOW_STARTUP` (1 s). Every `Environment` construction needs the field. `recovery::refusal_error`/`refusal_markup` take `resumed: bool`. `Refusal::Interrupted` now reads "interrupted before it changed anything".
-  - Cross-OS so far: `just cross-check worktree --os windows` passed 872 (1 skipped) and `worktree-cli` passed 654 (43 skipped). No Linux or WSL2 rig run yet.
-  - Tier trap: a test module first named `slow_startup` was silently out of L1 (a segment starting `slow_`) on the Windows rig and in CI. It is now `startup_warning`. Check new module names the same way.
-  - Load-sensitive (pre-existing, not touched here): `fsevents::tests::the_ceiling_spans_every_marker_round_of_a_busy_drain` failed once under a load average of about 20 ("expected the ceiling, got None after 1039 events"). Its 100 µs feeder thread can be descheduled long enough for a marker round to go quiet. It passed 3/3 alone. If it flakes in Phase 6, make the feeder deterministic rather than retrying.
-  - Still open, for the author: a loss recorded during the `release_admin` barrier stays queued and is missing from the diagnostics (pre-existing; not changed).
+source_files_during_phase_6:
+  - worktree/lib/src/remove/observation/diagnostics.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/os/linux.md
+source_code:
+  - worktree/cli/src/commands/remove/mod.rs
+  - worktree/cli/src/commands/remove/recovery.rs
+  - worktree/cli/tests/remove_recovery.rs
+  - worktree/cli/tests/remove_recovery_report.rs
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_macos_stall_after_the_move_points_at_fseventsd.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_slow_startup_warns_with_its_duration.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_stop_names_the_fsevents_flags_that_dropped_changes.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_watch_that_never_delivered_refuses_with_its_reason.snap
+  - worktree/cli/tests/snapshots/remove_recovery_report__a_windows_ceiling_names_the_watched_folder.snap
+  - worktree/lib/src/remove/inventory.rs
+  - worktree/lib/src/remove/lifecycle.rs
+  - worktree/lib/src/remove/lifecycle/resume.rs
+  - worktree/lib/src/remove/lifecycle/tests.rs
+  - worktree/lib/src/remove/lifecycle/tests/resume_consent.rs
+  - worktree/lib/src/remove/lifecycle/tests/startup_warning.rs
+  - worktree/lib/src/remove/observation/deletion.rs
+  - worktree/lib/src/remove/observation/deletion/tests.rs
+  - worktree/lib/src/remove/observation/diagnostics.rs
+  - worktree/lib/src/remove/observation/fsevents.rs
+  - worktree/lib/src/remove/observation/fsevents/tests.rs
+  - worktree/lib/src/remove/observation/injected.rs
+  - worktree/lib/src/remove/observation/inotify.rs
+  - worktree/lib/src/remove/observation/inotify/tests.rs
+  - worktree/lib/src/remove/observation/inventory/tests.rs
+  - worktree/lib/src/remove/observation/mod.rs
+  - worktree/lib/src/remove/observation/read_directory_changes.rs
+  - worktree/lib/src/remove/observation/read_directory_changes/tests.rs
+  - worktree/lib/src/remove/observation/tests.rs
+  - worktree/lib/src/remove/observation/wait.rs
+  - worktree/lib/src/remove/outcome.rs
+  - worktree/lib/src/remove/quarantine/unregister.rs
+  - worktree/lib/src/remove/quarantine/unregister/tests.rs
+documentation:
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/linux.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/worktree/lifecycle.md
+  - .claude/skills/worktree/observation.md
+  - worktree/docs/cli/remove.md
+completed_phase: 6
+implemented: true
+human_review: true
+human_review_items:
+  - |-
+    **macOS: deleting 512 entries between checks did not always prevent lost change events**
+
+    This fix makes `wt remove` on macOS stop deleting every 512 entries (it was 2,048) to check that
+    the macOS change watcher (FSEvents) has caught up. The spec says that if a quick 100,000-entry
+    sample still loses events, the change is unproven, and the author must decide what to do next
+    before anyone claims it works.
+
+    What happened on this Mac (two samples, 101,002 entries each):
+
+    - **Sample 1** started about a minute after the 100,000 test files were created. It stopped
+      after 18,600 deletions at about 2,900 per second, slower than either original incident. macOS
+      reported `UserDropped` + `MustScanSubDirs`. Running `wt remove` again with no force flag
+      finished the other 82,402 entries at about 8,200 per second with no loss.
+    - **Sample 2** waited 90 seconds after creating the files on a quieter host. It finished all
+      101,002 entries in 24.7 s (about 4,400 per second) with no loss.
+
+    So deletion speed alone does not explain the loss. The most likely cause is that macOS was
+    still processing the events from creating the files. That is unconfirmed. Full numbers are in
+    the Phase 6 section of the implementation log.
+
+    This must be decided before the fix is closed, because it determines whether the cadence part of
+    the fix counts as done. The rest of the fix works either way. Sample 1 showed the new failure
+    message naming the exact macOS flags, and the retry finishing without extra prompts.
+
+    Options:
+
+    - **A. Accept 512 as a mitigation and close the fix.** Write it down as "reduces but does not
+      prevent" loss. The safety net already handles a loss: deletion stops, and a retry finishes
+      without asking again.
+      - *Pros:* no more work, and the behavior is safe and recoverable.
+      - *Cons:* users can still see a stop on a large, freshly built checkout and need a retry.
+    - **B. Open a follow-up to pace deletion by time, not by count.** For example, pause when the
+      watcher reports it is falling behind, or cap deletions per second.
+      - *Pros:* goes after the cause directly.
+      - *Cons:* more design work. The spec warns against adapting to queue depth without a reliable
+        signal from macOS.
+    - **C. Have `wt remove` retry the deletion once by itself after an FSEvents drop.** The checks
+      that run before a retry would run again.
+      - *Pros:* most users would never see the stop.
+      - *Cons:* it changes the "stop and let the person decide" safety model, so it needs its own
+        spec.
+    - **D. Run a few more controlled samples first** (settled versus freshly created trees, and a
+      smaller interval such as 256) before deciding.
+      - *Pros:* cheap, and tells whether the interval matters at all.
+      - *Cons:* it delays the decision. The spec says a larger investigation is the author's call.
+
+    **Recommendation: A, plus a small, unscheduled follow-up for D.** A loss is detected and
+    recoverable, and the retry path was proven on a real tree in this sample. The data so far
+    points at macOS's backlog rather than the interval, so a quick D will show whether B is worth
+    designing.
 ---
 
 # Implementation Log for 2026-10-18-remove-observation-under-load (6 phases)
@@ -707,3 +799,201 @@ not apply.
 - Cross-OS (Windows rig): `just cross-check worktree --os windows` passed
   **872, 1 skipped**, and `just cross-check worktree-cli --os windows` passed
   **654, 43 skipped**. No Linux or WSL2 run; Phase 6 owns that evidence.
+
+## Phase 6
+
+### What changed
+
+- **Linux dead-code warning (fix).** The Linux cross-check build warned
+  `method record is never used` for `RoundTrips::record`
+  (`lib/src/remove/observation/diagnostics.rs`). Only the macOS and Windows
+  adapters and the test-only injected observer confirm markers; the Linux
+  adapter reads until empty. CI lints on Linux only, with `-D warnings`, so
+  this would have failed the `lint` cell. The method is now
+  `#[cfg(any(target_os = "macos", windows, test))]`. The rerun on
+  `build-linux` built with no warning. The macOS lint cannot see it, so it
+  slipped through Phases 3–5.
+- **`os` skill.** `.claude/skills/os/linux.md`: on 2026-10-18,
+  `--build-jobs 2` was not enough to keep `build-linux` from killing the
+  `worktree-cli` link (signal 9); `--build-jobs 1` worked.
+- No other code changed. No new CI environment, cell, fixture, or
+  performance gate.
+
+### macOS 100k-entry sample
+
+Release `wt` (`cargo build --release -p worktree-cli`, built before the run,
+nothing building during it). The generated checkout was a linked worktree,
+`big`: 1,000 directories × 100 files plus a seed file, committed. That is
+**101,002 entries**. Run from the base checkout with stdin closed.
+fseventsd had been up 12 h, at about 2 % CPU before sample 1 and 0 % before
+sample 2. Other sessions loaded the host; the load averages are given below.
+The incident rates were about 6,600 and 7,000 deletions per second.
+
+| Run | Conditions | Result | Elapsed | Rate | Loss / diagnostics |
+| --- | --- | --- | --- | --- | --- |
+| 1a | started within about 1 min of creating the 101k files; load average about 17 | paused, exit 3: two short-lived `git` processes were in the checkout (gone a second later); nothing moved | 0.9 s | — | — |
+| 1b | rerun seconds later, same tree | **stopped, exit 1, coverage lost during deletion** after 18,600 entries; 82,402 left in the hidden directory | 8.1 s total; deletion 6.46 s | about 2,900/s | `observation.loss`: stage `deletion`, `fs_events_dropped`, raw `0x3` = `user_dropped` + `must_scan_sub_dirs`, `entries_since_drain` 600; `startup_ms` 17, `longest_round_trip_ms` 1012 |
+| 1c | `wt remove big` retry, no `--force-worktree` | **completed**, exit 0: "18600 tracked files this removal already deleted are not asked about again", then the remaining 82,402 deleted with no loss | 12.5 s total; deletion 10.06 s | about 8,200/s | `loss: null`, `startup_ms` 14 |
+| 2 | fresh tree (branch fast-forwarded into `main`); waited 90 s after creating it; load average about 4 (1 min), 10 (5 min); fseventsd 0 % CPU | **completed**, exit 0, branch deleted | 24.7 s total; deletion 23.2 s | about 4,400/s | `loss: null`, `startup_ms` 13, `longest_round_trip_ms` 1012 |
+
+What this shows:
+
+- The new diagnostics work on a real overrun. The CLI printed `Watching
+  stopped during deletion, 600 entries after the previous check: macOS could
+  not report every change (UserDropped, MustScanSubDirs; flags 0x3).`, and
+  `report.json` `observation.loss` held the same data. Before this fix the
+  report could not name the flags.
+- Phase 4's resume consent worked on the real tree: the retry needed no
+  `--force-worktree` for the 18,600 ` D` entries.
+- **The 512 interval is not proven to prevent the overflow.** Run 1b lost
+  coverage while deleting at about 2,900/s, well below both incident rates.
+  Run 1c deleted faster (about 8,200/s) and run 2 at about 4,400/s, and
+  neither lost coverage. So deletion rate alone does not explain the loss.
+  A likely confound: run 1b started within a minute of creating the 101k
+  files and committing them, so fseventsd was probably still working through
+  that backlog. Run 2's 90 s settle removed it. These are two samples on one
+  host, not a measurement.
+- `longest_round_trip_ms` was 1012 in every run. That is the same value
+  each time, and close to 1 s; it may be a bound in the marker round rather
+  than a real delivery time. I did not investigate it.
+- Per the plan, I am not claiming success for the cadence. The interval or
+  pacing question is handed to the author (`human_review`).
+- Clean-up: both sample directories under `/tmp/wt-sample.*` were removed.
+
+### Cross-OS evidence
+
+All runs used `just cross-check <pkg> --os <os>` on the tree with the
+`diagnostics.rs` fix, except the first Linux `worktree` run, which found the
+warning.
+
+| Package | macOS (host) | Linux (`build-linux`) | Native Windows (`build-win-native`) | WSL2 (`build-win`) |
+| --- | --- | --- | --- | --- |
+| `worktree` + `worktree-cli` (area `just test`) | 1593 passed, 15 skipped | — | — | — |
+| `worktree` | (in area run) | 892 passed, 1 skipped (warning gone on rerun) | 872 passed, 1 skipped | 892 passed, 1 skipped |
+| `worktree-cli` | (in area run) | 693 passed, 55 skipped (at `--build-jobs 1`) | 654 passed, 43 skipped | 693 passed, 55 skipped |
+
+- Linux `worktree-cli` failed to build three times (default jobs, then
+  `--build-jobs 2`) with `ld terminated with signal 9`. That is the host
+  killing the linker for memory, not a test failure. The run passed at
+  `--build-jobs 1`.
+- The Windows and WSL2 results come from the rigs. CI's nightly still owns
+  their post-merge proof, under the fix-forward rule.
+
+### Departures from the spec
+
+- **Two samples instead of one.** The spec asks for one quick sample and
+  does not require repeated trials. The first sample lost coverage, and its
+  retry did not, at a higher rate. One more run with a settle period was the
+  cheapest way to give the author a cleaner data point. It does not change
+  the conclusion that 512 is unproven. No docs claim otherwise:
+  `docs/cli/remove.md` and the skills describe 512 as the default interval,
+  not as a guarantee.
+- No docs needed correcting in this phase.
+
+### Requirement → evidence mapping
+
+| Requirement | Evidence |
+| --- | --- |
+| L1 evidence on Linux, native Windows, WSL2 for both packages | cross-check table above |
+| macOS sample: completion, loss flags, elapsed time | sample table above |
+| If 512 still loses coverage: record, don't claim success, hand off | run 1b; `human_review: true` |
+| Linux build has no dead-code warning (CI lint is Linux-only, `-D warnings`) | `build-linux` rerun: no `warning:` in the `worktree` build |
+| Sticky loss: no force flag bypasses it (done item) | force flags affect consent only and never reach `DeletionOptions` (`drain_every`, `cumulative_kinds`); existing `deletion::tests::lost_coverage_and_admin_changes_stop_deletion` and `observation::tests::coverage_loss_is_typed_and_stays_lost` |
+
+The only code change is a `#[cfg]` on a method that already has callers and
+tests (`injected.rs` exercises it through the round-trip tests), so it needs
+no new test. The Linux build without the warning is the evidence. No parser,
+schema, or loader changed, so the input robustness matrix does not apply.
+
+### Gates
+
+- `just lint` (worktree area, macOS): clean, 0 warnings.
+- `just test` (worktree area, macOS): **1593 passed, 15 skipped**, first
+  run, no failures. The load-sensitive
+  `fsevents::tests::the_ceiling_spans_every_marker_round_of_a_busy_drain`
+  passed.
+- `just check-tier-coverage worktree`: 0 stranded.
+- Scope (`git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py`): `packages: [worktree,
+  test-toolkit, darkmatter]`, `change_class: package`. darkmatter and
+  test-toolkit read the skill files; their scoped checks are below.
+  - `darkmatter`: `cargo nextest run -E 'test(/shipped_schema_corpus/)'`
+    passed 9.
+  - `test-toolkit`: `just archive-path-guard` passed 2.
+  - `worktree-cli`, the only dependent of `worktree`, is in the area run.
+
+### Still open, for the author
+
+- The drain interval or pacing (see the sample).
+- Carried from Phase 5: a loss recorded during the `release_admin` barrier
+  stays queued and is not in the diagnostics.
+- Implementation complete, ready for review. The fix stays in `fixes/`;
+  moving it to `_completed` is the author's step.
+
+## Review 1 author decisions (2026-10-19)
+
+Ken resolved review 1's open items one by one (`review-1.md`, "Author
+decisions").
+
+### Decisions
+
+- **512 interval: accepted as a mitigation.** It lowers pressure but does
+  not prevent loss. The success criterion narrows to "loss is detected,
+  named, and recoverable by a plain retry" (runs 1b/1c). The controlled
+  comparison is scheduled as `2026-10-19-macos-drain-interval-comparison`. The spec is
+  left as written; this is the recorded departure.
+- **O1, watch-release loss: fixed here, diagnostics only.** The spec lists
+  `unregistration` as a reportable loss stage, and a loss in the
+  `release_admin` barrier never reached the diagnostics.
+- **O2, 1,012 ms round trip: investigated now** (below).
+
+### What changed
+
+- `Backend::queued_loss()` (default `None`; macOS, Windows, and the injected
+  observer return `EventQueue::loss()`, the queue's loss left in place).
+  `Observation::release_admin` records it, so it lands at stage
+  `unregistration`. The release still completes: whether to unregister is
+  still decided by `remove_listed_record`'s direct index/HEAD reread, as
+  before. Linux has no release barrier and keeps the default.
+- `docs/cli/remove.md`: the release-loss behavior and the macOS round-trip
+  quantization. `.claude/skills/worktree/observation.md`: the same facts.
+
+### O2 probe
+
+A temporary probe (removed, not in the diff) printed each confirmed macOS
+marker round trip and made stream latency overridable. Same 101,002-entry
+tree shape as Phase 6, release `wt`, 512 interval:
+
+| Sample | Load (1 min) | Result | Rounds | ~11 ms | 1,002–1,016 ms | 200–900 ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| fresh, 0 s settle | about 19 | completed, 25.3 s | 352 | 336 | 16 | 0 |
+| settled 90 s | about 4 | completed, 21.2 s | 352 | 340 | 12 | 0 |
+| fresh, latency 0.5 s | about 4 | **lost** after 72,600 deletions (`UserDropped` + `MustScanSubDirs`, `entries_since_drain` 600) | 248 | 237 | 11 | 0 |
+
+- Round trips are bimodal: about 11 ms or about 1 s, nothing between,
+  whatever the settle time or stream latency. `wt`'s wait path has no 1 s
+  bound (latency 0.1 s, a flush every 1 ms, `POLL_INTERVAL` 50 ms), so the
+  second comes from fseventsd: a marker it has not processed when flushed
+  arrives about a second later. The reported 1,012 ms is a real delay, but
+  it marks a missed fast path, not backlog depth, so it cannot drive a
+  pacing rule.
+- The third run is a second fresh-tree loss. Its changed latency makes it
+  only a loose data point for the interval question; it is recorded in the
+  comparison's spec.
+
+### Requirement → test mapping
+
+| Requirement | Test |
+| --- | --- |
+| A loss during the admin release reaches the diagnostics at `unregistration`; the release still completes | `observation::tests::a_loss_during_the_admin_release_is_recorded_in_the_diagnostics` (fails with the old `record(None)`) |
+
+### Gates
+
+- `just test` (worktree area, macOS): **1594 passed, 15 skipped**.
+- `just lint` (worktree area, macOS): clean.
+- `just cross-check worktree --os windows`: **873 passed, 1 skipped**
+  (compiles the `read_directory_changes` change). Not published as evidence
+  because the tree is uncommitted.
+- Not run: Linux or WSL2. Linux takes the trait default and `loss()` is
+  `cfg`'d to macOS, Windows, and test, so no new dead code there; CI's Linux
+  lint will confirm.
