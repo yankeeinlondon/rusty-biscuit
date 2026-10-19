@@ -509,3 +509,17 @@ fn native_setup_failure_is_an_error_before_anything_changes() {
     assert!(matches!(&error, ObservationError::Setup { path, .. } if path == &layout.checkout), "a link is not watched through: {error:?}");
     assert!(moved_checkout.join("sub").join("file.txt").is_file(), "nothing changed");
 }
+
+#[test]
+fn unconfirmed_delivery_says_confirmation_failed_not_that_events_dropped() {
+    let waited = std::time::Duration::from_secs(30);
+    let stalled = CoverageLost::DeliveryStalled { waited, watch: Some(Root::Admin) }.to_string();
+    assert_eq!(stalled, "could not confirm delivery of earlier changes on the Admin watch: no progress for 30s");
+    let unnamed = CoverageLost::DeliveryStalled { waited, watch: None }.to_string();
+    assert_eq!(unnamed, "could not confirm delivery of earlier changes: no progress for 30s");
+    let ceiling = CoverageLost::DrainCeiling { waited: std::time::Duration::from_secs(300), watch: Some(Root::Parent) }.to_string();
+    assert_eq!(ceiling, "could not confirm delivery of earlier changes on the Parent watch within 300s");
+    for text in [stalled, unnamed, ceiling] {
+        assert!(!text.contains("dropped"), "{text}");
+    }
+}

@@ -46,6 +46,9 @@ mod inotify;
 pub mod inventory;
 #[cfg(windows)]
 mod read_directory_changes;
+// Not yet called by the adapters.
+#[allow(dead_code)]
+mod wait;
 
 #[cfg(test)]
 mod tests;
@@ -218,10 +221,21 @@ pub enum CoverageLost {
     WatchLost { root: Root },
     #[error("reading events failed: {message}")]
     ReadFailed { message: String },
-    /// The platform did not confirm, within `waited`, that every earlier
-    /// change had been delivered.
-    #[error("the platform did not confirm delivery within {waited:?}")]
-    DrainTimedOut { waited: std::time::Duration },
+    /// No relevant progress arrived for `waited` while confirming that every
+    /// earlier change had been delivered. Confirmation could not be
+    /// obtained; this does not show that events were dropped. `watch` names
+    /// the stalled watch where the platform has one per place (Windows).
+    #[error("could not confirm delivery of earlier changes{}: no progress for {waited:?}", on_watch(*.watch))]
+    DeliveryStalled { waited: std::time::Duration, watch: Option<Root> },
+    /// Confirming delivery took `waited`, the whole of one wait's ceiling,
+    /// although progress kept arriving. As with a stall, nothing is known to
+    /// have been dropped.
+    #[error("could not confirm delivery of earlier changes{} within {waited:?}", on_watch(*.watch))]
+    DrainCeiling { waited: std::time::Duration, watch: Option<Root> },
+}
+
+fn on_watch(watch: Option<Root>) -> String {
+    watch.map_or_else(String::new, |root| format!(" on the {root:?} watch"))
 }
 
 /// What one [`Observation::drain`] returned.

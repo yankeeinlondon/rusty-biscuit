@@ -381,7 +381,7 @@ impl FsEvents {
                 break true;
             }
             if started.elapsed() >= DRAIN_TIMEOUT {
-                self.shared.queue.lose(CoverageLost::DrainTimedOut { waited: DRAIN_TIMEOUT });
+                self.shared.queue.lose(CoverageLost::DeliveryStalled { waited: DRAIN_TIMEOUT, watch: None });
                 break false;
             }
             std::thread::sleep(Duration::from_millis(1));

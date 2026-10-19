@@ -638,7 +638,8 @@ impl ReadDirectoryChanges {
         while !awaited.iter().all(|root| *delivered.of(*root) >= number) {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                self.shared.queue.lose(CoverageLost::DrainTimedOut { waited: DRAIN_TIMEOUT });
+                let watch = awaited.iter().copied().find(|root| *delivered.of(*root) < number);
+                self.shared.queue.lose(CoverageLost::DeliveryStalled { waited: DRAIN_TIMEOUT, watch });
                 break;
             }
             delivered = self.shared.progress.wait_timeout(delivered, left).unwrap_or_else(std::sync::PoisonError::into_inner).0;
