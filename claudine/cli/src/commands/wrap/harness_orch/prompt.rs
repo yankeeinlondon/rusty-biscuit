@@ -39,6 +39,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         lifecycle: Some(prepared.lifecycle.clone()),
         live_frontmatter,
         runtime_state,
+        loop_values: prepared.input_layers.loop_values.clone(),
     }
 }
 
@@ -85,12 +86,12 @@ pub(crate) fn find_wrapper_harness_source(
 ///
 /// The authored-layer half of overlay assembly. The bootstrap read before
 /// target `initialize` and the stabilized reread after it see the same
-/// immutable mapping. [`harness_prepare_options`] also carries non-null overlay
-/// values through the caller-supplied override layer so file references retain
-/// their launch-area resolution provenance.
+/// immutable mapping. [`harness_prepare_options`] also carries the overlay as
+/// the lowest data layer with each value's authoring origin, so a file value
+/// resolves from the file whose `with` authored it.
 ///
-/// Precedence, low to high: authored frontmatter < `proxy.with` < the caller's
-/// `key=value`/`--set`. Null removal lands here because an override object
+/// Precedence, low to high: authored frontmatter < `proxy.with` < a pending
+/// `retry.with` ([`active_overlay`]) < the caller's `key=value`/`--set`. Null removal lands here because an override object
 /// cannot express an absent key. The caller's `set_overrides` ride on the
 /// compose options and are applied by Darkmatter on top, so a router cannot
 /// silently replace a value the caller pinned explicitly.
@@ -104,7 +105,20 @@ fn load_overlaid_source(
     claudine::composition::ResolvedCompositionSource,
     claudine::composition::CompositionError,
 > {
-    load_overlaid_document(&state.source_path, &state.original_ref, &state.overlay)
+    load_overlaid_document(&state.source_path, &state.original_ref, active_overlay(state).values())
+}
+
+/// The overlay this document's next read applies: the retained `proxy.with`
+/// overlay, with a pending `retry.with` overlay layered key-wise on top (a
+/// shared key takes the retry's value). The retry was authored by this
+/// document's own lifecycle, so its values keep this document's context.
+fn active_overlay(state: &HarnessPromptState) -> std::borrow::Cow<'_, claudine::composition::AnchoredOverlay> {
+    match state.pending_retry_overlay.as_ref() {
+        None => std::borrow::Cow::Borrowed(&state.overlay),
+        Some(retry) => std::borrow::Cow::Owned(state.overlay.layered(
+            &claudine::composition::AnchoredOverlay::new(retry.clone(), state.file_resolution_context()),
+        )),
+    }
 }
 
 /// Read `path` fresh from disk and merge `overlay` into its authored
@@ -158,6 +172,7 @@ fn harness_prepare_options(
     source: &claudine::composition::ResolvedCompositionSource,
     child_cwd: &Path,
 ) -> claudine::composition::PrepareOptions {
+    let overlay = active_overlay(state).into_owned();
     let mut input_layers = state.input_layers.clone();
     let base = input_layers.layered_overrides();
     input_layers.set_layered_overrides(claudine::composition::layered_set_overrides(
@@ -217,8 +232,8 @@ fn harness_prepare_options(
         shell_working_directory: Some(child_cwd.to_path_buf()),
         // The immediate `proxy.with:` overlay, re-applied as a data layer so a
         // retry, resume, or in-place adoption composes it exactly as the first
-        // preparation did.
-        proxy_overlay: state.overlay.clone(),
+        // preparation did, plus a pending `retry.with:` overlay on top.
+        proxy_overlay: overlay,
         ..claudine::composition::PrepareOptions::new(input_layers.file_resolution_context.clone())
     });
     if let Some((context, file_resolution)) = propagated {
@@ -252,11 +267,19 @@ pub(crate) fn preflight_harness_document(
     if state.mode != HarnessPromptMode::Compose {
         return Ok(());
     }
-    let source = load_overlaid_source(state).map_err(Box::new)?;
+    // A failed preflight ends the retried attempt's preparation, so a pending
+    // retry overlay is spent here rather than left for a later read.
+    let source = load_overlaid_source(state).map_err(|error| {
+        state.pending_retry_overlay = None;
+        Box::new(error)
+    })?;
     let options = harness_prepare_options(state, &source, child_cwd);
     let approved =
         claudine::composition::preflight_document_shell(&source, &options, approval_options)
-            .map_err(Box::new)?;
+            .map_err(|error| {
+                state.pending_retry_overlay = None;
+                Box::new(error)
+            })?;
     state.input_layers.add_approved_commands(approved);
     Ok(())
 }
@@ -275,8 +298,15 @@ pub(crate) fn materialize_harness_prompt(
     // `initialize` has had its chance to add or repair the property (R4).
     schema: claudine::composition::SchemaStage,
 ) -> Result<MaterializedHarnessPrompt> {
-    let source = load_overlaid_source(state)?;
-    let options = harness_prepare_options(state, &source, child_cwd);
+    let loaded = load_overlaid_source(state).map(|source| {
+        let options = harness_prepare_options(state, &source, child_cwd);
+        (source, options)
+    });
+    // This is the retried attempt's canonical read: it consumes a pending
+    // `retry.with` overlay whether or not the read succeeds, so no later
+    // retry, resume, or loop refresh sees it.
+    state.pending_retry_overlay = None;
+    let (source, options) = loaded?;
 
     let prompt_source = match state.mode {
         // The prompt came from argv or stdin; the document is a provider memory
@@ -318,6 +348,7 @@ pub(crate) fn materialize_harness_prompt(
     };
     let launch_schema = prepared.launch_schema;
     let file_resolution_context = prepared.input_layers.file_resolution_context.clone();
+    let loop_values = prepared.input_layers.loop_values.clone();
     let compose_context = prepared.compose_context;
     let document_epoch = prepared.document_epoch;
     let mut prompt = prepared.prompt;
@@ -365,6 +396,7 @@ pub(crate) fn materialize_harness_prompt(
         lifecycle: Some(lifecycle),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
+        loop_values,
         mcp_body_tags,
     })
 }
@@ -425,6 +457,7 @@ pub(crate) fn bootstrap_harness_prompt(
         lifecycle: Some(bootstrap.lifecycle),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
+        loop_values: bootstrap.input_layers.loop_values,
         mcp_body_tags: Vec::new(),
     }))
 }

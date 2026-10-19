@@ -1,24 +1,13 @@
----
-related_specs:
-    - "@darkmatter/features/_completed/2026-05-11-schemas/spec.md"
-    - "@darkmatter/features/_completed/2026-05-23-compose-schema/spec.md"
-    - "@darkmatter/features/_completed/2026-05-28-schema-coercion/spec.md"
-    - "@darkmatter/features/_completed/2026-06-10-schema-improvement/spec.md"
-    - "@darkmatter/features/_completed/2026-07-08-schema-plus/spec.md"
-    - "@darkmatter/features/_completed/2026-07-09-suggest-constraint/spec.md"
-    - "@darkmatter/features/2026-07-13-meta-schema/spec.md"
----
-
 # Schema Definition
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
 
-This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline. The original specification lives in [`features/_completed/2026-05-11-schemas/spec.md`](../../../features/_completed/2026-05-11-schemas/spec.md); the compose integration is specified in [`features/_completed/2026-05-23-compose-schema/spec.md`](../../../features/_completed/2026-05-23-compose-schema/spec.md).
+This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline.
 
 ## What You Get
 
 - A `$schema` frontmatter property that can hold an inline schema, point at a YAML/JSON file, or list a root-level union.
-- A **baseline schema** that every document inherits.
+- A **baseline schema** that every document inherits. Darkmatter ships a built-in one, compiled into the library, which `md compose`, `md schema validate`, and DMLS apply by default.
 - A `md schema validate` CLI subcommand with `pretty` and `json` output.
 - A `md schema detect` CLI subcommand that infers a SimplifiedSchema from existing documents.
 - A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behavior.
@@ -73,7 +62,7 @@ Every property value follows one of four shapes:
 
 - **Whitespace** inside `(...)` and inside `{ ... }` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
 - **Multiple constraints** are separated by `;`.
-- **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key.
+- **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key. A property whose type itself admits `null` (`null`, `unknown`, or a union with one of those arms) is always optional, even when it is marked `required`; see [Null-Admitting Properties](#null-admitting-properties).
 - **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
 - **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](#inline-object-literals)). When a property fails validation, its declared description surfaces at the point of failure — in `md schema validate` (pretty and JSON output) and in compose schema-failure blocks (see [Error Rendering](#error-rendering)).
 - **Inline object literals** are an extension of the type-expression grammar. The whole `{ ... }` body is a single string scalar that the string-layer parser recognizes. YAML mapping values at a property position are still errors — quote the mapping as a string to opt into inline object syntax.
@@ -107,9 +96,17 @@ $schema:
 | `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
 | `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. See [Semantic Meta-Types](#semantic-meta-types).              |
 | `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. See [Semantic Meta-Types](#semantic-meta-types).  |
-| `any`        | Anything.                                                                                              | Only `required` is meaningful. `any(required)` is presence-only because `any` already includes `null`.                                                                          |
+| `unknown`    | Anything, including `null`, or omission. `any` is an equivalent alias.                                  | JSON Schema `{}`. `required` has no effect: `unknown(required)` still accepts `null` and omission. To require a value, use a concrete type, e.g. `unknown[](required)` for a required list. See [`unknown` and `null`](#unknown-and-null). |
+| `null`       | Only an explicit `null`, or omission.                                                                  | JSON Schema `{"type": "null"}`. `required` has no effect. Written unquoted (`review: null`, `review: ~`) or as `"null"`. See [`unknown` and `null`](#unknown-and-null). |
+| `alphanumeric` | A string of ASCII letters and digits (`[A-Za-z0-9]`), widened or narrowed by type options.          | Options before `;`, constraints after: `alphanumeric(allow-dashes; min(1))`. Lowers to a string `pattern`. Never coerces numbers or booleans. See [Alphanumeric Strings](#alphanumeric-strings). |
+| `shell`      | A string that holds a shell command: at least one non-whitespace character. Never parsed or run.       | JSON Schema `format: darkmatter-shell`. Constraints and coercion mirror `expression`. See [Shell Commands](#shell-commands). |
 
 Append `[]` to any type for an array of that type — e.g. `string[]`, `enum(red,green,blue)[]`, `file(match('*.md'))[]`.
+
+`unknown`, `null`, `alphanumeric`, and `shell` are built-in keywords, so a
+bare `shell` always means the built-in type. A local named type that happens
+to share one of these names is referenced explicitly as `shell@this` (see
+[Local Type References](./local-type-references.md)).
 
 ### Semantic Meta-Types
 
@@ -158,17 +155,90 @@ The semantic parsers operate on YAML values, while DMLS and other diagnostic
 consumers additionally require exact source spans. The v1 source-aware grammar
 is deliberately capped at these authored presentations:
 
-- plain, single-quoted, and double-quoted scalars;
-- block and flow sequences;
+- plain, single-quoted, and double-quoted scalars, where a plain scalar may
+  continue onto more-indented lines;
+- block and flow sequences, including a block sequence whose `-` sits at the
+  same column as its parent key;
 - implicit scalar-key block and flow mappings;
 - explicit scalar-key block mapping pairs, including compact mapping items in
   block sequences; and
 - mapping-value anchors and scalar aliases used by the shipped schema corpus.
 
+The last two YAML spellings are what serializers and editors that wrap lines
+tend to produce. Each means exactly what its conventional spelling means.
+
+**Indentless sequences.** Wherever the grammar accepts a sequence, its items
+may sit at the parent key's column. The list ends at the next line at that
+column that is not a `- ` item, so `next` below is a sibling definition, not
+part of `t`:
+
+```yaml
+kind: schema
+types:
+  t:
+  - string
+  - number
+  next: boolean
+```
+
+`t` is the property-level union `[string, number]`. The same holds for a union
+nested in a mapping arm, for compact mapping items (`- count: number`), and
+after an anchor (`status: &arms` followed by `- number`). Indentation never
+changes which values are allowed: an indentless list under `$schema` is a
+root-level union, while a list under `types` is still rejected because `types`
+must be a mapping.
+
+**Continued plain scalars.** An unquoted value may continue onto lines indented
+past its key or `-`. The type expression, its constraints, and its description
+can all be split this way:
+
+```yaml
+kind: schema
+types:
+  t: string(min(1);
+    max(8)) -> a description long enough that the editor
+    wraps it onto another physical line
+  next: boolean
+```
+
+The schema parser receives the value exactly as YAML decodes it: adjacent
+lines join with one space, and their indentation and any trailing comment are
+dropped. A blank line between two content lines becomes a line break instead,
+so the description below is `first paragraph` and `second paragraph` on two
+lines, the same as the quoted `"string(min(3)) -> first paragraph\nsecond
+paragraph"`:
+
+```yaml
+$schema:
+  title: string(min(3)) -> first paragraph
+
+    second paragraph
+  next: boolean
+```
+
+The value ends at the first line that is not indented past its key (here
+`next`) or at a comment line. Folding never makes an invalid expression valid;
+`string(min(1)` continued onto `bogus(2))` is still an unknown constraint.
+
+**Ranges.** Source maps and `suggest(...)` candidate spans are byte ranges into
+the original file, with its line endings left as authored (LF or CRLF). A token
+on a continuation line is ranged on that line, without its indentation. A token
+or expression that crosses a line break gets one range from its first authored
+byte to its last, with the break and indentation inside it. Editor positions
+are a separate step: DMLS converts these byte ranges to the line and column
+encoding the editor negotiated (UTF-8 or UTF-16), so a grammar error such as
+`bogus` above is underlined on its own line, not across the whole value.
+
 This is a SimplifiedSchema authoring grammar, not a promise to project every
-presentation accepted by a general YAML parser. Tags, block scalars, complex
-keys, explicit flow-mapping keys, directives, and other unlisted YAML
-presentations are outside the v1 source-map and DMLS contract. Authors should
+presentation accepted by a general YAML parser. Tags, block scalars (`|`,
+`>`), quoted scalars continued across lines, complex keys, explicit
+flow-mapping keys, directives, and other unlisted YAML presentations are
+outside the v1 source-map and DMLS contract; a schema file that uses one fails
+to load with `could not project SimplifiedSchema expression spans through YAML
+source`. Every non-comment line of a schema value must belong to a presentation
+the grammar recognizes, so an unrecognized one fails rather than being skipped.
+Frontmatter lookup is more tolerant and also follows tags, block scalars, and
+quoted continuations; that does not extend to schema documents. Authors should
 prefer ordinary `key: value` mappings. Expanding this closed boundary requires
 a separately specified feature; discovering another valid-but-unlisted YAML
 spelling is not a production-readiness regression for these meta-types.
@@ -203,7 +273,8 @@ Every type accepts:
 
 - `required` — the property must be present. Presence may still be deferred at
   stabilized launch so an actor inside the run can supply it; it is mandatory at
-  completion.
+  completion. `required` has no effect on a property whose type admits `null`
+  (see [Null-Admitting Properties](#null-admitting-properties)).
 - `eager` — a supplied value is validated at stabilized launch. `eager` is
   timing metadata, not a presence rule: absence is allowed unless `required` is
   also declared. It is not encoded into authored JSON Schema. On a `file` item
@@ -228,7 +299,10 @@ SimplifiedSchema without mutating the instance or authored schema:
 
 Missing and explicit `null` both count as absence at these seams. An
 eager-only `null` is therefore allowed at both phases, `required; eager`
-rejects it at launch, and `required` rejects it at completion. Raw JSON Schema
+rejects it at launch, and `required` rejects it at completion. The table holds
+for every type except a null-admitting one, which is optional at both phases
+whatever its markers: neither `required`, `eager`, nor `generated` makes
+`maybe: [string(required; eager), null]` demand a value. Raw JSON Schema
 has no phase vocabulary, so its authored `required` behavior remains in force
 at launch and completion. Authors who need an actor *inside* the run to produce
 a value must therefore use SimplifiedSchema, which is the only surface where
@@ -247,6 +321,76 @@ as it hoists `required` — the constraint governs the property as a whole, whil
 the selected arm still governs the value. Interactive collection is a
 top-level-property UI, so a missing nested property is reported rather than
 synthesized.
+
+### Null-Admitting Properties
+
+Use a null-admitting type when a whole value may be left out even though the
+type you reuse says `required`. A property is **null-admitting** when its
+whole value is typed:
+
+- `null`, or `unknown` (alias `any`), without `[]`; or
+- a union, written at the property or through a named union reference, with a
+  `null` or `unknown` arm.
+
+A null-admitting property is never required. A `required` written on it,
+inherited from a named type, or hoisted from another union arm has no effect,
+and neither `eager` nor `generated` restores presence. This is how you make
+an optional variant of a required named type:
+
+```yaml
+kind: schema
+types:
+    code: string(required; min(3))
+    record: "{ code: code }"        # record.code is required (inherited)
+    draft_code: [code, null]        # optional: null, omitted, or a valid code
+```
+
+The other arms keep their constraints for non-null values, so a property
+typed `draft_code@./types.yaml` accepts `null`, omission, and `abc`, and
+rejects `ab`.
+
+The decision is made in this order:
+
+```mermaid
+flowchart LR
+    R["Resolve named types<br/>code → string(required; min(3))"] --> N{"Does the whole value<br/>admit null?"}
+    N -->|"yes: null, unknown,<br/>or a union with such an arm"| O["Optional<br/>required, eager, generated ignored"]
+    N -->|no| P{"required marker?<br/>(written, inherited, hoisted)"}
+    P -->|yes| Q[Required]
+    P -->|no| O2["Optional<br/>null counts as absent"]
+    O --> V["Validate a present value<br/>against its arms"]
+    Q --> V
+    O2 --> V
+```
+
+Named references are resolved first, so a reference to a type defined as
+`[code, null]` is optional wherever it is used. Null admission is decided
+before the ordinary optional-property `null` wrapper is added; otherwise every
+optional concrete type would look null-admitting and could never be required.
+
+The rule concerns the **whole value**, not its items or fields:
+
+| Declaration | Missing or `null` | Notes |
+|---|---|---|
+| `unknown(required)`, `null(required)` | accepted | `required` has no effect |
+| `[string(required; min(3)), null]` | accepted | `ab` is still rejected |
+| `unknown[](required)` | rejected | a list is required; its items may be anything, including `null` |
+| `null[](required)` | rejected | a list is required; every item must be `null` |
+| `"{ note: null, id: string }(required)"` | rejected | a nullable field leaves its object required |
+
+The same calculation governs validation, generated JSON Schema, trigger
+matching, composition's optional-property materialization, and launch and
+completion validation. A null-admitting property lowers to its bare fragment
+(`{}` or `{"type": "null"}`, or the union's arms) and is never placed in the
+parent's `required` list.
+
+Raw JSON Schema is unaffected: a property listed in its authored `required`
+array is required even when its schema is `{}` or `{"type": "null"}`.
+
+A host may apply its own policy to an invalid optional value. Claudine, for
+example, drops an invalid optional value with a warning instead of failing, so
+`c: ab` against `c: [string(required; min(3)), null]` is dropped by Claudine
+while `md schema validate` reports it.
 
 ### Numeric Constraints (`number`)
 
@@ -269,6 +413,8 @@ synthesized.
 | `default(s)`   | Default string.                                                                                   | `default`               |
 | `required`     | Property is required.                                                                             | parent `required` entry |
 
+A value must satisfy every pattern. When an atom has more than one pattern-producing constraint (for example `not-empty` with a `pattern(...)`, or several `pattern(...)` constraints), each lowers to its own `allOf` entry instead of a single `pattern` keyword.
+
 ### Date / Time Constraints
 
 `date`, `datetime`, and `time` accept `default(s)` (ISO string) and `required`. The type itself emits the corresponding `format` with format-assertion enabled.
@@ -288,9 +434,11 @@ $schema:
 
 #### Eligibility
 
-`suggest(...)` is available only on exact `string` and `number` types. `number(integer)` remains eligible because `integer` is a constraint on `number`. Array forms (`string[]`, `number[]`) are eligible — their candidates describe individual elements, not whole arrays.
+`suggest(...)` is available only on exact `string` and `number` types and on `alphanumeric`. `number(integer)` remains eligible because `integer` is a constraint on `number`. Array forms (`string[]`, `number[]`) are eligible — their candidates describe individual elements, not whole arrays.
 
-`suggest(...)` is not available on `numberlike`, `date`, `datetime`, `time`, `url`, `email`, `boolean`, `boolish`, `enum`, `any`, `object`, `file`, or raw JSON Schema.
+`suggest(...)` is not available on `numberlike`, `date`, `datetime`, `time`, `url`, `email`, `boolean`, `boolish`, `enum`, `unknown`, `null`, `object`, `file`, `shell`, `expression`, or raw JSON Schema.
+
+On `alphanumeric` the check is stricter: every candidate must be a valid value of the type, or the schema fails to load (see [Alphanumeric Strings](#alphanumeric-strings)). Everywhere else an invalid candidate is only linted.
 
 #### Cardinality
 
@@ -358,7 +506,15 @@ The annotation preserves interpreted candidate order and scalar values. It is ne
 
 #### Candidate Linting
 
-The Darkmatter library owns candidate checking via `lint_suggestions()` — a structured, typed, span-bearing lint API. Each interpreted candidate is checked against its target schema (the non-null scalar or array-item fragment, with `x-darkmatter-suggest` excluded). Applicable number constraints include `min`, `max`, and `integer`; applicable string constraints include `minLength`, `maxLength`, `not-empty`, and `pattern`. `required`, `default`, `generated`, and `example(...)` do not constrain a candidate.
+The Darkmatter library owns candidate checking via `lint_suggestions()` — a structured, typed, span-bearing lint API. Each interpreted candidate is checked against its target schema (the non-null scalar or array-item fragment, with `x-darkmatter-suggest` excluded).
+
+In a union, the target is the property's effective type at the place the candidate is inserted, not just the arm that stores the list: a candidate is valid when **any** alternative there accepts it. Scalar alternatives share one place and the element alternatives of array forms (`string[]`, or the arms of a `U[]` list) share another, so an element arm never vouches for a scalar candidate. The failure reason reported is the storing arm's own. An unresolved named reference cannot vouch for a candidate until the schema is resolved.
+
+```yaml
+$schema:
+    # `large` is kept: the second arm accepts it. `huge` is linted.
+    size: ["string(pattern(^small$); suggest(small, large, huge))", "string(pattern(^large$))"]
+``` Applicable number constraints include `min`, `max`, and `integer`; applicable string constraints include `minLength`, `maxLength`, `not-empty`, and `pattern`. `required`, `default`, `generated`, and `example(...)` do not constrain a candidate.
 
 Invalid candidates produce structured lint problems (not schema-load errors) with decoded text, interpreted value, failure reason, and exact source span. Schema resolution, validator construction, frontmatter validation, and composition all continue uninterrupted. See `SuggestionLintProblem` and `SuggestionLintReason` in the library API.
 
@@ -410,7 +566,7 @@ The positional value is lexed as a YAML-style scalar, so the literal's JSON type
 
 `version: 2` in a document therefore satisfies `literal(2)` without coercion gymnastics, and quoting opts out (`literal('2')` matches the string `"2"`, not the number `2`). Number detection reuses the existing numberlike-shape test — no scientific notation, no leading-zero octal surprises; anything that fails the shape test is text.
 
-A **bare `null`** is rejected with an actionable error (*quote it or drop the key*): optional properties already accept `null`, so a null literal is always an authoring mistake.
+A **bare `null`** is rejected with an actionable error (*quote it or drop the key*): optional properties already accept `null`, so a null literal is always an authoring mistake. To declare a property that must be `null` or absent, use the [`null` type](#unknown-and-null).
 
 #### Constraints
 
@@ -474,6 +630,219 @@ Emits `{ "type": "string", "format": "darkmatter-expression" }`, backed by a pur
 
 The type ships in Darkmatter; consumers adopt it in their own schemas. Claudine's extension baseline retypes `when: string` → `when: expression` with zero Claudine-specific code in Darkmatter, then DMLS lights up schema-driven expression completion, hover, and diagnostics inside those frontmatter values.
 
+### `unknown` and `null`
+
+`unknown` names "any value at all"; `null` names "deliberately absent". Both
+admit `null`, so both are always optional (see
+[Null-Admitting Properties](#null-admitting-properties)).
+
+```yaml
+$schema:
+    payload: unknown            # any value, null, or omitted
+    legacy:  any                # the same type, spelled with its alias
+    review:  null               # only null, or omitted
+    spec:    [file, null]       # a file reference, null, or omitted
+```
+
+**`unknown`** accepts every value: a string, number, boolean, mapping,
+sequence, or `null`, and omission. It lowers to the empty JSON Schema `{}`.
+`any` parses to the same type and is never written back: serialization, `md
+schema about`, and DMLS hover all say `unknown` and list `any` as its alias.
+Values keep their native types, including nested `null`s; `unknown` performs
+no coercion. Because it accepts everything, `unknown(required)` cannot demand
+that a key be present. Use a concrete type for that, such as
+`agent: string(required)` or `steps: unknown[](required)`. "Anything except
+`null`" is a union of the accepted types:
+`value: [string(required), number, boolean, object, "unknown[]"]`.
+
+An expression variable that no frontmatter key, caller input, or schema
+property declares is of type `unknown`. That is a description, not a static
+check: an invalid operation on such a value is still a runtime error.
+
+**`null`** accepts an explicit `null` or omission and rejects every other
+value. It lowers to `{"type": "null"}`.
+
+- At a type position (a property, a union arm, a nested property, or a named
+  type), the YAML null scalars `null`, `Null`, `NULL`, and `~`, an empty
+  value (`review:`), an empty sequence item (`-`), and the string `"null"` all
+  mean the `null` type. A quoted empty string `""` is a string, not a null
+  spelling, so `d: ""` is still the grammar error *expected a type name*.
+- `null(required)` is legal and behaves exactly like `null`.
+- A `default(...)` on `null` must itself be `null`. `null(default(1))` fails
+  to load, with the error ranged on `1`.
+- `null` is a property type only. An empty root (`$schema:` with no value), a
+  `null` arm of a root union, and `literal(null)` remain errors.
+- Serialization writes the explicit `"null"` type string, never an empty
+  YAML value.
+
+`null` is how a [root union](#root-level-unions) excludes a key from an arm.
+
+### Alphanumeric Strings
+
+`alphanumeric` is a string made of ASCII letters and digits (`[A-Za-z0-9]`).
+Type options widen or narrow that character set. No option is on by default.
+
+```yaml
+$schema:
+    slug: alphanumeric(allow-dashes; min(1); max(40))
+    path: alphanumeric(allow-slashes, allow-periods, block-double-periods, block-leading-slash)
+    name: alphanumeric(leading-alpha, allow-underscores)
+    code: alphanumeric(min(1))       # no options; constraints only
+```
+
+Options are written first, separated by commas; ordinary constraints follow
+the `;`, as with `enum` members.
+
+| Option | Effect |
+|---|---|
+| `allow-dashes` | also allows `-` |
+| `allow-underscores` | also allows `_` |
+| `allow-slashes` | also allows `/` (never `\`) |
+| `allow-periods` | also allows `.` |
+| `allow-whitespace` | also allows the ASCII space (U+0020); never tabs, newlines, or other Unicode whitespace |
+| `block-double-periods` | the value may not contain `..` |
+| `block-leading-dash` | the first character may not be `-` |
+| `block-leading-slash` | the first character may not be `/` |
+| `leading-alpha` | the first character must be an ASCII letter |
+
+- **Grammar.** Options are a closed set. An unknown option, a repeated
+  option, an option with arguments, and an option after the `;` are grammar
+  errors. A list with no `;` that holds no option is read as constraints
+  (`alphanumeric(min(1))`, `alphanumeric(required)`); a list with no `;` that
+  mixes options and constraints is an error whose message shows the
+  `alphanumeric(allow-dashes; min(1))` form. An option on another type
+  (`string(allow-dashes)`) is an error too.
+- **Empty values.** The empty string is accepted unless `min(1)` or
+  `not-empty` excludes it. The leading-character options only constrain a
+  first character when there is one.
+- **Canonical form.** An option that cannot change the accepted values is
+  redundant and dropped: `block-double-periods` without `allow-periods`,
+  `block-leading-dash` without `allow-dashes` or with `leading-alpha`, and
+  `block-leading-slash` without `allow-slashes` or with `leading-alpha`. The
+  remaining options are ordered as in the table, whatever the authored order.
+  Identity, serialization, `md schema about`, DMLS hover, and the
+  [subtype relation](#subtype-relation-is_subtype) all use the canonical
+  form, so `alphanumeric(block-leading-dash)` serializes as `alphanumeric`.
+- **Constraints.** After the `;`: `min(n)` and `max(n)` (characters),
+  `not-empty`, `pattern(re)`, `suggest(...)`, `default(...)`, `example(...)`,
+  and the universal `required`, `generated`, and `eager`. Every pattern
+  applies: the option pattern, each `pattern(...)`, and `not-empty`.
+- **Defaults and suggestions must be valid values.** A `default(...)` or
+  `suggest(...)` value that the type rejects fails the schema load, without
+  coercion. `alphanumeric(default(12))` fails because `12` is a number; write
+  `default('12')`.
+- **No coercion.** A native number or boolean is a type mismatch, never
+  converted to text: `n: 3` fails against `n: alphanumeric`. In a union, the
+  other arms keep their own coercion, so `[alphanumeric, string]` still turns
+  `3` into `"3"` through the `string` arm.
+- **Host-independent.** The type does not establish that a value is a safe
+  path or a safe shell argument; quoting and path policy belong to the code
+  that uses the value.
+
+**Named types.** Options are part of a named type's identity. A use site may
+add ordinary constraints, and may repeat the exact option set, but any other
+option set is a `SchemaError::ConstraintConflict`, never a widening.
+Options are compared after canonicalization, so equivalent spellings agree:
+
+```yaml
+kind: schema
+types:
+    slug: alphanumeric(allow-dashes)
+    a: slug(max(10))                     # ok: constraints only
+    b: slug(allow-dashes; max(10))       # ok: the same option set
+    c: slug(allow-periods)               # error: a different option set
+```
+
+The error names both declarations: the definition's option group and the use
+site.
+
+**JSON Schema.** The type lowers to a string with a linear-time `pattern`
+that encodes exactly the canonical options and checks the whole value, plus
+two annotations that record the type identity for JSON consumers. The
+annotations do not validate anything. `alphanumeric(allow-dashes,
+block-leading-dash; min(1))` lowers to:
+
+```json
+{
+  "type": "string",
+  "minLength": 1,
+  "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9\\-]*)?$",
+  "x-darkmatter-type": "alphanumeric",
+  "x-darkmatter-options": ["allow-dashes", "block-leading-dash"]
+}
+```
+
+`x-darkmatter-options` is `[]` for the base type. When a user `pattern(...)`
+or `not-empty` is also present, each pattern becomes its own `allOf` entry,
+so none overwrites another.
+
+### Shell Commands
+
+`shell` types a string that is a shell command. It joins `expression`,
+`yaml`, and `json` in the content-format family. Its job is type identity: a
+schema can say "this value is a shell command", and a union of action types
+can include or exclude it.
+
+```yaml
+$schema:
+    build: shell(required)          # e.g. `cargo build --release`
+    hooks: shell[](min(1))
+```
+
+- **Validation.** A value must contain at least one non-whitespace character
+  (Unicode whitespace). There is **no shell-syntax check**: Darkmatter's own
+  `$( … )` and `::shell` grammar is narrower than the system shell that a host
+  such as Claudine runs (`sh -c` or `cmd /C`), so no single parser is right
+  for every host. `ls | wc -l; echo done` is valid; `"   "` is not.
+- **Passive.** Validation never runs, approves, or reads anything.
+- **Constraints, coercion, and pending values mirror `expression`.**
+  `required`, `default(...)`, `generated`, `eager`, `example(...)`, and array
+  constraints after `[]` are allowed; string constraints and `suggest(...)`
+  are rejected. Native booleans and numbers coerce to their text
+  (`shell: true` → `"true"`); mappings and sequences are type mismatches. A
+  `default(...)` is converted to text the same way and must contain a
+  non-whitespace character; a `null`, list, or mapping default fails to load.
+  An authored whole-value `$( … )` or `{{ … }}` is deferred as on
+  `expression`, while data that merely contains that syntax is validated as
+  text.
+- **JSON Schema.** `shell` lowers to
+  `{"type": "string", "format": "darkmatter-shell"}`. Every Darkmatter
+  validator registers and asserts that format. A consumer of exported JSON
+  Schema must enforce the custom format itself; a validator that ignores
+  unknown formats accepts any string, including a blank one.
+
+A lifecycle-style schema can allow a shell action under one event and not
+another by typing each event as a list of a different action union. Action
+alternatives are closed inline objects with a required action key, so an
+object that mixes an allowed action with a `shell` key, or an empty `{}`, is
+rejected as well:
+
+```yaml
+# actions.yaml
+kind: schema
+types:
+    say_action: "{ say: string(required) }"
+    set_action: "{ set: object(required) }"
+    shell_action: "{ shell: shell(required) }"
+    initialize_action: [say_action, set_action]
+    start_action: [say_action, set_action, shell_action]
+```
+
+```yaml
+$schema:
+    initialize: initialize_action[]@./actions.yaml
+    start: start_action[]@./actions.yaml
+```
+
+With this schema `start: [{shell: echo hi}]` is valid and
+`initialize: [{shell: echo hi}]` is reported by `md schema validate`,
+composition, and DMLS. An opaque `object` or `unknown` alternative would
+accept a shell action anyway, so do not add one. This is authoring
+validation only: a host that must never run a shell during an event, as
+Claudine refuses during `initialize`, still enforces that ban at run time,
+including for shell-valued `set` and `$(...)` forms that a schema does not
+see as a `shell` key.
+
 ### Files
 
 The `file` type wraps a `FileReference` string and is **lazy by default**. A bare
@@ -501,6 +870,13 @@ In a single schema it only suggests paths, so an existing file outside the
 configured globs still validates. In a root union, it is also an arm constraint:
 an existing file outside an arm's declared glob rules that arm out. This holds
 when the other arms declare the same glob, a different glob, or no glob.
+
+Each `match(...)` is one **group**: a path must match one of the group's
+positive globs and none of its `!` exclusions. Repeating `match(...)`, which
+usually happens when a [named type](#merging-use-site-constraints) is reused
+with another `match`, adds a group, and a path must satisfy every group:
+`file(match('*.md'); match('guide*'))` admits `guide-intro.md` but neither
+`notes.md` nor `guide.txt`. An exclusion stays inside its own group.
 
 Each glob is a **glob reference**: an optional `!` (exclude), an optional
 file-reference prefix, then the glob. The prefix says where the glob starts,
@@ -656,7 +1032,15 @@ $schema:
 | `max(n)`          | Maximum number of items.                     | `maxItems`       |
 | `unique`          | All items must be distinct.                  | `uniqueItems`    |
 | `required`        | Array property is required (not items).      | parent `required` |
-| `default([...])`  | Default array.                               | `default`        |
+| `default(value)`  | Default for the array property.              | `default`        |
+
+The `default(...)` argument is read as a scalar, like every other constraint
+argument, so `default([a])` stores the string `"[a]"`, not a one-item list. A
+list-valued default cannot be written in the type-expression grammar today.
+
+To make a list whose items may each take one of several shapes, name the
+union and reference it with `[]`: `steps: step[](min(1))`, where `step` is a
+union-typed named type. See [Named Union References](#named-union-references).
 
 ## Inline Object Literals
 
@@ -793,30 +1177,145 @@ Resolved example objects are emitted onto the JSON Schema as the `x-darkmatter-e
 
 ### Cross-File Named-Type Imports (`Name@file`)
 
-`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. A schema file's **top-level `$schema:` entries are its named types**; each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
+`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
+
+A type defined in the same schema may be referenced by its **bare name**: `type` and `type@this` are the same reference. See [Local Type References](./local-type-references.md) for where local names live, built-in collisions, and why a bare name inside an imported definition still resolves in its defining file.
 
 ```yaml
 $schema:
     type:       type@./types.yaml        # inlines types.yaml's `type` definition
     parameters: parameter[]@./types.yaml # array of the inlined `parameter` map
-    value:      type@this                # the `type` defined in *this* file
+    value:      kind                     # the `kind` defined in *this* schema
+    other:      kind@this                # the same reference, spelled explicitly
+    kind:       enum(a, b)
 ```
 
-Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? '@' fileref`. Postfix composes **outward**:
+Grammar: `type_ref := ident ('(' constraints ')')? ('[]' ('(' constraints ')')?)? ('@' fileref)?`. A bare `ident` that is a built-in type keyword is the built-in; any other bare `ident` is a local reference. Postfix composes **outward**:
 
 - `Name[]@file` — an array of the inlined `Name`.
-- `Name(constraints)@file` — the inlined type with `constraints` applied to it.
-- `@this` — the current schema file (self-target), including inline top-level documents.
+- `Name(constraints)@file` — the inlined type with `constraints` merged into its own (see [Merging use-site constraints](#merging-use-site-constraints)).
+- `Name[](constraints)@file` — an array of the inlined `Name`, with `constraints` on the array.
+- `Name -> description` — a use-site description replaces the inherited one; omitting it keeps the inherited description.
+- `@this` (or no `@` at all) — the current schema (self-target), including inline top-level documents.
+
+A constraint list before `[]` (`Name(c)[]`) parses, but only a union-typed named type accepts one, and only its property markers; on any other named type it is a schema error, so write the list's constraints after `[]`. Adding `[]` to a named type that is already an array is an error. A reference to a **union-typed** named type accepts `[]` with list constraints, the `required`, `generated`, and `eager` markers (before or after `[]`), and a description, in all three forms (bare, `@this`, and `Name@file`); any other constraint on it is an error. See [Named Union References](#named-union-references).
 
 The file reference is read as written up to the next `->`, `,`, or `}`, whichever comes first. No other punctuation in it has meaning, so `Name@./a(b.yaml` names the file `./a(b.yaml`, and `Name@./a{b.yaml -> the shared shape` names `./a{b.yaml` and describes it. Inside a YAML flow sequence, quote an arm whose filename contains `[` or `{`, because YAML ends a plain flow scalar there: `['Name@./a{b.yaml', string]`.
 
 Rules:
 
 - The right side resolves as a `biscuit_file::FileReference` whose `cwd` is the schema file's directory, in the request's file-resolution context when one is supplied — the same resolution as root-union file refs and `$schema`.
-- The target must be a SimplifiedSchema file with a matching named type. Importing from a raw JSON Schema file, from a file with no matching type name, or a missing file is a schema error.
-- Expansion is **eager, bounded, and cycle-checked**. Named types form a DAG; a type that transitively references itself is a recursion error (`SchemaError::ImportCycle`), and an import chain that exceeds the depth cap is rejected — the same protection as the inline-object nesting cap. True recursive types are deferred.
-- Each import is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes.
+- The target must be a SimplifiedSchema file whose payload is a mapping with a matching named type. Importing from a raw JSON Schema file, from a root-union schema file, from a file whose whole payload is a reference to another file, or from a missing file is a schema error. A name the target does not define is `SchemaError::UnknownNamedType`, naming the type, the schema searched, and the property that holds the reference.
+- **Every constraint of the definition survives the reference**, including `required` and `generated`. An inherited `required` keeps its scope: on `people: person[]` it makes `people` required, and inside one arm of a property-level union it is hoisted to the property like any arm's `required`. Requiring a field *inside* an object type does not require the property that holds the object.
+- Expansion is **eager, bounded, and cycle-checked**. Named types form a DAG; a type that transitively references itself, through bare or explicit references, is a recursion error (`SchemaError::ImportCycle`, reporting the chain such as `b -> a -> b`), and an import chain deeper than 32 references is rejected — the same protection as the inline-object nesting cap. True recursive types are deferred.
+- Each import of another file is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes. A local reference adds no edge.
+- An inherited `example(...)` reference resolves from the file that declared it, not from the importing schema.
 - `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
+
+> **Implementation note:** within one schema resolution, each target file's
+> named types are parsed once and shared, unexpanded, by every import of that
+> file, and the document's own table is shared by every `@this`. Each use site
+> still receives its own copy of the selected definition, so a constraint,
+> description, or `[]` on one import never affects another:
+>
+> ```yaml
+> $schema:
+>     primary: name(required)@./types.yaml  # required here only
+>     backup:  name@./types.yaml            # unaffected by `primary`
+> ```
+>
+> The sharing ends when that resolution finishes: nothing is kept between
+> calls, and it reduces copying without promising a fixed end-to-end speedup.
+
+#### Merging use-site constraints
+
+Constraints written at a use site combine with the constraints the named type
+already carries. This is a merge inside one reused type; it is unrelated to
+[schema layering](./authoring-schemas.md#schema-layering), where the winning
+schema's whole property definition replaces lower layers.
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    label: string(min(3))
+    site: url(scheme(http, https))
+```
+
+```yaml
+$schema:
+    title: label(max(80))@./types.yaml       # 3..80 characters
+    short: label(min(5))@./types.yaml        # at least 5 characters
+    home: site(scheme(https))@./types.yaml   # https only
+```
+
+| Situation | Result | Example |
+|---|---|---|
+| Different constraints | Both apply | `label` + `max(80)` → 3..80 characters |
+| Repeated lower bound | The larger (stricter) wins | `min(3)` + `min(5)` → `min(5)` |
+| Repeated upper bound | The smaller (stricter) wins | `max(80)` + `max(50)` → `max(50)` |
+| Contradictory bounds | `SchemaError::ConstraintConflict` | `min(10)` + `max(5)` |
+| Flags (`not-empty`, `integer`, `unique`, `eager`, `required`, `generated`) | Idempotent | `required` twice = `required` |
+| Repeated `pattern(…)` | Every pattern applies | `pattern(^a)` + `pattern(z$)` accepts `az`, rejects `ab` and `bz` |
+| Repeated `match(…)` | Groups intersect | `file(match('*.md'))` + `match('guide*')` offers `guide-intro.md`, not `notes.md` or `guide.txt` |
+| Repeated `scheme(…)` | Intersection; empty is a `ConstraintConflict` | `scheme(http, https)` + `scheme(https)` → `https` |
+| Repeated `default(…)` | Must be equal; different values are a `ConstraintConflict` | `default(3)` + `default(3.0)` is fine; `default(3)` + `default("3")` is not |
+| Repeated `suggest(…)` | Error: at most one `suggest` per property | |
+| Repeated `example(…)` | All kept, inherited first | each resolves from the file that declared it |
+| `alphanumeric` options | The same canonical set is accepted; a different set is a `ConstraintConflict` | `slug(allow-dashes; max(10))` over `slug: alphanumeric(allow-dashes)` is fine; `slug(allow-periods)` is not (see [Alphanumeric Strings](#alphanumeric-strings)) |
+
+The rules in detail:
+
+- **Bounds compare per kind:** string length (`min`/`max` on a string),
+  number (`min`/`max` on a number), item count (`min`/`max` on an array), and
+  key count (`min-keys`/`max-keys`). Equal lower and upper bounds are valid.
+- **Bounds are read against the resolved target.** Parsing a reference does
+  not know its target type, so `label(max(80))` means a length when `label`
+  is a string and a numeric maximum when it is a number. On a named type that
+  is already an array, such as `tags: string[](max(5))`, a use-site `min` or
+  `max` is an item count: `tags(min(6))` conflicts with the inherited
+  `max(5)`. A fractional length bound on a string target is an error.
+- **Item and container constraints never merge.** A named `string(min(3))`
+  used as `label[]` requires each item to have at least three characters;
+  `label[](min(1))` also requires at least one item. The two minima stay
+  separate.
+- **Patterns are conjunctive.** `not-empty` counts as a pattern. With a single
+  pattern-producing constraint the JSON Schema keeps one `pattern` keyword;
+  with several, each becomes its own entry in an `allOf` beside the base
+  `type`, `format`, bounds, and `x-darkmatter-*` annotations. Patterns are
+  never combined into one regular expression, and Darkmatter does not try to
+  prove that they can all match.
+- **`match` groups intersect.** Each `match(...)` keeps its own positive and
+  `!` exclusion list, and a path must satisfy every group. An exclusion in one
+  group never applies to another group's positives. Groups are not
+  concatenated, because a combined list would widen the choices instead of
+  narrowing them. As with a single `match`, the groups only shape completion
+  in a single schema and reject no value there; in a
+  [root union](#files) an existing file must satisfy every group of an arm
+  for that arm to apply. An empty intersection is not detected at schema-load
+  time, which would need a file search: the schema loads, and completion
+  offers no files.
+- **Defaults compare after number normalization**, so `3` equals `3.0`, while
+  `"3"` and `3` differ. Existing type-specific default checks still apply.
+- **One `suggest` per property.** The limit covers the whole property,
+  including the arms of a union reached through different named types.
+  Use-site `suggest(...)` candidates are checked against the resolved target,
+  which must be exactly `string` or `number`.
+- **The definition owns the target type.** A use site cannot replace enum
+  members or a literal value, or change the type. A constraint the resolved
+  type does not accept is rejected, as on any property.
+
+A `ConstraintConflict` names the property, the kind of conflict (`Bounds`,
+`Scheme`, or `Default`), and every declaration involved as a
+`SchemaConstraintOrigin`: its source (a file or the inline document), path,
+keyword, and, for a file, the byte span of the constraint. In a multi-hop
+chain each origin points at the declaration that introduced the value. When
+the conflict arises inside a schema the document references,
+`SchemaError::ReferencedSchema` wraps it.
+
+The same contradictions on a single atom, with no reuse involved, are errors
+too: `string(min(10); max(5))`, `url(scheme(http); scheme(ftp))`, and two
+different defaults are each a `SchemaError::Convert` naming the property.
 
 Because a named type can be *any* definition and `@` inlines it, composition (named types + `@` + `[]` + unions + pattern keys) **is** the type system — SimplifiedSchema's ergonomic answer to JSON Schema `$ref` / `$defs`.
 
@@ -828,7 +1327,7 @@ Inside an inline object (or a YAML-block schema object), keys may follow a **pat
 $schema:
     headers: "{ <string>: string }"                 # any string key → string value
     parameter:
-        "<string>": any                             # any string key → any value
+        "<string>": unknown                         # any string key → any value
 ```
 
 Key forms:
@@ -858,17 +1357,36 @@ They can be authored as **postfix constraints** or via the reserved **`$constrai
 ```yaml
 $schema:
     # Postfix form — exactly one key/value pair
-    parameter: "{ <string>: any }(min-keys(1); max-keys(1))"
+    parameter: "{ <string>: unknown }(min-keys(1); max-keys(1))"
 
     # $constraints block form — identical desugaring
     parameter:
-        "<string>": any
+        "<string>": unknown
         $constraints:
             min-keys: 1
             max-keys: 1
 ```
 
 `$constraints` (dollar-prefixed, mirroring `$schema`) is **reserved only inside authored schema objects**: it is stripped before shape assembly and never participates in literal/pattern key matching. Flag constraints are written `name: true`. This does **not** reserve `$constraints` in user frontmatter data — only the schema-authoring language uses the sentinel.
+
+The block and the postfix are one scope. Key bounds from a `$constraints` block, from the object's postfix, and from a use site that reuses the object as a named type merge under the [merge rules](#merging-use-site-constraints): the stricter bound wins, and a minimum above the maximum is an error whichever spelling declared it.
+
+What else a block may hold depends on where it sits:
+
+| Block on | Accepted keys | Anything else |
+|---|---|---|
+| an object-typed property | `min-keys`, `max-keys`, `required`, `generated` | schema error ("`$constraints` key `…` is not valid on an inline object") |
+| the root schema, or one arm of a root union | `min-keys`, `max-keys` | schema error ("… is not valid on the root object") |
+
+On a property's object, `required: true` and `generated: true` mean exactly the same as the postfix spelling: they apply to the property, so this `author` is required:
+
+```yaml
+$schema:
+    author:
+        name: string
+        $constraints:
+            required: true
+```
 
 ### Content-Format Types (`yaml` / `json`)
 
@@ -903,7 +1421,7 @@ $schema:
     status:
       - "enum(draft, published, archived)"
       - "number(integer; min(0))"
-      - any
+      - unknown
 
     # accepts a positive number or a CSS-length string
     width:
@@ -913,8 +1431,9 @@ $schema:
 
 **Hoisting.** `required`, `eager`, and `default(...)` are property-level — they
 are extracted from whichever arm declares them and applied to the property as a
-whole. `required` on any arm makes the property required; `eager` on any arm
-makes a supplied value launch-validated without requiring it. Convention is to
+whole. `required` on any arm makes the property required, unless another arm
+is `null` or `unknown` (see [Null-Admitting Properties](#null-admitting-properties));
+`eager` on any arm makes a supplied value launch-validated without requiring it. Convention is to
 place them on the first arm. Differing
 `default(...)` values on multiple arms is a compile-time error.
 
@@ -934,6 +1453,232 @@ $schema:
     width: [literal(auto), "number(min(1))"]   # the keyword `auto` or a positive number
 ```
 
+### Named Union References
+
+A union written once as a [named type](#cross-file-named-type-imports-namefile)
+can be reused, marked required, described, or turned into a list at each place
+that references it. This is how you declare a list whose items may each take a
+different shape, such as "a non-empty list whose entries are each a rule
+string or a rule mapping".
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    step:
+      - "string -> A shell command"
+      - "{ run: string(required), cwd: string }"
+```
+
+```yaml
+$schema:
+    setup: step@./types.yaml                              # the union, optional
+    main:  "step(required)@./types.yaml -> The main step" # the union, required
+    steps: "step[](min(1); unique)@./types.yaml"          # a non-empty list of distinct steps
+```
+
+The bare (`step[]`), `@this` (`step[]@this`), and cross-file
+(`step[]@./types.yaml`) forms of a reference behave identically.
+
+#### What a reference may add
+
+| Use site | Meaning |
+|---|---|
+| `U` | The union, inlined: its arms become the property's arms. |
+| `U(required)`, `U(generated)`, `U(eager)`, or a combination | The union, with the marker applied to the property as a whole, exactly as on a [property-level union](#property-level-unions). `eager` does not imply `required`. |
+| `U -> text` | The union, described as a whole. Each arm keeps its own description. |
+| `U[]` | A list whose every item is one of `U`'s arms. Each item is judged on its own and may match a different arm. |
+| `U[](min(n); max(n); unique; required; generated; eager)` | That list, with the constraints applied to the list itself. `default(...)` and `example(...)` are accepted after `[]` as on [any other array](#array-constraints). |
+| `U(required)[]`, `U(generated)[]`, `U(eager)[]`, or with a list after `[]` too | Exactly the same list as the marker written after `[]`: `step(eager)[]` and `step[](eager)` are one schema. The markers belong to the property, so their side of `[]` does not matter. |
+
+Anything else is rejected with `SchemaError::UnionReference`, rather than being
+copied into every arm. The error names the property, the union, what was
+rejected (a `SchemaUnionRejection`), and where the union is defined; DMLS
+reports the same error at the reference.
+
+| Rejected use site | Why | `SchemaUnionRejection` |
+|---|---|---|
+| `U(max(10))`, `U(pattern(^a))`, `U(unique)`, `U(default(x))`, `U(max(2))[]` | A value constraint without `[]`, or before it, would have to apply to every arm. Put it on the arms instead. | `Constraint { keyword, array_level: false }` |
+| `U[](pattern(^a))`, `U[](integer)` | After `[]`, only list constraints apply. | `Constraint { keyword, array_level: true }` |
+| `U[]` where an arm is already a list, such as `[string[], number]` | Checked after imported and nested union arms are expanded, so an array arm behind an import is caught too. | `ArrayArm { arm }` |
+| `U[]` where an arm carries a `default(...)` | The arm's default cannot become the list's default; see [Defaults](#defaults-on-named-union-references). | `ScalarDefault { arm, value }` |
+
+```text
+p: constraint `max` cannot apply to a union-typed type (named type `choice`)
+```
+
+A named type that is itself a postfixed union reference is still a union, so
+references to it take exactly these postfixes and rejections. It keeps its own
+markers and description; with `[]`, its markers apply to the list:
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    step: [string, number]
+    required_step: step(required)   # still union-typed
+```
+
+```yaml
+$schema:
+    steps: "required_step[](min(1))@./types.yaml"  # a required, non-empty list
+    bad:   "required_step(max(2))@./types.yaml"    # rejected: Constraint { keyword: "max", .. }
+```
+
+A list *inside* an object arm is fine: `[string, "{ tags: string[] }"]` may be
+referenced as `U[]`, because no arm's outer value is a list.
+
+Only a **named** union takes these postfixes. An anonymous union cannot be
+followed by `[]`, and an `(A | B)[]` spelling is not supported.
+
+#### Item versus container scope
+
+An arm's constraints describe one item; constraints after `[]` describe the
+list. They never merge, even when they share a keyword:
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    choice: ["string(required; min(3))", number]
+```
+
+```yaml
+$schema:
+    list: "choice[](max(2))@./types.yaml"
+```
+
+- `min(3)` stays on the string arm: each string item needs at least three
+  characters. It does not become the list's minimum item count.
+- `max(2)` follows `[]`, so the list holds at most two items.
+- `required` on the arm is a presence marker, so it hoists to `list`, which is
+  required.
+
+#### Presence and timing
+
+- `required` and `generated` declared on any arm hoist to the property that
+  holds the reference, whether that property is the union (`U`, `U(eager)`) or
+  a list of it (`U[]`), just as they do for a property-level union. Markers
+  written at the use site add to them. A union with a `null` or `unknown` arm
+  is the exception: `U` and `U(required)` stay optional (see
+  [Null-Admitting Properties](#null-admitting-properties)), while `U[]` is a
+  list and keeps its markers.
+- `generated` keeps its [usual meaning](#universal-constraints): it adds the
+  `x-darkmatter-generated` annotation and removes the property from the static
+  `required` list. It supplies no value.
+- `eager` written at the use site (`U(eager)`, `U(eager)[]`, or `U[](eager)`)
+  is property timing: a supplied value is validated at launch. An arm's
+  `eager` also times the property that holds the reference, whether that is
+  the union or a list of it, as on a property-level union. With
+  `choice: ["string(required; eager)", number]`, both `p: choice` and
+  `p: choice[]` must be supplied at launch.
+- Neither `eager` on the reference nor an eager sibling arm turns a lazy
+  `file` arm into `file(eager)`.
+  An arm already declared `file(eager)` keeps its existence check either way.
+- Fields of an object arm keep their own `required`, `generated`, and `eager`.
+
+#### Defaults on named union references
+
+- Without `[]`, an arm's `default(...)` hoists to the property as on any
+  property-level union.
+- With `[]`, an arm's default could only become the list's default. A scalar
+  default cannot, so the declaration fails with `ScalarDefault`, naming the
+  arm and the value. The default is neither dropped nor wrapped in a one-item
+  list. Because the grammar reads every `default(...)` argument as a scalar
+  (see [Array Constraints](#array-constraints)), any arm default fails this
+  way.
+- A `default(...)` written after `[]` at the use site lowers exactly as on any
+  other array.
+- Darkmatter never inserts a default value into a document.
+
+#### Lowering
+
+A list of a union lowers to an array whose `items` is the union's `anyOf`.
+Nested unions flatten into one `anyOf`, arm order and arm descriptions are
+kept, and items get no `null` arm. An optional property wraps the whole array
+in the usual `anyOf: [{ type: null }, …]`, so a missing or `null` property is
+allowed while a `null` item is not. A use-site description sits on that
+wrapper. The `content_policy` property of the
+[example below](#example-a-content-policy-list) lowers to:
+
+```json
+{
+  "anyOf": [
+    { "type": "null" },
+    {
+      "type": "array",
+      "minItems": 1,
+      "items": { "anyOf": [ { "type": "string", "pattern": "^Evergreen$" },
+                            …,
+                            { "type": "object", "properties": { "rule": { "anyOf": [ … ] }, "action": { … } },
+                              "required": ["rule", "action"], "additionalProperties": false } ] }
+    }
+  ]
+}
+```
+
+`U(required)` lowers to the union's `anyOf` with no `null` arm and the
+property in the parent's `required` list. A nested arm that carries its own
+postfix flattens exactly like a bare one, so coercion, literal-discriminant
+selection, and error reporting see one list of alternatives:
+
+- its `required`, `generated`, and `eager` markers belong to the containing
+  property, as an arm's own presence markers do. `[pair(required), boolean]`
+  makes the property required, and a reference `choice[]` to that union makes
+  the list required.
+  `eager` sets the property's timing only: a `file` arm of `pair` stays lazy
+  unless `pair` itself says `file(eager)`;
+- its `-> description` describes each of its arms that has no description of
+  its own.
+
+```yaml
+pair: [string, number]
+choice: ["pair(required) -> a label", boolean]
+# choice lowers to one anyOf, with no null arm:
+#   [{type: string, description: a label}, {type: number, description: a label}, {type: boolean}]
+```
+
+In the typed model, a bare `U` stays a `PropertyDef::Union`. A postfixed
+reference becomes one `PropertyAtom` whose `ty` is `TypeExpr::Union(arms)`,
+with `is_array` set for `U[]`. Use `schemas::flattened_alternatives` to list
+the leaf alternatives of either form.
+
+#### Example: a content policy list
+
+A content-policy style schema whose policies may be short strings or
+`{ rule, action }` mappings. The [built-in baseline](#the-built-in-baseline)
+types `content_policy` this way, importing Content Policy's shipped schema:
+
+```yaml
+# content-policy.yaml
+kind: schema
+types:
+    short_form:
+      - string(pattern(^Evergreen$))
+      - string(pattern(^TimeSensitive$))
+      # … one pattern arm each for ValidFor(…), ValidUntil(…), and FileChanged(…)
+    long_form:
+        rule: short_form(required)
+        action: enum(refresh, archive, remove; required)
+    policy: [short_form, long_form]
+```
+
+```yaml
+$schema:
+    content_policy: "policy[](min(1))@./content-policy.yaml"
+```
+
+| `content_policy` value | Result | Why |
+|---|---|---|
+| `[ValidFor(3mo), {rule: ValidUntil(2027-01-01), action: archive}]` | valid | Each item matches an arm; items may match different arms. |
+| missing, or `null` | valid | The property is optional. |
+| `[null]` | invalid | Items have no `null` arm. |
+| `ValidFor(3mo)` | invalid | A single string is not a list. |
+| `[]` | invalid | `min(1)` |
+| `[Duration(3mo)]` | invalid | No arm matches. |
+| `[{action: archive}]` or `[{rule: null, action: archive}]` | invalid | `rule` is required in `long_form`. |
+| `[{rule: ValidFor(3mo), action: delete}]` | invalid | `delete` is not an `action` member. |
+
 ### Discriminated Unions
 
 When the arms of a union are inline objects that each carry a `literal`-typed **discriminant** key, the union becomes a genuine tagged union. Both `md schema validate` diagnostics and DMLS editor behavior narrow to the single matched arm.
@@ -947,6 +1692,10 @@ $schema:
 
 Given a document with `kind: created`, validation reports only the `created` arm's missing/unknown/type problems instead of the full `anyOf` noise, and DMLS sibling-key completion offers only that arm's keys.
 
+Validation narrows the same way wherever the union sits: a property, each item of an array of a union (`events: event[]`, where every item selects its own arm), or a field nested inside an object. Narrowing changes only which problems are reported. A value that another arm accepts is still valid, and a union location with no problems is never narrowed.
+
+A problem's description is looked up through union arms as well. For `/events/1/path`, the lookup descends into the `items` alternatives, takes the arm the item's tag selects (or, without one, every arm that declares `path`), and reads that field's description. When several arms declare the field with different descriptions and no tag picks one, the problem carries no description rather than a guessed one.
+
 An arm is selected **only when** all of the following hold:
 
 - the same discriminant key is present as a `literal` in **at least two** arms,
@@ -954,6 +1703,41 @@ An arm is selected **only when** all of the following hold:
 - exactly **one** arm's typed literal equals the instance value.
 
 Equality is **type-sensitive**: a typed `2` does not select an arm tagged `'2'`. If multiple discriminant keys qualify, they must all select the same arm. For an absent, unknown, duplicate, or conflicting discriminant, validation and completion fall back to the normal merged/union behavior — narrowing never guesses an arm from a partial or ambiguous match. Schemas without literal discriminants keep byte-identical `anyOf` diagnostics.
+
+### Choosing an Arm: Reporting versus Changing Data
+
+Several parts of Darkmatter ask "which arm does this value belong to?" at a
+union location: a property union, an item of a `U[]` list, or a field nested
+inside either. How much evidence each needs depends on what it does with the
+answer. Explaining a problem may lean on a heuristic such as the closest arm;
+changing stored data may not.
+
+```mermaid
+flowchart TD
+    V[Value at a union location] --> Q{What is the answer used for?}
+    Q -->|validate| VA[Valid when at least one arm accepts it]
+    Q -->|report a problem| RP{Does a literal tag select exactly one arm?}
+    RP -->|yes| RN["Report that arm's problems"]
+    RP -->|no| RU[Report the ordinary union problems]
+    Q -->|coerce or rewrite| TC{Does exactly one arm qualify?}
+    TC -->|yes| TA[Change the value through that arm]
+    TC -->|no| TU[Leave the value unchanged]
+    Q -->|clean up| CL["Never repair inside a union, report only"]
+```
+
+| Consumer | Picks an arm when | Otherwise |
+|---|---|---|
+| Validation | It never needs to: the value is valid when any arm accepts it. | — |
+| Problem reporting | A literal tag selects one arm ([Discriminated Unions](#discriminated-unions)). A root union also reports its closest arm. | The ordinary union report. |
+| Coercion (compose) | Exactly one arm's coerced candidate validates ([Inline Object and Union Coercion](#inline-object-and-union-coercion)). | The value is left unchanged. |
+| Eager-`file` rewriting (compose) | Exactly one arm that contains an eager `file`, as the value itself or as a field of an object arm, accepts the value ([Files](#files)). | The value is left unchanged. |
+| Cleanup (`md clean`) | Never inside a union, even when a tag would identify the arm. | Problems are reported and the value is left unchanged; no key is deleted. Values outside the union keep cleanup's usual repair rules. |
+| Editor completion and hover | Completion: a literal tag selects one arm. Hover: exactly one arm accepts the value. | Every applicable alternative is offered or listed. |
+
+The same rules apply to every item of a `U[]` list, judged on its own, so
+neighboring items can select different arms. Closest-arm scoring only ever
+explains a failure: it never decides which arm coerces, rewrites, or cleans a
+value.
 
 ### Root-Level Unions
 
@@ -970,6 +1754,32 @@ $schema:
 ```
 
 The effective schema is `{ "anyOf": [arm0, arm1, ...] }`. **Baseline merging is applied to each arm independently** — a baseline declares the fields every arm inherits.
+
+**Root unions are inclusive.** A document is valid when it matches **one or
+more** arms. A root mapping is open, so a property an arm does not declare is
+unconstrained in that arm. This schema accepts a `schema` file, a `review`
+file, or both, and rejects a document with neither:
+
+```yaml
+$schema:
+  - schema: file(required)
+  - review: file(required)
+```
+
+To accept **exactly one**, exclude the other key in each arm with the
+[`null` type](#unknown-and-null). The excluded key may be omitted or `null`,
+so this schema rejects both files and neither:
+
+```yaml
+$schema:
+  - schema: file(required)
+    review: null
+  - review: file(required)
+    schema: null
+```
+
+Pattern-key dictionaries and explicit raw JSON Schema restrictions inside an
+arm still apply.
 
 When validation fails against a root union, Darkmatter reports the **closest-matching arm** — the one producing the fewest problems — and prefixes problems with the arm index. JSON output carries an `arm_index` field on every problem.
 
@@ -996,7 +1806,7 @@ The resolution rules:
      `https://json-schema.org/draft/2020-12/schema`.
    - `.json` files are always treated as JSON Schema.
 3. **YAML sequence** at `$schema` — root union; each arm is resolved by the same rules above.
-4. **No `$schema` and no baseline** — validation succeeds vacuously and `pretty` mode emits a `no schema; vacuously valid` note (suppressed by `--quiet`).
+4. **No `$schema`** — the baseline alone applies; `md schema validate` and `md compose` use the [built-in baseline](#the-built-in-baseline) unless told otherwise. With no baseline either, validation succeeds vacuously and `pretty` mode prints a note saying so (suppressed by `--quiet`).
 
 Path references in `$schema` resolve like implicit file references: a bare path is
 tried **from the document's directory first, then the repository root**, while an explicit
@@ -1093,26 +1903,137 @@ let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 ```
 
-`md schema validate` accepts the baseline per invocation:
+### The Built-in Baseline
 
-```bash
-md schema validate post.md --schema ./schemas/baseline.yaml
-md schema validate post.md     # falls back to $BASELINE_SCHEMA env var
+Darkmatter's own frontmatter properties (`title`, `last_updated`, `style`,
+`ctx`, and the rest) are typed by a built-in baseline authored in
+[`docs/schemas/darkmatter.yaml`](../../schemas/darkmatter.yaml) and described
+in [`docs/schemas/darkmatter-schema.md`](../../schemas/darkmatter-schema.md).
+It also types `content_policy` by importing Content Policy's editor schema:
+
+```yaml
+content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"
 ```
 
-**Resolution order for the `md schema validate` baseline:**
+The property is optional and has no default, so a document without it stays
+valid and nothing inserts it; a present value must be a non-empty list whose
+items each match a `policy` entry (see
+[Example: a content policy list](#example-a-content-policy-list)).
 
-1. `--schema <path>` flag.
-2. `BASELINE_SCHEMA` environment variable.
-3. No baseline.
+The baseline and every schema it imports are compiled into the library, so an
+installed `md` or `dmls` prepares it outside a checkout, with no schema files
+on disk:
 
-`md compose` has a different CLI default: it injects the Darkmatter base
-frontmatter schema as its baseline unless told otherwise. Use
-`--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose
-behavior with no default baseline, or `--baseline-schema <path>` to replace the
-default with a custom SimplifiedSchema YAML baseline. See
-[`docs/schemas/darkmatter-schema.md`](../../schemas/darkmatter-schema.md) for the
-base schema contract.
+- the imports resolve from an internal table keyed by repository-relative
+  virtual paths (`darkmatter/docs/schemas/darkmatter.yaml`,
+  `content-policy/schemas/content-policy.yaml`). A reference is resolved
+  lexically with `/` against the importing path; there is no disk or network
+  fallback, so a reference to a path the table does not hold is an error;
+- an embedded document is never a file dependency, so DMLS never watches it
+  and `EffectiveSchema::dependencies()` does not list it;
+- the baseline is prepared and lowered to JSON Schema once per process and
+  shared by every caller.
+
+Resolving the authored `darkmatter.yaml` from a checkout with the ordinary
+disk resolver gives the same typed schema and the same JSON Schema.
+
+### Selecting the Baseline
+
+Each entry point chooses its baseline separately:
+
+| Entry point | Default | Replace with | Opt out with |
+|---|---|---|---|
+| `md schema validate` | built-in baseline | `--schema <path>`, `BASELINE_SCHEMA` | `--no-baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA` |
+| `md compose` | built-in baseline | `--baseline-schema <path>` | `--no-baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA` |
+| DMLS | built-in baseline, then [extension baselines](./dmls-schema-support.md#extensibility-through-configuration) | — | — |
+| `DarkmatterSchemas` | none | `with_baseline(...)`, `with_baseline_from_file(...)`, `with_darkmatter_baseline_json_schema()` | — |
+
+```rust
+let api = DarkmatterSchemas::new(context)
+    .with_baseline_from_file("./schemas/baseline.yaml")?;
+```
+
+`DARKMATTER_NO_BASELINE_SCHEMA` disables the baseline only for the exact
+values `1`, `true`, `TRUE`, `yes`, and `YES`. Any other value, such as `0`,
+`True`, or ` yes`, leaves it on.
+
+**Resolution order for `md schema validate`.** The first rule that applies
+wins:
+
+```mermaid
+flowchart TD
+    A["md schema validate"] --> B{"--no-baseline-schema?"}
+    B -- yes --> N["no baseline"]
+    B -- no --> C{"--schema PATH?"}
+    C -- yes --> P["baseline from PATH"]
+    C -- no --> D{"DARKMATTER_NO_BASELINE_SCHEMA<br/>is 1, true, TRUE, yes, or YES?"}
+    D -- yes --> N
+    D -- no --> E{"BASELINE_SCHEMA set?"}
+    E -- yes --> Q["baseline from BASELINE_SCHEMA"]
+    E -- no --> F["built-in baseline"]
+```
+
+1. `--no-baseline-schema` validates with no baseline. It cannot be combined
+   with `--schema`; passing both is a usage error that exits `2` before any
+   file is read.
+
+   ```bash
+   md schema validate post.md --no-baseline-schema
+   ```
+
+2. `--schema <path>` replaces the built-in baseline, even when
+   `DARKMATTER_NO_BASELINE_SCHEMA` is set.
+
+   ```bash
+   DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate post.md --schema ./schemas/baseline.yaml
+   # validates against ./schemas/baseline.yaml
+   ```
+
+3. A disabling `DARKMATTER_NO_BASELINE_SCHEMA` validates with no baseline and
+   ignores `BASELINE_SCHEMA`.
+
+   ```bash
+   DARKMATTER_NO_BASELINE_SCHEMA=1 BASELINE_SCHEMA=./schemas/baseline.yaml md schema validate post.md
+   # no baseline
+   ```
+
+4. `BASELINE_SCHEMA` replaces the built-in baseline.
+
+   ```bash
+   BASELINE_SCHEMA=./schemas/baseline.yaml md schema validate post.md
+   ```
+
+5. Otherwise the built-in baseline applies.
+
+   ```bash
+   md schema validate post.md
+   ```
+
+Both environment variables are read from the environment the command was
+started with. A custom path, from `--schema` or `BASELINE_SCHEMA`, takes the
+same reference forms as a file argument and resolves from the directory the
+command was started in, not from the document. A custom baseline that cannot
+be found or loaded exits `2` and never falls back to the built-in baseline or
+to none.
+
+Opting out removes only the baseline. A document's own `$schema` and matching
+[trigger schemas](#repository-trigger-schemas) still apply, and `--no-trigger-schemas`
+turns off triggers independently of the baseline.
+
+**Compatibility.** Because every built-in property is checked by default, a
+document with no `$schema` can now fail `md schema validate`, exactly as it
+fails `md compose`. Given:
+
+```yaml
+---
+last_updated: not-a-date
+---
+```
+
+`md schema validate post.md` exits `1`, because `last_updated` is a `date`.
+`md schema validate post.md --no-baseline-schema` or
+`DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate post.md` exits `0`, as it
+did before the built-in baseline was the default.
 
 ### JSON Schema Baseline Restrictions
 
@@ -1150,6 +2071,7 @@ Coercion is **default-on**: there is no opt-in flag and no opt-out / strict-type
 | `string` (incl. `date` / `datetime` / `time` / `url` / `email` / `file`) | a `number` or `boolean` scalar | its canonical string (`42` → `"42"`, `true` → `"true"`) |
 | `yaml` | a native mapping / sequence / scalar | its YAML string serialization (validated as YAML) |
 | `json` | a native mapping / sequence / scalar | its JSON string serialization (validated as strict JSON) |
+| `expression` / `shell` | a `number` or `boolean` scalar | its canonical string (`true` → `"true"`) |
 | `array` of a coercible item type | an array | each element coerced by the item rule (recursively) |
 
 The string direction is reverse-direction and always unambiguous (every scalar has exactly one canonical string form). It targets `string` only — a number landing in a `date` field coerces to its string form and then fails the `date` format check normally, so coercion never produces a false accept.
@@ -1163,6 +2085,8 @@ These remain uncoerced and continue to fail strict validation on a type mismatch
 - any string that does not match the numeric regex → number.
 - arrays, objects, or `null` → any scalar type.
 - a string → object, or an object → string.
+- a `number` or `boolean` → `alphanumeric`. The value must already be a string; in a union, another arm such as `string` may still coerce it.
+- anything → `unknown` or `null`. `unknown` keeps every value as written, and `null` accepts only `null`.
 
 Nested object properties are not deeply coerced — coercion applies to top-level properties and to the elements of top-level typed arrays. Coercing an already-correctly-typed value is a no-op (idempotent).
 
@@ -1176,19 +2100,29 @@ Coercion recurses into the nested structure of an inline object when the matchin
 
 For property-level unions, coercion is attempted per arm. The compose stage builds a per-arm coerced candidate using that arm's schema path, validates each candidate against that arm, and commits the coerced value only when **exactly one** arm validates after coercion. If zero arms validate, or if multiple arms validate (ambiguous), the original value is left uncoerced and normal validation/reporting proceeds from the original. This avoids guessing across ambiguous inline object paths while still allowing unambiguous union arms to coerce nested scalars.
 
+An array of a union (a `U[]` reference to a union-typed named type) applies the same rule to **each item on its own**. Every item builds its candidates from its original value, and each item may select a different arm. An item that no arm accepts, or that several arms accept, is left unchanged while its siblings still coerce. A `boolish` or `numberlike` arm inside the union normalizes its item just as it does at property level. Given `toggle: [boolish, "{ name: string(required), enabled: boolean }"]`:
+
+```yaml
+toggles: ["TRUE", {name: x, enabled: "false"}, maybe]
+# coerces to
+toggles: [true, {name: x, enabled: false}, maybe]   # `maybe` fits no arm and fails validation
+```
+
 The same conservative rules apply at every nested level — coercion never fires on array- or object-typed values, never crosses a property boundary, and never produces a false accept on a value that is genuinely the wrong type.
 
 ## CLI: `md schema validate`
 
 ```
-md schema validate <FILE_OR_PROP=VALUE>... [--schema <path>] [--format pretty|json] [--quiet]
+md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --no-baseline-schema] [--no-trigger-schemas] [--format pretty|json] [--quiet]
 ```
 
 | Flag                       | Effect                                                                                                 |
 |----------------------------|--------------------------------------------------------------------------------------------------------|
 | `<FILE_OR_PROP=VALUE>...`  | Markdown files **and/or** `<prop>=<value>` assignments. See [Frontmatter Assignments](#frontmatter-assignments). |
-| `--schema <path>`          | Baseline schema for this invocation. Falls back to `$BASELINE_SCHEMA`, then to no baseline.            |
-| `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file with source line/column info.         |
+| `--schema <path>`          | Custom baseline replacing the built-in one, used even when `DARKMATTER_NO_BASELINE_SCHEMA` is set. See [Selecting the Baseline](#selecting-the-baseline). |
+| `--no-baseline-schema`     | Validate with no baseline, ignoring `BASELINE_SCHEMA`. Conflicts with `--schema`.                      |
+| `--no-trigger-schemas`     | Do not discover or apply [trigger schemas](#repository-trigger-schemas). The baseline is unaffected.   |
+| `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file; each problem names its [source location](#problem-locations). |
 | `--format json`            | Newline-delimited JSON, one object per file. Pipe-friendly.                                            |
 | `--quiet`                  | Suppress success lines; only failures print.                                                           |
 
@@ -1231,21 +2165,35 @@ md schema validate a.md b.md c.md title=shared
 
 Malformed YAML on the right-hand side (e.g. `user={broken`) is reported as a **usage error** with exit code `64` rather than silently treated as a file path. Bare strings with special YAML characters (commas in flow context, leading `&`, etc.) should be quoted in the shell.
 
-**Schema-aware coercion.** When the effective schema declares a top-level property as a string-shaped scalar (`string`, `date`, `datetime`, `time`, `url`, `email`, `enum`, or `file`), the raw right-hand side is stored verbatim as a string instead of being run through the YAML scalar parser. This lets `bar=true` validate against `bar: string(required)` without the shell-quoting acrobatics that would otherwise be needed to keep the literal `"`. Property-level unions follow the same rule when **any** non-array arm is a string-shaped type — the string variant wins so the value is preserved losslessly.
+**Schema-aware coercion.** When the effective schema declares a top-level property as a string-shaped scalar (`string`, `date`, `datetime`, `time`, `url`, `email`, `enum`, `file`, or `alphanumeric`), the raw right-hand side is stored verbatim as a string instead of being run through the YAML scalar parser. This lets `bar=true` validate against `bar: string(required)`, and `slug=123` against `slug: alphanumeric`, without the shell-quoting acrobatics that would otherwise be needed to keep the literal `"`. Property-level unions follow the same rule when **any** non-array arm is a string-shaped type — the string variant wins so the value is preserved losslessly.
 
 Coercion is intentionally conservative:
 
 - It only fires for **top-level** scalar paths. Nested `user.email=...` paths land inside `object`-typed properties, which are opaque in v1, so the original YAML parse is used.
 - Array-typed properties (`tags: string[]`) are excluded so `tags=[a, b, c]` still flows through the YAML flow-sequence parser.
 - Schemas that produce no SimplifiedSchema projection — raw JSON Schema input or root-level unions — also fall back to the plain YAML parse.
-- `boolean`, `boolish`, `number`, `numberlike`, `object`, and `any` keep the YAML-parsed value. For `boolish` this means a bare `flag=true` is stored as the boolean variant `true`; pass `flag=\"true\"` (or `'flag="true"'`) to get the quoted-string variant.
+- `boolean`, `boolish`, `number`, `numberlike`, `object`, `unknown`, `null`, `shell`, and `expression` keep the YAML-parsed value (`shell` and `expression` then turn a number or boolean into text during validation). A number written in the document itself (`slug: 123`) is still a type mismatch for `alphanumeric`. For `boolish` this means a bare `flag=true` is stored as the boolean variant `true`; pass `flag=\"true\"` (or `'flag="true"'`) to get the quoted-string variant.
 
 **Nested assignments.** Dot-separated paths create or merge intermediate objects:
 
 - `user.email=ken@ken.net` on `{ user: { name: "Ken" } }` produces `{ user: { name: "Ken", email: "ken@ken.net" } }`.
 - `user.email=...` on `{ user: "scalar" }` replaces the scalar with `{ email: "..." }` — the descent cannot continue into a non-object parent.
 
-**Caveat.** Source line/column reporting is taken from the original frontmatter text. Problems on assigned properties carry no `line`/`column`; problems on properties that were *overridden* by an assignment still report the original source position of the (now-replaced) value.
+**Locations of assigned values.** Problem locations always come from the file as written, so an assigned value has no source of its own. A problem at a path the file already had reports the authored node there, even though the assignment replaced its value. A problem at a newly added nested path reports its nearest authored ancestor; a newly added top-level property has no location (`line` and `column` are `null`). For example, given a schema where `count`, `rating`, and `user.age` are numbers, and this frontmatter:
+
+```yaml
+---
+count: 3
+user:
+  name: Ken
+---
+```
+
+| Assignment | Problem path | Location |
+|---|---|---|
+| `count=many` | `/count` | line 2, column 8: the authored `3` |
+| `user.age=x` | `/user/age` | line 4, column 3: the authored `user` mapping |
+| `rating=x` | `/rating` | none |
 
 ### Exit Codes
 
@@ -1259,18 +2207,34 @@ Coercion is intentionally conservative:
 
 When multiple kinds of failure occur in the same invocation, the more specific failure wins: parse error (`3`) outranks schema-load failure (`2`), which outranks validation failure (`1`).
 
+Passing both `--schema` and `--no-baseline-schema` is rejected by argument parsing itself, which exits `2` with a "cannot be used with" message on stderr and nothing on stdout.
+
 ### Pretty Output
 
-```
-post.md  ✓ valid (schema: ./schemas/post.yaml)
+Given `draft.md`:
 
-draft.md  ✗ 2 problems
-  • title "title" is a required property
-      at line 2, column 1 of frontmatter
-      The author's full name
-  • tags[2] does not match pattern ^[a-z0-9-]+$
-      at line 6, column 5 of frontmatter
+```markdown
+---
+$schema: ./schemas/post.yaml
+status: orange
+tags:
+  - rust
+  - 42
+---
 ```
+
+`md schema validate post.md draft.md` prints one block per file:
+
+```
+- ✔ the document post.md has a schema definition and is valid.
+- ✗ the document draft.md failed schema validation:
+    - title is a required property (at line 2, column 1)
+        The post's title
+    - status "orange" is not one of "draft", "published" or "archived" (at line 3, column 9)
+    - tags/1 42 is not of type "string" (at line 6, column 5)
+```
+
+Each bullet starts with the failing path (`tags/1`), or with the missing property's name when the root lacks it, and ends with the problem's [location](#problem-locations) in the complete file: `(at line L, column C)`, `(at line L)` when no column is known, or nothing when the problem has no location.
 
 When the failing property declares a `description` (via `-> ...`, an inline-object
 per-property description, or a `description` keyword in a referenced JSON Schema),
@@ -1281,36 +2245,90 @@ description-less schema produces no extra lines.
 For root-union failures, problems are prefixed with `arm[N]`:
 
 ```
-post.md  ✗ 1 problem
-  • arm[1]: title "title" is a required property
+- ✗ the document post.md failed schema validation:
+    - arm[0]: title is a required property (at line 2, column 1)
 ```
-
-Line/column positions are drawn from the **original frontmatter text** (with the leading `---` delimiter accounted for), so the coordinates match the source the author is editing.
 
 ### JSON Output
 
 ```json
 {"file":"post.md","valid":true,"schema":"./schemas/post.yaml","problems":[]}
-{"file":"draft.md","valid":false,"schema":null,"problems":[
-  {"path":"/title","property":"title","message":"\"title\" is a required property","kind":"missing","line":2,"column":1,"arm_index":null,"description":"The author's full name"},
-  {"path":"/tags/2","property":"tags","message":"does not match pattern ^[a-z0-9-]+$","kind":"invalid","line":6,"column":5,"arm_index":null,"description":null}
+{"file":"draft.md","valid":false,"schema":"./schemas/post.yaml","problems":[
+  {"path":"","property":"title","message":"\"title\" is a required property","kind":"missing","line":2,"column":1,"arm_index":null,"description":"The post's title"},
+  {"path":"/tags/1","property":null,"message":"42 is not of type \"string\"","kind":"type","line":6,"column":5,"arm_index":null,"description":null}
 ]}
 ```
 
-Each problem carries a `property` field (the top-level property name, when
-resolvable) and a `kind` field — one of `missing`, `type`, or `invalid`.
+Each problem carries a `path` (a JSON pointer; a missing property's `path` is the
+mapping that lacks it, `""` for the root), a `property` field (the missing
+property's name, when resolvable) and a `kind` field — one of `missing`,
+`type`, or `invalid`. `line` and `column` give the problem's
+[location](#problem-locations), or are `null` when it has none.
 
 Each problem also carries a `description` field: the failing property's declared
 description string when one is resolved, or `null` when the property declares no
 description (or the description was suppressed because it was whitespace-only or
 byte-for-byte equal to the problem message).
 
+The `schema` field names the document's own `$schema`. It is `null` for a document without one, even when the built-in or a custom baseline validated it; the pretty output still says such a document "has a schema definition", because its effective schema is the baseline.
+
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"` or `"schema"`) and an empty `problems` array.
+
+### Problem Locations
+
+A problem's location points at the authored YAML node that is wrong, not just at the top-level property that contains it. Given a schema in which `then` items allow only `say`:
+
+```yaml
+---
+start:
+  - then:
+      - say: hello
+      - sya: goodbye
+---
+```
+
+the unknown-key problem keeps the path `/start/0/then/1` and is reported at line 5, column 9, the `s` of `sya`:
+
+```
+    - start/0/then/1 Additional properties are not allowed ('sya' was unexpected) (at line 5, column 9)
+```
+
+**Coordinates.** Lines count the complete Markdown file, so the opening `---` is line 1. Columns are 1-based UTF-8 byte columns: a `😀` before the node counts as 4 columns. LF and CRLF line endings give the same line and column.
+
+**Which node.** The problem's kind decides what it points at:
+
+| Problem | Location | Example |
+|---|---|---|
+| A wrong value (type, constraint, enum, file reference) | the start of the value; for a block list item, after the `- ` | `  - oops`: column 5, the `o` |
+| An unknown key (`path` is the parent mapping; the message names the key) | the start of the key itself | `sya` above: 5:9 |
+| A missing required property | the start of the mapping that lacks it; for a list item, its first key rather than its dash | `  - name: b`: column 5, the `n` |
+| A missing property of the root | the root mapping's first key, after any leading comments or blank lines | `---`, `# draft`, then `title: x`: line 3, column 1 |
+
+Flow collections (`{…}`, `[…]`) written on one line are located node by node too. With `m: {a: 1, b: x}` on line 2, an unknown key `b` is at 2:11 and a wrong value `x` at 2:14.
+
+**Scalars are one node.** A block scalar (`|`, `>`) or a quoted scalar is located at its start (the indicator or the opening quote). A problem inside its decoded content, such as a `yaml` or `json` value whose embedded document is wrong, reports that start; no position inside the scalar is invented.
+
+**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation means aliases (`*a`) and anchors used as values, merge keys (`<<`), unquoted `{{ … }}` templates, flow collections spread across lines, and comments inside flow collections. It never changes the validation result or causes an error; it only makes every location in that document coarser.
+
+```mermaid
+flowchart TD
+    A[Problem at a path] --> B{Can the document's YAML<br/>be mapped node by node?}
+    B -- "no (unsupported presentation)" --> C[Line of the top-level key<br/>column 1]
+    B -- yes --> D{Is the node itself authored?}
+    D -- yes --> E[The node's start]
+    D -- "no (e.g. added by an assignment)" --> F{Is there an authored<br/>ancestor below the root?}
+    F -- yes --> G[The nearest authored ancestor's start]
+    F -- no --> H[No location]
+```
+
+**Documents without loaded text.** Locations need the text the document was parsed from. A `Markdown` document built in code has no such text, so its locations refer to the serialized YAML of its frontmatter. Source-free validation reports no locations: `EffectiveSchema::validate`, or `validate_with_positions` given the empty `PositionMap::new()`. A library caller holding bare YAML can build a map with `schemas::validate::build_position_map(yaml)`; its lines are relative to that slice, so line 1 is the first YAML line rather than the `---`.
+
+The same locations appear in `md compose`'s [schema-failure block](#error-rendering), and the DMLS language server highlights the same nodes in an editor.
 
 ### Behavior Without `$schema`
 
-- With a baseline configured, the document is validated against the baseline alone.
-- Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `valid (no schema; vacuously valid)`.
+- With a baseline, which is the built-in one unless [selected otherwise](#selecting-the-baseline), the document is validated against the baseline alone, and `pretty` mode says it has a schema definition.
+- Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
 
 ## CLI: `md schema detect`
 
@@ -1348,7 +2366,7 @@ For each top-level frontmatter property (excluding `$schema`), the inferred type
 - email string → `email`
 - string that resolves via `FileReference` to an existing path → `file`
 - other string → `string`
-- array → recursive item-type inference; mixed items fall back to `any[]`
+- array → recursive item-type inference; mixed items fall back to `unknown[]`
 - object → `object` (v1 does not synthesise nested SimplifiedSchemas)
 
 **No constraints are inferred** — detection produces base types only. Patterns, `min` / `max`, enum members, and other constraints are never synthesised from values. All detected properties are marked **optional**: a single sample cannot prove requiredness.
@@ -1378,7 +2396,7 @@ boolean ──> boolish
 file ──> string   (only if the strings stop resolving)
 ```
 
-When inferred types are **genuinely disjoint** (e.g. `string` and `boolean`), the merger emits a SimplifiedSchema union for that property rather than collapsing to `any`:
+When inferred types are **genuinely disjoint** (e.g. `string` and `boolean`), the merger emits a SimplifiedSchema union for that property rather than collapsing to `unknown`:
 
 ```yaml
 $schema:
@@ -1401,18 +2419,24 @@ $schema:
 md schema about
 ```
 
-`md schema about` is the **implementation-bound reference** for the SimplifiedSchema authoring language. It prints a human-readable report covering schema shapes, the type vocabulary, the constraint vocabulary, inline object rules, validation behavior, and coercion rules.
+`md schema about` is the **implementation-bound reference** for the SimplifiedSchema authoring language. It prints a human-readable report covering schema shapes, the type vocabulary, the `alphanumeric` type options, the constraint vocabulary, inline object rules, validation behavior, and coercion rules. A type's aliases appear under its canonical keyword (`unknown` shows `alias: any`; there is no separate `any` row), and the options table lists each option's effect and the options that make it redundant.
 
 ```
 SimplifiedSchema Language Reference
   …
   ## Schema Shapes
-    - Inline mapping
+    - Single object
     - Root-level union
-    - File reference
     - Property-level union
+    - Inline object literal
+    - Nested mapping object
+    - Array of a named union
+    - Marked union reference
   ## Type Vocabulary
     - string, date, datetime, time, number, numberlike, …
+    - unknown (alias: any), null, alphanumeric, shell
+  ## Type Options: alphanumeric
+    - allow-dashes, allow-underscores, …, leading-alpha
   ## Constraint Vocabulary
     - min, max, not-empty, pattern, default, required, …
   ## Inline Object Rules
@@ -1488,16 +2512,18 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | Type                  | Purpose                                                                                                             |
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
 | `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
-| `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's provenance: document, baseline, or referenced file). |
+| `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
-| `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column`, optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
+| `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
+| `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
 | `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`. |
-| `ValidationOptions` / `PendingValue` | Mirror the compose deferral rules as data: `pending_policy` (`Defer` / `Report`) plus `excluded_keys`; a `PendingValue` records a value validation skipped because it still holds a `$(...)` shell expression or an unresolved `{{ }}` template. |
+| `ValidationOptions` / `PendingValue` | Mirror the compose deferral rules as data: `pending_policy` (`Defer` / `Report`) plus `excluded_keys`; a `PendingValue` records a value validation skipped because it is a whole-value `$(...)` shell expression or still holds an unresolved `{{ }}` template. |
 | `SimplifiedSchema`    | Either `Single(SchemaShape)` or `Union(Vec<SchemaArm>)`.                                                            |
 | `SchemaShape`         | Ordered map of property names to `PropertyDef`.                                                                     |
 | `PropertyDef`         | Either `Single(PropertyAtom)` or `Union(Vec<PropertyAtom>)`.                                                        |
 | `PropertyAtom`        | `ty`, `is_array`, `constraints`, `array_constraints`, `description`.                                                |
-| `SimplifiedType`      | Enum of the supported types (`String`, `Date`, `Number`, …, `Any`).                                                 |
+| `SimplifiedType`      | Enum of the supported types (`String`, `Date`, `Number`, …, `Unknown`, `Null`, `Alphanumeric`, `Shell`). `aliases()` lists alternative spellings (`any` for `Unknown`). |
+| `AlphanumericOptions` | The canonical option set of an `alphanumeric` type (`PropertyAtom::alphanumeric_options()`), with its allowed and first-character sets (`AsciiCharSet`), `accepts(&str)`, and `pattern()`. |
 | `Constraint`          | Enum of all constraint variants (`Required`, `Default`, `Min`, `Max`, `Members`, `Match`, `Suggest`, …).           |
 | `SuggestionCandidate` | One interpreted `suggest(...)` argument: decoded text, interpreted value, canonical decimal, byte span.             |
 | `SuggestionLintProblem` | One invalid suggestion candidate with decoded text, interpreted value, reason (`SuggestionLintReason`), and exact authored byte span. |
@@ -1517,10 +2543,11 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 
 Detection is passive: it derives the supplied context to each document and never discovers a repository. A reference that does not resolve is a `string`, and so is every value when that derivation is invalid, so pass a context that admits the document: the request's for a document inside its tree, otherwise the one prepared for that document (in another repository, in none, or opened through another spelling of its path). `md schema detect` passes each argument's document context.
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
+- `is_subtype(&PropertyAtom, &PropertyAtom)` — whether every non-null value one resolved type accepts is accepted by another; see [Subtype Relation](#subtype-relation-is_subtype).
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
-- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (authored in `docs/schemas/darkmatter.yaml`) as a `SimplifiedSchema`.
+- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (authored in `docs/schemas/darkmatter.yaml` and compiled in with the schemas it imports; see [The Built-in Baseline](#the-built-in-baseline)) as a `SimplifiedSchema`.
 - `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value.
 - `darkmatter_base_json_schema_ref()` — a read-only borrow of the process-cached JSON Schema, avoiding a deep clone.
 
@@ -1529,14 +2556,59 @@ the built-in baseline; each configured instance shares the cached JSON Schema.
 
 ### Span-Aware Validation and Normalization
 
-`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values still holding a `$(...)` shell expression or an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
+`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
+
+### Subtype Relation (`is_subtype`)
+
+`is_subtype(a, b)` answers "does every non-null value accepted by type `a`
+also satisfy type `b`?". It is passive and works on resolved
+`PropertyAtom`s, so resolve named types first. Use it to decide whether a
+saved rule typed `b` covers a value typed `a`, for example whether an
+approval for `alphanumeric(allow-slashes)` covers an argument typed
+`alphanumeric`.
+
+```rust
+use darkmatter::markdown::schemas::is_subtype;
+use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
+
+let atom = |text| parse_type_expr("p", text).unwrap();
+let rule = atom("alphanumeric(allow-slashes)");
+assert!(is_subtype(&atom("alphanumeric(min(3))"), &rule)); // constraints are ignored
+assert!(!is_subtype(&atom("string"), &rule));
+assert!(is_subtype(&atom("email"), &atom("string")));
+```
+
+Only the type and its canonical options count. Ordinary constraints (`min`,
+`max`, `pattern`, …), presence, the optional `null` wrapper, and coercion are
+outside the relation.
+
+| `a` | `b` | `a` ⊆ `b`? |
+|---|---|---|
+| any type | the same type with the same canonical options (including an identical array, inline object, or union) | yes |
+| `alphanumeric(X)` | `alphanumeric(Y)` | yes when X's allowed characters and allowed first characters are subsets of Y's, and X guarantees any ban on `..` that Y makes |
+| an always-text type: `string`, `date`, `datetime`, `time`, `file`, `enum(…)`, `url`, `email`, `yaml`, `json`, `expression`, `alphanumeric(…)`, `shell`, or a string `literal(…)` | `string` | yes |
+| `string`, `email`, or any other non-`alphanumeric` type | `alphanumeric(…)` | no |
+| `unknown`, `null`, `number`, `boolean`, an array, … | `string` | no |
+| any other pair, including an unresolved reference | | no |
+
+The `alphanumeric` row compares what the options permit, not the keywords
+written. X guarantees no `..` when it blocks double periods or does not allow
+periods at all, so base `alphanumeric` ⊆
+`alphanumeric(allow-periods, block-double-periods)`, and
+`alphanumeric(leading-alpha, allow-dashes)` ⊆
+`alphanumeric(allow-dashes, block-leading-dash)`. Redundant options cancel
+out: `alphanumeric(block-leading-dash)` and `alphanumeric` are subtypes of
+each other. This is bounded reasoning over the option table, not inclusion
+checking for user regexes, and it never replaces a runtime check of the
+actual value or shell quoting.
 
 ### Schema Descriptor Catalog
 
 The descriptor catalog that backs `md schema about` is exposed to library callers. Each function returns a `&'static [...]` slice in a deterministic, stable order:
 
 - `schema_shape_descriptors()` — supported schema shapes and grammar forms.
-- `schema_type_descriptors()` — supported type keywords and their display descriptions.
+- `schema_type_descriptors()` — supported type keywords, their aliases (`unknown` lists `any`), display descriptions, the item-level constraint keywords each type accepts (`accepts_constraint("min")`), and any type options. `schema_type_descriptor(name)` finds one by keyword or alias.
+- `alphanumeric_option_descriptors()` — the `alphanumeric` type options in canonical order, each with its effect and the options that make it redundant (`block-leading-dash` is redundant without `allow-dashes` or with `leading-alpha`).
 - `schema_constraint_descriptors()` — supported constraints, their argument forms, their applicable target types, and their JSON Schema effect.
 - `inline_object_rule_descriptors()` — inline object grammar rules and limits (postfix constraints, arrays, nesting depth, identifier rules, description termination, `additionalProperties: false`).
 - `coercion_rule_descriptors()` — coercion rules and the matrix of declared-type / incoming-value pairs that fire.
@@ -1548,20 +2620,60 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 `ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
 
+A hit needs the whole resolution context to match, and the built-in baseline declares a `file` property (`style.page.stylesheet`), so its merged validator depends on that context. With the built-in baseline, each document whose schema or context differs therefore compiles the merged baseline once; this is most of the cost of validating many documents, and `--no-baseline-schema` avoids it when only document schemas matter.
+
 ## Shell-Completion Integration
 
-The `completion` module is a read-only consumer of an `EffectiveSchema`. It exposes:
+The `completion` module is a read-only consumer of an `EffectiveSchema`. It reads the authored document schema alone (`EffectiveSchema::simplified`): its properties are the parameters a caller may supply, while baseline and trigger properties are host controls and are not offered. The editor's full property shape, with matching trigger payloads, is `EffectiveSchema::property_shape`. It exposes:
 
 - `completion::completable_properties(&effective) -> Vec<String>` — properties whose declared type is completable, in declaration order.
 - `completion::for_property(&effective, "name") -> Option<CompletionSuggestion>` — completion data for a single property.
 
 Three completion categories are surfaced:
 
-- `CompletionKind::File { patterns }` — filesystem-path completion filtered by the `match(...)` globs (including `!`-prefixed negations). The caller walks the filesystem.
+- `CompletionKind::File { alternatives }` — filesystem-path completion. `alternatives: Vec<Vec<Vec<String>>>` is an OR of AND-ed groups: a path is a candidate when it satisfies **every** group of **some** alternative, each group being the raw globs of one `match(...)` (including `!`-prefixed exclusions). A single property gives one alternative holding all of its groups, including those a reused named type inherits; a root union gives one alternative per `file` arm that declares a `match`. Empty means no `match` at all (a bare `file`). `file_match::FileMatchGroups` judges one alternative. The caller walks the filesystem.
 - `CompletionKind::Enum { members }` — the enumerated members in declaration order.
 - `CompletionKind::Hint { format }` — a one-line format hint for value-completion-unfriendly types (`url`, `email`, `date`, `datetime`, `time`).
 
-Root unions and raw JSON Schema inputs do not expose a SimplifiedSchema projection, so they return no completion data.
+For a root union, `completable_properties` lists every inline arm's completable properties, and a property declared as `file` in several arms offers each arm's groups as a separate alternative. Raw JSON Schema inputs do not expose a SimplifiedSchema projection, so they return no completion data.
+
+A union-typed reference completes through its arms: `U(required)` like the union `U`, and `U[]` with `is_array: true` and the first completable arm describing one element. The `suggest(...)` queries (`suggestions_for_path`, `suggestions_for_def`) read the same arms and report `is_array: true` for `U[]`.
+
+### Completing inside a union value
+
+Editors that complete inside one value of a union — typically an element of a `U[]` list — use:
+
+- `completion::for_list_item(&effective, "name", &item)` — the alternatives of one array element;
+- `completion::for_property_value(&effective, "name", &value)` — the alternatives of a non-array property's own value;
+- `completion::alternatives_for_def(&def, site, &value)` — the same answer for a `PropertyDef` the caller already resolved.
+
+Pass the value as authored so far (`Value::Null` when it is missing or empty). The result, an `AlternativeCompletion`, lists `keys` from the inline-object alternatives and `values` from the scalar alternatives (`enum` members, `literal(...)` values, and lint-valid `suggest(...)` candidates, YAML-quoted where they are strings):
+
+```yaml
+types:
+  step:
+    - "{ kind: literal(shell; required), run: string(required) }"
+    - "{ kind: literal(say; required), text: string(required) }"
+    - enum(fast, slow)
+```
+
+| Authored element of `step[]` | Keys offered        | Values offered | `selected_arm` |
+|------------------------------|---------------------|----------------|----------------|
+| missing or `null`            | `kind`, `run`, `text` | `fast`, `slow` | none |
+| `{ kind: shell }`            | `kind`, `run`       | none           | `0` |
+| `{ kind: other }` or `{}`    | `kind`, `run`, `text` | none         | none |
+| `"f"`                        | none                | `fast`, `slow` | none |
+
+The rules:
+
+- Only alternatives that can hold the authored JSON kind apply: an object keeps the object alternatives, a scalar keeps the scalar ones, `null` keeps all of them.
+- An object narrows to one alternative only when the shared literal-discriminant selector picks it unambiguously; a missing, unknown, duplicate, or conflicting tag keeps the combined choices. Nothing is chosen by closeness.
+- Each element is judged on its own, so neighboring elements can narrow to different alternatives.
+- A key's `required` is `true` only when every alternative offering it requires it; already-authored keys are not removed, so the caller filters them and the typed prefix.
+- The same union used as a property value gives the same answer as an element, apart from `is_array`.
+- `suggest(...)` candidates are judged against the whole union, not only the arm that stores them (see [Candidate Linting](#candidate-linting)). A property carries one `suggest(...)` list (see [Cardinality](#cardinality)), so a union keeps that list on one arm and still offers every candidate some alternative accepts. The built-in `content_policy` typing relies on this: Content Policy's seven example rules sit on the `^Evergreen$` arm, and completion offers all seven.
+
+All of it is passive: no file is read or written, and no expression is evaluated.
 
 ## Error Model
 
@@ -1577,8 +2689,11 @@ All failure modes are variants of `SchemaError`:
 | `SchemaDocument`        | A recognized standalone schema document (pure or tagged envelope) has a missing or malformed payload.     |
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
-| `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
-| `ImportCycle`           | A `Name@file` named-type import references itself directly or transitively (or exceeds the import-depth cap). |
+| `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, contradictory bounds or schemes on one atom, a `$constraints` key the block's object cannot use, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
+| `ImportCycle`           | A named-type reference (bare or `Name@file`) references itself directly or transitively (or exceeds the import-depth cap). |
+| `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
+| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
+| `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](#named-union-references). |
 | `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |
 | `Io`                    | Filesystem read failure with the offending path.                                                          |
@@ -1611,8 +2726,8 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 - When a baseline schema is set via `ComposeOptions::with_baseline_schema(...)` and the document lacks `$schema`, the baseline alone is validated.
 - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
 - The stage **mutates** the document: it coerces schema-recognized top-level scalars to their declared types (see [Type Coercion](#type-coercion)) and **writes the coerced values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
-- A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper, so compose and the downstream consumer agree.
-- Problems whose top-level field value still contains a frontmatter shell expression (`$(...)`) are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been expanded at validation time, so the downstream consumer (e.g. claudine) re-validates the post-shell effective frontmatter. If every problem is deferred, compose proceeds; any composition-independent problem fails fast. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
+- A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper.
+- Problems on a whole-value frontmatter shell expression (`$(...)`), or on a key whose `{{ }}` template reads one, are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--no-trigger-schemas`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing, so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
 - Only **authored** text is ever pending. A data value (a data override layer, an expression's result, a decoded literal token) is final, so a problem on it is reported even when its text contains `$(` or `{{`: with `OverrideLayer::data(json!({"count": "$(echo 2)"}))` against `count: number`, validation fails, while the same value as an authored override is deferred and run. A stored literal token is judged by the text it holds.
 - Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
 - The baseline schema participates in transclusion cache keys and the run-local options hash, so cached results are not reused across different baselines.
@@ -1646,11 +2761,12 @@ for `md compose`; `--baseline-schema <path>` replaces it, and
 
 - **Header**: `Schema validation failed` plus an OSC8 link to the source file.
 - **Description line**: the document's `description:` frontmatter (if present), rendered dimmed and italic.
-- **One bullet per problem**: styled with the property name inverted and colour-coded by category:
-  - Missing required: `missing <inverse>property</inverse>: required but not provided`.
-  - Wrong type: `type <inverse>property</inverse>: <message>`.
-  - Constraint / format failure: `invalid <inverse>property</inverse>: <message>`.
-- Each bullet carries the YAML source `line:col` when available.
+- **One bullet per problem**: styled with the problem's instance path inverted and colour-coded by category:
+  - Missing required: `missing <inverse>path</inverse>: required but not provided`.
+  - Wrong type: `type <inverse>path</inverse>: <message>`.
+  - Constraint / format failure: `invalid <inverse>path</inverse>: <message>`.
+- The path is the problem's JSON Pointer without its leading `/`, the spelling `md schema validate` prints: `invalid content_policy/1/action: "delete" is not one of …` names the field of the second list item, not just `content_policy`. A missing property has no node of its own, so its name follows its parent's path (`missing content_policy/0/rule`); a missing top-level property is its bare name, and a problem on the whole document is `<root>`.
+- Each bullet ends with the problem's [location](#problem-locations) as `line:column` in the complete file, for example `invalid start: Additional properties are not allowed ('sya' was unexpected) at 5:9`.
 - **Per-problem description sub-line**: when the failing property declares a description (via `-> ...`, an inline-object per-property description, or a `description` keyword in a referenced JSON Schema), it renders as a sub-line beneath the bullet, reusing the same dimmed-italic treatment as the document-level `description:` line. The document-level and per-problem description lines coexist. Schema-preparation failures (empty problems list) render no per-problem description.
 - **Failure-class sub-line**: a `file` value that failed to resolve adds `failure: <class>` beneath its bullet, for example `failure: no-match` (no such file) or `failure: invalid-reference` (malformed, or a relative path that climbs out of the file tree). The class is the stable part to match on; the message is not. `md schema validate` prints the same sub-line.
 - Root-union failures include the arm index (e.g. `schema arm 2`).
@@ -1663,24 +2779,26 @@ Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.)
 ### Compose and Validate Defaults
 
 `md compose` and `md schema validate` share the same `DarkmatterSchemas::validate`
-implementation once their effective schemas are resolved, but their CLI defaults
-intentionally differ. `md compose` injects the Darkmatter base schema by default;
-`md schema validate` keeps the explicit `--schema` / `BASELINE_SCHEMA` contract.
-
-As a result, when a document has no `$schema`, `md compose` may reject an invalid
-Darkmatter-owned frontmatter value that `md schema validate` accepts vacuously
-unless the same baseline is supplied explicitly.
+implementation once their effective schemas are resolved, and both apply the
+built-in baseline by default, so a document with no `$schema` fails both for
+the same invalid Darkmatter-owned value. Each opts out with
+`--no-baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA`. They differ in how
+a custom baseline is named (`md compose --baseline-schema <path>`;
+`md schema validate --schema <path>` or `BASELINE_SCHEMA`) and in what they
+check: compose validates after interpolation, so a `{{ … }}` value is checked
+once it resolves, while `md schema validate` checks the frontmatter as
+written. See [Selecting the Baseline](#selecting-the-baseline).
 
 ## Limitations (v1)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
-- **No `$ref` or reusable inline fragments.** Inline objects are anonymous; reuse still requires an external JSON Schema file.
+- **No `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile), which are inlined at each use site; recursive types are not supported.
 - **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
 - **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Reference a JSON Schema file for deeper typing.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
 - **No quoted inline object property names.** Rename to a valid identifier (alphanumeric, `-`, `_`, leading digits allowed) or use a JSON Schema file.
 - **No escaped commas inside inline object descriptions.** Inline descriptions terminate at the next top-level comma or closing brace — keep descriptions comma-free inside `{ ... }`.
-- **No arrays of ordinary denoted-value unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form. This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays). Use an external JSON Schema when an ordinary property needs an array of union-valued items.
+- **No arrays of anonymous unions.** For ordinary denoted types, the `[]` suffix binds to a single type expression, and a YAML sequence at a property value is itself the union form; there is no `(A | B)[]` spelling. Name the union and reference it as `U[]` instead (see [Named Union References](#named-union-references)). This limitation does not apply to `type-definition[]` or `schema[]`; these semantic arrays support union-valued items through nested sequences, as shown in [Semantic Arrays](#semantic-arrays).
 - **No coercion opt-out.** [Type coercion](#type-coercion) is default-on with no `--no-coerce` / strict-types flag.
 - **No coercions beyond the matrix.** In particular no `"yes"` / `"no"` / `"1"` / `"0"` → boolean, no string-parsing into `date` / `url` / `email`, and no cross-property coercions. Coercion recurses into inline object fields and inline object arrays when the schema path is unambiguous; for property-level unions, only exactly-one-arm-validates candidates are committed.
 - **No `md schema validate --write`.** The library check path reports post-coercion validity but does not rewrite files; only the compose pipeline mutates the (in-memory) document it composes.
@@ -1692,12 +2810,7 @@ unless the same baseline is supplied explicitly.
 
 ## See Also
 
-- [Schemas specification](../../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behavior, EBNF grammar, ADRs.
-- [Compose schema specification](../../../features/_completed/2026-05-23-compose-schema/spec.md) — schema validation in the compose pipeline.
-- [Inline object spec](../../../features/_completed/2026-06-10-schema-improvement/spec.md) — inline object literals, postfix constraints, nesting rules, and the `md schema about` descriptor catalog.
-- [Schema-plus spec](../../../features/_completed/2026-07-08-schema-plus/spec.md) — composition primitives: `example(...)`, `Name@file` imports, pattern keys, `min-keys` / `max-keys`, `yaml` / `json`.
-- [Suggest-constraint spec](../../../features/_completed/2026-07-09-suggest-constraint/spec.md) — the `suggest(...)` advisory-completion constraint.
-- [Literal / expression spec](../../../features/_completed/2026-07-12-literal-expression/spec.md) — the `literal(value)` and `expression` types and the DMLS unlocks they enable.
+- [Local Type References](./local-type-references.md) — bare local names, where they resolve, and how reused types inherit constraints.
 - [`json-schema-primitives.md`](../json-schema-primitives.md) — JSON Schema primitives reused under the hood.
 - [`magic-paths.md`](../magic-paths.md) — `FileReference` resolution rules.
 - [`frontmatter-recursion.md`](../frontmatter-recursion.md) — how frontmatter is layered through the compose pipeline.
@@ -1717,7 +2830,7 @@ match:
     all:
         - kind: enum(prompt; required)
         - none:
-              - steps: any(required)
+              - steps: unknown[](required)
 $schema: prompt.yaml
 ```
 
@@ -1811,7 +2924,10 @@ $schema: docs.yaml
 
 Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
-wrong type defeats the match. `required` makes it a presence gate. Match-safe
+wrong type defeats the match. `required` makes it a presence gate, except on
+a [null-admitting](#null-admitting-properties) type: `steps: unknown(required)`
+is only a guard and cannot make an arm satisfiable, while
+`steps: unknown[](required)` is a gate that requires a list. Match-safe
 constraints are limited to structural types plus pure constraints such as
 `required`, `enum`, `pattern`, length/range, item-count, and key-count.
 Stateful or phase-specific constraints (`eager`, imports, `example`,
@@ -1822,13 +2938,17 @@ The match grammar supports freely nested `all`, `any`, `none`, and
 OR of independent arms. `$path` is case-sensitive on every OS (see
 [Matching a path with `$path`](#matching-a-path-with-path)). Every arm must
 contain a satisfiable presence gate or `$path`; otherwise the vacuous arm is a
-load error.
+load error. An empty condition mapping (`{}`) is a load error wherever it
+appears, including as a child of a combinator: `none: [{}]` would otherwise
+make the trigger unmatchable, and `all: [{}, …]` would hide a dropped
+condition.
 
 Effective precedence is caller baseline, matching trigger payloads (schema
 root order and then filename order), then the document's own `$schema`. Trigger
 payloads must be merge-compatible object schemas. Discovery is transactional:
-an invalid opted-in envelope rejects the scan, while unrelated YAML files are
-ignored. Library hosts opt in explicitly with
+an invalid opted-in envelope rejects the scan, while YAML files that do not
+[claim the envelope](#which-files-claim-the-envelope) are ignored, even when
+they are not valid YAML. Library hosts opt in explicitly with
 `DarkmatterSchemas::with_trigger_discovery`; `md compose` and
 `md schema validate` opt in for repository-backed files and accept
 `--no-trigger-schemas`. Use `md schema triggers <file>` to inspect the five
@@ -1843,4 +2963,133 @@ Schema roots (search order):
 3. file tree root: /repo/schemas
 4. SCHEMAS_DIR: unset
 5. home: /home/me/schemas (absent)
+```
+
+#### Which files claim the envelope
+
+A schema root also holds ordinary YAML: payloads, named-type libraries, and
+files unrelated to Darkmatter. Only a file that **claims** the envelope can
+break trigger discovery, so a scratch file with a syntax error never disables
+the triggers beside it.
+
+- **Valid YAML** claims the envelope when its top-level mapping has
+  `kind: trigger-schema`, however the mapping is written (quoted keys and
+  JSON-style mappings included).
+- **YAML that does not parse** claims it only when a line declares it the
+  conventional way: `kind` at column 0, optional spaces, `:`, then exactly
+  `trigger-schema` (plain, single-quoted, or double-quoted), optionally
+  followed by whitespace and a `#` comment. Windows line endings and an
+  initial byte-order mark make no difference.
+
+| Line in a file that does not parse | Claims the envelope? |
+| --- | --- |
+| `kind: trigger-schema` | yes: a YAML error |
+| `kind: "trigger-schema"  # note` | yes: a YAML error |
+| `kind : 'trigger-schema'` | yes: a YAML error |
+| `  kind: trigger-schema` (indented, so nested) | no: ignored |
+| `kind: trigger-schema-extra` | no: ignored |
+| `# kind: trigger-schema` (commented out) | no: ignored |
+| `kind: trigger-schema` inside a multi-line quoted or block scalar | no: ignored |
+| `kind: schema`, or no `kind:` line at all | no: ignored |
+
+This fallback recognizes only a conventional block-mapping declaration. A
+malformed flow mapping (`{kind: trigger-schema, match: …`) or an unusual key
+spelling is ignored when it does not parse. The limit affects only how a
+broken file is recovered from; valid YAML is classified from its parsed
+mapping as above.
+
+A claimed file that is not valid YAML fails with an error that names the YAML
+problem and its position (`SchemaError::TriggerEnvelopeYaml`, inside
+`TriggerLoad` for a schema-root file and `EmbeddedTriggerLoad` for a bundle
+file), not the match grammar. With this `schemas/note-trigger.yaml`:
+
+```yaml
+kind: trigger-schema
+match:
+    kind: literal(note; required)
+description: Note: a colon here breaks YAML
+$schema: note.yaml
+```
+
+```text
+trigger-schema file `…/schemas/note-trigger.yaml` is not valid YAML at line 4, column 18:
+mapping values are not allowed in this context
+```
+
+The line and column are one-based, and the column counts characters. The
+hint that `md compose` and `md schema validate` print points at YAML syntax:
+a plain value that contains `: ` or ` #`, or starts with an indicator such
+as `@` or `*`, must be quoted (`description: "Note: a colon here is fine"`).
+DMLS publishes the same error on the trigger file; while the file is open,
+the diagnostic starts at the reported position. Errors in a file that parses (a bad `match`, or none at all)
+are still reported as trigger-schema match or envelope errors.
+
+#### Embedded trigger bundles
+
+A program that uses Darkmatter as a library can ship trigger schemas inside
+its own binary, so they apply even where no schema file is installed. It
+hands Darkmatter an `EmbeddedSchemaBundle`: a bundle name plus
+`(file name, text)` pairs, usually from `include_str!`. Darkmatter ships no
+bundle of its own; the `md` CLI and DMLS register none.
+
+```rust
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle};
+
+const BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
+    "my-tool",
+    &[
+        ("my-tool.yaml", include_str!("../schemas/my-tool.yaml")), // kind: trigger-schema
+        ("steps.yaml", include_str!("../schemas/steps.yaml")),     // kind: schema
+    ],
+);
+
+let schemas = DarkmatterSchemas::new(document_context)
+    .with_trigger_discovery()?
+    .with_embedded_trigger_bundle(BUNDLE)?;
+let report = schemas.validate(&markdown)?;
+```
+
+The bundle is the **last** place triggers are looked for:
+
+```mermaid
+flowchart LR
+    R["the five schema roots"] --> Q{"does any root hold a file<br/>named like the bundle file?"}
+    Q -- yes --> D["the disk file decides;<br/>the bundle file is ignored"]
+    Q -- no --> E{"does the bundle file claim<br/>kind: trigger-schema?"}
+    E -- yes --> T["embedded trigger, layered<br/>after every disk trigger"]
+    E -- no --> L["library: an import target only"]
+```
+
+- A file of the same name in any schema root replaces the bundle's file,
+  whatever that disk file holds: a matching trigger, a trigger that does not
+  match the document, a plain schema, or a broken trigger. A broken disk
+  trigger stays an error; the bundle never stands in for it.
+- An embedded trigger's `$schema` and every import in it
+  (`steps: step[]@./steps.yaml`, imports inside the imported library, and
+  `@this`) resolve among the bundle's own files, by name, without touching
+  the disk. `../` cannot leave the bundle, and a name the bundle lacks is an
+  error. A disk trigger never imports a bundle file: its `./steps.yaml` must
+  exist on disk.
+- A malformed embedded trigger, or one whose payload does not resolve, fails
+  trigger discovery with an error naming `{bundle}/{file name}`. A bundle
+  whose name is not one plain folder name, or whose file names are not
+  distinct plain `.yaml`/`.yml` names, is rejected when registered.
+- Embedded triggers add no dependency edges: they cannot change while the
+  program runs.
+- The trigger trace (`trace_registry`, which `md schema triggers` prints for
+  disk triggers) shows an embedded trigger as `embedded:{bundle}/{file name}`.
+
+`EffectiveSchema.origins` names the winning declaration of each top-level
+property. The rule is the same for disk and embedded triggers: the document's
+own `$schema` wins, otherwise the last matching trigger that declares the
+property, otherwise the baseline. For a trigger origin,
+`SchemaOrigin::trigger_source()` returns `TriggerSource::File(path)` for a
+schema-root file or `TriggerSource::Embedded { bundle, name }` for a bundle
+file; `SchemaOrigin::file()` returns a path only for a real file, so an
+embedded origin is never shown as one:
+
+```rust
+if let Some(TriggerSource::Embedded { bundle, name }) = effective.origins["model"].trigger_source() {
+    assert_eq!((bundle.as_str(), name.as_str()), ("my-tool", "my-tool.yaml"));
+}
 ```

@@ -46,7 +46,12 @@ mod compose_initialize_staged_boot;
 #[cfg(unix)]
 mod compose_interactive_timeout_cli;
 #[cfg(unix)]
+mod compose_removed_grammar;
+#[cfg(unix)]
 mod compose_removed_validation_keys;
+#[cfg(unix)]
+mod compose_retry_overlay;
+mod compose_presence_parity;
 mod compose_prompt_tiers;
 mod context_construction_guard;
 mod compose_repository_context;
@@ -67,6 +72,7 @@ mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
+mod document_environment_routes;
 mod effective_diagnostic_render;
 mod entry_point_parity;
 mod error_guards;
@@ -87,11 +93,15 @@ mod inline_compose_cli;
 mod inline_compose_hash;
 mod inline_compose_sequence_mismatch;
 #[cfg(unix)]
+mod launch_trigger_schemas;
+#[cfg(unix)]
 mod level1_compose_autocomplete_failure_pty;
 #[cfg(unix)]
 mod level1_dry_run_pty;
 #[cfg(unix)]
 mod level1_inline_compose_mismatch_pty;
+#[cfg(unix)]
+mod level1_lifecycle_shell_terminal_pty;
 #[cfg(unix)]
 mod level1_provided_partial_file_pty;
 #[cfg(unix)]
@@ -108,14 +118,37 @@ mod level1_review_router_partial_pty;
 mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_directive_matrix;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_prep;
 mod lifecycle_downgrade_outcome;
 mod lifecycle_literal_escapes;
 mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod lifecycle_shell_templates;
 #[cfg(unix)]
 mod loop_cli;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod loop_config_matrix;
+// Records prompts with the Unix-only `launch_recorder`, and orders legs with
+// POSIX `sh` loops.
+#[cfg(unix)]
+mod loop_break;
+// Records prompts with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod loop_primitives;
+// Its flaky shell steps are POSIX `sh`.
+#[cfg(unix)]
+mod loop_retry_passes;
 // Installs the `claudine-fake-goose` fixture binary on Windows, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -125,7 +158,11 @@ mod mcp_cli;
 mod override_boundary_guard;
 mod path_lookup_guard;
 mod preflight_execution_parity;
+#[cfg(unix)]
+mod lifecycle_mixed_span_validation;
 mod lifecycle_set_shell_values;
+mod shell_approval_prompt;
+mod shell_missing_values;
 mod literal_glob_hint;
 #[cfg(unix)]
 mod prompt_reporting;
@@ -142,15 +179,13 @@ mod provider_tail_notice;
 mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
 mod setter_after_switch;
-// Spawns the `claudine-fake-goose` fixture binary, which only
-// `test-fixtures` builds.
-#[cfg(feature = "test-fixtures")]
-mod sequence_budget;
 mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
+mod sequence_dry_run;
 mod steer_cli;
+mod task_guards;
 #[cfg(unix)]
 mod sequence_groups;
 // Reads the `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` seam, which only
@@ -171,7 +206,13 @@ mod sequence_perf;
 mod sequence_prompt_property;
 #[cfg(unix)]
 mod sequence_schema;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod sequence_shell_templates;
 mod sequence_sources_cli;
+#[cfg(unix)]
+mod sequence_task_providers;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;
@@ -179,6 +220,11 @@ mod switch_catalog_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
 mod test_seam_gate_guard;
+// Reads the `CLAUDINE_TEST_PREWARM` seam, which only `test-fixtures` builds
+// compile, and records launches with Unix shell-stub providers.
+#[cfg(all(unix, feature = "test-fixtures"))]
+mod tts_prewarm;
+mod with_file_provenance;
 #[cfg(unix)]
 mod wrap_antigravity_exit_signal;
 mod wrap_basics;
@@ -218,3 +264,11 @@ mod wrap_structured_stream;
 mod wrap_watchdog_startup_stall;
 #[cfg(unix)]
 mod wrap_watchdog_timeout;
+
+mod sequence_containers;
+mod sequence_frozen_graph;
+mod sequence_grammar_matrix;
+mod sequence_referenced_state;
+mod sequence_deep_cancelled;
+
+mod research_sequence_artifacts;

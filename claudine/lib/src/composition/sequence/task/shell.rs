@@ -1,7 +1,8 @@
 //! Running a task's approved shell commands and capturing their stdout.
 //!
-//! A task's commands arrive already resolved by preflight — approved bytes are
-//! executed bytes — so nothing here interpolates. What it adds over the
+//! Commands arrive as approved bytes or as a filled, approved template chain.
+//! Template arguments go directly to native processes; nothing here interpolates.
+//! What this adds over the
 //! lifecycle [`ShellRunner`](super::super::super::lifecycle::executor::ShellRunner)
 //! is the two things a task needs and a lifecycle action does not: the command's
 //! stdout (which becomes the task's `outputs` entry) and a per-command deadline.
@@ -30,7 +31,7 @@
 //!   members of its tree are killed before the capture threads are waited on,
 //!   so `x &` never outlives its task on any platform and no descendant can
 //!   hold the output pipe open to emit frames after the task's footer. Every
-//!   post-spawn exit shares the one epilogue in `run` (tree teardown, bounded
+//!   post-spawn exit shares the one execution epilogue (tree teardown, bounded
 //!   reader settlement, live-stream flush); a panic unwind still reaches the
 //!   reap through [`ProcessTree`]'s `Drop`.
 //! - **Windows assignment is race-free.** The child is spawned suspended,
@@ -58,6 +59,14 @@ use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use darkmatter::markdown::compose::shell_expansion::template::{
+    FilledChain, TemplateTargetError, resolve_direct_target,
+};
+use darkmatter::markdown::compose::shell_expansion::types::{
+    ChainOperator, RedirectionConfig, StderrTarget, StdoutTarget,
+};
+
+use crate::invocation_context::EnvBaseline;
 use crate::render::TaskLiveOutput;
 use crate::runaway::{CaptureVolumeCap, Trip};
 
@@ -192,6 +201,17 @@ impl std::fmt::Display for RunawayTrip {
 /// [`ShellCommandOutput`], including the three kill triggers.
 #[derive(Debug, thiserror::Error)]
 pub enum TaskShellError {
+    /// A custom runner has no direct-argument implementation.
+    #[error("this task runner does not support structured template commands")]
+    UnsupportedStructured,
+    /// Every target is checked before any segment starts.
+    #[error("template target '{program}' cannot run directly: {reason}")]
+    Target {
+        /// The authored program, excluding potentially sensitive arguments.
+        program: String,
+        /// Why direct dispatch is unsafe or unavailable.
+        reason: Box<TemplateTargetError>,
+    },
     /// The process could not be spawned.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -243,6 +263,32 @@ pub trait TaskShellRunner: Sync {
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
     ) -> Result<ShellCommandOutput, TaskShellError>;
+
+    /// Execute a filled chain under one deadline, without sending its arguments
+    /// through a shell. All program targets are checked before the first spawn.
+    /// Custom runners must opt in; the default refuses instead of reconstructing
+    /// shell text from values that may contain shell syntax.
+    fn run_structured(
+        &self,
+        _chain: &FilledChain,
+        _timeout: Duration,
+        _interrupt: Option<&AtomicBool>,
+        _live: Option<&Arc<TaskLiveOutput>>,
+    ) -> Result<ShellCommandOutput, TaskShellError> {
+        Err(TaskShellError::UnsupportedStructured)
+    }
+
+    /// This runner, starting its commands from `environment` instead of this
+    /// process's: the `shell:` route of a document entered under its own map.
+    ///
+    /// `None` keeps `self`, which is right for a runner that starts no process
+    /// of its own.
+    fn for_child_environment(
+        &self,
+        _environment: &EnvBaseline,
+    ) -> Option<Box<dyn TaskShellRunner>> {
+        None
+    }
 }
 
 /// Production [`TaskShellRunner`]: the platform's system shell, both pipes
@@ -280,6 +326,9 @@ pub struct SystemTaskShell {
     /// fixtures deterministic — so their commands must write to stdout.
     #[cfg(test)]
     fail_wait: bool,
+    /// The complete environment every command starts from; `None` inherits
+    /// this process's.
+    environment: Option<EnvBaseline>,
 }
 
 impl SystemTaskShell {
@@ -291,6 +340,16 @@ impl SystemTaskShell {
             fail_isolation: false,
             #[cfg(test)]
             fail_wait: false,
+            environment: None,
+        }
+    }
+
+    /// This runner, starting every command from exactly `environment`.
+    #[must_use]
+    pub fn in_environment(self, environment: EnvBaseline) -> Self {
+        Self {
+            environment: Some(environment),
+            ..self
         }
     }
 }
@@ -316,6 +375,13 @@ impl SystemTaskShell {
 }
 
 impl TaskShellRunner for SystemTaskShell {
+    fn for_child_environment(
+        &self,
+        environment: &EnvBaseline,
+    ) -> Option<Box<dyn TaskShellRunner>> {
+        Some(Box::new(self.clone().in_environment(environment.clone())))
+    }
+
     fn run(
         &self,
         command: &str,
@@ -323,20 +389,102 @@ impl TaskShellRunner for SystemTaskShell {
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
     ) -> Result<ShellCommandOutput, TaskShellError> {
-        let mut builder = system_shell_command(command)
+        let builder = system_shell_command(command, self.environment.as_ref())
             .map_err(|error| TaskShellError::Io(std::io::Error::other(error)))?;
-        builder
-            .stdout(Stdio::piped())
-            // Piped only when there is somewhere attributed to put it. With no
-            // live stream — a `--silent` run, or a caller executing tasks
-            // outside a terminal — inheriting keeps a command's diagnostics
-            // visible instead of swallowing them into a buffer nobody reads.
-            .stderr(if live.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::inherit()
+        self.run_process(builder, timeout, interrupt, live, &RedirectionConfig::default())
+    }
+
+    fn run_structured(
+        &self,
+        chain: &FilledChain,
+        timeout: Duration,
+        interrupt: Option<&AtomicBool>,
+        live: Option<&Arc<TaskLiveOutput>>,
+    ) -> Result<ShellCommandOutput, TaskShellError> {
+        let cwd = crate::child_environment::initialize_process_launch_directory(
+            crate::child_environment::LaunchDirectoryMode::Ordinary,
+        ).map(std::path::Path::to_path_buf).unwrap_or_default();
+        let search_path = self.environment.as_ref().and_then(|environment| environment.get("PATH"));
+        let targets = chain.segments.iter().map(|segment| {
+            resolve_direct_target(&segment.program, search_path, &cwd).map_err(|reason| TaskShellError::Target {
+                program: segment.program.clone(),
+                reason: Box::new(reason),
             })
-            .stdin(Stdio::null());
+        }).collect::<Result<Vec<_>, _>>()?;
+        let start = Instant::now();
+        let mut output = ShellCommandOutput {
+            stdout: String::new(), exit_code: 0, timed_out: false,
+            interrupted: false, runaway: None,
+        };
+        let mut captured_bytes = 0u64;
+        let mut captured_lines = 0u64;
+        for (segment, target) in chain.segments.iter().zip(targets) {
+            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst))
+                || crate::composition::lifecycle::cancellation::requested() {
+                output.interrupted = true;
+                break;
+            }
+            if start.elapsed() >= timeout {
+                output.timed_out = true;
+                break;
+            }
+            let runs = match segment.operator {
+                ChainOperator::None => true,
+                ChainOperator::And => output.exit_code == 0,
+                ChainOperator::Or => output.exit_code != 0,
+            };
+            if !runs { continue; }
+            let mut builder = match &self.environment {
+                Some(environment) => crate::child_environment::command_with_environment(&target, &environment.to_child_map()),
+                None => crate::child_environment::command(&target),
+            }.map_err(|error| TaskShellError::Io(std::io::Error::other(error)))?;
+            builder.args(&segment.args);
+            let next = self.run_process(builder, timeout.saturating_sub(start.elapsed()), interrupt, live, &segment.redirection)?;
+            captured_bytes += next.stdout.len() as u64;
+            captured_lines += next.stdout.bytes().filter(|byte| *byte == b'\n').count() as u64;
+            output.stdout.push_str(&next.stdout);
+            output.exit_code = next.exit_code;
+            output.timed_out = next.timed_out;
+            output.interrupted = next.interrupted;
+            output.runaway = next.runaway;
+            if self.volume_cap.check(captured_lines, captured_bytes).is_some() {
+                output.runaway.get_or_insert_with(|| RunawayTrip::from_counters(&self.volume_cap, captured_lines, captured_bytes));
+            }
+            if output.timed_out || output.interrupted || output.runaway.is_some() { break; }
+        }
+        Ok(output)
+    }
+}
+
+impl SystemTaskShell {
+    fn run_process(
+        &self,
+        mut builder: Command,
+        timeout: Duration,
+        interrupt: Option<&AtomicBool>,
+        live: Option<&Arc<TaskLiveOutput>>,
+        redirection: &RedirectionConfig,
+    ) -> Result<ShellCommandOutput, TaskShellError> {
+        let stdout_channel = match redirection.stdout {
+            StdoutTarget::Capture => Some(Channel::Data),
+            StdoutTarget::ToStderr => live.map(|_| Channel::Status),
+            StdoutTarget::Null => None,
+        };
+        let stderr_channel = match redirection.stderr {
+            StderrTarget::Capture => live.map(|_| Channel::Status),
+            StderrTarget::ToStdout => Some(Channel::Data),
+            StderrTarget::Null => None,
+        };
+        builder.stdout(match redirection.stdout {
+            StdoutTarget::Null => Stdio::null(),
+            StdoutTarget::ToStderr if live.is_none() => Stdio::from(std::io::stderr()),
+            _ => Stdio::piped(),
+        });
+        builder.stderr(match redirection.stderr {
+            StderrTarget::Null => Stdio::null(),
+            StderrTarget::Capture if live.is_none() => Stdio::inherit(),
+            _ => Stdio::piped(),
+        }).stdin(Stdio::null());
         isolate_process_tree(&mut builder);
         let mut child = builder.spawn()?;
         let ownership = ProcessTree::own(&child);
@@ -378,33 +526,25 @@ impl TaskShellRunner for SystemTaskShell {
         let runaway = Arc::new(Mutex::new(None::<RunawayTrip>));
         let (finished_tx, finished_rx) = std::sync::mpsc::sync_channel::<()>(2);
 
-        let mut readers = 1usize;
-        let stdout_reader = spawn_capture(
-            child.stdout.take().expect("stdout was piped"),
-            self.volume_cap.clone(),
-            Arc::clone(&runaway),
-            finished_tx.clone(),
-            Some(Arc::clone(&captured)),
-            live.map(Arc::clone).map(|live| (live, Channel::Data)),
-        );
-        // stderr gets its own budget against the same limits rather than a
-        // share of stdout's. The guard exists to stop a command flooding this
-        // process, and a command can flood either pipe; splitting the counters
-        // keeps one noisy channel from making the other's cap arrive early.
-        let stderr_reader = match child.stderr.take() {
-            Some(pipe) => {
-                readers += 1;
-                Some(spawn_capture(
-                    pipe,
-                    self.volume_cap.clone(),
-                    Arc::clone(&runaway),
-                    finished_tx.clone(),
-                    None,
-                    live.map(Arc::clone).map(|live| (live, Channel::Status)),
-                ))
-            }
-            None => None,
-        };
+        let mut readers = 0usize;
+        let stdout_reader = child.stdout.take().map(|pipe| {
+            readers += 1;
+            let channel = stdout_channel.expect("a piped stdout has a channel");
+            spawn_capture(
+                pipe, self.volume_cap.clone(), Arc::clone(&runaway), finished_tx.clone(),
+                (channel == Channel::Data).then(|| Arc::clone(&captured)),
+                live.map(Arc::clone).map(|live| (live, channel)),
+            )
+        });
+        let stderr_reader = child.stderr.take().map(|pipe| {
+            readers += 1;
+            let channel = stderr_channel.expect("a piped stderr has a channel");
+            spawn_capture(
+                pipe, self.volume_cap.clone(), Arc::clone(&runaway), finished_tx.clone(),
+                (channel == Channel::Data).then(|| Arc::clone(&captured)),
+                live.map(Arc::clone).map(|live| (live, channel)),
+            )
+        });
 
         let start = Instant::now();
         let mut timed_out = false;
@@ -430,7 +570,8 @@ impl TaskShellRunner for SystemTaskShell {
                 Ok(None) => {}
                 Err(error) => break Err(error),
             }
-            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst))
+                || crate::composition::lifecycle::cancellation::requested() {
                 interrupted = true;
             } else if observed_trip(&runaway).is_some() {
                 // Terminate rather than merely stopping the capture: a command
@@ -907,14 +1048,29 @@ fn isolate_process_tree(command: &mut Command) {
     command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED);
 }
 
+/// `program` as a child starting from `environment`, or inheriting this
+/// process's when there is none.
+fn shell_program(
+    program: &str,
+    environment: Option<&EnvBaseline>,
+) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
+    match environment {
+        Some(environment) => {
+            crate::child_environment::command_with_environment(program, &environment.to_child_map())
+        }
+        None => crate::child_environment::command(program),
+    }
+}
+
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(windows)]
 fn system_shell_command(
     command: &str,
+    environment: Option<&EnvBaseline>,
 ) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
     use std::os::windows::process::CommandExt;
 
-    let mut cmd = crate::child_environment::command("cmd")?;
+    let mut cmd = shell_program("cmd", environment)?;
     // `cmd.exe` parses the command tail itself rather than with the Windows
     // argv rules `Command::arg` targets. Passing the tail as a normal argument
     // escapes its nested quotes, changing the command before the shell sees it.
@@ -926,11 +1082,115 @@ fn system_shell_command(
 #[cfg(not(windows))]
 fn system_shell_command(
     command: &str,
+    environment: Option<&EnvBaseline>,
 ) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
-    let mut cmd = crate::child_environment::command("sh")?;
+    let mut cmd = shell_program("sh", environment)?;
     cmd.arg("-c").arg(command);
     Ok(cmd)
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod structured_tests;
+
+/// Lifecycle commands retain inherited streams while sharing task shells' tree
+/// ownership, except one that shares this process's terminal (see
+/// [`holds_terminal_foreground`]). Cancellation is worker-local; cleanup
+/// suspends the original stop request so its commands can finish under their
+/// own contract.
+pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, std::io::Error> {
+    if crate::composition::lifecycle::cancellation::requested() { return Ok(130); }
+    #[cfg(unix)]
+    if holds_terminal_foreground() {
+        return run_in_own_group(command);
+    }
+    isolate_process_tree(command);
+    let mut child = command.spawn()?;
+    let tree = match ProcessTree::own(&child) {
+        Ok(tree) => tree,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.code().unwrap_or(-1)),
+            Ok(None) => {},
+            Err(error) => {
+                tree.terminate(&mut child);
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if crate::composition::lifecycle::cancellation::requested() {
+            tree.terminate(&mut child);
+            let _ = child.wait();
+            return Ok(130);
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// Whether this process is in the foreground process group of its controlling
+/// terminal.
+///
+/// A lifecycle command inherits that terminal. Moved into a group of its own,
+/// it would be a background job: the kernel stops it (`SIGTTIN`/`SIGTTOU`) the
+/// first time it reads the terminal or changes its modes, and nothing ever
+/// resumes it, so a nested interactive `claudine` never finishes. The provider
+/// wrapper's inherited-output spawn keeps such a child in its group for the
+/// same reason.
+#[cfg(unix)]
+fn holds_terminal_foreground() -> bool {
+    use std::os::fd::AsRawFd;
+
+    // Opening `/dev/tty` fails when there is no controlling terminal, the case
+    // (CI, test runners) where isolation cannot stop anything.
+    let Ok(terminal) = std::fs::File::open("/dev/tty") else {
+        return false;
+    };
+    // SAFETY: both calls only read process state; the descriptor is open for
+    // the duration of the call.
+    let foreground = unsafe { libc::tcgetpgrp(terminal.as_raw_fd()) };
+    foreground > 0 && foreground == unsafe { libc::getpgrp() }
+}
+
+/// Run a lifecycle command in this process's own group, where it keeps the
+/// terminal's foreground.
+///
+/// Ctrl-C reaches the whole tree through the terminal. Any other cancellation
+/// can address only the direct child: what it left running in the background
+/// outlives it, as it did before lifecycle commands owned their trees.
+#[cfg(unix)]
+fn run_in_own_group(command: &mut Command) -> Result<i32, std::io::Error> {
+    let mut child = command.spawn()?;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.code().unwrap_or(-1)),
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if crate::composition::lifecycle::cancellation::requested() {
+            // SAFETY: a positive pid addresses only this unreaped child.
+            unsafe {
+                libc::kill(child.id() as i32, libc::SIGTERM);
+            }
+            let deadline = Instant::now() + TREE_KILL_GRACE;
+            while Instant::now() < deadline && matches!(child.try_wait(), Ok(None)) {
+                std::thread::sleep(POLL_INTERVAL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(130);
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}

@@ -103,7 +103,7 @@ mod launched {
     }
 
     /// Records the composed `phase` once the run succeeds.
-    const PROBE: &str = "success:\n  stack:\n    - action: {append_line: ['probe.log', 'phase={{ phase }}']}\n";
+    const PROBE: &str = "success:\n  - {append_line: ['probe.log', 'phase={{ phase }}']}\n";
 
     /// A Codex stub whose structured stream names thread `thread-7`, so a
     /// failed launch can be resumed; launch 0 fails, later launches succeed.
@@ -198,7 +198,7 @@ mod launched {
         let file = doc(
             &fixture,
             "plan.md",
-            &format!("---\nphase: 1\nfailure:\n  stack:\n    - action: {{retry: 1}}\n{PROBE}---\nPhase {{{{ phase }}}}\n"),
+            &format!("---\nphase: 1\nfailure:\n  - {{retry: 1}}\n{PROBE}---\nPhase {{{{ phase }}}}\n"),
         );
 
         let (code, _, stderr) = run(&fixture, &["compose", &file, "--codex", "-c", "x=y", "phase=2"]);
@@ -221,7 +221,7 @@ mod launched {
         let file = doc(
             &fixture,
             "plan.md",
-            "---\nphase: 1\nfailure:\n  stack:\n    - action: {proxy: './target.md'}\n---\nPhase {{ phase }}\n",
+            "---\nphase: 1\nfailure:\n  - {proxy: './target.md'}\n---\nPhase {{ phase }}\n",
         );
 
         let (code, _, stderr) = run(&fixture, &["compose", &file, "--codex", "-c", "x=y", "phase=2"]);
@@ -247,7 +247,7 @@ mod launched {
             &fixture,
             "plan.md",
             &format!(
-                "---\nphase: 1\nfailure:\n  stack:\n    - action: {{resume: 'continue'}}\n{PROBE}---\nPhase {{{{ phase }}}}\n"
+                "---\nphase: 1\nfailure:\n  - {{resume: 'continue'}}\n{PROBE}---\nPhase {{{{ phase }}}}\n"
             ),
         );
 

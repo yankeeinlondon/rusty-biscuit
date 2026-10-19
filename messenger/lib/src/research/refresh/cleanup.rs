@@ -2,19 +2,20 @@
 //!
 //! Only run directories and renewal records in the state area are
 //! considered, and only when at least the threshold (initially 30 days) old.
-//! Active, awaiting-review, and interrupted runs are protected, as is any run
-//! whose ledger lock is held or whose record cannot be read. Accepted research
+//! Active, awaiting-review, and interrupted runs are protected, as is any
+//! run whose record cannot be read. Everything here is refused while a
+//! research runner is live ([`RefreshError::RunnerLive`]). Accepted research
 //! and its evidence live under `docs/research/` and are never considered.
 //! Nothing is deleted unless the caller applies a plan, and nothing touches
-//! Git.
+//! Git. [`recover`] marks a stale `active` run `interrupted`.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 
 use serde::Serialize;
 
 use super::RefreshError;
 use super::review::{RENEWAL_FORMAT, RenewalRecord};
-use super::state::{RENEWALS, RunStatus, StateArea, io_err};
+use super::state::{RENEWALS, RunRecord, RunStatus, StateArea, fleet_lock_path, io_err};
 use crate::research::model::Date;
 
 /// The initial retention threshold.
@@ -50,20 +51,14 @@ pub struct CleanupPlan {
     pub younger: usize,
 }
 
-/// Whether Claudine's ledger lock for a run is held right now.
-fn ledger_lock_held(dir: &std::path::Path) -> bool {
-    let path = dir.join("budget.json.lock");
-    if !path.exists() {
-        return false;
-    }
-    match OpenOptions::new().read(true).write(true).open(&path) {
-        Ok(file) => file.try_lock().is_err(),
-        Err(_) => true,
-    }
-}
-
 /// Computes exactly what cleanup would remove. Reads only.
-pub fn plan(state: &StateArea, today: &Date, threshold_days: u32) -> CleanupPlan {
+///
+/// ## Errors
+///
+/// [`RefreshError::RunnerLive`] while a research runner holds the fleet lock:
+/// cleanup is refused during a live run.
+pub fn plan(state: &StateArea, today: &Date, threshold_days: u32) -> Result<CleanupPlan, RefreshError> {
+    refuse_while_live(state)?;
     let mut plan = CleanupPlan {
         threshold_days,
         today: today.clone(),
@@ -80,12 +75,10 @@ pub fn plan(state: &StateArea, today: &Date, threshold_days: u32) -> CleanupPlan
                 continue;
             }
         };
-        let dir = state.run_dir(record.platform_id, &record.run_id);
         let protected = match record.status {
             RunStatus::Active => Some("the run is active"),
             RunStatus::AwaitingReview => Some("the candidate awaits review"),
             RunStatus::Interrupted => Some("the run awaits operator resumption"),
-            _ if ledger_lock_held(&dir) => Some("a Claudine runner holds the ledger lock"),
             _ => None,
         };
         if let Some(reason) = protected {
@@ -134,7 +127,44 @@ pub fn plan(state: &StateArea, today: &Date, threshold_days: u32) -> CleanupPlan
         }
         plan.removals.push(Removal { path, kind: "renewal", status: None, age_days, loses_resumability: false });
     }
-    plan
+    Ok(plan)
+}
+
+/// Refuses an operation while a research runner holds the fleet lock.
+fn refuse_while_live(state: &StateArea) -> Result<(), RefreshError> {
+    if state.fleet_lock_held() {
+        return Err(RefreshError::RunnerLive { path: fleet_lock_path() });
+    }
+    Ok(())
+}
+
+/// Marks a stale `active` run — launched by a runner that no longer holds the
+/// fleet lock — `interrupted`, so it can be resumed or rejected. Recovery is
+/// explicit, never silent: a live runner and an unlaunched run are refused.
+///
+/// ## Errors
+///
+/// [`RefreshError::RunnerLive`] while a runner holds the fleet lock,
+/// [`RefreshError::WrongStatus`] for a run that is not active, or
+/// [`RefreshError::NotLaunched`] for an active run no runner started.
+pub fn recover(state: &StateArea, run_id: &str) -> Result<RunRecord, RefreshError> {
+    refuse_while_live(state)?;
+    let mut record = state.load(run_id)?;
+    if record.status != RunStatus::Active {
+        return Err(RefreshError::WrongStatus {
+            run_id: record.run_id.to_string(),
+            status: record.status,
+            action: "recovering",
+            needs: "a stale active run (a runner started it and is gone)",
+        });
+    }
+    if !record.launched {
+        return Err(RefreshError::NotLaunched { run_id: record.run_id.to_string() });
+    }
+    record.status = RunStatus::Interrupted;
+    record.stop_reason = Some("recovered: the runner no longer holds the fleet lock".to_string());
+    state.save(&record)?;
+    Ok(record)
 }
 
 /// Removes exactly the plan's entries. Each is re-checked against a fresh
@@ -142,9 +172,10 @@ pub fn plan(state: &StateArea, today: &Date, threshold_days: u32) -> CleanupPlan
 ///
 /// ## Errors
 ///
+/// [`RefreshError::RunnerLive`] while a research runner holds the fleet lock;
 /// [`RefreshError::State`] when a removal fails; earlier removals stay done.
 pub fn apply(state: &StateArea, planned: &CleanupPlan) -> Result<Vec<String>, RefreshError> {
-    let fresh = plan(state, &planned.today, planned.threshold_days);
+    let fresh = plan(state, &planned.today, planned.threshold_days)?;
     let mut removed = Vec::new();
     for removal in &planned.removals {
         if !fresh.removals.contains(removal) {

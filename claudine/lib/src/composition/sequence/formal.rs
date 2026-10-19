@@ -61,6 +61,9 @@ pub fn is_direct_formal_document(source: &ResolvedCompositionSource) -> bool {
 /// Returns [`CompositionError::SequenceExternalWrongType`] when `template` is
 /// present but is not a mapping.
 pub fn formal_keys(root: &Map<String, Value>) -> Result<FormalKeys<'_>, CompositionError> {
+    if let Some(value) = root.get("fail_fast") {
+        return Err(super::grammar::removed_task_key("fail_fast", value, std::path::Path::new("<sequence>")));
+    }
     let template = match root.get("template") {
         Some(Value::Object(map)) => Some(map),
         Some(other) => {
@@ -228,12 +231,13 @@ fn validate_state_schema(
             .map_err(|e| load_failure(SequenceLoadCause::Schema(Box::new(e))))?;
 
         if let Some(problem) = report.problems.first() {
-            // `property` is set only for missing-required failures; every other
-            // kind locates itself with the instance pointer instead.
-            let property = problem
-                .property
-                .clone()
-                .unwrap_or_else(|| problem.path.clone());
+            // A top-level missing property has no pointer of its own, so it is
+            // named; every other problem, including a field missing inside a
+            // value, keeps its instance pointer (the message names the field).
+            let property = match &problem.property {
+                Some(name) if problem.path.is_empty() => name.clone(),
+                _ => problem.path.clone(),
+            };
             return Err(CompositionError::SequenceStateSchemaViolation {
                 index: step.index,
                 id: step.state.id.clone(),

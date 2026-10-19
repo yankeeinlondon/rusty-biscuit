@@ -1,6 +1,6 @@
 //! `dm.expression.nested_span_in_literal` end to end through the frontmatter
-//! producer and the `Rewrite with + concatenation` quick fix, with the shipped
-//! Claudine extension active.
+//! producer and the `Rewrite with + concatenation` quick fix, with Claudine's
+//! catalog (from `claudine/schemas/`) active as a schema extension.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use darkmatter::markdown::compose::expression::lint_expression;
 use darkmatter::markdown::span::SourceSpan;
 use lsp_types::{CodeActionOrCommand, InitializeParams, Uri};
 
-use super::lifecycle::{COMMUNICATION_FIELDS, EVENT_KEYS};
+use super::lifecycle::{EVENT_KEYS, LOOP_ITERATION_KEYS, STRUCTURAL_ITEM_KEYS};
 use super::*;
 use crate::capabilities::ClientProfile;
 use crate::config::{DmlsConfig, SchemaExtensionConfig};
@@ -24,19 +24,25 @@ const INCIDENT: &str = include_str!(
     "../../../../../claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md"
 );
 
-fn schemas_dir() -> PathBuf {
-    biscuit_test_harness::manifest_dir!().join("../docs/schemas")
-}
 
 /// Runs `f` with a context for `text` at client document `version`.
 fn with_ctx<R>(text: &str, version: i32, f: impl FnOnce(&DocumentContext) -> R) -> R {
     let path = Path::new("/w/prompts/doc.md");
     let uri: Uri = "file:///w/prompts/doc.md".parse().unwrap();
+    let schemas = tempfile::tempdir().expect("temp dir");
     let mut config = DmlsConfig::default();
     config.schema.extensions.insert(
         "claudine".to_string(),
         SchemaExtensionConfig {
-            path: schemas_dir().join("claudine.yaml"),
+            path: crate::context::test_support::claudine_payload_extension(
+                schemas.path(),
+                &[
+                    ("claudine.yaml", CLAUDINE_TRIGGER),
+                    ("lifecycle.yaml", CLAUDINE_LIFECYCLE),
+                    ("action.yaml", CLAUDINE_ACTION),
+                    ("linking.yaml", CLAUDINE_LINKING),
+                ],
+            ),
             globs: vec!["**/*.md".to_string()],
         },
     );
@@ -150,22 +156,34 @@ fn the_same_defect_in_a_body_produces_no_diagnostic() {
 
 #[test]
 fn diagnostics_use_decoded_escape_parity_for_literal_openers() {
-    for (authored_backslashes, expected_diagnostics) in
-        [(1, 0), (2, 0), (3, 1), (4, 1), (5, 0), (6, 0)]
-    {
+    // One document, one stack item per case: item `k`'s expression is on
+    // line `3 + 2k`.
+    let cases = [(1, 0), (2, 0), (3, 1), (4, 1), (5, 0), (6, 0)];
+    let mut text = String::from("---\nsuccess:\n");
+    let mut expressions = Vec::new();
+    for (authored_backslashes, _) in cases {
         let expression = format!(
             "{{{{ '{}{{{{ name }}}}' }}}}",
             "\\".repeat(authored_backslashes)
         );
-        let text = format!("---\nsuccess:\n    say: |-\n        {expression}\n---\n\nbody\n");
-        with_ctx(&text, 1, |ctx| {
-            let found = nested(ctx);
-            assert_eq!(found.len(), expected_diagnostics, "{expression}: {found:#?}");
-            for diagnostic in found {
-                assert_eq!(ranged(ctx, &diagnostic), "{{ name }}", "{expression}");
-            }
-        });
+        text.push_str(&format!("    - say: |-\n        {expression}\n"));
+        expressions.push(expression);
     }
+    text.push_str("---\n\nbody\n");
+    with_ctx(&text, 1, |ctx| {
+        let found = nested(ctx);
+        for (k, ((_, expected_diagnostics), expression)) in cases.iter().zip(&expressions).enumerate() {
+            let line = 3 + 2 * k as u32;
+            let on_line: Vec<&Diagnostic> =
+                found.iter().filter(|diagnostic| diagnostic.range.start.line == line).collect();
+            assert_eq!(on_line.len(), *expected_diagnostics, "{expression}: {found:#?}");
+            for diagnostic in on_line {
+                assert_eq!(ranged(ctx, diagnostic), "{{ name }}", "{expression}");
+            }
+        }
+        let expected_total: usize = cases.iter().map(|(_, expected)| expected).sum();
+        assert_eq!(found.len(), expected_total, "{found:#?}");
+    });
 }
 
 #[test]
@@ -175,7 +193,6 @@ fn mixed_strings_and_non_lifecycle_whole_values_are_not_flagged() {
         "resides_in: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
         "success:\n",
         "    say: \"done {{ ok ? 'a {{ x }}' : 'b' }} now\"\n",
-        "    effect: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
         "loop:\n",
         "    action: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
         "---\n\nbody\n",
@@ -184,15 +201,14 @@ fn mixed_strings_and_non_lifecycle_whole_values_are_not_flagged() {
 }
 
 #[test]
-fn stack_operands_proxy_with_values_and_predicates_are_diagnosed() {
+fn item_operands_proxy_with_values_and_predicates_are_diagnosed() {
     let text = concat!(
         "---\n",
         "initialize:\n",
-        "    stack:\n",
-        "        - when: \"mode == 'a {{ x }}'\"\n",
-        "          action:\n",
-        "              - ensure_file: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
-        "              - action: proxy\n",
+        "    - when: \"mode == 'a {{ x }}'\"\n",
+        "      then:\n",
+        "          - ensure_file: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
+        "          - proxy:\n",
         "                target: ./next.md\n",
         "                with:\n",
         "                    review: \"{{ ok ? 'c {{ y }}' : 'd' }}\"\n",
@@ -208,10 +224,78 @@ fn stack_operands_proxy_with_values_and_predicates_are_diagnosed() {
         summary.sort();
         assert_eq!(
             summary,
-            vec![(3, "{{ x }}"), (5, "{{ x }}"), (9, "{{ y }}"), (11, "{{ w }}")],
+            vec![(2, "{{ x }}"), (4, "{{ x }}"), (8, "{{ y }}"), (10, "{{ w }}")],
             "{found:#?}"
         );
         assert!(found.iter().all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
+    });
+}
+
+/// Every new-grammar stack shape reaches the diagnostic: a root dictionary, a
+/// `then` dictionary body, an `else` list body with a nested guard, a
+/// long-form parameter, and `loop.gate` (guard and body). A long-form
+/// `no_error` flag is never a surface.
+#[test]
+fn root_dictionaries_branch_bodies_and_the_loop_gate_are_diagnosed() {
+    let text = concat!(
+        "---\n",
+        "start:\n",
+        "    say: \"{{ ok ? 'a {{ r }}' : 'b' }}\"\n",
+        "failure:\n",
+        "    - when: \"err.code == 'cap'\"\n",
+        "      then:\n",
+        "          warn: \"{{ ok ? 'a {{ t }}' : 'b' }}\"\n",
+        "      else:\n",
+        "          - when: \"mode == 'n {{ n }}'\"\n",
+        "            then:\n",
+        "                - shell:\n",
+        "                      command: \"{{ ok ? 'a {{ s }}' : 'b' }}\"\n",
+        "                      no_error: true\n",
+        "loop:\n",
+        "    while: \"fm.i < 3\"\n",
+        "    gate:\n",
+        "        - when: \"mode == 'g {{ g }}'\"\n",
+        "          then:\n",
+        "              - info: \"{{ ok ? 'a {{ i }}' : 'b' }}\"\n",
+        "---\n\nbody\n",
+    );
+    with_ctx(text, 1, |ctx| {
+        let found = nested(ctx);
+        let mut summary: Vec<(u32, &str)> =
+            found.iter().map(|d| (d.range.start.line, ranged(ctx, d))).collect();
+        summary.sort();
+        assert_eq!(
+            summary,
+            vec![
+                (2, "{{ r }}"),
+                (6, "{{ t }}"),
+                (8, "{{ n }}"),
+                (11, "{{ s }}"),
+                (16, "{{ g }}"),
+                (18, "{{ i }}"),
+            ],
+            "{found:#?}"
+        );
+    });
+}
+
+/// Loose verb keys at the loop root are a dictionary stack; the loop's
+/// iteration controls are not lifecycle surfaces.
+#[test]
+fn loose_loop_verbs_are_diagnosed_and_iteration_controls_are_not() {
+    let text = concat!(
+        "---\n",
+        "loop:\n",
+        "    while: \"fm.i < 3\"\n",
+        "    action: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
+        "    stderr: \"{{ ok ? 'a {{ l }}' : 'b' }}\"\n",
+        "---\n\nbody\n",
+    );
+    with_ctx(text, 1, |ctx| {
+        let found = nested(ctx);
+        let summary: Vec<(u32, &str)> =
+            found.iter().map(|d| (d.range.start.line, ranged(ctx, d))).collect();
+        assert_eq!(summary, vec![(4, "{{ l }}")], "{found:#?}");
     });
 }
 
@@ -247,79 +331,185 @@ fn ranges_are_inner_for_exact_styles_and_whole_for_folded_and_tagged() {
 
 // ── Lifecycle inventory ─────────────────────────────────────────────────────
 
-fn schema_mapping(file: &str) -> serde_yaml_ng::Mapping {
-    let text = std::fs::read_to_string(schemas_dir().join(file)).expect("read schema");
-    let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).expect("schema YAML");
-    document.get("$schema").and_then(|schema| schema.as_mapping()).expect("$schema").clone()
+// Claudine's authoritative schemas; DMLS has no Claudine dependency, so the
+// static inventory is held against the YAML itself.
+const CLAUDINE_TRIGGER: &str = include_str!("../../../../../claudine/schemas/claudine.yaml");
+const CLAUDINE_LIFECYCLE: &str = include_str!("../../../../../claudine/schemas/lifecycle.yaml");
+const CLAUDINE_ACTION: &str = include_str!("../../../../../claudine/schemas/action.yaml");
+const CLAUDINE_LINKING: &str = include_str!("../../../../../claudine/schemas/linking.yaml");
+
+/// The mapping under `section` (`$schema` of a trigger, `types` of a library).
+fn schema_section(text: &str, section: &str) -> serde_yaml_ng::Mapping {
+    let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).expect("schema YAML");
+    document.get(section).and_then(|value| value.as_mapping()).expect(section).clone()
 }
 
+/// Literal property names of an object type, without `$constraints`.
 fn keys_of(mapping: &serde_yaml_ng::Mapping) -> BTreeSet<String> {
-    mapping.keys().filter_map(|key| key.as_str()).map(str::to_string).collect()
+    mapping
+        .keys()
+        .filter_map(|key| key.as_str())
+        .filter(|key| !key.starts_with(['<', '$']))
+        .map(str::to_string)
+        .collect()
 }
 
 #[test]
 fn lifecycle_inventory_matches_the_authored_claudine_schema() {
-    let root = schema_mapping("claudine.yaml");
-    let events: BTreeSet<String> = root
+    let payload = schema_section(CLAUDINE_TRIGGER, "$schema");
+    let events: BTreeSet<String> = payload
         .iter()
         .filter(|(_, value)| {
             value.as_str().is_some_and(|definition| {
-                definition.starts_with("lifecycle-event@") || definition.starts_with("loop-event@")
+                ["stack@", "initialize-stack@", "loop@"].iter().any(|prefix| definition.starts_with(prefix))
             })
         })
         .filter_map(|(key, _)| key.as_str().map(str::to_string))
         .collect();
     assert_eq!(events, EVENT_KEYS.iter().map(|key| key.to_string()).collect());
 
-    let types = schema_mapping("claudine-types.yaml");
-    let object = |name: &str| types.get(name).and_then(|value| value.as_mapping()).unwrap().clone();
-    let communication: BTreeSet<String> =
-        COMMUNICATION_FIELDS.iter().map(|field| field.to_string()).collect();
-    let mut event_fields = keys_of(&object("lifecycle-event"));
-    for structural in ["effect", "stack"] {
-        assert!(event_fields.remove(structural), "{structural}");
-    }
-    assert_eq!(event_fields, communication);
-    assert!(keys_of(&object("loop-event")).is_superset(&communication));
-
-    let is_expression = |name: &str, key: &str| {
-        object(name).get(key).and_then(|value| value.as_str()).is_some_and(|d| d.starts_with("expression"))
+    let actions = schema_section(CLAUDINE_ACTION, "types");
+    let lifecycle = schema_section(CLAUDINE_LIFECYCLE, "types");
+    let object = |types: &serde_yaml_ng::Mapping, name: &str| -> serde_yaml_ng::Mapping {
+        types.get(name).and_then(|value| value.as_mapping()).unwrap_or_else(|| panic!("{name} is an object")).clone()
     };
-    assert!(is_expression("lifecycle-stack-item", "when"));
-    assert!(is_expression("loop-event", "while"));
-    assert!(is_expression("loop-event", "until"));
+    let definition = |types: &serde_yaml_ng::Mapping, name: &str, key: &str| -> String {
+        object(types, name).get(key).and_then(|value| value.as_str()).unwrap_or_else(|| panic!("{name}.{key}")).to_string()
+    };
+    let verbs: BTreeSet<String> = ["communicate", "flow", "shell", "expression"]
+        .into_iter()
+        .flat_map(|category| keys_of(&object(&actions, category)))
+        .collect();
+
+    // A conditional item contributes `when`/`then`/`else`; a dictionary bundle
+    // contributes `when` and `no_error` beside its verbs.
+    let structural: BTreeSet<String> = STRUCTURAL_ITEM_KEYS.iter().map(|key| key.to_string()).collect();
+    let mut authored_structural = BTreeSet::new();
+    for level in 1..=3 {
+        for conditional in [format!("conditional-{level}"), format!("initialize-conditional-{level}")] {
+            let keys = keys_of(&object(&lifecycle, &conditional));
+            assert!(keys.is_subset(&structural), "{conditional}: {keys:?}");
+            assert!(definition(&lifecycle, &conditional, "when").starts_with("expression"), "{conditional}");
+            authored_structural.extend(keys);
+        }
+    }
+    for bundle in ["bundle", "initialize-bundle"] {
+        let keys = keys_of(&object(&actions, bundle));
+        let grammar: BTreeSet<String> = keys.difference(&verbs).cloned().collect();
+        assert!(grammar.is_subset(&structural), "{bundle}: {grammar:?}");
+        assert!(definition(&actions, bundle, "when").starts_with("expression"), "{bundle}");
+        authored_structural.extend(grammar);
+    }
+    assert_eq!(authored_structural, structural);
+
+    let loop_keys = keys_of(&object(&lifecycle, "loop"));
+    // `fail_fast` is removed grammar: the parser still owns it so it can reject
+    // it, so the schema must not offer it.
+    let removed = "fail_fast";
+    assert!(LOOP_ITERATION_KEYS.contains(&removed) && !loop_keys.contains(removed), "{loop_keys:?}");
+    let mut loop_grammar: BTreeSet<String> =
+        LOOP_ITERATION_KEYS.iter().filter(|key| **key != removed).map(|key| key.to_string()).collect();
+    loop_grammar.extend(["gate".to_string(), "no_error".to_string()]);
+    // `max` is both an iteration key and an expression-function verb name, so
+    // the grammar is checked in both directions rather than as a difference.
+    assert!(loop_grammar.is_subset(&loop_keys), "{loop_keys:?}");
+    let loose: BTreeSet<String> = loop_keys.difference(&loop_grammar).cloned().collect();
+    assert!(loose.is_subset(&verbs), "loop keys that are neither grammar nor verbs: {:?}", loose.difference(&verbs));
+    assert!(definition(&lifecycle, "loop", "gate").starts_with("stack "), "loop.gate is a lifecycle stack");
+    assert!(definition(&lifecycle, "loop", "while").starts_with("expression"));
+    assert!(definition(&lifecycle, "loop", "until").starts_with("expression"));
+
+    // Every communication verb is a single-pass surface wherever an event can
+    // hold it: short form, long-form `text`, dictionary bundle, branch body,
+    // and loose loop verb. Its long-form `no_error` flag is not text.
+    let communicate = keys_of(&object(&actions, "communicate"));
+    assert!(communicate.contains("say") && communicate.len() >= 10, "{communicate:?}");
+    for verb in &communicate {
+        let verb = verb.as_str();
+        assert!(loop_keys.contains(verb), "loop accepts {verb}");
+        for event in EVENT_KEYS.iter().copied().filter(|event| *event != "loop") {
+            for path in [
+                vec![Key(event), Index(0), Key(verb)],
+                vec![Key(event), Index(0), Key(verb), Key("text")],
+                vec![Key(event), Key(verb)],
+                vec![Key(event), Index(0), Key("then"), Index(0), Key(verb)],
+                vec![Key(event), Index(0), Key("else"), Key(verb)],
+            ] {
+                assert!(lifecycle::is_single_pass_value(&path), "{path:?}");
+            }
+            let flag = [Key(event), Index(0), Key(verb), Key("no_error")];
+            assert!(!lifecycle::is_single_pass_value(&flag), "{flag:?}");
+        }
+        assert!(lifecycle::is_single_pass_value(&[Key("loop"), Key(verb)]), "loop.{verb}");
+        assert!(lifecycle::is_single_pass_value(&[Key("loop"), Key("gate"), Index(0), Key(verb)]), "loop.gate.{verb}");
+    }
 }
 
 #[test]
 fn path_matcher_classifies_representative_lifecycle_paths() {
     let single_pass = [
+        // Root dictionary.
         vec![Key("success"), Key("say")],
+        vec![Key("success"), Key("effect")],
+        vec![Key("start"), Key("shell"), Key("command")],
+        // List items: short form, argument list, long form, `set`, `with`.
+        vec![Key("initialize"), Index(0), Key("message")],
+        vec![Key("start"), Index(1), Key("ensure_file"), Index(2)],
+        vec![Key("start"), Index(1), Key("shell"), Key("command")],
+        vec![Key("success"), Index(0), Key("set"), Key("no_error")],
+        vec![Key("failure"), Index(0), Key("proxy"), Key("with"), Key("log")],
+        vec![Key("failure"), Index(0), Key("retry"), Key("with"), Key("reason")],
+        // Branch bodies: list and dictionary, nested.
+        vec![Key("initialize"), Index(0), Key("then"), Index(0), Key("message")],
+        vec![Key("failure"), Index(0), Key("else"), Index(1), Key("shell"), Key("command")],
+        vec![Key("failure"), Index(0), Key("then"), Key("warn")],
+        vec![
+            Key("failure"), Index(0), Key("else"), Index(0), Key("else"), Index(0), Key("then"), Index(0),
+            Key("stop"),
+        ],
+        // Loop: loose verbs and `gate`.
         vec![Key("loop"), Key("stdout")],
-        vec![Key("initialize"), Key("stack"), Index(0), Key("action")],
-        vec![Key("start"), Key("stack"), Index(1), Key("action"), Index(2), Key("ensure_file")],
-        vec![Key("failure"), Key("stack"), Index(0), Key("action"), Index(0), Key("with"), Key("log")],
-        vec![Key("finalize"), Key("stack"), Index(0), Key("stdout")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("effect")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("then"), Index(0), Key("warn")],
     ];
     for path in &single_pass {
         assert!(lifecycle::is_single_pass_value(path), "{path:?}");
+        assert!(!lifecycle::is_predicate(path), "{path:?}");
     }
     let not_single_pass = [
         vec![Key("success")],
-        vec![Key("success"), Key("effect")],
         vec![Key("resides_in")],
         vec![Key("loop"), Key("action")],
-        vec![Key("initialize"), Key("stack"), Index(0)],
-        vec![Key("initialize"), Key("stack"), Index(0), Key("when")],
-        vec![Key("initialize"), Key("stack"), Index(0), Key("no_error")],
+        vec![Key("loop"), Key("max")],
+        vec![Key("loop"), Key("gate")],
+        vec![Key("initialize"), Index(0)],
+        vec![Key("initialize"), Index(0), Key("when")],
+        vec![Key("initialize"), Index(0), Key("no_error")],
+        vec![Key("initialize"), Index(0), Key("then")],
+        vec![Key("start"), Index(0), Key("shell"), Key("no_error")],
+        vec![Key("start"), Key("no_error")],
+        vec![Key("failure"), Index(0), Key("else"), Index(0), Key("when")],
         vec![Key("meta"), Key("success"), Key("say")],
     ];
     for path in &not_single_pass {
         assert!(!lifecycle::is_single_pass_value(path), "{path:?}");
     }
-    assert!(lifecycle::is_predicate(&[Key("blocked"), Key("stack"), Index(3), Key("when")]));
-    assert!(lifecycle::is_predicate(&[Key("loop"), Key("while")]));
+    for predicate in [
+        vec![Key("blocked"), Index(3), Key("when")],
+        vec![Key("failure"), Index(0), Key("else"), Index(1), Key("when")],
+        vec![Key("failure"), Index(0), Key("then"), Index(0), Key("else"), Index(0), Key("when")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("when")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("then"), Index(2), Key("when")],
+        vec![Key("loop"), Key("while")],
+        vec![Key("loop"), Key("until")],
+    ] {
+        assert!(lifecycle::is_predicate(&predicate), "{predicate:?}");
+    }
     assert!(!lifecycle::is_predicate(&[Key("when")]));
     assert!(!lifecycle::is_predicate(&[Key("success"), Key("until")]));
+    // A dictionary of verbs never carries `when`.
+    assert!(!lifecycle::is_predicate(&[Key("success"), Key("when")]));
+    assert!(!lifecycle::is_predicate(&[Key("loop"), Key("when")]));
 }
 
 // ── Host globals at the Darkmatter baseline ─────────────────────────────────
@@ -344,11 +534,10 @@ fn host_globals_are_undeclared_properties_beneath_lifecycle_keys_and_elsewhere()
     let lifecycle = concat!(
         "---\n",
         "failure:\n",
-        "    stack:\n",
-        "        - when: err\n",
-        "          action: stop\n",
-        "        - when: timing\n",
-        "          action: stop\n",
+        "    - when: err\n",
+        "      then: [stop]\n",
+        "    - when: timing\n",
+        "      then: [stop]\n",
         "loop:\n",
         "    while: current\n",
         "---\n\nbody\n",

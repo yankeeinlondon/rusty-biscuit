@@ -302,6 +302,14 @@ fn parse_match_expr(value: &YamlValue) -> Result<MatchExpr, SchemaError> {
             yaml_kind(value)
         ),
     })?;
+    // An empty mapping would parse as `all([])`, which is always true: under
+    // `none:` it silently makes a trigger unmatchable, under `all:` it hides a
+    // dropped condition.
+    if map.is_empty() {
+        return Err(SchemaError::TriggerMatch {
+            message: "a match condition mapping must have at least one key".into(),
+        });
+    }
 
     let mut structural_keys: Vec<&str> = Vec::new();
     let mut property_keys: Vec<&str> = Vec::new();
@@ -565,6 +573,9 @@ pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
             // a valid trigger discriminant — the idiomatic replacement for a
             // single-member `enum(...)` tag.
             | Constraint::LiteralValue(_)
+            // `alphanumeric` options select a character set; checking a value
+            // against it is pure.
+            | Constraint::Options(_)
             | Constraint::Pattern(_)
             | Constraint::MinLen(_)
             | Constraint::MaxLen(_)
@@ -652,6 +663,24 @@ mod tests {
                 assert_eq!(children.len(), 2);
             }
             other => panic!("expected All, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_an_empty_condition_mapping_at_every_level() {
+        for input in [
+            "{}",
+            "[{}]",
+            "all:\n  - prompt: string(required)\n  - {}",
+            "any:\n  - {}",
+            "all:\n  - prompt: string(required)\n  - none:\n      - {}",
+            "min-match:\n  count: 1\n  of:\n    - {}",
+        ] {
+            let err = parse_match_arms(&yaml(input)).expect_err(input);
+            assert!(
+                err.to_string().contains("must have at least one key"),
+                "{input}: {err}"
+            );
         }
     }
 

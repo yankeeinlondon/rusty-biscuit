@@ -27,6 +27,14 @@
   dev-dependencies `wiremock`, `rcgen`, and `tokio-rustls` for local HTTP and
   TLS mocks. All were already in the workspace graph and in
   `schematic/schema/Cargo.lock`; the lockfile gains no package.
+- `darkmatter` adds `content-policy` as a normal dependency with
+  `default-features = false` (2026-10-12). It is a workspace member, so the
+  lockfile gains one edge and no package. The runtime baseline imports its
+  `EDITOR_SCHEMA` to type `content_policy`, and Darkmatter's tests compare
+  Content Policy's declaration parser with that typing. The edge runs from
+  Darkmatter to Content Policy only; Content Policy's `just deps-check` still
+  forbids the reverse, and `file-adapter` stays off.
+
 - `tree-hugger-cli` adds a direct local `renderable` edge for the render-tree
   node types of biscuit-terminal's `InlineProse::to_render_nodes`, which its
   Markdown and plain Prose exports read. biscuit-terminal already depends on
@@ -102,8 +110,8 @@
   `reqwest` should copy this shape rather than take the defaults.
 - `claudine-cli` adds a direct `sysinfo = "0.38.2"` edge (2026-09-17, research
   metadata pipeline Phase 5). The crate was already in the graph through
-  `sniff`, so the lockfile gains one edge and no package. Budget-ledger crash
-  recovery uses it to check a recorded worker's process start time before
+  `sniff`, so the lockfile gains one edge and no package. Process-start
+  identity uses it to check a recorded worker's process start time before
   signaling that PID. See [`claudine/docs/dependencies.md`](claudine/docs/dependencies.md).
 - `scripts/` (package `repo-deps`) is a **root Cargo workspace member**. It
   carried a nested `[workspace]` stanza and its own `scripts/Cargo.lock` until
@@ -255,6 +263,11 @@
   `research` also enables the library's existing optional `sniff` dependency
   (already used by `desktop`), whose Git work-tree discovery lets `prepare`
   refuse a research root below the Git top level; no crate was added.
+- `messenger/lib` adds an optional `sysinfo = "0.38.2"` edge through its
+  `research` feature (and as a development dependency): the research runner
+  finds and kills a stopped sequence's descendant processes, checking each
+  PID's start time before signaling it. The crate was already in the graph
+  through `sniff`, so the lockfile gains one edge and no package.
 - `messenger/lib` also uses the workspace `biscuit-test-harness` as a
   development dependency for `manifest_dir!()`, so its research fixture tests
   resolve the corpus at run time and still find it on the WSL2 nextest-archive
@@ -414,7 +427,8 @@
   `unicode-normalization` for NFC so a vault resolves identically across OSes.
   Semantic authorities: `darkmatter` (lib),
   `biscuit-file` (`file-reference` feature, default features off), and
-  `biscuit-hash` (xxHash content-hash identity for graph invalidation). See
+  `biscuit-hash` (xxHash content-hash identity for graph invalidation).
+  `rusqlite` (`bundled`) holds the persistent per-file facts store. See
   [`darkmatter/docs/dependencies.md`](./darkmatter/docs/dependencies.md).
 - `darkmatter/dmls/zed-dmls-cli` (`zed-dmls-cli`) stages the Zed extension in
   a stable per-user data directory and diagnoses the native binary, dev
@@ -444,7 +458,7 @@ This is a Rust workspace with the following modules:
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
-- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
+- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash, rusqlite bundled)
 - `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
@@ -1425,7 +1439,7 @@ This is a Rust workspace with the following modules:
 
 - [rusqlite](https://github.com/rusqlite/rusqlite) _v0.31_ [📄](https://docs.rs/rusqlite)
 
-    _Ergonomic SQLite bindings for Rust used by Claudine's local reporting index._
+    _Ergonomic SQLite bindings for Rust used by Claudine's local reporting index, biscuit-icon's icon cache, and DMLS's per-file facts store._
 
     _Tags: database, sqlite, embedded_
 

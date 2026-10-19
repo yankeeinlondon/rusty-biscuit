@@ -27,10 +27,10 @@ const BODY_MARKER: &str = "STAGED-BODY";
 const ATTEMPT_SEPARATOR: &str = "=== attempt ===";
 
 /// The `initialize` stack that creates the included file with content.
-const CREATING_INITIALIZE: &str = "initialize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'initialize']}\n    \
-     - action: {ensure_file: 'generated/notes.md'}\n    \
-     - action: {append_line: ['generated/notes.md', 'GENERATED-BY-INITIALIZE']}\n";
+const CREATING_INITIALIZE: &str = "initialize:\n    \
+     - {append_line: ['events.log', 'initialize']}\n    \
+     - {ensure_file: 'generated/notes.md'}\n    \
+     - {append_line: ['generated/notes.md', 'GENERATED-BY-INITIALIZE']}\n";
 
 struct Acceptance {
     fixture: CliProcessFixture,
@@ -152,9 +152,9 @@ fn ensure_file_preserves_an_existing_include_the_prompt_reads() {
     let doc = accept.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: existing\ninitialize:\n  stack:\n    \
-             - action: {{append_line: ['events.log', 'initialize']}}\n    \
-             - action: {{ensure_file: '{GENERATED}'}}\n---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
+            "---\ntitle: existing\ninitialize:\n    \
+             - {{append_line: ['events.log', 'initialize']}}\n    \
+             - {{ensure_file: '{GENERATED}'}}\n---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
         ),
     );
 
@@ -214,10 +214,10 @@ fn a_shell_directive_initialize_writes_into_an_include_is_audited_before_it_runs
     let doc = accept.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: shell include\ninitialize:\n  stack:\n    \
-             - action: {{append_line: ['events.log', 'initialize']}}\n    \
-             - action: {{ensure_file: '{GENERATED}'}}\n    \
-             - action: {{append_line: ['{GENERATED}', '::shell touch {effect}']}}\n\
+            "---\ntitle: shell include\ninitialize:\n    \
+             - {{append_line: ['events.log', 'initialize']}}\n    \
+             - {{ensure_file: '{GENERATED}'}}\n    \
+             - {{append_line: ['{GENERATED}', '::shell touch {effect}']}}\n\
              ---\n{BODY_MARKER}\n\n::file {GENERATED}\n",
             effect = effect.display(),
         ),
@@ -246,9 +246,9 @@ fn an_approved_shell_directive_initialize_writes_into_an_include_runs() {
     let doc = accept.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: shell include\ninitialize:\n  stack:\n    \
-             - action: {{ensure_file: '{GENERATED}'}}\n    \
-             - action: {{append_line: ['{GENERATED}', '::shell echo GENERATED-SHELL-OUTPUT']}}\n\
+            "---\ntitle: shell include\ninitialize:\n    \
+             - {{ensure_file: '{GENERATED}'}}\n    \
+             - {{append_line: ['{GENERATED}', '::shell echo GENERATED-SHELL-OUTPUT']}}\n\
              ---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
         ),
     );
@@ -308,8 +308,8 @@ fn an_include_initialize_rewrites_reaches_the_prompt_with_its_new_content() {
     let doc = accept.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: rewrite\ninitialize:\n  stack:\n    \
-             - action: {{set_frontmatter: ['{path}', 'content', 'REWRITTEN-BY-INITIALIZE']}}\n\
+            "---\ntitle: rewrite\ninitialize:\n    \
+             - {{set_frontmatter: ['{path}', 'content', 'REWRITTEN-BY-INITIALIZE']}}\n\
              ---\n{BODY_MARKER}\n\n::file {GENERATED}\n",
             path = accept.path(GENERATED).display(),
         ),
@@ -333,12 +333,12 @@ fn initialize_mutating_the_document_itself_is_prompted_and_audited_from_the_rere
     accept.install_provider("claude", &[]);
     let appended_doc = |effect: Option<&Path>| {
         let shell = effect
-            .map(|path| format!("    - action: {{append_line: ['doc.md', '::shell touch {}']}}\n", path.display()))
+            .map(|path| format!("    - {{append_line: ['doc.md', '::shell touch {}']}}\n", path.display()))
             .unwrap_or_default();
         format!(
-            "---\ntitle: self mutation\ninitialize:\n  stack:\n    \
-             - action: {{append_line: ['events.log', 'initialize']}}\n    \
-             - action: {{append_line: ['doc.md', 'APPENDED-BY-INITIALIZE']}}\n{shell}\
+            "---\ntitle: self mutation\ninitialize:\n    \
+             - {{append_line: ['events.log', 'initialize']}}\n    \
+             - {{append_line: ['doc.md', 'APPENDED-BY-INITIALIZE']}}\n{shell}\
              ---\n{BODY_MARKER}\n"
         )
     };
@@ -371,15 +371,15 @@ fn an_initialize_proxy_chain_never_reads_an_abandoned_body() {
     accept.write_doc("target.md", &creating_doc("phase: 4\n"));
     accept.write_doc(
         "middle.md",
-        "---\ntitle: middle\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'middle-initialize']}\n    \
-         - action: {proxy: 'target.md'}\n---\nMIDDLE-BODY\n\n::file abandoned/never.md\n",
+        "---\ntitle: middle\ninitialize:\n    \
+         - {append_line: ['events.log', 'middle-initialize']}\n    \
+         - {proxy: 'target.md'}\n---\nMIDDLE-BODY\n\n::file abandoned/never.md\n",
     );
     let router = accept.write_doc(
         "router.md",
-        "---\ntitle: router\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'router-initialize']}\n    \
-         - action: {proxy: 'middle.md'}\n---\nROUTER-BODY\n\n::file abandoned/router.md\n",
+        "---\ntitle: router\ninitialize:\n    \
+         - {append_line: ['events.log', 'router-initialize']}\n    \
+         - {proxy: 'middle.md'}\n---\nROUTER-BODY\n\n::file abandoned/router.md\n",
     );
 
     let (success, output) = accept.run(&["compose", router.to_str().unwrap(), "-y", "--claude"]);
@@ -397,8 +397,9 @@ fn an_initialize_proxy_chain_never_reads_an_abandoned_body() {
     assert!(!attempts[0].contains("MIDDLE-BODY") && !attempts[0].contains("ROUTER-BODY"));
 }
 
-/// `stop` ends the `initialize` stack cleanly: later actions do not run, and the
-/// run continues into the stabilized reread with what ran before the stop.
+/// `stop` ends the `initialize` stack cleanly: later actions do not run (a
+/// directive may only end its own list, so the stop sits in a guarded body and
+/// still skips the outer list's next item), and the run continues into the stabilized reread with what ran before the stop.
 #[test]
 fn an_initialize_stop_ends_the_stack_and_the_run_continues_from_the_reread() {
     let accept = Acceptance::new("init-accept-stop");
@@ -406,12 +407,14 @@ fn an_initialize_stop_ends_the_stack_and_the_run_continues_from_the_reread() {
     let doc = accept.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: stop\ninitialize:\n  stack:\n    \
-             - action: {{append_line: ['events.log', 'initialize']}}\n    \
-             - action: {{ensure_file: '{GENERATED}'}}\n    \
-             - action: {{append_line: ['{GENERATED}', '{GENERATED_MARKER}']}}\n    \
-             - action: stop\n    \
-             - action: {{append_line: ['events.log', 'after-stop']}}\n\
+            "---\ntitle: stop\ninitialize:\n    \
+             - {{append_line: ['events.log', 'initialize']}}\n    \
+             - when: 'true'\n      \
+               then:\n        \
+                 - {{ensure_file: '{GENERATED}'}}\n        \
+                 - {{append_line: ['{GENERATED}', '{GENERATED_MARKER}']}}\n        \
+                 - stop\n    \
+             - {{append_line: ['events.log', 'after-stop']}}\n\
              ---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
         ),
     );
@@ -433,9 +436,9 @@ fn an_initialize_error_fails_without_reading_the_body_or_launching() {
     let doc = accept.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: error\ninitialize:\n  stack:\n    \
-             - action: {{append_line: ['events.log', 'initialize']}}\n    \
-             - action: {{error: 'INITIALIZE-REFUSED'}}\n\
+            "---\ntitle: error\ninitialize:\n    \
+             - {{append_line: ['events.log', 'initialize']}}\n    \
+             - {{error: 'INITIALIZE-REFUSED'}}\n\
              ---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
         ),
     );
@@ -459,10 +462,10 @@ fn a_retry_rereads_the_include_without_initializing_again() {
     let doc = accept.write_doc(
         "doc.md",
         &creating_doc(
-            "phase: 1\nfailure:\n  stack:\n    \
-             - action: {append_line: ['events.log', 'failure']}\n    \
-             - action: {append_line: ['generated/notes.md', 'APPENDED-BEFORE-RETRY']}\n    \
-             - action: {retry: 1}\n",
+            "phase: 1\nfailure:\n    \
+             - {append_line: ['events.log', 'failure']}\n    \
+             - {append_line: ['generated/notes.md', 'APPENDED-BEFORE-RETRY']}\n    \
+             - {retry: 1}\n",
         ),
     );
 
@@ -504,9 +507,9 @@ fn a_resume_continues_the_session_without_initializing_again() {
     let doc = accept.write_doc(
         "doc.md",
         &creating_doc(
-            "phase: 1\nfailure:\n  stack:\n    \
-             - action: {append_line: ['events.log', 'failure']}\n    \
-             - action: {resume: 'please continue'}\n",
+            "phase: 1\nfailure:\n    \
+             - {append_line: ['events.log', 'failure']}\n    \
+             - {resume: 'please continue'}\n",
         ),
     );
 
@@ -535,9 +538,9 @@ fn inline_compose_proxy_target_initialize_creates_a_file_its_prompt_includes() {
     );
     let router = accept.write_doc(
         "router.md",
-        "---\ntitle: router\nprompt: ROUTER-PROMPT\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'router-initialize']}\n    \
-         - action: {proxy: 'target.md'}\n---\nrouter body\n",
+        "---\ntitle: router\nprompt: ROUTER-PROMPT\ninitialize:\n    \
+         - {append_line: ['events.log', 'router-initialize']}\n    \
+         - {proxy: 'target.md'}\n---\nrouter body\n",
     );
     let prelude = format!(
         "{{ printf '%s\\n' {separator}; printf '%s\\n' \"$@\"; cat; }} >> {prompt}\n\
@@ -693,9 +696,9 @@ fn assert_resolution_parity(name: &str, reference: &str, resolved: &str, decoy: 
     let doc = accept.write_doc(
         "docs/area/doc.md",
         &format!(
-            "---\ntitle: parity\ninitialize:\n  stack:\n    \
-             - action: {{ensure_file: \"{reference}\"}}\n    \
-             - action: {{append_line: [\"{reference}\", PARITY-MARKER]}}\n\
+            "---\ntitle: parity\ninitialize:\n    \
+             - {{ensure_file: \"{reference}\"}}\n    \
+             - {{append_line: [\"{reference}\", PARITY-MARKER]}}\n\
              ---\n{BODY_MARKER}\n\n::file \"{reference}\"\n"
         ),
     );
@@ -783,9 +786,9 @@ fn a_shadowed_implicit_reference_mutates_the_file_the_include_prefers() {
     write(&accept.path("generated/notes.md"), "ROOT-DECOY\n");
     let doc = accept.write_doc(
         "docs/area/doc.md",
-        "---\ntitle: parity\ninitialize:\n  stack:\n    \
-         - action: {ensure_file: generated/notes.md}\n    \
-         - action: {append_line: [generated/notes.md, PARITY-MARKER]}\n\
+        "---\ntitle: parity\ninitialize:\n    \
+         - {ensure_file: generated/notes.md}\n    \
+         - {append_line: [generated/notes.md, PARITY-MARKER]}\n\
          ---\nSTAGED-BODY\n\n::file generated/notes.md\n",
     );
 
@@ -811,10 +814,10 @@ fn every_filesystem_effect_uses_the_document_reference_identity() {
     accept.install_provider("claude", &[]);
     let doc = accept.write_doc(
         "docs/area/doc.md",
-        "---\ntitle: parity\npayload:\n  event: ready\ninitialize:\n  stack:\n    \
-         - action: {ensure_dir: ./generated/nested}\n    \
-         - action: {ensure_file: [./generated/content.md, SEEDED-CONTENT]}\n    \
-         - action: {append_jsonl: [./generated/events.md, \"{{ payload }}\"]}\n\
+        "---\ntitle: parity\npayload:\n  event: ready\ninitialize:\n    \
+         - {ensure_dir: ./generated/nested}\n    \
+         - {ensure_file: [./generated/content.md, SEEDED-CONTENT]}\n    \
+         - {append_jsonl: [./generated/events.md, \"{{ payload }}\"]}\n\
          ---\n::file \"./generated/content.md\"\n::file \"./generated/events.md\"\n",
     );
 
@@ -843,8 +846,8 @@ fn a_repository_escape_is_rejected_before_any_file_or_provider_effect() {
     accept.install_provider("claude", &[]);
     let doc = accept.write_doc(
         "docs/area/doc.md",
-        "---\ntitle: invalid reference\ninitialize:\n  stack:\n    \
-         - action: {ensure_file: '&../outside.md'}\n---\nBODY\n",
+        "---\ntitle: invalid reference\ninitialize:\n    \
+         - {ensure_file: '&../outside.md'}\n---\nBODY\n",
     );
 
     let (success, output) = accept.run(&["compose", doc.to_str().unwrap(), "-y", "--claude"]);

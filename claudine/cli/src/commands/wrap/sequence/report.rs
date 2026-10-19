@@ -24,10 +24,20 @@ pub(super) fn emit_sequence_summary(
     interrupted: &Arc<AtomicBool>,
     interrupt_observed: bool,
     silent: bool,
+    dry_run: bool,
 ) -> Result<i32> {
     if !silent {
         log::message("");
-        if summary.failed == 0 {
+        // A preview completed nothing, so it reports what it rendered rather
+        // than a count of succeeded steps.
+        if dry_run && summary.failed == 0 {
+            let status = Status::from_prose(format!(
+                "Sequence previewed (<i>dry-run</i>): <green>{}</green> step(s) rendered, none run",
+                summary.succeeded
+            ))
+            .state(StatusState::Success);
+            log::message(&status.render(&log::terminal()));
+        } else if summary.failed == 0 {
             let status = Status::from_prose(format!(
                 "Sequence finished: <green>{}</green> succeeded, 0 failed",
                 summary.succeeded

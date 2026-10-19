@@ -8,6 +8,11 @@
 //! executed at two events runs its command twice. A ternary's condition and a
 //! value branch are expression content, not command bytes: they are evaluated
 //! when the value executes, against the state the caller supplies then.
+//!
+//! A value the caller approved by its typed shape runs as its authored
+//! template instead ([`ResolvedShellValue::with_template`]): each placeholder
+//! is read when the value executes, from the state the caller supplies then,
+//! and fills exactly one argument; its resolved bytes never run.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -35,6 +40,10 @@ use crate::markdown::compose::shell_expansion::types::{
     ShellExpansionError, ShellExpansionRuntime, ShellPipeline,
 };
 use crate::markdown::compose::ComposeContext;
+use crate::markdown::compose::shell_expansion::site::{SiteFrame, TemplateSite, prepare_site};
+use crate::markdown::compose::shell_expansion::template::{
+    CommandSite, CommandTemplate, HoleEvaluator, LookupEvaluator, ModeRequirement, ShellCandidate, SiteValues,
+};
 
 /// Checks an authored whole-value `$( … )` without resolving or running it.
 ///
@@ -63,7 +72,9 @@ pub fn check_frontmatter_shell_value(key: &str, authored: &str) -> Result<(), Sh
 /// interpolated at [`Self::resolve`] and passed the same shape checks as a
 /// top-level frontmatter value. [`Self::commands`] lists exactly what
 /// [`execute_resolved_shell_values`] may run, so approving that list approves
-/// the value. The suffix is never part of those bytes.
+/// the value. The suffix is never part of those bytes. A value given its
+/// template ([`Self::with_template`]) runs that instead, and approving its
+/// shape approves it.
 #[derive(Debug, Clone)]
 pub struct ResolvedShellValue {
     key: String,
@@ -77,6 +88,12 @@ pub struct ResolvedShellValue {
     login_shell: Option<String>,
     /// The context's alias lookup record, shared with the rest of the run.
     alias_resolutions: AliasResolutions,
+    /// The authored command, typed by the caller, when the value runs as a
+    /// template; see [`Self::with_template`].
+    template: Option<CommandTemplate>,
+    /// Late values the caller validated before the value executes; see
+    /// [`Self::with_late_values`].
+    late: Option<SiteValues>,
 }
 
 impl PartialEq for ResolvedShellValue {
@@ -86,6 +103,7 @@ impl PartialEq for ResolvedShellValue {
             && self.resolved == other.resolved
             && self.then_pipeline == other.then_pipeline
             && self.else_pipeline == other.else_pipeline
+            && self.template == other.template
     }
 }
 
@@ -136,7 +154,61 @@ impl ResolvedShellValue {
             else_pipeline,
             login_shell: login_shell(context.env()).map(str::to_string),
             alias_resolutions,
+            template: None,
+            late: None,
         })
+    }
+
+    /// A value whose interpolated text no longer reads as a command (a value
+    /// inserted quotes, `;`, or other command syntax) but whose authored
+    /// command is a template with a placeholder. It has no resolved bytes:
+    /// [`Self::commands`] is empty, and it runs only once given its template
+    /// ([`Self::with_template`]).
+    ///
+    /// `None` when `authored` is not such a template, so the caller reports
+    /// the original resolution error.
+    pub fn template_only(key: &str, authored: &str, reason: &str, context: &ComposeContext) -> Option<Self> {
+        let ctx = value_context(key, authored);
+        let directive = super::unparsed_template(authored, key, reason.to_string(), &ctx)?;
+        Some(Self {
+            key: key.to_string(),
+            authored: authored.trim().to_string(),
+            resolved: String::new(),
+            directive,
+            then_pipeline: None,
+            else_pipeline: None,
+            login_shell: login_shell(context.env()).map(str::to_string),
+            alias_resolutions: AliasResolutions::default(),
+            template: None,
+            late: None,
+        })
+    }
+
+    /// This value, run as `template`: the command inside its `$( … )`,
+    /// parsed with [`authored_shell_template`](super::authored_shell_template)
+    /// and typed against its owner's schema. Its suffixes still apply.
+    ///
+    /// Executing it requires a template approval of `template`'s shape, not
+    /// of the value's bytes.
+    #[must_use]
+    pub fn with_template(mut self, template: CommandTemplate) -> Self {
+        self.template = Some(template);
+        self
+    }
+
+    /// The template the value runs as, when it was given one.
+    pub fn template(&self) -> Option<&CommandTemplate> {
+        self.template.as_ref()
+    }
+
+    /// This value, filling the holes `late` holds (by placeholder index, as
+    /// [`resolve_late_values`](crate::markdown::compose::shell_expansion::template::resolve_late_values)
+    /// produced them at the caller's barrier) without evaluating them again.
+    /// Only a value run as a template reads them.
+    #[must_use]
+    pub fn with_late_values(mut self, late: SiteValues) -> Self {
+        self.late = Some(late);
+        self
     }
 
     /// The destination key the value was resolved for.
@@ -180,6 +252,9 @@ impl ResolvedShellValue {
     fn pipelines(&self) -> Vec<&ShellPipeline> {
         match &self.directive.ast {
             FrontmatterShellAst::Pipeline(pipeline) => vec![pipeline],
+            // Never produced here: values are parsed with `parse_shell_value`,
+            // which fails instead.
+            FrontmatterShellAst::Unparsed { .. } => Vec::new(),
             FrontmatterShellAst::Ternary { .. } => self
                 .then_pipeline
                 .iter()
@@ -210,6 +285,29 @@ pub fn execute_resolved_shell_values(
     state: HashMap<String, Value>,
     request: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
+    execute_shell_values_with(values, state, request, None)
+}
+
+/// [`execute_resolved_shell_values`], reading the placeholders of a value
+/// that runs as a template ([`ResolvedShellValue::with_template`]) through
+/// `holes` instead of from `state`.
+///
+/// A host whose expressions see more than the frontmatter state (its own
+/// globals) passes the evaluator it uses for every other value, so a
+/// placeholder reads what the host's expressions read.
+///
+/// ## Errors
+///
+/// As [`execute_resolved_shell_values`], plus, for a template value, every
+/// error of template execution: a missing or rejected value, a blacklisted
+/// filled command, or a program that needs an interpreter. None of them is
+/// suppressed by a result suffix.
+pub fn execute_shell_values_with(
+    values: &[&ResolvedShellValue],
+    state: HashMap<String, Value>,
+    request: &crate::markdown::compose::ComposeRequest,
+    holes: Option<&dyn HoleEvaluator>,
+) -> Result<Vec<(String, Value)>, ShellExpansionError> {
     let options = request;
     let shell_opts = options.shell_options();
     let policy_paths = resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
@@ -220,10 +318,18 @@ pub fn execute_resolved_shell_values(
         .with_current_authority(resolution.current.clone())
         .with_resolution_context(Some(resolution));
 
+    let seed_holes = LookupEvaluator::new(&seed);
+    let holes = holes.unwrap_or(&seed_holes);
+
     let mut pending = Vec::with_capacity(values.len());
     for value in values {
         let ctx = value_context(&value.key, &value.authored);
         let directive = &value.directive;
+        if let Some(template) = &value.template {
+            let prepared = prepare_template_value(value, template, holes, options, &policy_paths, &mut shell, &ctx)?;
+            pending.push((value.key.clone(), directive.result, Pending::Execute(Box::new(prepared))));
+            continue;
+        }
         let item = match &directive.ast {
             FrontmatterShellAst::Pipeline(pipeline) => Pending::Execute(Box::new(
                 prepare_branch_pipeline(
@@ -236,6 +342,16 @@ pub fn execute_resolved_shell_values(
                     &ctx,
                 )?,
             )),
+            FrontmatterShellAst::Unparsed { .. } => {
+                return Err(ShellExpansionError::ParseDirective {
+                    ctx: Box::new(ctx.clone()),
+                    origin: crate::markdown::compose::ShellCommandOrigin::Frontmatter {
+                        key: value.key.clone(),
+                        line: None,
+                    },
+                    message: "the value's interpolated text does not parse as a command".to_string(),
+                });
+            }
             FrontmatterShellAst::Ternary {
                 condition_source,
                 then_branch,
@@ -292,6 +408,50 @@ pub fn execute_resolved_shell_values(
         .collect::<Vec<_>>()
         .into_iter()
         .collect()
+}
+
+/// Prepares a value that runs as its template. The site may run only as a
+/// template, so its resolved bytes are never consulted.
+fn prepare_template_value(
+    value: &ResolvedShellValue,
+    template: &CommandTemplate,
+    holes: &dyn HoleEvaluator,
+    options: &crate::markdown::compose::ComposeRequest,
+    policy_paths: &crate::markdown::compose::shell_expansion::ShellPolicyPaths,
+    shell: &mut ShellExpansionRuntime,
+    ctx: &SourceContext,
+) -> Result<crate::markdown::compose::shell_expansion::PreparedShellDirective, ShellExpansionError> {
+    let origin = crate::markdown::compose::ShellCommandOrigin::Frontmatter {
+        key: value.key.clone(),
+        line: None,
+    };
+    let candidate = ShellCandidate {
+        authored_command: template.authored.clone(),
+        site: CommandSite {
+            source_file: PathBuf::from(&value.key),
+            origin: origin.clone(),
+            owner: None,
+        },
+        template: Ok(template.clone()),
+        resolved: None,
+        requirement: ModeRequirement::TemplateRequired,
+    };
+    let frame = SiteFrame {
+        span: 0..0,
+        indent: String::new(),
+        error_handling: Default::default(),
+        timeout_override: value.directive.timeout_override,
+        no_cache: value.directive.no_cache,
+    };
+    let unread = || ShellExpansionError::ParseDirective {
+        ctx: Box::new(ctx.clone()),
+        origin: origin.clone(),
+        message: "the value runs as its template, whose command has no placeholder".to_string(),
+    };
+    let site = TemplateSite::new(candidate, holes, ctx.clone(), frame)
+        .ok_or_else(unread)?
+        .with_late_values(value.late.clone());
+    prepare_site(Err(unread()), Some(&site), options, policy_paths, shell)
 }
 
 /// Interpolates one command branch of a ternary from its authored text and

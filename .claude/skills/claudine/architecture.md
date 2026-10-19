@@ -31,7 +31,7 @@ claudine/lib/src/
 │   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
 │   ├── prepare/   → The canonical preparation service (prepare/service.rs) and the entry-reason stage matrix as data (prepare/entry.rs); prepare.rs holds the two sanctioned composers prepare_direct/prepare_inline
-│   ├── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
+│   ├── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting; `bundle.rs` embeds `claudine/schemas/` as the last-resort trigger location and decides Claudine-control ownership (see topics/schemas.md)
 │   ├── closure.rs → The inline artifact reconciler: reads the agent-written document back, restores the three closure-owned nodes textually, judges the body under Darkmatter's non-strict Simple hash, stamps, writes once atomically, and owns baseline rollback
 │   └── completion.rs → The one completion verdict for both modes: pure evaluate_completion + the complete_active_document orchestration entry point
 ├── config/       → Agent detection, hook registration, atomic writes, backups
@@ -44,7 +44,7 @@ claudine/lib/src/
 ├── harness/      → Shell audit, timeouts, attempt classification, and recovery infrastructure
 ├── hook_adapters/ → Native hook request/response adapters (ProviderAdapter trait) — parse provider hook payloads; distinct from stream/providers (stdout NDJSON parsers)
 ├── interrupt.rs  → Process-scoped user-interrupt state
-├── invocation_context.rs → Immutable launch baseline (`HomeBaseline`, raw-`OsString` `EnvBaseline`) every attempt and provider transition plans from
+├── invocation_context.rs → Immutable launch baseline (`HomeBaseline`, raw-`OsString` `EnvBaseline`) every attempt and provider transition plans from; each `InvocationContext` is a view of one document (`enter_document(DocumentEnvironment)`, `capture_document()`; `document_environment.rs` holds `DocumentEnvironment`/`EnvironmentSource`)
 ├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── messaging/    → Outbound messaging route resolution and delivery
@@ -362,7 +362,7 @@ All dispatch surfaces that evaluate expressions against an `EventMeta` share the
                       → parse_condition(expr) + evaluate(parsed, &lookup)
 ```
 
-`EventMetaExpressionLookup` resolves `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`, `os.*`, `hardware.*`, `git.*`, `project.*`, and top-level event fields. `EventMetaConditionLookup` layers `ctx.*` (e.g. `ctx.today`) on top for hook `when` evaluation, reading the environment of the dispatching process's `RequestSnapshot` (carried on `CanonicalRuntimeConfig`, so `compile_canonical_runtime`, `DispatchRuntimeContext::load_for_env`, and the `dispatch*` entry points take one). Its read-side file functions resolve through a context Darkmatter's builder makes at the hook's directory, on first use. Hook-template `env.NAME` still reads the hook process's environment when the event fires. The old JSON-serialize-and-flatten path was removed by feature `2026-05-02-flattened-bridge`.
+`EventMetaExpressionLookup` resolves the hook-only `hook` root (bare `hook` is the normalized payload without `env`; `hook.<path>` reads one field with no fallback to the unprefixed paths), `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`, `os.*`, `hardware.*`, `git.*`, `project.*`, and top-level event fields. `EventMetaConditionLookup` layers `ctx.*` (e.g. `ctx.today`) on top for hook `when` evaluation, reading the environment of the dispatching process's `RequestSnapshot` (carried on `CanonicalRuntimeConfig`, so `compile_canonical_runtime`, `DispatchRuntimeContext::load_for_env`, and the `dispatch*` entry points take one). Its read-side file functions resolve through a context Darkmatter's builder makes at the hook's directory, on first use. Hook-template `env.NAME` still reads the hook process's environment when the event fires. The old JSON-serialize-and-flatten path was removed by feature `2026-05-02-flattened-bridge`.
 
 ### Config Merge Strategy
 
@@ -509,6 +509,12 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 - **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input; the agent edits the document itself, then the closure repairs, restores, encodes, hashes, and writes it once (see Agent text is data below)
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
 
+`prepare_direct` and `prepare_inline` export the composed body through
+Darkmatter's `render_tree::embedded::without_embedded_metadata` before storing
+the provider prompt. Keep Markdown fallbacks and portable links; internal
+component metadata belongs to Darkmatter's terminal/browser document folds,
+not provider delivery or dry-run stdout.
+
 The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
 points and public re-exports in `mod.rs`. `pipeline.rs` owns one
 `CompositionAttempt` across ordered selection/launch, environment/MCP,
@@ -541,6 +547,26 @@ wrapper-supplied `AGENT_CWD` for `handle`). Routes read it through
 environment to resolve a reference or seed `ctx.*`. `InvocationContext::capture`,
 `capture_at`, and `capture_for_wrapper` take the snapshot, and completion's
 `ScopeContext` takes its directory and home.
+
+The snapshot's environment is the launched document's. Every later document (a
+sequence step, a concurrent group leg, a `proxy` target) captures its
+own map once, before its `initialize`, through
+`InvocationContext::capture_document()`, which reads the `EnvironmentSource`
+the CLI installed (`request::document_environment_source()`, pinning `PWD` to
+the launch value) and returns `enter_document(map)`: a view whose request map,
+launch `FileResolutionContext` map (and the `VAULT`-selected tree root), and
+child baseline all come from that map, while home, launch CWD, repository and
+host evidence, caches, and the launch `@` scope stay shared. Without an
+installed source the library re-enters the launch map; it never reads the
+process. Every consumer of the document (`env.*`, `ctx` environment values,
+lazy `current`, file references, `SCHEMAS_DIR`, model selection, loop settings,
+shell approval, and shell children through the view's `DocumentShellRunner`
+and Darkmatter's `ComposeOptions::with_shell_child_environment`) reads that
+view. Sequence tasks re-resolve preflight-approved `shell:` and lifecycle command
+text under their own map and refuse changed text
+(`CompositionError::SequenceShellApprovalChanged`,
+`sequence/preflight/reapproval.rs`). See `docs/topics/composition.md`
+("One Environment per Document").
 
 Every `FileResolutionContext` comes from Darkmatter's builder or derives from a
 built one:
@@ -583,6 +609,51 @@ repository and `@` from the launch tree, in composition and in completion
 (`CommittedPrompt::resolve` derives such a prompt with
 `composition::derive_request_context_for_source`, composition's policy).
 
+### Lifecycle grammar
+
+Every stack (the seven events and the `loop:` block's loose verbs or `gate:` list) parses into `Vec<LifecycleNode>`
+(`lifecycle/actions.rs`): `Action(LifecycleAction)` or
+`Conditional(LifecycleConditional { when, then, otherwise, path })`, at most
+five `when` levels deep. `LifecycleConfig` holds only `stacks`. A dictionary
+bundle expands at parse time in canonical order (`set`; `stdout`, `stderr`,
+`info`, `warn`, `success`, `message`, `notify`, `effect`, `say`/`speak`;
+`shell`; other verbs by ASCII name; the one directive), so the executor never
+iterates a map. Each node carries its authored `LifecyclePath`
+(`source_map.rs`, e.g. `failure[0].else[1].shell.command`), which every
+diagnostic's `property` and `ActionLocation` render; there is no synthetic
+index. `validate.rs::walk_stack` is the one recursive walker (both branches)
+for nested-span, `err`-availability, retired-loop-read, and shell-collection
+checks, and DMLS's `nested_span.rs` mirrors its path spelling.
+
+- **Lift-ready slice.** `parse`, `action_shape`, `actions`, `validate`,
+  `signatures`, and `source_map` name no Claudine runtime type
+  (`lib/tests/l1/lifecycle_lift_ready_guard.rs`); the caller injects the effect
+  catalog through `LifecycleParseOptions`. The public `parse_lifecycle_config`
+  lives in `lifecycle/mod.rs` and supplies `audio.rs::is_known_effect`.
+- **Removed grammar.** `stack`, the `action` aggregator or discriminator map,
+  the speech-ordering flag, communication `message`/`sound`/`route` parameters, and
+  `_loop_*` reads are `CompositionError::RemovedGrammar { path, removed,
+  replacement }`, checked before any other shape error; loop-root
+  `action`/`actions` stay iteration controls.
+- **Execution.** `executor.rs::execute_nodes` runs nodes serially, evaluates a
+  reached guard once, runs only the selected body, and the first directive
+  ends the whole event. Audio is published in list position (no
+  `audio_phases`). `LifecycleRunGuard::emit_signal` (the drop safety net) emits
+  only root, unguarded, literal communication.
+- **Shell modes.** A `shell` command or `set` `$( … )` with a placeholder
+  carries a `shell_template::LifecycleShellTemplate` (stamped by
+  `preflight::resolve_lifecycle_shell_commands`); the lifecycle audit settles
+  it to resolved bytes or template, or leaves it refusing. Template mode fills
+  from the live state, checks the filled chain, and dispatches through
+  `ShellRunner::run_structured` (`structured_shell.rs`); a host that approves a
+  container stack elsewhere builds one with
+  `LifecycleShellTemplate::approved`.
+- **`with` overlays.** `proxy` and `retry` share `WithOverlay` and
+  `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
+  (`LifecycleWithUnsupported` elsewhere). A retry overlay travels as
+  `StackControl::Retry.overlay` into `HarnessPromptState.pending_retry_overlay`
+  and applies to one transition (see [cli-commands.md](cli-commands.md)).
+
 ### Agent text is data
 
 Anything a run *produces* (agent output, expression results, file reads) is
@@ -591,9 +662,13 @@ wrote (the document, `--set`/`key=value`, interactive answers) is a template.
 Claudine enforces this at two boundaries:
 
 - **In memory — `LayeredOverrides`** (`runtime_state.rs`). Runtime values stay
-  raw and typed (`outputs`, `_loop_*`, loop action results, lifecycle `set:`,
-  task `params`, group `variables`, the step overlay, and the per-document
-  `PrepareOptions::proxy_overlay`). `LayeredOverrides::apply_to` is the only
+  raw and typed (`seq.outputs`, loop action results, lifecycle `set:`,
+  task `with`, group `variables`, the step overlay, and the per-document
+  `PrepareOptions::proxy_overlay`, an `AnchoredOverlay` that carries the
+  retained proxy overlay with any one-read `retry.with` overlay merged on
+  top). A loop iteration's
+  values are not an override: they are the host-declared `loop` global
+  (`ComposeOptions::with_host_globals`). `LayeredOverrides::apply_to` is the only
   call to Darkmatter's `with_override_layers`, splitting keys into an authored
   and a data layer. `cli/tests/l1/override_boundary_guard.rs` fails on any
   other override hand-off and on any `literal_token` reference in the runtime
@@ -633,10 +708,20 @@ In the lifecycle executor, `evaluate_operand` interpolates an authored literal
 once and returns any other expression's result as data; the old
 `reject_surviving_spans` guard is gone. DM2 (Darkmatter subtree compose) fails
 a malformed span, an unknown function, or a read of an unavailable global, and
-an absent document property is `null`. Which globals a scope may read comes
+an absent document property is `null`. An authored operand never reaches DM2
+with a malformed span: `action_shape.rs::action_value_to_expr` parses every
+span, whole-value or inside mixed text, when the stack parses (both branches,
+nothing evaluated), so it is a `LifecycleActionInvalidLongForm` naming the
+operand path. Which globals a scope may read comes
 from `lifecycle/bindings.rs` (`binding_view`/`runtime_bindings`), handed to
 Darkmatter as a `BindingView`; `group` outside an established group is an
-unavailable global (`claudine.outside-group`).
+unavailable global (`claudine.outside-group`). `loop` is declared the same way:
+an iteration's `{count, is_first, is_last, last_output, last_exit_code}` inside
+a loop, `claudine.outside-loop` outside one, and execution-dependent for a loop
+document prepared before its first iteration. The five retired `_loop_*` names
+are declared unavailable (`claudine.removed-loop-name`) so a read that only a
+later render introduces still maps to `CompositionError::RemovedGrammar`
+(`path: "render"`), including during preflight discovery.
 Known limits: Darkmatter's `expression` format validator is
 string-only, so decoded data with `{{` in an expression-typed field passes
 lexically; the public `pre_validate_schema[_for_mode]` treats every override
@@ -644,37 +729,49 @@ as authored.
 
 ### Sequences
 
-`lib/src/composition/sequence/` owns the normalized plan; `cli/src/commands/wrap/sequence/`
-owns orchestration. The split follows the two execution phases:
+`lib/src/composition/sequence/` owns normalized tasks, recursive preflight,
+and primitive execution; `cli/src/commands/wrap/sequence/` owns orchestration.
 
-- `sequence/{model,normalize,reserved,source,grammar,data,expr}.rs` — typed step
-  state, id/`sequence_id` generation, the reserved-key catalog, and the
-  `<file-ref> [-> offset] [::op(args)]` source grammar. Data files load through
-  `biscuit_file` and resolve through `FileReference::resolve_in_context` using
-  the request-scoped `FileResolutionContext` derived for the authoring source;
-  string sources classify through `biscuit_file::ListFormat`. `grammar.rs`
-  refuses a `sequence:` value that opens a stored literal token
-  (`SequenceInvalid`); expression sources and pre-flight `step_state` read
-  stored tokens as their text via `closure::stored_text`.
-- `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
-  `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
-  document, keeping a canonical-path ancestry stack so a cycle reports its whole
-  chain. Resolves shell bytes under an early-binding-only lookup so
-  approved == executed.
-- `sequence/task/` — `TaskExecution::run` → `TaskOutcome`. `run()` never returns
-  `Err`: continuation is the scheduler's `fail_fast` decision, not an error
-  escaping one task. `group.rs` adds serial and (via `std::thread::scope` plus a
-  shared cursor) parallel groups.
-- `composition/runtime_state.rs` — `RuntimeState`, the invocation-local cell
-  holding accumulated `set` mutations and the `outputs` accumulator.
-  `layered_set_overrides` is the single place the four-layer precedence
-  (live frontmatter < user setters < mutations < reserved overlay) is encoded;
-  it returns `LayeredOverrides`, which also records which keys are data (see
-  [Agent text is data](#agent-text-is-data)).
-- `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` — just-in-time
-  composition at each step's turn. `phase1c`'s validation compose and execution
-  both route through `jit::compose_step`, so "validated == executed" holds
-  without a second prepare implementation.
+- `sequence/{model,normalize,reserved,source,grammar,data,expr}.rs` handles
+  step rows, unique step IDs, and `<file-ref> [-> offset] [::op(args)]` sources.
+  Data files load through `biscuit_file` and resolve with the request-scoped
+  `FileReference::resolve_in_context`. A task chooses one executable, including
+  inline or referenced `sequence:` containers.
+- `sequence/preflight/` recursively loads inline tasks, task/group/catalog
+  files, nested sequences, and referenced prompt lifecycle stacks. Ancestry
+  includes a selected catalog entry, allowing different entries in one catalog.
+  `PreparedShellSite` records authored text, typed template, position, and
+  property. Known first-task values may use exact bytes or shape approval;
+  later placeholders and container terminal-event placeholders require shape
+  approval. Late roots are `seq`, `loop`, and `group`. The graph's audited
+  root lifecycle is installed on the root guard; rereads settle only against
+  original approval membership.
+- `sequence/task/` executes primitives and concurrent named group legs.
+  Group workers clone runtime snapshots, preserving isolated mutations and
+  proxy ancestry. Only groups accept `fail_fast`: atomic failed groups publish
+  no leg state; tolerant groups merge completed legs in declaration order.
+- `lifecycle/runtime::ContainerRunner` and `LifecycleRunGuard` own container
+  events. Root initialize precedes preflight; nested preparation is just in
+  time. Retry retains mutations but clears child results and defers finalize
+  until the final attempt. Unhandled failures propagate outward. Cancellation
+  settles descendants before `cancelled` and `finalize`, without recovery.
+- `composition/runtime_state.rs` holds invocation-local mutations and lexical
+  `seq`, `group`, and `loop` roots. `LayeredOverrides.sequence_value` and
+  `CallerInputLayers.sequence_binding` carry sequence data separately from
+  frontmatter/setters; never flatten them. `replace_sequence_scope` restores
+  enclosing position and outputs while retaining mutations.
+- `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` composes each
+  child at its turn. Prompt passive validation and execution share the same
+  document epoch and retain `DocumentShellValues`. Closed shell approvals
+  travel through step scopes, retries, proxies, and concurrent descendants.
+  Body-only steps mask source lifecycle keys to avoid repeating root events.
+
+Successful children publish a string, sequence array, or named group dictionary
+only after finalize. Nested sequences start with empty `seq.outputs` and share
+`seq.run_id`. In-memory isolation does not roll back filesystem effects.
+Task `setup:`/`teardown:`, group `execution:`, sequence-level `fail_fast`, and
+`--fail-fast` are removed grammar. Containers loop through the shared
+`looping::LoopFrame` and `finish_container_pass`.
 
 Two seams are worth knowing before editing:
 
@@ -768,14 +865,22 @@ earlier step would create fails there as the unchanged typed
 the file first. A sequence step's prompt is composed before its `initialize`
 runs; a target that step *proxies* to is still staged inside the harness.
 
-File-valued input keeps its provenance through that service. A reference
-authored in a document resolves from the document's source context; an eager
-`file` value supplied by the caller (`--set` or an immediate `proxy.with`
-overlay) resolves through the captured launch-area `FileResolutionContext` and
-is stored as the resolved absolute path. Ordinary strings are never probed as
-files. Overlay null-removal still applies to the authored layer because an
-override object cannot represent an absent key; non-null overlay values also
-travel through the caller layer so this resolution distinction is preserved.
+File-valued input keeps its provenance through that service: a relative file
+value resolves from the file that authored it. A reference authored in a
+document resolves from the document's source context; a caller value (`--set`,
+`key=value`) carries a `CallerInputRecord` with the captured launch-area
+`FileResolutionContext`; every `with` carries the context of the file that
+wrote it. Task `with` becomes origin-anchored records in `task_run.rs`
+(`with_origin_path`). `proxy.with`/`retry.with` travel as
+`composition::AnchoredOverlay` (values plus per-key origin; the CLI anchors a
+committed handoff at `ProxyProvenance::source_path`, a retry at the document
+itself), and `PrepareOptions::compose_caller_records` folds its records below
+the caller's, skipping any key a higher override layer supplies. `prep.with`
+reaches the target as `SharedComposeArgs::set` with `set_origin` set to the
+calling document. Ordinary strings are never probed as files; a schema
+`[file, string]` union leaves the value raw. Overlay null-removal still
+applies to the authored layer because an override object cannot represent an
+absent key; a null carries no record.
 
 Two `cli/tests/l1/composition_seams.rs` guards hold these lines mechanically: the
 `compose_with` allowlist (four sanctioned composer sites) and the ambient-capture

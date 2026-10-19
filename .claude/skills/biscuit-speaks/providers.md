@@ -40,6 +40,13 @@ provider.speak("Hello", &TtsConfig::default()).await?;
 the requested gain through native Playa. Without `playa`, uses macOS `afplay -v`.
 Detached synthesis reserves an ordered preparation slot.
 
+**Caching and `prepare`**: keyed by voice and integer WPM rate. The voice is
+the requested one, `Alex`/`Samantha` for a gender, or the system voice read
+through `NSSpeechSynthesizer` (via `osascript`) and accepted only if
+`say -v '?'` lists it. The system *rate* is not read, so normal-speed requests
+are synthesized into an uncached temporary file and `prepare` is a no-op for
+them; an explicit speed (175 WPM × multiplier) caches and prepares.
+
 ---
 
 ### eSpeak / eSpeak-NG
@@ -201,8 +208,10 @@ let voices = provider.list_voices().await?;
 
 **API**: HTTP-based via the schematic-generated `ElevenLabs` client struct
 (which wraps a `schematic_runtime::Client`). Every endpoint, including the
-paginated `/v2/voices` listing behind `list_voices_raw`, is a typed `send`;
-the provider has no hand-rolled HTTP path. A 402 reply maps to
+paginated `/v2/voices` listing behind `list_voices_raw`, uses a typed endpoint
+method. Voice listing and synthesis run through the injectable
+`ElevenLabsTransport`; its production implementation uses the same generated
+client, with no hand-rolled HTTP path. A 402 reply maps to
 `TtsError::PaidPlanRequired`; any other failure maps to `TtsError::HttpError`.
 Mock-server coverage lives in `lib/tests/elevenlabs_http.rs`.
 
@@ -235,6 +244,18 @@ is set):
 - Voices are optimized for specific models
 
 **Speed Control**: Supports 0.7x to 1.2x (values clamped to this range).
+
+**Default-voice record**: without a requested voice, each selection from the
+account's voice list is written to `.biscuit-speaks-elevenlabs-voice-{hash}.json`
+beside the capability cache file. It holds voice, model, selection inputs, a
+non-secret account context, and the write time, and is trusted for 24 hours so
+a fresh `play_detached` finds prepared audio with no API request. Records exist
+only while `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` holds a non-blank label distinct
+per account (`snapshot::account_context` is `None` otherwise): the key is never
+stored, so nothing else tells two keys under one variable apart, and without
+the label the helper re-lists voices (the audio cache still hits). `prepare`
+always re-lists voices and rewrites it; a failed listing makes `prepare` a
+no-op.
 
 **Features**:
 - Premium neural voices

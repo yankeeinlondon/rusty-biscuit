@@ -197,7 +197,7 @@ fn discovers_commands_from_template() {
             .unwrap();
 
     assert_eq!(result.total_discovered, 1);
-    assert!(result.approved_commands.contains("echo hello"));
+    assert!(result.approved_commands.contains_exact("echo hello"));
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn full_flow_template_with_whitelisted_commands() {
     // Pre-flight should discover and approve "echo hello"
     let result =
         resolve_shell_approvals(Some(&md), Some(&request(compose_opts.clone())), &options, None, None).unwrap();
-    assert!(result.approved_commands.contains("echo hello"));
+    assert!(result.approved_commands.contains_exact("echo hello"));
 
     // Now compose with the pre-approved set — should succeed
     let compose_with_approval = ComposeOptions::new()
@@ -377,7 +377,7 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
     let result =
         resolve_shell_approvals(Some(&md), Some(&request(compose_opts.clone())), &options, None, None).unwrap();
     assert!(
-        result.approved_commands.contains("dirname fixes/x/spec.md"),
+        result.approved_commands.contains_exact("dirname fixes/x/spec.md"),
         "pre-approved set must contain the resolved command; got: {:?}",
         result.approved_commands
     );
@@ -457,7 +457,7 @@ fn allow_once_populates_cache_without_persisting() {
 
     assert_eq!(result.total_discovered, 1);
     assert_eq!(result.user_approved, 1);
-    assert!(result.approved_commands.contains("echo test-once"));
+    assert!(result.approved_commands.contains_exact("echo test-once"));
 }
 
 #[test]
@@ -538,8 +538,7 @@ fn interactive_handler_is_invoked_for_non_whitelisted_command() {
     );
     assert!(
         result
-            .approved_commands
-            .contains("curl https://example.com")
+            .approved_commands.contains_exact("curl https://example.com")
     );
     assert_eq!(result.user_approved, 1);
     assert_eq!(result.already_whitelisted, 0);
@@ -559,7 +558,7 @@ fn shared_cache_options(
     dir: &tempfile::TempDir,
     handler: Arc<dyn ShellApprovalHandler>,
     cache: Arc<
-        Mutex<std::collections::HashMap<String, crate::harness::shell::CachedApprovalDecision>>,
+        Mutex<std::collections::HashMap<darkmatter::markdown::compose::shell_expansion::template::ApprovalKey, crate::harness::shell::CachedApprovalDecision>>,
     >,
 ) -> ShellApprovalOptions {
     ShellApprovalOptions {
@@ -713,12 +712,7 @@ impl Drop for CwdGuard {
 fn lifecycle_with_file_exists_shell()
 -> (crate::composition::lifecycle::LifecycleConfig, serde_json::Value) {
     let frontmatter = serde_json::json!({ "spec": "spec.md" });
-    let fm_with_event = serde_json::json!({
-        "spec": "spec.md",
-        "start": {
-            "stack": [{"action": {"shell": "echo {{ file_exists(spec) }}"}}]
-        }
-    });
+    let fm_with_event = serde_json::json!({ "spec": "spec.md", "start": [{ "shell": "echo {{ file_exists(spec) }}" }] });
     let config = crate::composition::lifecycle::parse_lifecycle_config(
         &fm_with_event,
         Path::new("<test>"),
@@ -731,10 +725,14 @@ fn lifecycle_with_file_exists_shell()
 fn resolved_start_shell_command(
     config: &crate::composition::lifecycle::LifecycleConfig,
 ) -> String {
-    let stack = config
-        .stack(LifecycleSignal::Start)
-        .expect("start stack present");
-    match &stack[0].actions[0].kind {
+    let mut first = None;
+    crate::composition::lifecycle::actions::for_each_action(
+        config.stack(LifecycleSignal::Start),
+        &mut |action| {
+            first.get_or_insert(action);
+        },
+    );
+    match &first.expect("start stack present").kind {
         LifecycleActionKind::Shell(shell) => match &shell.command {
             Expr::StringLiteral(s) => s.clone(),
             other => panic!("expected string-literal command, got: {other:?}"),
@@ -768,6 +766,8 @@ fn lifecycle_shell_read_side_resolves_against_document_dir() {
         &source_path,
         crate::test_support::process_context(),
         Some(launch_dir.path()),
+        crate::composition::lifecycle::bindings::EnclosingLoop::Outside,
+        None,
     )
     .expect("resolution against the document dir must succeed");
 
@@ -799,6 +799,8 @@ fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
         &ComposeContext::capture_for_dir(doc_dir.path()),
         &source_path,
         crate::test_support::process_context(),
+        None,
+        crate::composition::lifecycle::bindings::EnclosingLoop::Outside,
         None,
     )
     .expect("resolution still succeeds; file just resolves to absent");
@@ -842,14 +844,16 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
         "home_ref": "~/home.flag",
         "magic_ref": "@magic.flag",
         "package_ref": "^package.flag",
-        "start": {
-            "stack": [{"action": {"shell": concat!(
-                "echo {{ file_exists(env_ref) }} ",
-                "{{ file_exists(home_ref) }} ",
-                "{{ file_exists(magic_ref) }} ",
-                "{{ file_exists(package_ref) }}"
-            )}}]
-        }
+        "start": [
+            {
+                "shell": concat!(
+                    "echo {{ file_exists(env_ref) }} ",
+                    "{{ file_exists(home_ref) }} ",
+                    "{{ file_exists(magic_ref) }} ",
+                    "{{ file_exists(package_ref) }}"
+                ),
+            },
+        ],
     });
     let mut lifecycle = crate::composition::lifecycle::parse_lifecycle_config(
         &fm_with_event,
@@ -881,6 +885,8 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
         &source_dir.join("prompt.md"),
         &snapshot,
         None,
+        crate::composition::lifecycle::bindings::EnclosingLoop::Outside,
+        None,
     )
     .unwrap();
 
@@ -901,9 +907,7 @@ fn lifecycle_with_shell_per_event(
     for event in events {
         frontmatter.insert(
             (*event).to_string(),
-            serde_json::json!({
-                "stack": [{"action": {"shell": format!("echo {event}")}}]
-            }),
+            serde_json::json!([{ "shell": format!("echo {event}") }]),
         );
     }
     crate::composition::lifecycle::parse_lifecycle_config(
@@ -929,11 +933,11 @@ fn full_audit_covers_every_lifecycle_surface() {
 
     assert_eq!(
         audited.approved_commands,
-        HashSet::from([
+        darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::from(HashSet::from([
             "echo start".to_string(),
             "echo success".to_string(),
             "echo finalize".to_string(),
-        ]),
+        ])),
         "got {:?}",
         audited.approved_commands,
     );
@@ -960,4 +964,433 @@ fn initialize_scoped_audit_of_a_document_without_initialize_shell_is_a_no_op() {
 
     assert_eq!(gated.total_discovered, 0);
     assert_eq!(handler.calls(), 0, "no command, no prompt");
+}
+
+// --- Template sites and mode-tagged approvals --------------------------
+//
+// A site whose placeholder reads a late root can be approved only by its
+// shape; the session cache keys every decision by execution mode and policy
+// root, so an exact decision never answers for a template or the reverse.
+
+use crate::harness::error::HarnessError;
+use darkmatter::markdown::compose::shell_expansion::template::{
+    ApprovalKey, DeferredShellRoots, TemplateShape,
+};
+
+/// The discovered candidates of `content`, with `seq` declared late.
+fn late_candidates(content: &str) -> Vec<ShellCandidate> {
+    let md: Markdown = content.into();
+    md.compose_preflight(&request(
+        ComposeOptions::new().with_deferred_shell_roots(DeferredShellRoots::new(["seq"])),
+    ))
+    .unwrap()
+    .candidates
+}
+
+struct RecordingDecision {
+    decision: ShellApprovalDecision,
+    requests: Mutex<Vec<ShellApprovalRequest>>,
+}
+
+impl ShellApprovalHandler for RecordingDecision {
+    fn approve(&self, request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+        self.requests.lock().unwrap().push(request);
+        Ok(self.decision.clone())
+    }
+}
+
+fn recording(decision: ShellApprovalDecision) -> Arc<RecordingDecision> {
+    Arc::new(RecordingDecision {
+        decision,
+        requests: Mutex::new(Vec::new()),
+    })
+}
+
+fn template_options(dir: &tempfile::TempDir, handler: Option<Arc<RecordingDecision>>) -> ShellApprovalOptions {
+    ShellApprovalOptions {
+        policy_root: Some(dir.path().to_path_buf()),
+        approval_handler: handler.map(|handler| handler as Arc<dyn ShellApprovalHandler>),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_template_site_is_offered_its_shape_and_persists_the_template_row() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let candidates = late_candidates("::shell just test {{ last(seq.outputs) }}\n");
+    let handler = recording(ShellApprovalDecision::AllowTemplatePersist);
+    let options = template_options(&dir, Some(handler.clone()));
+
+    let shape = crate::harness::shell::validate_and_approve_template_site(&candidates[0], &options).unwrap();
+    assert_eq!(shape.canonical_text(), "just test {{ string }}");
+    let requests = handler.requests.lock().unwrap();
+    let request = &requests[0];
+    assert!(!request.offered.exact && request.offered.shape && request.offered.prefix);
+    assert_eq!(request.normalized_exact, "");
+    assert_eq!(
+        request.template.as_ref().unwrap().display,
+        "just test {{ last(seq.outputs): string }}"
+    );
+    let whitelist = std::fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+    assert_eq!(whitelist, "template just test {{ string }}\n");
+    let cache = options.approval_cache.lock().unwrap();
+    assert!(cache.contains_key(&ApprovalKey::template(Some(dir.path()), shape.clone())));
+    assert!(!cache.keys().any(|key| matches!(key, ApprovalKey::Exact { .. })));
+}
+
+#[test]
+fn an_exact_decision_never_answers_for_a_template_site() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let candidates = late_candidates("::shell just test {{ last(seq.outputs) }}\n");
+    let options = template_options(&dir, None);
+    // A cached exact approval for every plausible fill, and an exact rule.
+    std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), "exact just test\n").unwrap();
+    for bytes in ["just test", "just test x"] {
+        options.approval_cache.lock().unwrap().insert(
+            ApprovalKey::exact(Some(dir.path()), bytes),
+            crate::harness::shell::CachedApprovalDecision::Allowed,
+        );
+    }
+    let error = crate::harness::shell::validate_and_approve_template_site(&candidates[0], &options)
+        .expect_err("no template approval exists");
+    assert!(matches!(error, HarnessError::ShellCommandDenied { .. }), "{error:?}");
+
+    // And an exact choice the request did not offer authorizes nothing.
+    let handler = recording(ShellApprovalDecision::AllowExactPersist);
+    let prompted = template_options(&dir, Some(handler));
+    let error = crate::harness::shell::validate_and_approve_template_site(&candidates[0], &prompted)
+        .expect_err("exact is not offered");
+    assert!(matches!(error, HarnessError::ShellCommandDenied { .. }), "{error:?}");
+    let whitelist = std::fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+    assert_eq!(whitelist, "exact just test\n", "nothing was persisted");
+}
+
+#[test]
+fn a_template_decision_is_scoped_to_its_policy_root() {
+    let first = tempfile::TempDir::new().unwrap();
+    let second = tempfile::TempDir::new().unwrap();
+    let candidates = late_candidates("::shell just test {{ last(seq.outputs) }}\n");
+    let cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let handler = recording(ShellApprovalDecision::AllowOnce);
+    let options_at = |dir: &tempfile::TempDir| ShellApprovalOptions {
+        policy_root: Some(dir.path().to_path_buf()),
+        approval_handler: Some(handler.clone() as Arc<dyn ShellApprovalHandler>),
+        approval_cache: Arc::clone(&cache),
+        ..Default::default()
+    };
+
+    crate::harness::shell::validate_and_approve_template_site(&candidates[0], &options_at(&first)).unwrap();
+    crate::harness::shell::validate_and_approve_template_site(&candidates[0], &options_at(&first)).unwrap();
+    assert_eq!(handler.requests.lock().unwrap().len(), 1, "the session cache answers the repeat");
+    crate::harness::shell::validate_and_approve_template_site(&candidates[0], &options_at(&second)).unwrap();
+    assert_eq!(
+        handler.requests.lock().unwrap().len(),
+        2,
+        "another policy root's decision does not answer"
+    );
+}
+
+#[test]
+fn a_template_blacklist_refuses_the_site_before_any_prompt() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join(".darkmatter-shell-blacklist"), "template just {{ string }}\n").unwrap();
+    std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), "template just {{ string }}\n").unwrap();
+    let candidates = late_candidates("::shell just {{ last(seq.outputs) }}\n");
+    let handler = recording(ShellApprovalDecision::AllowOnce);
+    let error = crate::harness::shell::validate_and_approve_template_site(
+        &candidates[0],
+        &template_options(&dir, Some(handler.clone())),
+    )
+    .expect_err("blacklisted");
+    assert!(matches!(error, HarnessError::ShellCommandBlacklisted { .. }), "{error:?}");
+    assert!(handler.requests.lock().unwrap().is_empty());
+}
+
+/// Replaces the whitelist with a directory when asked, so the append that
+/// follows the decision fails.
+struct BreaksTheWhitelist {
+    whitelist: std::path::PathBuf,
+    decision: ShellApprovalDecision,
+}
+
+impl ShellApprovalHandler for BreaksTheWhitelist {
+    fn approve(&self, _request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+        let _ = std::fs::remove_file(&self.whitelist);
+        std::fs::create_dir(&self.whitelist).unwrap();
+        Ok(self.decision.clone())
+    }
+}
+
+#[test]
+fn a_failed_policy_write_is_typed_and_caches_no_decision() {
+    for decision in [ShellApprovalDecision::AllowTemplatePersist, ShellApprovalDecision::AllowExactPersist] {
+        let dir = tempfile::TempDir::new().unwrap();
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(BreaksTheWhitelist {
+                whitelist: dir.path().join(".darkmatter-shell-whitelist"),
+                decision: decision.clone(),
+            })),
+            ..Default::default()
+        };
+        let error = if decision == ShellApprovalDecision::AllowTemplatePersist {
+            let candidates = late_candidates("::shell just test {{ last(seq.outputs) }}\n");
+            crate::harness::shell::validate_and_approve_template_site(&candidates[0], &options).map(|_| ())
+        } else {
+            crate::harness::shell::validate_and_approve_command_parts(
+                &["just".to_string(), "build".to_string()],
+                &options,
+                None,
+                None,
+            )
+            .map(|_| ())
+        }
+        .expect_err("the policy write fails");
+        assert!(
+            matches!(error, HarnessError::ShellPolicyWriteFailed { ref source, .. } if matches!(**source, ShellExpansionError::PolicyIo { .. })),
+            "{decision:?}: {error:?}"
+        );
+        assert_eq!(error.code(), "io.write_failed");
+        assert!(options.approval_cache.lock().unwrap().is_empty(), "{decision:?}: nothing cached");
+    }
+}
+
+#[test]
+fn a_template_rule_approves_a_resolved_site_by_shape_and_an_exact_rule_wins() {
+    let md: Markdown = "---\nword: hello\n---\n::shell git --version {{ word }}\n".into();
+    let shape = TemplateShape::parse_rule("git --version {{ string }}").unwrap();
+    for (rules, exact, template) in [
+        ("template git --version {{ string }}\n", false, true),
+        ("exact git --version hello\ntemplate git --version {{ string }}\n", true, false),
+        ("prefix git\n", true, false),
+    ] {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), rules).unwrap();
+        let options = template_options(&dir, None);
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&request(ComposeOptions::new())), &options, None, None).unwrap();
+        assert_eq!(result.approved_commands.contains_exact("git --version hello"), exact, "{rules}");
+        assert_eq!(result.approved_commands.contains_template(&shape), template, "{rules}");
+    }
+}
+
+#[test]
+fn a_shape_approved_site_still_checks_its_bytes_against_the_blacklist() {
+    let md: Markdown = "---\nword: hello\n---\n::shell git --version {{ word }}\n".into();
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), "template git --version {{ string }}\n").unwrap();
+    std::fs::write(dir.path().join(".darkmatter-shell-blacklist"), "exact git --version hello\n").unwrap();
+    let error = resolve_shell_approvals(
+        Some(&md),
+        Some(&request(ComposeOptions::new())),
+        &template_options(&dir, None),
+        None,
+        None,
+    )
+    .expect_err("blacklisted bytes");
+    assert!(
+        matches!(error, CompositionError::ShellApprovalUnavailable { failure: ShellApprovalFailure::Blacklisted(_), .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_late_document_site_without_an_approval_fails_pre_flight_naming_it() {
+    let md: Markdown = "::shell just test {{ last(seq.outputs) }}\n".into();
+    let dir = tempfile::TempDir::new().unwrap();
+    let error = resolve_shell_approvals(
+        Some(&md),
+        Some(&request(
+            ComposeOptions::new().with_deferred_shell_roots(DeferredShellRoots::new(["seq"])),
+        )),
+        &template_options(&dir, None),
+        None,
+        None,
+    )
+    .expect_err("no handler");
+    match error {
+        CompositionError::ShellApprovalUnavailable { command, failure, .. } => {
+            assert_eq!(command, "just test {{ last(seq.outputs) }}");
+            assert!(matches!(failure, ShellApprovalFailure::NoHandler));
+        }
+        other => panic!("expected ShellApprovalUnavailable, got {other:?}"),
+    }
+}
+
+// ── Every prompt choice and the policy row it saves ──────────────────────
+//
+// A resolved command with a placeholder is asked about as a site, so its
+// prompt offers the exact bytes, the shape, and the program together; a
+// command whose value comes later is offered no exact bytes.
+
+const RESOLVED_SITE: &str = "---\nword: hello\n---\n::shell git --version {{ word }}\n";
+
+fn resolve_site(dir: &tempfile::TempDir, handler: Option<Arc<dyn ShellApprovalHandler>>) -> (
+    ShellApprovalOptions,
+    Result<PreFlightResult, CompositionError>,
+) {
+    let md: Markdown = RESOLVED_SITE.into();
+    let options = ShellApprovalOptions {
+        policy_root: Some(dir.path().to_path_buf()),
+        approval_handler: handler,
+        ..Default::default()
+    };
+    let result = resolve_shell_approvals(Some(&md), Some(&request(ComposeOptions::new())), &options, None, None);
+    (options, result)
+}
+
+fn policy_file(dir: &tempfile::TempDir, name: &str) -> Option<String> {
+    std::fs::read_to_string(dir.path().join(name)).ok()
+}
+
+#[test]
+fn each_choice_at_a_resolved_site_saves_its_row() {
+    let shape = TemplateShape::parse_rule("git --version {{ string }}").unwrap();
+    // (decision, whitelist, blacklist, approved by bytes, approved by shape)
+    let cases = [
+        (ShellApprovalDecision::AllowExactPersist, Some("exact git --version hello\n"), None, true, false),
+        (ShellApprovalDecision::AllowTemplatePersist, Some("template git --version {{ string }}\n"), None, false, true),
+        (ShellApprovalDecision::AllowCommandPersist, Some("prefix git\n"), None, true, false),
+        (ShellApprovalDecision::AllowOnce, None, None, true, false),
+        (ShellApprovalDecision::Deny, None, None, false, false),
+        (ShellApprovalDecision::BlacklistPersist, None, Some("exact git --version hello\n"), false, false),
+    ];
+    for (decision, whitelist, blacklist, by_bytes, by_shape) in cases {
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = recording(decision.clone());
+
+        let (_, result) = resolve_site(&dir, Some(handler.clone()));
+
+        let requests = handler.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1, "{decision:?}: one prompt for the site");
+        let request = &requests[0];
+        assert!(request.offered.exact && request.offered.shape && request.offered.prefix);
+        assert_eq!(request.normalized_exact, "git --version hello");
+        assert_eq!(request.template.as_ref().unwrap().display, "git --version {{ word: string }}");
+        assert_eq!(policy_file(&dir, ".darkmatter-shell-whitelist").as_deref(), whitelist, "{decision:?}");
+        assert_eq!(policy_file(&dir, ".darkmatter-shell-blacklist").as_deref(), blacklist, "{decision:?}");
+        match decision {
+            ShellApprovalDecision::Deny => {
+                assert!(matches!(result, Err(CompositionError::ShellCommandDenied { .. })), "{result:?}");
+            }
+            ShellApprovalDecision::BlacklistPersist => assert!(
+                matches!(
+                    result,
+                    Err(CompositionError::ShellApprovalUnavailable { failure: ShellApprovalFailure::Blacklisted(_), .. })
+                ),
+                "{result:?}"
+            ),
+            _ => {
+                let result = result.unwrap();
+                assert_eq!(result.approved_commands.contains_exact("git --version hello"), by_bytes, "{decision:?}");
+                assert_eq!(result.approved_commands.contains_template(&shape), by_shape, "{decision:?}");
+                assert_eq!(result.user_approved, 1, "{decision:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn each_choice_at_a_template_site_saves_its_row() {
+    let chain = "::shell git --version {{ last(seq.outputs) }} && just build {{ last(seq.outputs) }}\n";
+    let rule = "template git --version {{ string }} && just build {{ string }}\n";
+    // (decision, whitelist, blacklist, approved)
+    let cases = [
+        (ShellApprovalDecision::AllowTemplatePersist, Some(rule), None, true),
+        (ShellApprovalDecision::AllowCommandPersist, Some("prefix git\nprefix just\n"), None, true),
+        (ShellApprovalDecision::AllowOnce, None, None, true),
+        (ShellApprovalDecision::Deny, None, None, false),
+        (ShellApprovalDecision::BlacklistPersist, None, Some(rule), false),
+        // Not offered: there are no exact bytes to approve.
+        (ShellApprovalDecision::AllowExactPersist, None, None, false),
+    ];
+    for (decision, whitelist, blacklist, approved) in cases {
+        let dir = tempfile::TempDir::new().unwrap();
+        let candidates = late_candidates(chain);
+        let handler = recording(decision.clone());
+        let options = template_options(&dir, Some(handler.clone()));
+
+        let result = crate::harness::shell::validate_and_approve_template_site(&candidates[0], &options);
+
+        let request = &handler.requests.lock().unwrap()[0];
+        assert!(!request.offered.exact && request.offered.shape && request.offered.prefix);
+        assert_eq!(request.chain_executables, ["git", "just"], "every program of the chain is listed");
+        assert_eq!(policy_file(&dir, ".darkmatter-shell-whitelist").as_deref(), whitelist, "{decision:?}");
+        assert_eq!(policy_file(&dir, ".darkmatter-shell-blacklist").as_deref(), blacklist, "{decision:?}");
+        assert_eq!(result.is_ok(), approved, "{decision:?}: {result:?}");
+        if decision == ShellApprovalDecision::AllowOnce {
+            // Once approves the shape for this session only.
+            let key = candidates[0].template_key(Some(dir.path())).unwrap();
+            assert_eq!(
+                options.approval_cache.lock().unwrap().get(&key),
+                Some(&crate::harness::shell::CachedApprovalDecision::Allowed)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_saved_choice_answers_the_next_run_without_a_prompt_and_is_not_written_twice() {
+    for decision in [
+        ShellApprovalDecision::AllowExactPersist,
+        ShellApprovalDecision::AllowTemplatePersist,
+        ShellApprovalDecision::AllowCommandPersist,
+    ] {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (_, first) = resolve_site(&dir, Some(recording(decision.clone())));
+        let first = first.unwrap().approved_commands;
+        let saved = policy_file(&dir, ".darkmatter-shell-whitelist");
+
+        for _ in 0..2 {
+            let silent = recording(ShellApprovalDecision::Deny);
+            let (_, again) = resolve_site(&dir, Some(silent.clone()));
+            let again = again.unwrap();
+            assert!(silent.requests.lock().unwrap().is_empty(), "{decision:?}: no prompt");
+            assert_eq!(again.user_approved, 0, "{decision:?}");
+            assert_eq!(again.approved_commands, first, "{decision:?}: the same mode");
+            assert_eq!(policy_file(&dir, ".darkmatter-shell-whitelist"), saved, "{decision:?}");
+        }
+    }
+}
+
+#[test]
+fn a_failed_write_at_a_resolved_site_is_typed_and_approves_nothing() {
+    for decision in [
+        ShellApprovalDecision::AllowExactPersist,
+        ShellApprovalDecision::AllowTemplatePersist,
+        ShellApprovalDecision::AllowCommandPersist,
+    ] {
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(BreaksTheWhitelist {
+            whitelist: dir.path().join(".darkmatter-shell-whitelist"),
+            decision: decision.clone(),
+        });
+
+        let (options, result) = resolve_site(&dir, Some(handler));
+
+        assert!(
+            matches!(
+                result,
+                Err(CompositionError::PreFlightShellAuditFailed { source: HarnessError::ShellPolicyWriteFailed { .. } })
+            ),
+            "{decision:?}: {result:?}"
+        );
+        assert!(options.approval_cache.lock().unwrap().is_empty(), "{decision:?}: nothing cached");
+    }
+}
+
+#[test]
+fn a_resolved_site_without_a_handler_is_not_prompted_and_fails_naming_its_bytes() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let (_, result) = resolve_site(&dir, None);
+
+    match result {
+        Err(CompositionError::ShellApprovalUnavailable { command, failure, .. }) => {
+            assert_eq!(command, "git --version hello");
+            assert!(matches!(failure, ShellApprovalFailure::NoHandler));
+        }
+        other => panic!("expected ShellApprovalUnavailable, got {other:?}"),
+    }
+    assert_eq!(policy_file(&dir, ".darkmatter-shell-whitelist"), None);
 }

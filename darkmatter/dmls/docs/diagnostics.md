@@ -143,7 +143,7 @@ the biscuit-file failure class (`InvalidReference`, `MissingContext`,
 | Code | Meaning |
 |------|---------|
 | `dm.links.broken_path` | A link path matched no existing file and no open document, resolving `&`, `^`, `@`, `~`, and relative paths as `md compose` does. A file outside the workspace folder is not broken. |
-| `dm.links.missing_anchor` | The link resolved to an indexed document, but its `#fragment` anchor does not exist there. Fragments on unindexed files are not checked. |
+| `dm.links.missing_anchor` | The link resolved to a workspace document, but its `#fragment` anchor does not exist there. The target is parsed for the check; fragments on files outside the workspace file list are not checked. |
 | `dm.links.duplicate_heading` | Two or more headings generate the same GitHub anchor slug (carries `relatedInformation` linking the twins). |
 
 ### Layer 1 — Wiki links (`source: darkmatter.wiki`)
@@ -156,11 +156,20 @@ the biscuit-file failure class (`InvalidReference`, `MissingContext`,
 | `wiki.empty-target` | An empty target (`[[]]` / `[[\|alias]]`). |
 | `wiki.empty-heading` | An empty heading query (`[[target#]]`). |
 | `wiki.unsupported-syntax` | A v1-unsupported form (embed, block ref, interwiki). |
-| `wiki.portability-collision` | Indexed paths collide under case-fold / NFC normalization (workspace-scope). |
+| `wiki.portability-collision` | Paths in the workspace file list collide under case-fold / NFC normalization (workspace-scope). |
 | `wiki.invalid-percent-escape` | A malformed percent escape, treated literally. |
 | `wiki.confusing-extension` | Resolved to a visually confusing name (e.g. `note.md.md`). |
 | `wiki.ambiguous-heading-spelling` | Resolved by exact text, but a different heading would match by slug. |
 | `wiki.ambiguous-after-rename` | A file rename would leave a wiki link with no unique replacement spelling. |
+
+Findings that depend on which files exist wait for the workspace file list,
+which DMLS builds in the background after startup: `dm.links.broken_path`,
+`dm.links.missing_anchor`, `dm.transclusion.broken_path`,
+`dm.transclusion.cycle`, `wiki.unresolved-target`, `wiki.ambiguous-target`,
+and `wiki.heading-missing-in-target` are withheld until the list is ready,
+then published. If the walk hit an error, the list is incomplete and the
+three `wiki.*` codes stay withheld, since wiki resolution is decided by the
+list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 
 ### Layer 2 — Frontmatter & schema (`source: darkmatter.frontmatter` / `darkmatter.schema` / `darkmatter.style`)
 
@@ -182,7 +191,28 @@ the biscuit-file failure class (`InvalidReference`, `MissingContext`,
 | `dm.expression.malformed` | An `expression`-typed value that does not parse. Emitted only for untagged single-line plain and quoted scalars; block and tagged values keep the schema problem. Pending `{{ … }}` / `$(…)` values are deferred. |
 | `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. DMLS classifies against Darkmatter's baseline binding view and supplies no host globals, so Claudine's `err`, `timing`, and `group` are reported like any other undeclared property, beneath a lifecycle event or not. `current` is a reserved namespace and is never reported. |
 | `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. |
-| `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value communication field, stack action operand, or `proxy … with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
+| `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value verb operand (in a list item, a `then`/`else` body, a dictionary event, or `loop.gate`), a `set` or `with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. A `when` is checked where the Claudine extension types it as an expression: an event's or `loop.gate`'s list items and the items of their `then`/`else` bodies; deeper guards are accepted loosely, and Claudine itself checks them before launch. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
+
+Every schema-validation diagnostic (`dm.schema.type_mismatch`,
+`dm.schema.constraint`, `dm.schema.missing_required`, `dm.schema.unknown_key`,
+`dm.schema.invalid_file_reference`, and the `type-definition`/`schema`
+meta-type `dm.schema.invalid_type_definition`/`invalid_schema_shape`) carries
+the validator's JSON Pointer in `data.instance_path`, beside its range. The
+range alone does not say which list item or field failed: a list item shares
+its line with its first field, and a missing key ranges its parent mapping.
+
+```yaml
+content_policy:
+  - TimeSensitive
+  - rule: TimeSensitive
+    action: delete   # dm.schema.constraint, data: {"instance_path": "/content_policy/1/action"}
+  - action: archive  # data: {"instance_path": "/content_policy/2"}
+```
+
+The pointer is the same one `md schema validate --format json` reports as
+`path`: a missing or unknown key's pointer names the parent object, and the
+message names the key. A file-reference failure carries both keys,
+`{"instance_path": "/spec", "resolution_failure": "NoMatch"}`.
 
 Two Layer-2 behaviors reach beyond the Markdown document under edit:
 
@@ -191,11 +221,18 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
   error are published on that document — they are never duplicated onto the
   Markdown documents whose `$schema` consumes it.
 - **Trigger-schema load failures are published on the envelope.** When a
-  repository-scoped trigger-registry scan fails for an envelope whose payload
-  cannot be loaded, DMLS publishes a file-level `dm.schema.prepare` diagnostic
-  on that envelope file (even when it is not open) instead of failing
-  silently; the last-good registry keeps serving consumers meanwhile, and a
-  recovered scan clears the diagnostic.
+  repository-scoped trigger-registry scan fails for an envelope that cannot
+  be loaded (invalid YAML, a malformed match, or a payload that does not
+  resolve), DMLS publishes a `dm.schema.prepare` diagnostic on that envelope
+  file (even when it is not open) instead of failing silently. A closed
+  envelope's diagnostic sits at the start of the file. Once it is open, an
+  envelope that is not valid YAML is diagnosed from the reported line and
+  column to the end of that line, and other failures cover the whole file. Registries are
+  first prepared at startup, so a broken envelope in a workspace folder's
+  schema roots is reported before any document opens. The last-good registry keeps serving consumers meanwhile,
+  and a recovered scan clears the diagnostic. A YAML file that does not
+  [claim the envelope](../../docs/topics/schemas/definition.md#which-files-claim-the-envelope)
+  is never diagnosed this way.
 
 ### Layer 3 — Darkmatter DSL (`source: darkmatter.compose` / `darkmatter.security`)
 
@@ -210,7 +247,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
-| `dm.expression.undeclared_property` | **Warning** (advisory), matching `md compose`. An identifier, in any operand position and ranged at itself, whose root is an undeclared document property: no frontmatter key, schema-declared property, or function names it, and Darkmatter's binding model does not classify it as a reserved namespace (`ctx`, `env`, `doc`, `current`, `current_env`) or the `null` literal. A bare runtime-context name such as `repo` is a document property, never `ctx.repo`. The message says the property is valid, of unknown type, and `null` unless supplied at runtime. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition and its guarded root (`x ? x : "none"`), and a direct `is_null`/`is_empty` argument. Unlike compose, both ternary branches are checked. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
+| `dm.expression.undeclared_property` | **Warning** (advisory), matching `md compose`. An identifier, in any operand position and ranged at itself, whose root is an undeclared document property: no frontmatter key, schema-declared property, or function names it, and Darkmatter's binding model does not classify it as a reserved namespace (`fm`, `ctx`, `env`, `current`) or the `null` literal. `doc` and `current_env` are ordinary property names. A bare runtime-context name such as `repo` is a document property, never `ctx.repo`. The message says the property is valid, of unknown type, and `null` unless supplied at runtime. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition and its guarded root (`x ? x : "none"`), and a direct `is_null`/`is_empty` argument. Unlike compose, both ternary branches are checked. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
 | `dm.expression.unknown_function` | **Error**, matching `md compose`, which fails on the call. A call to a function outside Darkmatter's closed catalog, ranged on the function name and reported in every branch. Unlike the advisory, it is reported on a document without frontmatter too. |
 | `dm.fence.unknown_language` | A fenced-code language token no grammar recognizes (with a nearest-match suggestion). |
 | `dm.security.disallowed_command` | A `::shell` / `::shell-block` / `$()` command the shell policy disallows. |
@@ -256,6 +293,22 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   (a visible, non-zero-width range).
 - A YAML parse error ranges the parser's reported position; the last-good tree
   keeps completion and hover alive meanwhile.
+- In a standalone schema document, a `dm.schema.invalid_type_definition`
+  grammar error ranges the **offending token** inside the definition, even
+  when the value continues onto later lines. Here `bogus` is underlined on
+  line 5, not the whole value from line 4:
+
+  ```yaml
+  kind: schema
+  types:
+    t: string(min(1);
+      bogus(2))
+  ```
+
+  When the token cannot be placed exactly — for example, a sibling uses a
+  presentation the schema grammar does not support, such as a block scalar —
+  the diagnostic falls back to the definition's whole value. It is never given
+  an empty or guessed range.
 - `dm.transclusion.nullable_target` ranges the complete `{{ ... }}` target
   expression. DMLS suppresses it when an enclosing supported guard proves the
   same property present, including `file_exists(x)`, truthy `x`, `!!x`,

@@ -30,7 +30,7 @@ fn chooser_offers_every_glob_row_in_native_order() {
         };
         assert_eq!(cell.entry, EntryPoint::ClaudineChooser, "{row:?}");
         let launch = fixture.launch_dir(cell.launch);
-        let paths = file_candidate_paths(&cell.patterns(), &ScopeContext::discover_from(&launch));
+        let paths = file_candidate_paths(&[vec![cell.patterns()]], &ScopeContext::discover_from(&launch));
         let observed = if paths.is_empty() { Observed::Unresolved } else { Observed::Files(paths) };
         report.record(&fixture, &row, &fixture.expected_glob_value(&cell), &observed);
     }
@@ -52,7 +52,7 @@ fn chooser_rejects_absolute_directory_case_aliases() {
         fs_capability::probe_directory_alias(tmp.path(), stored, authored);
         let root = biscuit_file::to_portable_string(tmp.path());
         let ctx = ScopeContext::discover_from(tmp.path());
-        let offered = |pattern: String| file_candidate_paths(&[pattern], &ctx);
+        let offered = |pattern: String| file_candidate_paths(&[vec![vec![pattern]]], &ctx);
 
         for mismatched in [format!("{root}/{authored}/*.md"), format!("{authored}/*.md")] {
             assert_eq!(offered(mismatched.clone()), Vec::<std::path::PathBuf>::new(), "`{mismatched}`");

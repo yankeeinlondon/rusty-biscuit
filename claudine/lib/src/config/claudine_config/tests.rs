@@ -571,12 +571,13 @@ fn validate_round_trip_fully_populated_config() {
 
     let config = ClaudineConfig {
         tts: TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Gendered {
                 male: "Alex".to_string(),
                 female: "Samantha".to_string(),
             }),
             gender: Gender::Male,
+            prewarm: None,
         }),
         messenger: Some(ClaudineMessengerConfig {
             active_config: Some("work".to_string()),
@@ -645,7 +646,7 @@ fn validate_round_trip_fully_populated_config() {
     );
     match &roundtripped.tts {
         TtsValue::Config(cfg) => {
-            assert_eq!(cfg.provider, "say");
+            assert_eq!(cfg.provider.as_deref(), Some("say"));
             assert_eq!(cfg.gender, Gender::Male);
             match &cfg.voice {
                 Some(VoiceSelection::Gendered { male, female }) => {

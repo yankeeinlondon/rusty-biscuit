@@ -1,6 +1,33 @@
 //! parse config lifecycle tests.
 
 use super::*;
+use actions::LifecycleNode;
+
+/// The `(verb, literal text)` of every root-level communication action in the
+/// stack of `signal`, in execution order.
+fn communications(config: &LifecycleConfig, signal: LifecycleSignal) -> Vec<(&'static str, String)> {
+    config
+        .stack(signal)
+        .iter()
+        .filter_map(|node| match node {
+            LifecycleNode::Action(LifecycleAction {
+                kind: LifecycleActionKind::Communication(comm),
+                ..
+            }) => match &comm.text {
+                Expr::StringLiteral(text) => Some((comm.channel.verb(), text.clone())),
+                other => panic!("expected a literal payload, got {other:?}"),
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+fn pairs(expected: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
+    expected
+        .iter()
+        .map(|(verb, text)| (*verb, text.to_string()))
+        .collect()
+}
 
 #[test]
 fn parses_valid_lifecycle_config() {
@@ -15,24 +42,22 @@ fn parses_valid_lifecycle_config() {
     });
 
     let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
-    assert!(config.start.is_some());
     assert_eq!(
-        config.start.as_ref().unwrap().message.as_deref(),
-        Some("Starting composition...")
+        communications(&config, LifecycleSignal::Start),
+        pairs(&[("message", "Starting composition...")])
     );
-
-    assert!(config.success.is_some());
-    let success = config.success.as_ref().unwrap();
-    assert_eq!(success.say.as_deref(), Some("All done!"));
-    assert_eq!(success.effect.as_deref(), Some("confirmation"));
+    assert_eq!(
+        communications(&config, LifecycleSignal::Success),
+        pairs(&[("effect", "confirmation"), ("say", "All done!")])
+    );
 }
 
 #[test]
-fn rejects_both_say_and_say_first() {
+fn rejects_say_and_speak_in_one_dictionary() {
     let frontmatter = json!({
         "start": {
             "say": "Starting",
-            "say_first": "Also starting"
+            "speak": "Starting now"
         }
     });
 
@@ -41,21 +66,6 @@ fn rejects_both_say_and_say_first() {
         result,
         Err(CompositionError::LifecycleSayConflict(_))
     ));
-}
-
-#[test]
-fn trims_empty_strings_to_none() {
-    let frontmatter = json!({
-        "start": {
-            "message": "   ",
-            "say": ""
-        }
-    });
-
-    let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
-    let start = config.start.as_ref().unwrap();
-    assert!(start.message.is_none());
-    assert!(start.say.is_none());
 }
 
 #[test]
@@ -87,7 +97,7 @@ fn rejects_unknown_effect_name() {
 }
 
 #[test]
-fn say_plus_effect_is_valid() {
+fn a_dictionary_plays_its_effect_before_speech() {
     let frontmatter = json!({
         "success": {
             "say": "Done!",
@@ -96,24 +106,21 @@ fn say_plus_effect_is_valid() {
     });
 
     let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
-    let success = config.success.as_ref().unwrap();
-    assert_eq!(success.say.as_deref(), Some("Done!"));
-    assert_eq!(success.effect.as_deref(), Some("confirmation"));
+    assert_eq!(
+        communications(&config, LifecycleSignal::Success),
+        pairs(&[("effect", "confirmation"), ("say", "Done!")])
+    );
 }
 
 #[test]
-fn say_first_plus_effect_is_valid() {
-    let frontmatter = json!({
-        "success": {
-            "say_first": "Starting now",
-            "effect": "confirmation"
-        }
-    });
+fn a_list_speaks_before_its_effect_when_authored_that_way() {
+    let frontmatter = json!({ "success": [{ "say": "Starting now" }, { "effect": "confirmation" }] });
 
     let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
-    let success = config.success.as_ref().unwrap();
-    assert_eq!(success.say_first.as_deref(), Some("Starting now"));
-    assert_eq!(success.effect.as_deref(), Some("confirmation"));
+    assert_eq!(
+        communications(&config, LifecycleSignal::Success),
+        pairs(&[("say", "Starting now"), ("effect", "confirmation")])
+    );
 }
 
 #[test]
@@ -140,8 +147,8 @@ fn null_lifecycle_property_is_skipped() {
     });
 
     let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
-    assert!(config.start.is_none());
-    assert!(config.success.is_some());
+    assert!(config.stack(LifecycleSignal::Start).is_empty());
+    assert!(!config.stack(LifecycleSignal::Success).is_empty());
 }
 
 #[test]
@@ -155,7 +162,10 @@ fn frontmatter_with_non_lifecycle_keys_is_fine() {
     });
 
     let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
-    assert!(config.start.is_some());
+    assert_eq!(
+        communications(&config, LifecycleSignal::Start),
+        pairs(&[("message", "Starting")])
+    );
 }
 
 #[test]
@@ -178,16 +188,16 @@ fn property_names() {
 }
 
 #[test]
-fn lifecycle_config_get() {
+fn lifecycle_config_stack_is_empty_for_absent_events() {
     let fm = json!({
         "start": { "stderr": "Starting" },
         "failure": { "stderr": "Failed" }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(config.get(LifecycleSignal::Start).is_some());
-    assert!(config.get(LifecycleSignal::Success).is_none());
-    assert!(config.get(LifecycleSignal::Blocked).is_none());
-    assert!(config.get(LifecycleSignal::Failure).is_some());
+    assert!(!config.stack(LifecycleSignal::Start).is_empty());
+    assert!(config.stack(LifecycleSignal::Success).is_empty());
+    assert!(config.stack(LifecycleSignal::Blocked).is_empty());
+    assert!(!config.stack(LifecycleSignal::Failure).is_empty());
 }
 
 #[test]
@@ -201,7 +211,7 @@ fn lifecycle_config_is_empty() {
 }
 
 #[test]
-fn all_seven_signals_have_canonical_property_names() {
+fn all_eight_signals_have_canonical_property_names() {
     assert_eq!(LifecycleSignal::Initialize.property_name(), "initialize");
     assert_eq!(LifecycleSignal::Start.property_name(), "start");
     assert_eq!(LifecycleSignal::Success.property_name(), "success");
@@ -225,6 +235,7 @@ fn signal_all_iterates_in_canonical_order() {
             "failure",
             "finalize",
             "loop",
+            "cancelled",
         ]
     );
 }
@@ -264,33 +275,17 @@ fn parses_initialize_finalize_top_level_events() {
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert_eq!(
-        config.initialize.as_ref().unwrap().stderr.as_deref(),
-        Some("composing")
+        communications(&config, LifecycleSignal::Initialize),
+        pairs(&[("stderr", "composing")])
     );
     assert_eq!(
-        config.finalize.as_ref().unwrap().stderr.as_deref(),
-        Some("cleanup")
-    );
-    assert_eq!(
-        config
-            .get(LifecycleSignal::Initialize)
-            .unwrap()
-            .stderr
-            .as_deref(),
-        Some("composing")
-    );
-    assert_eq!(
-        config
-            .get(LifecycleSignal::Finalize)
-            .unwrap()
-            .stderr
-            .as_deref(),
-        Some("cleanup")
+        communications(&config, LifecycleSignal::Finalize),
+        pairs(&[("stderr", "cleanup")])
     );
 }
 
 #[test]
-fn parses_info_warn_and_success_top_level_fields() {
+fn parses_info_warn_and_success_verbs() {
     let fm = json!({
         "start": { "info": "composing" },
         "failure": { "warn": "watch out" },
@@ -298,16 +293,16 @@ fn parses_info_warn_and_success_top_level_fields() {
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert_eq!(
-        config.start.as_ref().unwrap().info.as_deref(),
-        Some("composing")
+        communications(&config, LifecycleSignal::Start),
+        pairs(&[("info", "composing")])
     );
     assert_eq!(
-        config.failure.as_ref().unwrap().warn.as_deref(),
-        Some("watch out")
+        communications(&config, LifecycleSignal::Failure),
+        pairs(&[("warn", "watch out")])
     );
     assert_eq!(
-        config.success.as_ref().unwrap().success.as_deref(),
-        Some("all done")
+        communications(&config, LifecycleSignal::Success),
+        pairs(&[("success", "all done")])
     );
 }
 
@@ -322,35 +317,29 @@ fn extracts_loop_lifecycle_concerns() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let concerns = config.loop_concerns.as_ref().expect("loop concerns");
-    assert_eq!(concerns.say.as_deref(), Some("iterate"));
-    assert_eq!(concerns.stderr.as_deref(), Some("looping"));
-    // `while` and `action` are iteration controls, not lifecycle
-    // concerns, so they do not appear on the notification.
+    // `while` and `action` are iteration controls, not lifecycle concerns,
+    // so only the two verbs reach the loop stack, in canonical order.
     assert_eq!(
-        config.get(LifecycleSignal::Loop).unwrap().say.as_deref(),
-        Some("iterate")
+        communications(&config, LifecycleSignal::Loop),
+        pairs(&[("stderr", "looping"), ("say", "iterate")])
     );
 }
 
 #[test]
-fn empty_stack_is_normalized_to_none() {
-    let fm = json!({
-        "start": { "stack": [] }
-    });
+fn empty_stack_is_the_empty_slice() {
+    let fm = json!({ "start": [] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(config.stacks.start.is_none());
-    assert!(config.stack(LifecycleSignal::Start).is_none());
+    assert!(config.stacks.start.is_empty());
+    assert!(config.stack(LifecycleSignal::Start).is_empty());
 }
 
 #[test]
-fn empty_frontmatter_yields_empty_seven_event_config() {
+fn empty_frontmatter_yields_empty_eight_event_config() {
     let fm = json!({});
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert!(config.is_empty());
     for s in LifecycleSignal::ALL {
-        assert!(config.get(s).is_none(), "expected {s:?} to be None");
-        assert!(config.stack(s).is_none(), "expected stack for {s:?} to be None");
+        assert!(config.stack(s).is_empty(), "expected stack for {s:?} to be empty");
     }
 }
 
@@ -368,18 +357,18 @@ fn null_event_property_is_skipped() {
         "start": { "stderr": "go" }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(config.initialize.is_none());
-    assert!(config.start.is_some());
+    assert!(config.stack(LifecycleSignal::Initialize).is_empty());
+    assert!(!config.stack(LifecycleSignal::Start).is_empty());
 }
 
 #[test]
-fn loop_concerns_stack_uses_loop_signal_for_placement() {
+fn loop_gate_uses_loop_signal_for_placement() {
     // `Skip` is the one placement-restricted action (`initialize` only),
     // so it is invalid in the `loop` event.
     let fm = json!({
         "loop": {
             "while": "true",
-            "stack": [{"action": "skip"}]
+            "gate": ["skip"]
         }
     });
     let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
@@ -399,13 +388,11 @@ fn stop_is_valid_in_every_event() {
             json!({
                 "loop": {
                     "while": "true",
-                    "stack": [{"action": "stop"}]
+                    "gate": ["stop"]
                 }
             })
         } else {
-            json!({
-                s.property_name(): {"stack": [{"action": "stop"}]}
-            })
+            json!({ s.property_name(): ["stop"] })
         };
         let config = parse_lifecycle_config(&fm, dummy_path());
         assert!(
@@ -415,4 +402,3 @@ fn stop_is_valid_in_every_event() {
         );
     }
 }
-

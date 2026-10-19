@@ -35,6 +35,11 @@ initialize:
                   review: "{{ pending_review }}"
                   iteration: "{{ file_index(pending_review) }}"
                   log: "{{ dirname(spec) + '/implementation-log.md' }}"
+    # - when: "spec && frontmatter(spec, 'implemented')"
+    #   then: 
+    #     - info: |-
+    #         an _implemented_ spec file was passed into the **implementation** router and will be routed to **implement-suggestions** with the assumption that we are in a _review-to-implement_ looping cycle currently.
+    #     - proxy: ./_implement/implement-suggestions.md
     - when: "spec && !frontmatter(spec, 'implemented')"
       then:
           - info: |-
@@ -50,18 +55,18 @@ initialize:
           - proxy: ./_implement/implement-review.md
     - stderr: |-
         Couldn't determine what _type_ of implementation to route; the following files were passed in or identified:
-
+            
         {{ spec ? '- a specification file was identified: ' + spec : '' }}
         {{ plan ? '- a plan file was identified: ' + plan : '' }}
         {{ review ? '- a review file was identified: ' + review : ''}}
         {{ !spec && !plan && !review ? '- no spec, plan, or review file was identified!' : ''}}
-    - error: |-
+    - error: |- 
         Unable to _route_ the implementation to an appropriate prompt:
 
         > You called the {{ link('prompts/implement.md') }} prompt which is a _router_ prompt that looks at what has been passed into it via _parameters_ as well as files or metadata that either exists or doesn't.
         >
         > The parameters this router would expect:
-        >
+        > 
         > - **spec:** {{ spec ? '✔' : '<red>⤫</red>' }}
         > - **plan:** {{ plan ? '✔' : '<red>⤫</red>' }}
         > - **review:** {{ review ? '✔' : "<red>⤫</red>"}}

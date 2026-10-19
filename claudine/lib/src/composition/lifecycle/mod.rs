@@ -1,12 +1,12 @@
-//! Lifecycle notification types and parsing for composition frontmatter.
+//! Lifecycle stacks for composition frontmatter.
 //!
-//! This module provides support for the seven composition lifecycle events
+//! This module provides support for the eight composition lifecycle events
 //! (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`,
-//! `loop`) in composition frontmatter. Each event may carry top-level
-//! communication properties (`say`, `say_first`, `effect`, `message`,
-//! `stderr`, `notify`, `info`, `warn`) and an ordered `stack:` of
-//! conditional actions. The `loop` event additionally carries iteration
-//! controls parsed by [`super::looping::resolve_loop_config`].
+//! `loop`, `cancelled`). Each event is a stack: an ordered action list, or one dictionary
+//! of verbs that expands into that list in canonical order (see
+//! [`actions::LifecycleNode`]). The `loop:` block additionally carries
+//! iteration controls parsed by [`super::looping::resolve_loop_config`]; its
+//! lifecycle concerns are loose verb keys or a `gate:` list.
 
 // rustfmt doesn't support let-chains yet, so nested ifs are required
 #![allow(clippy::collapsible_if)]
@@ -21,16 +21,14 @@ use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::compose::expression::{
     Expr, ExpressionFinder, parse, parse_condition,
 };
-use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use super::error::{ActionExprError, CompositionError};
 use self::actions::{
     all_lifecycle_verbs, CommunicationAction, CommunicationChannel, ExpressionFunctionAction,
     expression_function_signature, is_known_lifecycle_verb, LifecycleAction, LifecycleActionKind,
-    LifecycleControlAction, LifecycleStackItem, ProxyWith, ProxyWithError, RuntimeSet,
-    RuntimeSetError,
-    RetryBackoff, rewrite_to_positional, ShellAction,
+    LifecycleControlAction, LifecycleNode, LifecyclePath, WithOverlay, WithOverlayError,
+    RuntimeSet, RuntimeSetError, RetryBackoff, rewrite_to_positional, ShellAction,
     SideEffectAction, side_effect_signature,
 };
 use crate::events::{GlobalSettings, TtsSettings};
@@ -40,59 +38,199 @@ mod action_shape;
 pub mod actions;
 mod audio;
 pub mod bindings;
+pub mod cancellation;
 pub mod context;
 pub mod control;
 pub mod executor;
+pub mod prep;
 pub mod runtime;
 mod parse;
+pub mod shell_template;
+mod structured_shell;
+pub mod prewarm;
 mod source_map;
 mod validate;
 
 use action_shape::*;
-pub(crate) use action_shape::action_value_to_expr;
+pub(crate) use action_shape::{action_value_to_expr, closest_spelling};
 pub(crate) use audio::*;
-pub(crate) use parse::parse_task_action_stack_with_order;
-pub use parse::{
-    parse_lifecycle_config, parse_single_action, parse_task_action_stack,
-    scan_removed_validation_keys,
-};
-pub(crate) use parse::parse_lifecycle_config_with_orders;
-pub(crate) use parse::parse_single_action_with_order;
+pub use parse::{LifecycleParseOptions, scan_removed_validation_keys};
+pub(crate) use parse::{LOOP_ITERATION_KEYS, with_mapping_shape};
 pub use validate::{
     collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
     validate_no_err_in_no_error_events, validate_no_nested_spans_in_literals,
 };
 
-/// The notification's nine communication-field name/value pairs, in a fixed
-/// iteration order.
+/// Parses lifecycle configuration from composition frontmatter.
 ///
-/// Shared by the lifecycle string guards that read top-level communication
-/// surfaces (the nested-span scan and the `err` availability check) so they
-/// agree on the field set and iteration order. `stack` is a list, not a
-/// communication field, so it is not here.
-fn notification_comm_fields(
-    n: &LifecycleNotification,
-) -> [(&'static str, Option<&String>); 9] {
-    [
-        ("say", n.say.as_ref()),
-        ("say_first", n.say_first.as_ref()),
-        ("message", n.message.as_ref()),
-        ("stderr", n.stderr.as_ref()),
-        ("notify", n.notify.as_ref()),
-        ("info", n.info.as_ref()),
-        ("warn", n.warn.as_ref()),
-        ("success", n.success.as_ref()),
-        ("stdout", n.stdout.as_ref()),
-    ]
+/// Every event (`initialize`, `start`, `success`, `blocked`, `failure`,
+/// `finalize`) and the `loop:` block's lifecycle concerns parse into an
+/// ordered [`LifecycleNode`] stack on [`LifecycleConfig::stacks`]. Literal
+/// `effect` names are checked against the embedded Playa catalog here, so an
+/// unknown name fails before anything runs; a `{{ … }}` name is checked when
+/// the event resolves it.
+///
+/// ## Errors
+///
+/// The lifecycle authoring family of [`CompositionError`]: shape violations
+/// ([`CompositionError::LifecycleStackInvalidShape`]), removed spellings
+/// ([`CompositionError::RemovedGrammar`]), unknown verbs or parameters,
+/// directive placement and order, and
+/// [`CompositionError::LifecycleUnknownEffect`].
+///
+/// ## Examples
+///
+/// ```
+/// # use serde_json::json;
+/// # use claudine::composition::{parse_lifecycle_config, LifecycleSignal};
+/// let frontmatter = json!({
+///     "title": "My Composition",
+///     "start": [{ "message": "Starting..." }]
+/// });
+/// let config = parse_lifecycle_config(&frontmatter, std::path::Path::new("test.md")).unwrap();
+/// assert_eq!(config.stack(LifecycleSignal::Start).len(), 1);
+/// ```
+pub fn parse_lifecycle_config(
+    frontmatter: &serde_json::Value,
+    source_file: &Path,
+) -> Result<LifecycleConfig, CompositionError> {
+    parse_lifecycle_config_with_orders(frontmatter, source_file, None)
 }
 
-/// The seven top-level frontmatter keys that hold lifecycle event subtrees.
+/// [`parse_lifecycle_config`] with the authored frontmatter, whose retained
+/// mapping order gives a `set:` mapping its authored key order.
+pub(crate) fn parse_lifecycle_config_with_orders(
+    frontmatter: &serde_json::Value,
+    source_file: &Path,
+    authored: Option<&darkmatter::markdown::Frontmatter>,
+) -> Result<LifecycleConfig, CompositionError> {
+    parse::parse_lifecycle_config_with(
+        frontmatter,
+        source_file,
+        &LifecycleParseOptions {
+            is_known_effect: &is_known_effect,
+            authored,
+        },
+    )
+}
+
+/// Parse the lifecycle concerns of a `loop:` block authored at `property`
+/// (`loop`, `tasks[2].loop`): its loose verb keys or its `gate:` stack, by the
+/// grammar a document's `loop:` uses. Iteration controls are skipped.
+///
+/// ## Errors
+///
+/// The same [`CompositionError`] family [`parse_lifecycle_config`] raises.
+pub(crate) fn parse_loop_gate(
+    loop_obj: &serde_json::Map<String, serde_json::Value>,
+    source_file: &Path,
+    property: &str,
+    authored: &super::authored_order::AuthoredOrder,
+) -> Result<Vec<LifecycleNode>, CompositionError> {
+    parse::parse_loop_concerns_with(
+        loop_obj,
+        source_file,
+        property,
+        authored,
+        &LifecycleParseOptions {
+            is_known_effect: &is_known_effect,
+            authored: None,
+        },
+    )
+}
+
+/// Parse a task's `setup:` / `teardown:` value into a typed action stack.
+///
+/// The value is a stack like any event: a list, or one dictionary of verbs.
+/// `property` is the source-rooted path of the value itself
+/// (`tasks[0].setup`), and item `n` is `{property}[n]`.
+///
+/// ## Errors
+///
+/// The same [`CompositionError`] family [`parse_lifecycle_config`] raises.
+pub fn parse_task_action_stack(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+) -> Result<Vec<LifecycleNode>, CompositionError> {
+    parse_task_action_stack_with_order(
+        signal,
+        raw,
+        source_file,
+        property,
+        &super::authored_order::AuthoredOrder::default(),
+    )
+}
+
+/// [`parse_task_action_stack`] against the stack's authored key order, which
+/// is positioned at the `setup:`/`teardown:` value itself.
+pub(crate) fn parse_task_action_stack_with_order(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+    authored: &super::authored_order::AuthoredOrder,
+) -> Result<Vec<LifecycleNode>, CompositionError> {
+    parse::parse_task_action_stack_with(
+        signal,
+        raw,
+        source_file,
+        property,
+        authored,
+        &LifecycleParseOptions {
+            is_known_effect: &is_known_effect,
+            authored: None,
+        },
+    )
+}
+
+/// Parse a task's single `side_effect:` action.
+///
+/// `property` is the source-rooted path of the action value itself
+/// (`tasks[0].side_effect`); the action's path is `{property}.{verb}`.
+///
+/// ## Errors
+///
+/// [`CompositionError::LifecycleStackInvalidShape`] when the value is not a
+/// one-verb dictionary, and the standard action rejections otherwise.
+pub fn parse_single_action(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+) -> Result<LifecycleAction, CompositionError> {
+    parse_single_action_with_order(signal, raw, source_file, property, None)
+}
+
+/// [`parse_single_action`] with a `set:` mapping's authored key order.
+pub(crate) fn parse_single_action_with_order(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+    authored_set_order: Option<&[String]>,
+) -> Result<LifecycleAction, CompositionError> {
+    parse::parse_single_action_with(
+        signal,
+        raw,
+        source_file,
+        property,
+        authored_set_order,
+        &LifecycleParseOptions {
+            is_known_effect: &is_known_effect,
+            authored: None,
+        },
+    )
+}
+
+/// The eight top-level frontmatter keys that hold lifecycle event subtrees.
 ///
 /// Claudine defers these from Darkmatter's compose-time value-resolution
 /// passes (via `ComposeOptions::with_exclude_keys`) so their authored
 /// `{{ }}` spans survive raw in `effective_frontmatter` for event-time
 /// interpolation. Non-lifecycle keys compose as today; the iteration
-/// controls inside `loop:` (`while`/`until`/`actions`/`max`/`fail_fast`)
+/// controls inside `loop:` (`while`/`until`/`actions`/`max`)
 /// are unaffected because they are parsed from raw frontmatter by
 /// [`super::looping::resolve_loop_config`] and evaluated by the loop
 /// engine, not by compose-time interpolation.
@@ -107,140 +245,63 @@ pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
     "failure",
     "finalize",
     "loop",
+    "cancelled",
 ];
 
 
-/// A single lifecycle notification configuration.
-///
-/// Carries the top-level communication properties for one lifecycle event
-/// block. The optional `stack` field captures the raw stack items; typed
-/// parsing into [`LifecycleStackItem`] values happens in
-/// [`parse_lifecycle_config`], which has the event-name context needed for
-/// the per-event "Where valid" matrix.
-///
-/// ## Examples
-///
-/// ```yaml
-/// start:
-///   say: "Starting composition workflow"
-///   effect: "confirmation"
-/// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct LifecycleNotification {
-    /// Text to say using TTS (mutually exclusive with `say_first`).
-    pub say: Option<String>,
-
-    /// Text to say before other actions (mutually exclusive with `say`).
-    pub say_first: Option<String>,
-
-    /// Sound effect to play (kebab-case name like "confirmation").
-    pub effect: Option<String>,
-
-    /// Message to display in the terminal.
-    pub message: Option<String>,
-
-    /// Message to write to stderr.
-    pub stderr: Option<String>,
-
-    /// Title for a local desktop notification.
-    pub notify: Option<String>,
-
-    /// Status line rendered with `Status::Info` style.
-    pub info: Option<String>,
-
-    /// Status line rendered with `Status::Warn` style.
-    pub warn: Option<String>,
-
-    /// Status line rendered with `Status::Success` style.
-    pub success: Option<String>,
-
-    /// Plain text written to stdout (no status glyph).
-    pub stdout: Option<String>,
-
-    /// Raw stack items, captured at deserialize time and parsed into typed
-    /// [`LifecycleStackItem`] values by [`parse_lifecycle_config`] (which
-    /// knows the owning event and can enforce the per-event "Where valid"
-    /// matrix). After `parse_lifecycle_config` returns, the typed form
-    /// lives on [`LifecycleConfig::stacks`] and this field is cleared.
-    #[serde(default)]
-    pub stack: Option<Vec<serde_json::Value>>,
-}
-
 /// Complete lifecycle configuration for a composition.
 ///
-/// Parsed from frontmatter properties: `initialize`, `start`, `success`,
-/// `blocked`, `failure`, `finalize`. Lifecycle concerns authored inside the
-/// `loop:` block (alongside iteration controls) are extracted into
-/// [`Self::loop_concerns`] and surfaced through
-/// [`Self::get`](`LifecycleSignal::Loop`).
-///
-/// Each event's typed stack (post-validation) lives in [`Self::stacks`].
+/// Parsed from frontmatter properties `initialize`, `start`, `success`,
+/// `blocked`, `failure`, `cancelled`, `finalize`, and the lifecycle concerns of `loop:`.
 ///
 /// ## Examples
 ///
 /// ```yaml
 /// start:
-///   message: "Starting..."
+///   - message: "Starting..."
 /// success:
-///   say: "Composition complete"
 ///   effect: "crowd-applause"
+///   say: "Composition complete"
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LifecycleConfig {
-    /// Notification emitted at the `initialize` event.
-    pub initialize: Option<LifecycleNotification>,
-
-    /// Notification emitted when composition begins.
-    pub start: Option<LifecycleNotification>,
-
-    /// Notification emitted when composition succeeds.
-    pub success: Option<LifecycleNotification>,
-
-    /// Notification emitted when composition is blocked.
-    pub blocked: Option<LifecycleNotification>,
-
-    /// Notification emitted when composition fails.
-    pub failure: Option<LifecycleNotification>,
-
-    /// Notification emitted at the `finalize` event (once per iteration).
-    pub finalize: Option<LifecycleNotification>,
-
-    /// Lifecycle concerns authored inside the `loop:` block. The iteration
-    /// controls themselves live on `LoopConfig`.
-    pub loop_concerns: Option<LifecycleNotification>,
-
     /// Typed, validated stacks keyed by event.
     pub stacks: LifecycleStacks,
+    /// Whether `cancelled` was authored, including an empty stack. Sibling
+    /// cancellation opts in by presence, independently of cleanup actions.
+    pub cancelled_declared: bool,
 }
 
-/// Per-event typed stacks, populated by [`parse_lifecycle_config`].
+/// Per-event typed stacks.
 ///
-/// Each field is `None` when the event block has no `stack:` key. An empty
-/// array never appears: a `stack: []` is normalized to `None`.
+/// An omitted event, `[]`, and `{}` contain no actions. The configuration
+/// separately retains cancellation opt-in presence. `cancelled: null` is
+/// invalid; other events retain their null-as-empty behavior.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LifecycleStacks {
-    /// Stack for the `initialize` event.
-    pub initialize: Option<Vec<LifecycleStackItem>>,
-    /// Stack for the `start` event.
-    pub start: Option<Vec<LifecycleStackItem>>,
-    /// Stack for the `success` event.
-    pub success: Option<Vec<LifecycleStackItem>>,
-    /// Stack for the `blocked` event.
-    pub blocked: Option<Vec<LifecycleStackItem>>,
-    /// Stack for the `failure` event.
-    pub failure: Option<Vec<LifecycleStackItem>>,
-    /// Stack for the `finalize` event.
-    pub finalize: Option<Vec<LifecycleStackItem>>,
-    /// Stack for the `loop` gate's lifecycle concerns.
-    pub loop_gate: Option<Vec<LifecycleStackItem>>,
+    #[allow(missing_docs)]
+    pub initialize: Vec<LifecycleNode>,
+    #[allow(missing_docs)]
+    pub start: Vec<LifecycleNode>,
+    #[allow(missing_docs)]
+    pub success: Vec<LifecycleNode>,
+    #[allow(missing_docs)]
+    pub blocked: Vec<LifecycleNode>,
+    #[allow(missing_docs)]
+    pub failure: Vec<LifecycleNode>,
+    #[allow(missing_docs)]
+    pub finalize: Vec<LifecycleNode>,
+    #[allow(missing_docs)]
+    pub cancelled: Vec<LifecycleNode>,
+    /// The `loop:` block's lifecycle concerns: its loose verb keys or `gate:`.
+    pub loop_gate: Vec<LifecycleNode>,
 }
 
 /// Lifecycle event signal types.
 ///
-/// The seven composition lifecycle signals, in deterministic iteration
+/// The eight composition lifecycle signals, in deterministic iteration
 /// order: `Initialize`, `Start`, `Success`, `Blocked`, `Failure`,
-/// `Finalize`, `Loop`. This order is used by validators that walk every
+/// `Finalize`, `Loop`, `Cancelled`. This order is used by validators that walk every
 /// event surface (nested-span scan, `err` availability check) and is exposed
 /// via [`Self::all`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -262,12 +323,15 @@ pub enum LifecycleSignal {
     Failure,
 
     /// Once per iteration, immediately after the terminal `success`/
-    /// `failure` (or `blocked`) completes.
+    /// `failure`, `blocked`, or `cancelled` completes.
     Finalize,
 
     /// Post-`finalize` "iterate again?" gate; evaluates the document's
     /// `loop` while/until condition.
     Loop,
+
+    /// Execution was interrupted or a running leg opted into sibling cancellation.
+    Cancelled,
 }
 
 impl LifecycleSignal {
@@ -276,7 +340,7 @@ impl LifecycleSignal {
     /// Used by validators that walk every event surface. New variants
     /// should be appended to the end so existing diagnostic order is
     /// preserved.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Initialize,
         Self::Start,
         Self::Success,
@@ -284,6 +348,7 @@ impl LifecycleSignal {
         Self::Failure,
         Self::Finalize,
         Self::Loop,
+        Self::Cancelled,
     ];
 }
 
@@ -308,7 +373,7 @@ pub struct LifecycleRuntimeState {
 // Emitter trait + default implementation
 // ---------------------------------------------------------------------------
 
-/// Trait for emitting lifecycle notification side effects.
+/// Trait for emitting lifecycle communication side effects.
 ///
 /// Injectable to allow test doubles that capture emissions without hitting
 /// real stderr, messaging, TTS, or sound playback. The text channels keep the
@@ -439,8 +504,8 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
 /// terminal signal (`blocked` or `failure`) is emitted when a run exits
 /// after `start` without an explicit terminal signal.
 ///
-/// The guard now tracks the full seven-event lifecycle:
-/// `initialize` → `start` → (`success`|`blocked`|`failure`) → `finalize`.
+/// The guard tracks terminal exclusivity and cleanup:
+/// `initialize` → `start` → (`success`|`blocked`|`failure`|`cancelled`) → `finalize`.
 /// Each non-terminal signal is idempotent; terminal signals are exclusive
 /// (only one may fire per iteration); `finalize` may fire once after the
 /// terminal signal.
@@ -486,6 +551,9 @@ pub struct LifecycleRunGuard<'a> {
 }
 
 impl<'a> LifecycleRunGuard<'a> {
+    /// Source owning this lifecycle, retained for typed runtime diagnostics.
+    pub fn source_path(&self) -> &Path { self.ctx.source_path }
+
     /// Create a new guard.
     pub fn new(
         config: &'a LifecycleConfig,
@@ -583,7 +651,8 @@ impl<'a> LifecycleRunGuard<'a> {
             }
             LifecycleSignal::Success
             | LifecycleSignal::Blocked
-            | LifecycleSignal::Failure => {
+            | LifecycleSignal::Failure
+            | LifecycleSignal::Cancelled => {
                 if self.terminal_emitted {
                     return false;
                 }
@@ -606,12 +675,12 @@ impl<'a> LifecycleRunGuard<'a> {
     /// can still fire.
     ///
     /// A `success`/`blocked` stack that ends in an explicit `error(...)` action
-    /// downgrades the run to `failure`. The success/blocked top-level
-    /// communication has **already** fired (top-level fires before the stack, per
-    /// the spec) and that emission must remain — so the terminal slot was already
-    /// taken by `Success`/`Blocked`. This overwrites only [`Self::terminal_signal`]
-    /// to `Failure` while keeping [`Self::terminal_emitted`] true, letting the
-    /// caller run the `failure` event's top-level + stack directly (without
+    /// downgrades the run to `failure`. The actions before the directive in the
+    /// success/blocked stack have **already** run and their emissions must
+    /// remain — so the terminal slot was already taken by `Success`/`Blocked`.
+    /// This overwrites only [`Self::terminal_signal`] to `Failure` while keeping
+    /// [`Self::terminal_emitted`] true, letting the caller run the `failure`
+    /// event's stack directly (without
     /// [`Self::record_event_emission`], which would refuse the taken slot) and
     /// keeping [`Self::emit_finalize_once`] enabled.
     ///
@@ -628,8 +697,7 @@ impl<'a> LifecycleRunGuard<'a> {
         true
     }
 
-    /// Run the top-level notification + typed stack for `signal` using the
-    /// provided context.
+    /// Run the typed stack for `signal` using the provided context.
     ///
     /// Callers must first call [`Self::record_event_emission`] and only run
     /// the stack when it returns `true`.
@@ -645,9 +713,13 @@ impl<'a> LifecycleRunGuard<'a> {
             LifecycleSignal::Success
                 | LifecycleSignal::Blocked
                 | LifecycleSignal::Failure
+                | LifecycleSignal::Cancelled
                 | LifecycleSignal::Finalize
         )
         .then(crate::interrupt::TerminalLifecycleScope::enter);
+        let _cleanup = matches!(signal, LifecycleSignal::Success | LifecycleSignal::Blocked
+            | LifecycleSignal::Failure | LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
+            .then(cancellation::CleanupScope::enter);
         let mut context = stack_ctx.with_signal(signal);
         // `start` follows successful preflight; proxy adoption resets it. Catch
         // events reached before that boundary must not inherit a shell runner.
@@ -657,8 +729,8 @@ impl<'a> LifecycleRunGuard<'a> {
         context.execute_event(&self.config)
     }
 
-    /// Execute the full lifecycle event (top-level notification + stack) for
-    /// `signal`, tracking the guard's state machine.
+    /// Execute the lifecycle event's stack for `signal`, tracking the guard's
+    /// state machine.
     ///
     /// Convenience wrapper around [`Self::record_event_emission`] +
     /// [`Self::run_event_stack`]. Prefer the split methods when the context
@@ -826,57 +898,68 @@ impl<'a> LifecycleRunGuard<'a> {
         self.config = std::borrow::Cow::Owned(config);
     }
 
-    /// Emit a single lifecycle signal through the injected emitter.
+    /// Emit a signal's unguarded, literal root communication without an
+    /// execution context.
+    ///
+    /// This is the drop safety net's path (and the `emit_*_once` helpers'):
+    /// with no [`StackExecutionContext`] it cannot evaluate a guard,
+    /// interpolate, or run anything but communication. It emits, in stack
+    /// order (a root dictionary's canonical order), each root-level `stderr`,
+    /// `message`, `notify`, `say`/`speak`, and `effect` whose text contains no
+    /// `{{ … }}` span. Guarded items, templated text, and every other verb are
+    /// skipped rather than emitted unevaluated. Ordinary runs go through
+    /// [`Self::run_event_stack`] instead.
     ///
     /// Short-circuits on `crate::interrupt::interrupted()` so a Ctrl+C
-    /// during execution skips all post-execute side effects (messenger sends,
-    /// desktop notifications, and durable audio publication). The cheap stderr
-    /// line still emits so the user sees the
-    /// terminal status before the process exits.
+    /// during execution skips messenger sends, desktop notifications, and
+    /// durable audio publication. The cheap stderr line still emits so the
+    /// user sees the terminal status before the process exits.
+    ///
+    /// [`StackExecutionContext`]: super::lifecycle_executor::StackExecutionContext
     fn emit_signal(&self, signal: LifecycleSignal) {
-        let Some(notification) = self.config.get(signal) else {
-            return;
-        };
-
-        let interrupted = crate::interrupt::interrupted();
-
-        // --- Non-audio fan-out (immediate) ---
-        if let Some(stderr_text) = &notification.stderr {
-            self.emitter.emit_stderr(signal, stderr_text, self.ctx.term);
-        }
-        if interrupted {
-            return;
-        }
-        if let Some(message_text) = &notification.message {
-            self.emitter.emit_message(
-                message_text,
-                self.ctx.source_path,
-                self.ctx.repo_root,
-                self.ctx.messaging,
-            );
-        }
-        if let Some(notify_title) = &notification.notify {
-            self.emitter.emit_notification(notify_title);
-        }
-
-        // --- Audio phases (sequential, blocking, lazy TTS config) ---
-        let phases = audio_phases(notification);
         let mut tts_config: Option<TtsConfig> = None;
-
-        for phase in phases {
-            if crate::interrupt::interrupted() {
-                return;
+        for node in self.config.stack(signal) {
+            let LifecycleNode::Action(LifecycleAction {
+                kind: LifecycleActionKind::Communication(comm),
+                ..
+            }) = node
+            else {
+                continue;
+            };
+            let Expr::StringLiteral(text) = &comm.text else {
+                continue;
+            };
+            // Mixed text such as `done: {{ fm.title }}` is still a string
+            // literal; without a context its spans cannot render, and emitting
+            // them raw would speak or send template source.
+            if !ExpressionFinder::find_all_plain(text).is_empty() {
+                continue;
             }
-            match phase {
-                AudioPhase::Speak(text) => {
+            if comm.channel == CommunicationChannel::Stderr {
+                self.emitter.emit_stderr(signal, text, self.ctx.term);
+                continue;
+            }
+            if crate::interrupt::interrupted() {
+                continue;
+            }
+            match comm.channel {
+                CommunicationChannel::Message => self.emitter.emit_message(
+                    text,
+                    self.ctx.source_path,
+                    self.ctx.repo_root,
+                    self.ctx.messaging,
+                ),
+                CommunicationChannel::Notify => self.emitter.emit_notification(text),
+                CommunicationChannel::Say | CommunicationChannel::Speak => {
                     let config = tts_config
                         .get_or_insert_with(|| {
                             tts_config_from_settings(self.ctx.settings.tts.as_ref())
                         })
                         .clone();
-                    self.emitter.emit_speech(&text, config);
+                    self.emitter.emit_speech(text, config);
                 }
-                AudioPhase::Effect(name) => self.emitter.emit_effect(&name),
+                CommunicationChannel::Effect => self.emitter.emit_effect(text),
+                _ => {}
             }
         }
     }
@@ -895,10 +978,10 @@ impl Drop for LifecycleRunGuard<'_> {
     }
 }
 
-/// Runtime context required for emitting lifecycle notifications.
+/// Runtime context required for emitting lifecycle communication.
 ///
 /// Holds references to settings, messaging configuration, terminal, and paths
-/// needed to resolve and emit lifecycle notifications.
+/// needed to resolve and emit lifecycle communication actions.
 #[derive(Debug)]
 pub struct LifecycleRuntimeContext<'a> {
     /// Global settings (includes TTS configuration).
@@ -930,61 +1013,61 @@ pub struct LifecycleRuntimeContext<'a> {
     pub context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
 }
 
-/// A single audio playback phase.
 impl LifecycleConfig {
-    /// Returns the notification for a given signal, if configured.
+    /// Returns the typed stack for a given signal; empty when the event is
+    /// absent.
     ///
-    /// For [`LifecycleSignal::Loop`], this returns the lifecycle concerns
-    /// authored inside the `loop:` block (alongside the iteration controls
-    /// that live on `LoopConfig`).
+    /// For [`LifecycleSignal::Loop`] this is the `loop:` block's lifecycle
+    /// concerns.
     ///
     /// ## Examples
     ///
     /// ```
     /// # use claudine::composition::{LifecycleConfig, LifecycleSignal};
     /// let config = LifecycleConfig::default();
-    /// assert!(config.get(LifecycleSignal::Start).is_none());
+    /// assert!(config.stack(LifecycleSignal::Start).is_empty());
     /// ```
-    pub fn get(&self, signal: LifecycleSignal) -> Option<&LifecycleNotification> {
+    pub fn stack(&self, signal: LifecycleSignal) -> &[LifecycleNode] {
         match signal {
-            LifecycleSignal::Initialize => self.initialize.as_ref(),
-            LifecycleSignal::Start => self.start.as_ref(),
-            LifecycleSignal::Success => self.success.as_ref(),
-            LifecycleSignal::Blocked => self.blocked.as_ref(),
-            LifecycleSignal::Failure => self.failure.as_ref(),
-            LifecycleSignal::Finalize => self.finalize.as_ref(),
-            LifecycleSignal::Loop => self.loop_concerns.as_ref(),
+            LifecycleSignal::Initialize => &self.stacks.initialize,
+            LifecycleSignal::Start => &self.stacks.start,
+            LifecycleSignal::Success => &self.stacks.success,
+            LifecycleSignal::Blocked => &self.stacks.blocked,
+            LifecycleSignal::Failure => &self.stacks.failure,
+            LifecycleSignal::Finalize => &self.stacks.finalize,
+            LifecycleSignal::Loop => &self.stacks.loop_gate,
+            LifecycleSignal::Cancelled => &self.stacks.cancelled,
         }
     }
 
-    /// Returns the typed stack for a given signal, if any.
-    ///
-    /// `None` means the event block had no `stack:` key (or the event is
-    /// absent entirely). An empty stack is normalized to `None`.
-    pub fn stack(&self, signal: LifecycleSignal) -> Option<&[LifecycleStackItem]> {
-        let stack = match signal {
-            LifecycleSignal::Initialize => self.stacks.initialize.as_ref(),
-            LifecycleSignal::Start => self.stacks.start.as_ref(),
-            LifecycleSignal::Success => self.stacks.success.as_ref(),
-            LifecycleSignal::Blocked => self.stacks.blocked.as_ref(),
-            LifecycleSignal::Failure => self.stacks.failure.as_ref(),
-            LifecycleSignal::Finalize => self.stacks.finalize.as_ref(),
-            LifecycleSignal::Loop => self.stacks.loop_gate.as_ref(),
-        };
-        stack.map(Vec::as_slice)
+    /// Every `prep` target written as a literal, in event and stack order:
+    /// the targets a dry run lists without running. A target written as an
+    /// interpolation is known only when its event fires.
+    pub fn literal_prep_targets(&self) -> Vec<String> {
+        let mut targets = Vec::new();
+        for signal in LifecycleSignal::ALL {
+            actions::for_each_action(self.stack(signal), &mut |action| {
+                if let LifecycleActionKind::LifecycleControl(actions::LifecycleControlAction::Prep {
+                    target: Expr::StringLiteral(target),
+                    ..
+                }) = &action.kind
+                    && ExpressionFinder::find_all_plain(target).is_empty()
+                    && !targets.contains(target)
+                {
+                    targets.push(target.clone());
+                }
+            });
+        }
+        targets
     }
 
-    /// Returns a mutable reference to the typed stack for a given signal, if
-    /// any.
+    /// Mutable access to the typed stack for a given signal.
     ///
     /// Used by the pre-flight shell resolution pass (C3) to stamp resolved
     /// command bytes back into `ShellAction::command` / `on_error` so the
     /// approved command equals the executed command.
-    pub fn stack_mut(
-        &mut self,
-        signal: LifecycleSignal,
-    ) -> Option<&mut Vec<LifecycleStackItem>> {
-        let stack = match signal {
+    pub fn stack_mut(&mut self, signal: LifecycleSignal) -> &mut Vec<LifecycleNode> {
+        match signal {
             LifecycleSignal::Initialize => &mut self.stacks.initialize,
             LifecycleSignal::Start => &mut self.stacks.start,
             LifecycleSignal::Success => &mut self.stacks.success,
@@ -992,12 +1075,11 @@ impl LifecycleConfig {
             LifecycleSignal::Failure => &mut self.stacks.failure,
             LifecycleSignal::Finalize => &mut self.stacks.finalize,
             LifecycleSignal::Loop => &mut self.stacks.loop_gate,
-        };
-        stack.as_mut()
+            LifecycleSignal::Cancelled => &mut self.stacks.cancelled,
+        }
     }
 
-    /// Returns `true` if no lifecycle notifications and no stacks are
-    /// configured across any event.
+    /// Returns `true` when there are no actions or explicit cancellation opt-in.
     ///
     /// ## Examples
     ///
@@ -1007,20 +1089,9 @@ impl LifecycleConfig {
     /// assert!(config.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.initialize.is_none()
-            && self.start.is_none()
-            && self.success.is_none()
-            && self.blocked.is_none()
-            && self.failure.is_none()
-            && self.finalize.is_none()
-            && self.loop_concerns.is_none()
-            && self.stacks.initialize.is_none()
-            && self.stacks.start.is_none()
-            && self.stacks.success.is_none()
-            && self.stacks.blocked.is_none()
-            && self.stacks.failure.is_none()
-            && self.stacks.finalize.is_none()
-            && self.stacks.loop_gate.is_none()
+        !self.cancelled_declared && LifecycleSignal::ALL
+            .iter()
+            .all(|signal| self.stack(*signal).is_empty())
     }
 }
 

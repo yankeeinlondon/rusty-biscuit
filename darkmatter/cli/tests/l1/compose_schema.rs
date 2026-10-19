@@ -647,10 +647,10 @@ fn first_frontmatter_interpolation_precedes_optional_materialization() {
         "---\n\
          $schema:\n\
         \x20 optional: string\n\
-         optional_was_present: \"{{ has_key(doc, 'optional') }}\"\n\
+         optional_was_present: \"{{ has_key(fm, 'optional') }}\"\n\
          ---\n\
          before-schema={{ optional_was_present }}\n\
-         after-schema={{ has_key(doc, 'optional') }}\n",
+         after-schema={{ has_key(fm, 'optional') }}\n",
     );
 
     process

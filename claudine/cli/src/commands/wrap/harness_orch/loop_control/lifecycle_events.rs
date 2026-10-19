@@ -1,5 +1,5 @@
 //! Lifecycle event execution for the harness loop: running one event's
-//! top-level communication + stack, terminal-event downgrade handling, and
+//! stack, terminal-event downgrade handling, and
 //! the shared stack-context and `timing` capture helpers.
 
 use super::*;
@@ -8,18 +8,15 @@ use super::*;
 /// action into `Failure` for events that would otherwise record a successful
 /// or blocked outcome.
 ///
-/// `Success` and `Blocked` fire their top-level communication **first** (the
-/// spec's top-level-before-stack contract: top-level properties are
-/// unconditional and execute before the stack), recording the terminal signal,
-/// then run their stack **exactly once**. If that stack terminates with
-/// `StackControl::Error`, the run is downgraded to `Failure`: the guard's
-/// terminal signal is re-designated to `Failure` and the `Failure` event's
-/// top-level communication + stack fire. The already-fired success/blocked
-/// top-level communication is **kept** — the spec requires top-level to fire
-/// before stack processing, so an `error()` later in the stack cannot un-fire
-/// it. Otherwise the success/blocked signal stays terminal. This preserves the
-/// spec rule that an explicit `error()` in a success/blocked stack downgrades
-/// the run, without running the success/blocked stack twice.
+/// `Success` and `Blocked` record the terminal signal, then run their stack
+/// **exactly once**. If that stack terminates with `StackControl::Error`, the
+/// run is downgraded to `Failure`: the guard's terminal signal is re-designated
+/// to `Failure` and the `Failure` event's stack runs. Actions that ran before
+/// the `error` directive keep their effects — items run in order, so an
+/// `error` later in the stack cannot un-fire them. Otherwise the
+/// success/blocked signal stays terminal. This preserves the rule that an
+/// explicit `error` in a success/blocked stack downgrades the run, without
+/// running the success/blocked stack twice.
 /// Result of running a terminal lifecycle event via [`execute_terminal_event`].
 #[derive(Default)]
 pub(super) struct TerminalEventOutcome {
@@ -53,9 +50,8 @@ pub(super) fn execute_terminal_event(
     loop_start: std::time::Instant,
 ) -> TerminalEventOutcome {
     if matches!(signal, LifecycleSignal::Success | LifecycleSignal::Blocked) {
-        // Take the terminal slot and fire the top-level communication FIRST
-        // (before the stack), per the spec's top-level-before-stack contract.
-        // If the slot was already taken by another terminal signal, do nothing.
+        // Take the terminal slot. If another terminal signal already took it,
+        // do nothing.
         if !guard.record_event_emission(signal) {
             return TerminalEventOutcome::default();
         }
@@ -67,8 +63,6 @@ pub(super) fn execute_terminal_event(
         } else {
             "blocked"
         };
-        // The top-level communication and the stack are one event, so they
-        // share one context and therefore one `current` observation.
         let outcome = {
             let timing = capture_lifecycle_timing(loop_start);
             let ctx = build_lifecycle_stack_context_for_materialized(
@@ -86,36 +80,16 @@ pub(super) fn execute_terminal_event(
                 err,
                 Some(&timing),
             );
-            // A raised top-level interpolation fails the event closed before
-            // its stack runs (mirroring `StackExecutionContext::execute_event`):
-            // report it as the event's evaluation error so the caller halts the
-            // run.
-            if let Some(info) = ctx.emit_top_level_for_signal(guard.config()) {
-                return TerminalEventOutcome {
-                    outcome: LifecycleEventOutcome {
-                        evaluation_error: Some(info),
-                        ..Default::default()
-                    },
-                    downgrade_err: None,
-                    effective_event: event_name,
-                };
-            }
-            // Now run the success/blocked stack exactly once.
-            let mut ctx = ctx;
-            if !guard.start_emitted() {
-                ctx.shell_runner = &claudine::composition::lifecycle_executor::DisabledShellRunner;
-            }
-            ctx.execute_stack_for_signal(guard.config())
+            guard.run_event_stack(signal, &ctx)
         };
         if let Some(StackControl::Error { reason }) = outcome.control.as_ref() {
             // The stack downgraded the run. Re-designate the already-recorded
             // terminal signal to `Failure` (keeping `terminal_emitted` true so
             // the later `finalize` still fires) and run the `failure` event's
-            // top-level + stack directly. We must NOT call
-            // `record_event_emission(Failure)` — the terminal slot is already
-            // taken — so the failure event is run via a hand-built context.
-            // The already-fired success/blocked top-level communication is
-            // intentionally preserved.
+            // stack directly. We must NOT call `record_event_emission(Failure)`
+            // — the terminal slot is already taken — so the failure event is
+            // run via a hand-built context. Actions that ran before the
+            // `error` directive keep their effects.
             guard.redesignate_terminal_to_failure();
             // A reasonless `error` gets the same default message as one raised
             // from `start`, so `err.msg` and the rendered error never go blank.
@@ -164,7 +138,7 @@ pub(super) fn execute_terminal_event(
     }
 }
 
-/// Run the `Failure` event (top-level communication + stack) when a
+/// Run the `Failure` event's stack when a
 /// success/blocked stack downgraded the run via an explicit `error()`.
 ///
 /// The terminal slot was already taken by the success/blocked signal (and
@@ -202,7 +176,7 @@ pub(super) fn run_failure_event_for_downgrade(
     guard.run_event_stack(LifecycleSignal::Failure, &ctx)
 }
 
-/// Run one lifecycle event (top-level + stack), recording emission state in
+/// Run one lifecycle event's stack, recording emission state in
 /// `guard` and returning the event outcome.
 ///
 /// The helper is careful to release the mutable borrow used for state recording
@@ -273,6 +247,7 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         .unwrap_or_else(|| EMPTY_FRONTMATTER.get_or_init(serde_json::Map::new));
     let base_dir = source_path.parent().or(repo_root);
     StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter: fm_map,
@@ -293,12 +268,18 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
             .as_ref()
             .map(|epoch| epoch.current_authority().memoized()),
         group: None,
+        loop_values: materialized.loop_values.as_ref(),
         base_dir,
         ctx_base_dir: launch_area,
         prepared_context,
         file_resolution_context: &materialized.file_resolution_context,
         effect_engine,
-        shell_runner: &SystemShellRunner,
+        // The materialized document's `shell` actions start from its own
+        // environment.
+        shell_runner: materialized
+            .document_epoch
+            .as_ref()
+            .map_or(&SystemShellRunner as &dyn claudine::composition::ShellRunner, |epoch| epoch.shell_runner()),
         emitter,
         term,
         source_path,
@@ -315,19 +296,11 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
 /// and `finalize` see the entry this run produced, while `initialize`/`start`
 /// (and `failure`, which never reaches here) see only prior entries.
 ///
-/// The entry is published to the per-attempt live cell as well, so an
-/// event-time `{{ last(outputs) }}` resolves against the same array a later
-/// composition will be handed.
+/// Event-time `seq.outputs` and later composition both read this runtime
+/// cell; no generated output property is published into frontmatter.
 pub(super) fn commit_run_output(materialized: &MaterializedHarnessPrompt, stdout: &str) {
     materialized.runtime_state.append_output(stdout);
-    materialized
-        .live_frontmatter
-        .lock()
-        .expect("live frontmatter mutex poisoned")
-        .insert(
-        claudine::composition::OUTPUTS_KEY.to_string(),
-        materialized.runtime_state.outputs_value(),
-    );
+
 }
 
 /// Capture the lifecycle stack-only `timing` global for an event.

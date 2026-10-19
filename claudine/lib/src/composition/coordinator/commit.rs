@@ -79,7 +79,9 @@ impl std::error::Error for ProxyCommitError {
 /// Resolve and commit a proxy using the invocation's immutable file context.
 ///
 /// Proxy resolution cannot re-read process CWD, HOME, environment, or
-/// repository topology: every input comes from `request_context`.
+/// repository topology: every input comes from `request_context`, which is the
+/// *source* document's, so the source's environment selects the target. The
+/// target then captures its own environment when its owner enters it.
 pub fn commit_proxy(
     ledger: &mut RunLedger,
     request: EvaluatedProxyRequest,
@@ -106,7 +108,7 @@ fn proxy_resolution_error(
             context: Box::new(crate::composition::FileReferenceContext {
                 source_path: source_path.to_path_buf(),
                 event: Some(event.to_string()),
-                property: format!("{event}.stack[*].proxy"),
+                property: format!("{event}[*].proxy"),
                 reference: target.to_string(),
                 hint: PROXY_TARGET_HINT.to_string(),
             }),
@@ -121,6 +123,18 @@ fn commit_resolved_proxy(
     source_path: PathBuf,
     resolved: PathBuf,
 ) -> Result<ProxyHandoff, ProxyCommitError> {
+    // A handoff to a document with an active `prep` call on this branch closes
+    // the same cycle a call to it would.
+    if crate::composition::lifecycle::prep::proxy_reaches_an_active_caller(&resolved) {
+        let mut chain = crate::composition::lifecycle::prep::active_chain();
+        chain.extend(ledger.chain().iter().cloned());
+        return Err(ProxyCommitError::Rejected(CompositionError::LifecycleProxyCycle {
+            source_path,
+            target: request.target().to_string(),
+            chain: chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+            limit: crate::composition::MAX_PROXY_HOPS,
+        }));
+    }
     // Bind before matching so the `LedgerMut` temporary is dropped here: the
     // rejection arm below needs to read the chain back off the ledger.
     let decision = ledger

@@ -25,7 +25,7 @@ fn assert_lifecycle_eval_error(
     }
 }
 
-/// Pre-launch: a `blocked.stack` `when:` raise must surface as a typed
+/// Pre-launch: a `blocked` stack `when:` raise must surface as a typed
 /// evaluation error naming `blocked`, and the helper must still fire the
 /// `failure` and `finalize` stacks (with the evaluation error as `err`) by
 /// redesignating the already-taken terminal slot. Without the redesignate
@@ -34,21 +34,9 @@ fn assert_lifecycle_eval_error(
 #[test]
 fn emit_blocked_finalize_pre_launch_blocked_raise_surfaces_failure_and_finalize() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "never"}}
-            ]
-        },
-        "failure": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "failure-ran"]}}
-            ]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "finalize-ran"]}}
-            ]
-        }
+        "blocked": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "failure": [{"when": "err", "then": [{"append_line": ["events.log", "failure-ran"]}]}],
+        "finalize": [{"when": "err", "then": [{"append_line": ["events.log", "finalize-ran"]}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -101,23 +89,15 @@ fn emit_blocked_finalize_pre_launch_blocked_raise_surfaces_failure_and_finalize(
 }
 
 /// Post-launch: the helper selects `Failure` as the terminal signal. A
-/// `failure.stack` `when:` raise surfaces as a typed evaluation error
+/// `failure` stack `when:` raise surfaces as a typed evaluation error
 /// naming `failure`, and the `finalize` stack still fires with the
 /// evaluation error as `err`. Failure is already terminal, so no
 /// redesignation is needed.
 #[test]
 fn emit_blocked_finalize_post_launch_failure_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "never"}}
-            ]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "finalize-ran"]}}
-            ]
-        }
+        "failure": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "finalize": [{"when": "err", "then": [{"append_line": ["events.log", "finalize-ran"]}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -162,20 +142,14 @@ fn emit_blocked_finalize_post_launch_failure_raise_surfaces_finalize() {
     );
 }
 
-/// A `finalize.stack` raise surfaces as a typed evaluation error naming
+/// A `finalize` stack raise surfaces as a typed evaluation error naming
 /// `finalize`. The helper must not re-enter finalize, and the (already
 /// fired) blocked stack must not fire a second time.
 #[test]
 fn emit_blocked_finalize_finalize_raise_surfaces_without_reentry() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [{"action": {"append_line": ["events.log", "blocked-ran"]}}]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "never"}}
-            ]
-        }
+        "blocked": [{"append_line": ["events.log", "blocked-ran"]}],
+        "finalize": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -224,13 +198,7 @@ fn emit_blocked_finalize_finalize_raise_surfaces_without_reentry() {
 /// where the raise occurred.
 #[test]
 fn missing_source_branch_blocked_raise_surfaces_not_swallowed() {
-    let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "never"}}
-            ]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"blocked": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -285,14 +253,8 @@ fn missing_source_branch_blocked_raise_surfaces_not_swallowed() {
 #[test]
 fn shell_audit_branch_finalize_raise_surfaces_not_swallowed() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [{"action": {"append_line": ["events.log", "blocked-ran"]}}]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "never"}}
-            ]
-        }
+        "blocked": [{"append_line": ["events.log", "blocked-ran"]}],
+        "finalize": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -345,22 +307,14 @@ fn shell_audit_branch_finalize_raise_surfaces_not_swallowed() {
     );
 }
 
-/// `emit_failure_finalize_with_err` — a `failure.stack` raise surfaces as
+/// `emit_failure_finalize_with_err` — a `failure` stack raise surfaces as
 /// a typed evaluation error naming `failure`, and the `finalize` stack
 /// still fires with the evaluation error as `err`.
 #[test]
 fn emit_failure_finalize_failure_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "never"}}
-            ]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "finalize-ran"]}}
-            ]
-        }
+        "failure": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "finalize": [{"when": "err", "then": [{"append_line": ["events.log", "finalize-ran"]}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -401,20 +355,14 @@ fn emit_failure_finalize_failure_raise_surfaces_finalize() {
     );
 }
 
-/// `emit_failure_finalize_with_err` — a `finalize.stack` raise surfaces as
+/// `emit_failure_finalize_with_err` — a `finalize` stack raise surfaces as
 /// a typed evaluation error naming `finalize`. The failure stack (already
 /// fired) must not fire a second time.
 #[test]
 fn emit_failure_finalize_finalize_raise_surfaces_without_reentry() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "never"}}
-            ]
-        }
+        "failure": [{"append_line": ["events.log", "failure-ran"]}],
+        "finalize": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -461,12 +409,8 @@ fn emit_failure_finalize_finalize_raise_surfaces_without_reentry() {
 #[test]
 fn emit_failure_finalize_both_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
-        "finalize": {
-            "stack": [{"when": "also_missing() == true", "action": {"stderr": "never"}}]
-        }
+        "failure": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "finalize": [{"when": "also_missing() == true", "then": [{"stderr": "never"}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -506,12 +450,8 @@ fn emit_failure_finalize_both_raise_surfaces_finalize() {
 #[test]
 fn success_raise_then_finalize_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
-        "success": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
-        "finalize": {
-            "stack": [{"when": "also_missing() == true", "action": {"stderr": "never"}}]
-        }
+        "success": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "finalize": [{"when": "also_missing() == true", "then": [{"stderr": "never"}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -570,20 +510,18 @@ fn success_raise_then_finalize_raise_surfaces_finalize() {
 /// Precedence: a setup-phase `initialize`/`start` raise followed by a
 /// `failure.when` raise must surface `failure`, and `finalize` must
 /// receive the FAILURE evaluation error as `err` (not the original). The
-/// `finalize.stack` interpolates `{{ err.event }}` so we can prove it
+/// `finalize` stack interpolates `{{ err.event }}` so we can prove it
 /// observed the failure raise.
 #[test]
 fn setup_raise_then_failure_raise_surfaces_failure_and_threads_into_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [{"when": "failure_typo() == true", "action": {"stderr": "never"}}]
-        },
-        "finalize": {
-            "stack": [{
+        "failure": [{"when": "failure_typo() == true", "then": [{"stderr": "never"}]}],
+        "finalize": [
+            {
                 "when": "err",
-                "action": {"append_line": ["events.log", "finalize-saw-{{err.variant}}"]}
-            }]
-        }
+                "then": [{"append_line": ["events.log", "finalize-saw-{{err.variant}}"]}]
+            }
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -660,15 +598,9 @@ fn setup_raise_then_failure_raise_surfaces_failure_and_threads_into_finalize() {
 #[test]
 fn emit_blocked_finalize_blocked_raise_then_finalize_raise_surfaces_finalize() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
-        "failure": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"when": "also_missing() == true", "action": {"stderr": "never"}}]
-        }
+        "blocked": [{"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "failure": [{"when": "err", "then": [{"append_line": ["events.log", "failure-ran"]}]}],
+        "finalize": [{"when": "also_missing() == true", "then": [{"stderr": "never"}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -713,12 +645,8 @@ fn emit_blocked_finalize_blocked_raise_then_finalize_raise_surfaces_finalize() {
 #[test]
 fn emit_blocked_finalize_returns_none_when_no_evaluation_error() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [{"action": {"append_line": ["events.log", "blocked-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "blocked": [{"append_line": ["events.log", "blocked-ran"]}],
+        "finalize": [{"append_line": ["events.log", "finalize-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -766,14 +694,9 @@ fn emit_blocked_finalize_returns_none_when_no_evaluation_error() {
 #[test]
 fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() {
     let fx = fixture(serde_json::json!({
-        "initialize": {
-            "stack": [{"action": {"error": "target refused"}}]
-        },
-        "failure": {
-            "stderr": "fail",
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
-        "finalize": { "stderr": "final" }
+        "initialize": [{"error": "target refused"}],
+        "failure": [{"stderr": "fail"}, {"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "finalize": {"stderr": "final"}
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -828,13 +751,11 @@ fn target_initialize_error_with_failure_raise_surfaces_failure_evaluation_error(
 fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_error() {
     let fx = fixture(serde_json::json!({
         // Creating a directory over a file raises a non-shell dispatch error.
-        "initialize": {
-            "stack": [{"action": {"ensure_dir": "prompt.md"}}]
-        },
-        "failure": {
-            "stderr": "fail",
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
+        "initialize": [{"ensure_dir": "prompt.md"}],
+        "failure": [
+            {"stderr": "fail"},
+            {"when": "missing_root() == true", "then": [{"stderr": "never"}]}
+        ],
         "finalize": { "stderr": "final" }
     }));
     std::fs::write(&fx.source_path, "existing file").unwrap();
@@ -885,7 +806,7 @@ fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_er
 /// Start `routes_to_failure` catch path (Location G): when `failure.when`
 /// raises after a start action error, the surfaced error must name
 /// `failure`, and finalize must receive the FAILURE evaluation error as
-/// `err` (not the original action error) so a `finalize.stack` can branch
+/// `err` (not the original action error) so a `finalize` stack can branch
 /// on the failure raise. Simulates the inline `run_harness_loop` code
 /// path's primitives directly (record_event_emission + run_event_stack +
 /// run_lifecycle_event) since the surrounding function is impractical to
@@ -893,20 +814,14 @@ fn target_initialize_routes_to_failure_with_raise_surfaces_failure_evaluation_er
 #[test]
 fn start_routes_to_failure_with_raise_surfaces_failure_and_threads_into_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stderr": "fail",
-            "stack": [{
-                "when": "missing_root() == true",
-                "action": {"stderr": "never"}
-            }]
-        },
-        "finalize": {
-            "stderr": "final",
-            "stack": [{
+        "failure": [{"stderr": "fail"}, {"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "finalize": [
+            {"stderr": "final"},
+            {
                 "when": "err",
-                "action": {"append_line": ["events.log", "finalize-saw-{{err.variant}}"]}
-            }]
-        }
+                "then": [{"append_line": ["events.log", "finalize-saw-{{err.variant}}"]}]
+            }
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -977,10 +892,10 @@ fn start_routes_to_failure_with_raise_surfaces_failure_and_threads_into_finalize
 #[test]
 fn terminal_control_abort_with_finalize_raise_surfaces_finalize_evaluation_error() {
     let fx = fixture(serde_json::json!({
-        "finalize": {
-            "stderr": "final",
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        }
+        "finalize": [
+            {"stderr": "final"},
+            {"when": "missing_root() == true", "then": [{"stderr": "never"}]}
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -1046,14 +961,8 @@ fn terminal_control_abort_with_finalize_raise_surfaces_finalize_evaluation_error
 #[test]
 fn interrupt_failure_when_raise_surfaces_failure_and_runs_finalize_once() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stderr": "fail",
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
-        "finalize": {
-            "stderr": "final",
-            "stack": [{"action": {"append_line": ["events.log", "finalized"]}}]
-        }
+        "failure": [{"stderr": "fail"}, {"when": "missing_root() == true", "then": [{"stderr": "never"}]}],
+        "finalize": [{"stderr": "final"}, {"append_line": ["events.log", "finalized"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -1125,11 +1034,11 @@ fn interrupt_failure_when_raise_surfaces_failure_and_runs_finalize_once() {
 #[test]
 fn interrupt_finalize_when_raise_surfaces_finalize_evaluation_error() {
     let fx = fixture(serde_json::json!({
-        "failure": { "stderr": "fail" },
-        "finalize": {
-            "stderr": "final",
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        }
+        "failure": {"stderr": "fail"},
+        "finalize": [
+            {"stderr": "final"},
+            {"when": "missing_root() == true", "then": [{"stderr": "never"}]}
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -1216,10 +1125,10 @@ fn interrupt_finalize_when_raise_surfaces_finalize_evaluation_error() {
 #[test]
 fn start_control_abort_with_finalize_raise_surfaces_finalize_evaluation_error() {
     let fx = fixture(serde_json::json!({
-        "finalize": {
-            "stderr": "final",
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "never"}}]
-        }
+        "finalize": [
+            {"stderr": "final"},
+            {"when": "missing_root() == true", "then": [{"stderr": "never"}]}
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {

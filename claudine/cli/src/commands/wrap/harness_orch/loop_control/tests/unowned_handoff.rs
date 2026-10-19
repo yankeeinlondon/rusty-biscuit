@@ -27,7 +27,7 @@ fn request_to(source: &Path, target: &Path) -> claudine::composition::EvaluatedP
         indexmap::IndexMap::new(),
         claudine::composition::ProxyProvenance::new(
             source.to_path_buf(),
-            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 1),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, claudine::composition::LifecyclePath::root("failure").index(1).field("proxy")),
             vec![source.to_path_buf()],
         ),
     )
@@ -38,9 +38,9 @@ fn request_to(source: &Path, target: &Path) -> claudine::composition::EvaluatedP
 /// than a bare count.
 fn routing_fixture() -> Fixture {
     fixture(serde_json::json!({
-        "failure": {"stack": [{"action": {"append_line": ["events.log", "failure"]}}]},
-        "blocked": {"stack": [{"action": {"append_line": ["events.log", "blocked"]}}]},
-        "finalize": {"stack": [{"action": {"append_line": ["events.log", "finalize"]}}]},
+        "failure": [{"append_line": ["events.log", "failure"]}],
+        "blocked": [{"append_line": ["events.log", "blocked"]}],
+        "finalize": [{"append_line": ["events.log", "finalize"]}]
     }))
 }
 
@@ -112,7 +112,7 @@ fn an_unowned_handoff_is_refused_with_a_typed_diagnostic() {
     };
     assert_eq!(source_path, &fx.source_path);
     assert_eq!(
-        property, "failure.stack[0].action[1]",
+        property, "failure[1].proxy",
         "the diagnostic points at the `proxy` action the user authored",
     );
     assert_eq!(named_target, &target.display().to_string());

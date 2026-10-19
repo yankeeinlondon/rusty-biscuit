@@ -88,13 +88,7 @@ fn scan_returns_none_for_clean_frontmatter() {
 
 #[test]
 fn err_inside_array_literal_when_clause_is_rejected() {
-    let fm = json!({
-        "start": {
-            "stack": [
-                {"when": "length([err.msg]) > 0", "action": {"say": "leaked"}}
-            ]
-        }
-    });
+    let fm = json!({ "start": [{ "when": "length([err.msg]) > 0", "then": [{ "say": "leaked" }] }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     assert!(
@@ -105,13 +99,7 @@ fn err_inside_array_literal_when_clause_is_rejected() {
 
 #[test]
 fn err_inside_object_literal_value_when_clause_is_rejected() {
-    let fm = json!({
-        "start": {
-            "stack": [
-                {"when": "{ reason: err.msg }", "action": {"say": "leaked"}}
-            ]
-        }
-    });
+    let fm = json!({ "start": [{ "when": "{ reason: err.msg }", "then": [{ "say": "leaked" }] }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     assert!(
@@ -124,26 +112,14 @@ fn err_inside_object_literal_value_when_clause_is_rejected() {
 fn err_span_inside_object_literal_key_is_text_not_a_read() {
     // An object key is authored text that Darkmatter never evaluates, so a
     // `{{ err.msg }}` spelled inside one reads nothing.
-    let fm = json!({
-        "start": {
-            "stack": [
-                {"when": "{ \"{{ err.msg }}\": 1 }", "action": {"say": "fine"}}
-            ]
-        }
-    });
+    let fm = json!({ "start": [{ "when": "{ \"{{ err.msg }}\": 1 }", "then": [{ "say": "fine" }] }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
 
 #[test]
-fn doc_err_inside_container_literal_is_still_allowed() {
-    let fm = json!({
-        "start": {
-            "stack": [
-                {"when": "{ err: doc.err }", "action": {"say": "fine"}}
-            ]
-        }
-    });
+fn fm_err_inside_container_literal_is_still_allowed() {
+    let fm = json!({ "start": [{ "when": "{ err: fm.err }", "then": [{ "say": "fine" }] }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }

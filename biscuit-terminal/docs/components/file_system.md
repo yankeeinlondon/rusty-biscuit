@@ -192,6 +192,15 @@ let _ = icons::unicode::file::SYMLINK; // @
 
 ### Filtering and Root Customization Examples
 
+With `.with_file_links()`, entries receive file hyperlinks. The leading root
+line remains an unlinked context label, including any dimmed prefix.
+
+The render-tree projection preserves Nerd Font and Unicode icon variants.
+Terminal rendering chooses extension-specific Nerd Font icons when
+`Terminal::is_nerd_font` is `Some(true)`, including a Markdown icon for `.md`
+files. Other terminals, browsers, and Markdown fallbacks use Unicode icons.
+`FileSystem::render_markdown()` omits icons for plain link lists.
+
 ```rust
 use biscuit_terminal::prelude::*;
 

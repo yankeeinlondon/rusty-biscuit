@@ -24,7 +24,7 @@ fn sequence_resolves_external_file_via_relative_path() {
     fs::write(&steps_yaml, "sequence:\n  - alpha\n  - beta\n").unwrap();
 
     let md_file = fixture.cwd().join("seq.md");
-    fs::write(&md_file, "---\nsequence: steps.yaml\n---\nStep {{state}}\n").unwrap();
+    fs::write(&md_file, "---\nsequence: steps.yaml\n---\nStep {{seq}}\n").unwrap();
 
     write_executable(
         &fixture.bin_dir().join("goose"),
@@ -78,7 +78,7 @@ fn sequence_resolves_external_file_via_magic_reference() {
     let md_file = md_dir.join("seq.md");
     fs::write(
         &md_file,
-        "---\nsequence: '@fixtures/steps.yaml'\n---\nStep {{state}}\n",
+        "---\nsequence: '@fixtures/steps.yaml'\n---\nStep {{seq}}\n",
     )
     .unwrap();
 
@@ -148,13 +148,13 @@ fn sequence_magic_reference_follows_launch_scope_and_relative_stays_source_ancho
     let magic_md = md_dir.join("seq-magic.md");
     fs::write(
         &magic_md,
-        "---\nsequence: '@fixtures/steps.yaml'\n---\nStep {{state}}\n",
+        "---\nsequence: '@fixtures/steps.yaml'\n---\nStep {{seq}}\n",
     )
     .unwrap();
     let relative_md = md_dir.join("seq-relative.md");
     fs::write(
         &relative_md,
-        "---\nsequence: './fixtures/steps.yaml'\n---\nStep {{state}}\n",
+        "---\nsequence: './fixtures/steps.yaml'\n---\nStep {{seq}}\n",
     )
     .unwrap();
 

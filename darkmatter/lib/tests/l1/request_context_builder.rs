@@ -245,3 +245,55 @@ fn with_context_rejects_an_invalid_context() {
         "{error:?}"
     );
 }
+
+/// Replacing only the environment of a built context is enough to enter a
+/// second document under another map: the first document and its
+/// transclusion read map A, the second document reads map B through both
+/// `env.*` and a `{{VAR}}` file reference, and every other anchor of the
+/// context is unchanged by the replacement.
+#[test]
+fn an_environment_only_replacement_enters_a_document_under_another_map() {
+    const NAME: &str = "DARKMATTER_DOCUMENT_ENVIRONMENT_PROBE";
+    assert!(std::env::var_os(NAME).is_none(), "the process must not carry {NAME}");
+    let (_temp, root) = canonical_temp();
+    let repo = repository(&root);
+    write(&root.join("fixtures-a").join("target.md"), "# Title A\n");
+    write(&root.join("fixtures-b").join("target.md"), "# Title B\n");
+    let work = repo.join("work");
+    let body = format!(
+        "value=[{{{{ env.{NAME} }}}}] title=[{{{{ markdown_title(\"{{{{{NAME}}}}}/target.md\") }}}}]\n"
+    );
+    write(&work.join("first.md"), &format!("{body}\n::file ./child.md\n"));
+    write(&work.join("child.md"), &format!("child=[{{{{ env.{NAME} }}}}]\n"));
+    write(&work.join("second.md"), &body);
+    let map = |dir: &str| {
+        HashMap::from([(NAME.to_string(), biscuit_file::to_portable_string(&root.join(dir)))])
+    };
+    let home = root.join("home");
+    let snapshot = RequestSnapshot::new(&work).with_home(Some(home.clone())).with_env(map("fixtures-a"));
+
+    let first = ComposeRequest::prepare(ComposeOptions::new().with_source_file(work.join("first.md")), &snapshot)
+        .unwrap();
+    let (composed, _) = Markdown::try_from(work.join("first.md").as_path()).unwrap().compose_with(&first).unwrap();
+    let a = biscuit_file::to_portable_string(&root.join("fixtures-a"));
+    let content = composed.content();
+    assert!(content.contains(&format!("value=[{a}] title=[Title A]")), "{content}");
+    assert!(content.contains(&format!("child=[{a}]")), "the transclusion reads map A: {content}");
+
+    let context_b = first.resolution_context().clone().with_env(map("fixtures-b"));
+    // Restoring map A gives back the first context exactly: the environment
+    // is the only thing the replacement changed.
+    assert_eq!(&context_b.clone().with_env(map("fixtures-a")), first.resolution_context());
+    assert_eq!(context_b.home_dir(), Some(home.as_path()));
+    assert_eq!(context_b.repository_root(), Some(repo.as_path()));
+    assert_eq!(context_b.launch_magic_scope(), first.resolution_context().launch_magic_scope());
+    let second =
+        ComposeRequest::with_context(ComposeOptions::new().with_source_file(work.join("second.md")), context_b)
+            .unwrap();
+    let (composed, _) = Markdown::try_from(work.join("second.md").as_path()).unwrap().compose_with(&second).unwrap();
+    let b = biscuit_file::to_portable_string(&root.join("fixtures-b"));
+    assert!(composed.content().contains(&format!("value=[{b}] title=[Title B]")), "{}", composed.content());
+    assert_eq!(second.options().context().env(), &map("fixtures-b"));
+    // The first request is untouched by entering the second document.
+    assert_eq!(first.resolution_context().env(), &map("fixtures-a"));
+}

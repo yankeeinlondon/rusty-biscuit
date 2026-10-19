@@ -492,6 +492,7 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
                 max_attempts: 1,
                 backoff: RetryBackoff::Fixed,
                 delay: "0s".to_string(),
+                overlay: indexmap::IndexMap::new(),
             },
             false,
             false,
@@ -510,6 +511,7 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
                 max_attempts: 1,
                 backoff: RetryBackoff::Fixed,
                 delay: "0s".to_string(),
+                overlay: indexmap::IndexMap::new(),
             },
             true,
             false,
@@ -556,7 +558,10 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
             StackControl::Proxy {
                 target: "next.md".to_string(),
                 overlay: indexmap::IndexMap::new(),
-                location: crate::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+                location: crate::composition::ActionLocation::new(
+                    LifecycleSignal::Failure,
+                    crate::composition::LifecyclePath::root("failure").index(0).field("proxy"),
+                ),
             },
             true,
             false,
@@ -573,7 +578,10 @@ fn transition_control_matrix_covers_preflight_and_harness_controls() {
             StackControl::Proxy {
                 target: "next.md".to_string(),
                 overlay: indexmap::IndexMap::new(),
-                location: crate::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+                location: crate::composition::ActionLocation::new(
+                    LifecycleSignal::Failure,
+                    crate::composition::LifecyclePath::root("failure").index(0).field("proxy"),
+                ),
             },
             true,
             false,

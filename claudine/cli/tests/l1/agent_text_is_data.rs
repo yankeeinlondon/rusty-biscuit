@@ -69,7 +69,7 @@ fn assert_no_shell_approval(stderr: &str) {
 }
 
 // ============================================================================
-// Row 1: captured agent output in a loop (`_loop_last_output`)
+// Row 1: captured agent output in a loop (`loop.last_output`)
 // ============================================================================
 
 fn loop_carries_output_raw(agent_text: &str) {
@@ -80,7 +80,7 @@ fn loop_carries_output_raw(agent_text: &str) {
     let md = fixture.cwd().join("loop.md");
     fs::write(
         &md,
-        "---\ntitle: t\ncounter: 0\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\n---\nPrevious: [{{ _loop_last_output }}]\n",
+        "---\ntitle: t\ncounter: 0\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\n---\nPrevious: [{{ loop.last_output }}]\n",
     )
     .unwrap();
 
@@ -126,7 +126,7 @@ fn loop_predicate_reads_the_raw_output() {
     fs::write(
         &md,
         format!(
-            "---\ntitle: t\nloop:\n  max: 3\n  until: 'length(_loop_last_output) == {}'\n---\nGo.\n",
+            "---\ntitle: t\nloop:\n  max: 3\n  until: 'length(loop.last_output) == {}'\n---\nGo.\n",
             agent_text.chars().count()
         ),
     )
@@ -156,13 +156,13 @@ fn sequence_outputs_with_template_syntax_stay_raw() {
     fs::write(fixture.cwd().join("producer.md"), "Produce.\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader\n---\nEntry: [{{ doc.entry }}]\nLast: [{{ last(outputs) }}]\n",
+        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nLast: [{{ last(seq.outputs) }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - name: alpha\n    prompt: producer.md\n  - name: beta\n    prompt: reader.md\n    params:\n      entry: \"{{ last(outputs) }}\"\n---\nBody.\n",
+        "---\nsequence:\n  - name: alpha\n    prompt: producer.md\n  - name: beta\n    prompt: reader.md\n    with:\n      entry: \"{{ last(seq.outputs) }}\"\n---\nBody.\n",
     )
     .unwrap();
 
@@ -185,7 +185,7 @@ fn sequence_parallel_group_nested_output_stays_raw() {
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' '{{ ctx.repo }}'\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader\n---\nEntry: [{{ doc.entry }}]\nNested: [{{ last(outputs)[0] }}]\n",
+        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nNested: [{{ last(seq.outputs).templated }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -196,7 +196,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: templated
           shell: "/bin/sh emit.sh"
@@ -204,8 +203,8 @@ sequence:
           shell: "printf 'plain\n'"
   - name: beta
     prompt: reader.md
-    params:
-      entry: "{{ last(outputs)[0] }}"
+    with:
+      entry: "{{ last(seq.outputs).templated }}"
 ---
 Body.
 "#,
@@ -536,7 +535,7 @@ fn lifecycle_stack_message_from_agent_written_file_is_sent_verbatim() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nsuccess:\n  stack:\n    - action: {info: \"agent says: {{ frontmatter('log.md', 'message_to_agent') }}\"}\n---\nBody.\n",
+        "---\ntitle: t\nsuccess:\n    - {info: \"agent says: {{ frontmatter('log.md', 'message_to_agent') }}\"}\n---\nBody.\n",
     )
     .unwrap();
 
@@ -562,7 +561,7 @@ fn lifecycle_set_from_agent_data_stays_inert_on_next_preparation() {
     let md = fixture.cwd().join("loop.md");
     fs::write(
         &md,
-        "---\ntitle: authored-title\ncarried: none\ncounter: 0\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\nsuccess:\n  stack:\n    - action: {set: {carried: \"{{ frontmatter('log.md', 'message_to_agent') }}\"}}\n---\nCarried: [{{ carried }}]\n",
+        "---\ntitle: authored-title\ncarried: none\ncounter: 0\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\nsuccess:\n    - {set: {carried: \"{{ frontmatter('log.md', 'message_to_agent') }}\"}}\n---\nCarried: [{{ carried }}]\n",
     )
     .unwrap();
 
@@ -590,7 +589,7 @@ fn lifecycle_proxy_with_from_agent_data_stays_inert_in_target() {
     let md = fixture.cwd().join("source.md");
     fs::write(
         &md,
-        "---\ntitle: t\nsuccess:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {note: \"{{ frontmatter('log.md', 'message_to_agent') }}\"}}\n---\nSource.\n",
+        "---\ntitle: t\nsuccess:\n    - {proxy: {target: './target.md', with: {note: \"{{ frontmatter('log.md', 'message_to_agent') }}\"}}}\n---\nSource.\n",
     )
     .unwrap();
 
@@ -625,7 +624,7 @@ fn initialize_proxy_with_from_file_data_stays_inert_in_a_looping_target() {
     let md = fixture.cwd().join("router.md");
     fs::write(
         &md,
-        "---\ntitle: t\ninitialize:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {note: \"{{ frontmatter('data.md', 'v') }}\", cmd: \"{{ frontmatter('data.md', 'c') }}\"}}\n---\nRouter.\n",
+        "---\ntitle: t\ninitialize:\n    - {proxy: {target: './target.md', with: {note: \"{{ frontmatter('data.md', 'v') }}\", cmd: \"{{ frontmatter('data.md', 'c') }}\"}}}\n---\nRouter.\n",
     )
     .unwrap();
 
@@ -670,13 +669,13 @@ fn lifecycle_proxy_with_from_agent_data_stays_inert_on_a_retry() {
     );
     fs::write(
         fixture.cwd().join("target.md"),
-        "---\ntitle: target-title\nnote: none\nfailure:\n  stack:\n    - action: {retry: 1}\n---\nNote: [{{ note }}]\n",
+        "---\ntitle: target-title\nnote: none\nfailure:\n    - {retry: 1}\n---\nNote: [{{ note }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("source.md");
     fs::write(
         &md,
-        "---\ntitle: t\nsuccess:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {note: \"{{ frontmatter('log.md', 'message_to_agent') }}\"}}\n---\nSource.\n",
+        "---\ntitle: t\nsuccess:\n    - {proxy: {target: './target.md', with: {note: \"{{ frontmatter('log.md', 'message_to_agent') }}\"}}}\n---\nSource.\n",
     )
     .unwrap();
 
@@ -709,7 +708,7 @@ fn lifecycle_shell_from_file_data_runs_approved_bytes() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nsuccess:\n  stack:\n    - action: {shell: \"printf '%s' '{{ frontmatter(\\\"data.md\\\", \\\"v\\\") }}' > out.txt\"}\n---\nBody.\n",
+        "---\ntitle: t\nsuccess:\n    - {shell: \"printf '%s' '{{ frontmatter(\\\"data.md\\\", \\\"v\\\") }}' > out.txt\"}\n---\nBody.\n",
     )
     .unwrap();
 
@@ -764,7 +763,7 @@ fn loop_action_result_is_not_reparsed_as_json() {
     let md = fixture.cwd().join("loop.md");
     fs::write(
         &md,
-        "---\ntitle: t\ncounter: 0\nflag: none\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\n    - op: set\n      prop: flag\n      value: \" {{ _loop_last_output }}\"\n---\nFlag: [{{ flag }}]\n",
+        "---\ntitle: t\ncounter: 0\nflag: none\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\n    - op: set\n      prop: flag\n      value: \" {{ loop.last_output }}\"\n---\nFlag: [{{ flag }}]\n",
     )
     .unwrap();
 
@@ -791,7 +790,7 @@ fn sequence_state_from_jsonl_item_stays_raw() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\ntitle: authored-title\nsequence: items.jsonl\n---\nNote: [{{ state.note }}]\n",
+        "---\ntitle: authored-title\nsequence: items.jsonl\n---\nNote: [{{ seq.note }}]\n",
     )
     .unwrap();
 
@@ -805,16 +804,16 @@ fn sequence_state_from_jsonl_item_stays_raw() {
     );
 }
 
-/// Row B12: group `variables:` and task `params:` evaluated from a prior
+/// Row B12: group `variables:` and task `with:` evaluated from a prior
 /// task's output reach the member prompt raw.
 #[test]
-fn task_params_and_group_variables_from_outputs_stay_raw() {
-    let fixture = CliProcessFixture::named("agent-text-params");
+fn task_with_and_group_variables_from_outputs_stay_raw() {
+    let fixture = CliProcessFixture::named("agent-text-with");
     counting_goose(&fixture, "", "ok");
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' 'see {{ title }}'\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader-title\n---\nGroup: [{{ group.prev }}]\nParam: [{{ doc.entry }}]\n",
+        "---\ntitle: reader-title\n---\nGroup: [{{ group.prev }}]\nParam: [{{ fm.entry }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -828,12 +827,12 @@ sequence:
     group:
       name: bundle
       variables:
-        prev: "{{ last(outputs) }}"
+        prev: "{{ last(seq.outputs) }}"
       tasks:
         - name: read
           prompt: reader.md
-          params:
-            entry: "{{ last(outputs) }}"
+          with:
+            entry: "{{ last(seq.outputs) }}"
 ---
 Body.
 "#,
@@ -863,7 +862,7 @@ fn set_frontmatter_argument_from_agent_data_is_not_reresolved() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: authored-title\nsuccess:\n  stack:\n    - action: {set_frontmatter: [\"state.md\", \"note\", \"{{ frontmatter('log.md', 'message_to_agent') }}\"]}\n---\nBody.\n",
+        "---\ntitle: authored-title\nsuccess:\n    - {set_frontmatter: [\"state.md\", \"note\", \"{{ frontmatter('log.md', 'message_to_agent') }}\"]}\n---\nBody.\n",
     )
     .unwrap();
 
@@ -901,7 +900,7 @@ fn set_frontmatter_persisted_agent_data_survives_next_preparation() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nnote: none\nsuccess:\n  stack:\n    - action: {set_frontmatter: [\"doc.md\", \"note\", \"{{ frontmatter('log.md', 'message_to_agent') }}\"]}\n---\nNote: [{{ note }}]\n",
+        "---\ntitle: t\nnote: none\nsuccess:\n    - {set_frontmatter: [\"doc.md\", \"note\", \"{{ frontmatter('log.md', 'message_to_agent') }}\"]}\n---\nNote: [{{ note }}]\n",
     )
     .unwrap();
 

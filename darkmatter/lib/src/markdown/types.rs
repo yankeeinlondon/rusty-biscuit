@@ -422,6 +422,31 @@ impl MarkdownError {
         None
     }
 
+    /// The read of a host global declared unavailable
+    /// ([`BindingError::Unavailable`](crate::markdown::compose::expression::BindingError::Unavailable))
+    /// somewhere in this error's cause chain, if any.
+    ///
+    /// The host forbade the read, so no tolerance a stage offers for ordinary
+    /// failures (a transclusion replaced by a notice) may absorb it.
+    pub fn unavailable_binding(
+        &self,
+    ) -> Option<&crate::markdown::compose::expression::UnavailableBinding> {
+        use crate::markdown::compose::expression::BindingError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let expression = error
+                .downcast_ref::<ExpressionError>()
+                .or_else(|| error.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
+            if let Some(ExpressionError::Binding(binding)) = expression
+                && let BindingError::Unavailable(read) = binding.as_ref()
+            {
+                return Some(read);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// The [`NotPreApproved`](crate::markdown::compose::ShellExpansionError::NotPreApproved)
     /// failure somewhere in this error's cause chain, if any.
     ///
@@ -439,6 +464,35 @@ impl MarkdownError {
                 .downcast_ref::<ShellExpansionError>()
                 .or_else(|| error.downcast_ref::<Box<ShellExpansionError>>().map(AsRef::as_ref));
             if let Some(shell @ ShellExpansionError::NotPreApproved { .. }) = shell {
+                return Some(shell);
+            }
+            current = error.source();
+        }
+        None
+    }
+
+    /// The shell authorization or input failure in this error's cause chain,
+    /// if any: a missing value, a command that must run as a template and is
+    /// not a valid one, a template value its type refuses, or a template
+    /// program that cannot run without an interpreter.
+    ///
+    /// These are not command failures, so no tolerance a stage offers for
+    /// ordinary failures (`when_error`, a transclusion notice, a nested
+    /// composition reported as an expression failure) may absorb them.
+    pub fn shell_input_violation(&self) -> Option<&crate::markdown::compose::ShellExpansionError> {
+        use crate::markdown::compose::ShellExpansionError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let shell = error
+                .downcast_ref::<ShellExpansionError>()
+                .or_else(|| error.downcast_ref::<Box<ShellExpansionError>>().map(AsRef::as_ref));
+            if let Some(
+                shell @ (ShellExpansionError::MissingValue { .. }
+                | ShellExpansionError::TemplateGrammar { .. }
+                | ShellExpansionError::TemplateValueRejected { .. }
+                | ShellExpansionError::TemplateTarget { .. }),
+            ) = shell
+            {
                 return Some(shell);
             }
             current = error.source();
@@ -609,9 +663,15 @@ impl BlockError for MarkdownError {
                 description,
                 // The preparation source is preserved for `Error::source()`
                 // programmatic recovery; the styled block renders `summary`
-                // and `problems` only.
-                source: _,
-            } => blocks::schema_validation_failed_block(path, problems, summary, description),
+                // and `problems`, and reads the source only for its hint.
+                source,
+            } => {
+                let hint = source
+                    .as_deref()
+                    .and_then(|source| source.downcast_ref::<crate::markdown::schemas::SchemaError>())
+                    .and_then(crate::markdown::schemas::SchemaError::preparation_hint);
+                blocks::schema_validation_failed_block(path, problems, summary, description, hint)
+            }
             MarkdownError::CallerFileClassificationChanged { property } => {
                 blocks::caller_file_classification_changed_block(property)
             }

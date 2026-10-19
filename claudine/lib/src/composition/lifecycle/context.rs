@@ -5,9 +5,9 @@
 //! declare them, and as what, is the binding catalog's policy
 //! ([`super::bindings`]); this module owns their values. Both are eager: they
 //! are already captured by the time the event fires. The late-binding *facts* —
-//! `current.<key>` and `current_env.<key>` — are not globals at all. They are
-//! Darkmatter reserved roots served by the request's `CurrentAuthority`, which
-//! the executor installs on the event's effective state (spec R30–R33).
+//! `current.<key>` — are not globals at all. They are a Darkmatter reserved
+//! root served by the request's `CurrentAuthority`, which the executor installs
+//! on the event's effective state (spec R30–R33).
 //!
 //! ## `err`
 //!
@@ -118,7 +118,8 @@ pub struct LifecycleErrorInfo {
 
     /// Why an event-time evaluation failed, recovered by downcasting the reported
     /// error itself to [`LifecycleExprError`](super::executor::LifecycleExprError)
-    /// (the source chain is not walked).
+    /// (the source chain is not walked), or set by the executor when it refuses
+    /// a directive it cannot run yet.
     /// Not projected into `err.*`.
     pub reason: LifecycleEvaluationReason,
 

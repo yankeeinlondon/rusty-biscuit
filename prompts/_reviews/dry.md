@@ -7,8 +7,7 @@ success:
     - when: file_exists(file)
       then:
         - stderr: "🍸  the DRY review `{{file}}` has completed (_{{frontmatter(file, 'recommendations')}} recommendations_)"
-    - when: "!file_exists(file)"
-      then:
+      else:
         - warn: "the review file -- {{ file }} -- was not created!"
 failure: 
     stderr: "💥  the DRY review for `{{file}}` failed to complete!"

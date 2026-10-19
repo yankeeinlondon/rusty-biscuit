@@ -11,8 +11,9 @@ timeout: 30m
 step_timeout: 12m
 show_system_prompt: false
 operation: commit
-agent: opencode
-model: minimax/MiniMax-M3
+agent: codex
+yolo: true
+model: gpt-6-luna
 resides_in: |-
     {{
         length(ctx.dirty_package_areas) == 1

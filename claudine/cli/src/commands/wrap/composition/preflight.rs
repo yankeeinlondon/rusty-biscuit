@@ -43,30 +43,29 @@ pub(super) enum PreflightBlockedOutcome {
     EvaluationError(CompositionError),
 }
 
-/// Run the `blocked` and `finalize` lifecycle events (top-level
-/// communication **and** typed stack) for a composition preflight failure.
+/// Run the `blocked` and `finalize` lifecycle stacks for a composition
+/// preflight failure.
 ///
 /// The spec requires a blocked iteration to reach `blocked` then `finalize`,
-/// each firing both its top-level communication surface and its typed stack
-/// (`spec.md:436`, `spec.md:650`, `spec.md:652`). Pre-flight failures
-/// (harness-plan parse, shell-approval denial, dry-run pre-check) used to
-/// call [`LifecycleRunGuard::emit_blocked_or_failure`], which only fires the
-/// legacy top-level subset (`stderr`/`message`/`notify`/audio) and skips both
-/// the typed stacks and `finalize`. That left documents relying on
-/// `blocked.stack` / `finalize.stack` side effects (e.g.
+/// each running its stack. Pre-flight failures (harness-plan parse,
+/// shell-approval denial, dry-run pre-check) used to call
+/// [`LifecycleRunGuard::emit_blocked_or_failure`], which has no execution
+/// context and only emits the root-level literal communication, skipping the
+/// rest of the stacks and `finalize`. That left documents relying on
+/// `blocked` / `finalize` side effects (e.g.
 /// `{append_line: ["events.log", "blocked"]}`) without either marker.
 ///
 /// This helper builds [`StackExecutionContext`] from the same local lifecycle
 /// bindings used by `initialize` (see `init_ctx` in the composition executor):
 /// the context borrows the *local* `emitter`/`settings`/etc. — not the guard — so
 /// [`LifecycleRunGuard::execute_event`] can take `&mut guard` without a
-/// borrow conflict. `execute_event` records the emission and runs the
-/// top-level + stack in one call, and sets `terminal_emitted = true` so the
+/// borrow conflict. `execute_event` records the emission and runs the stack
+/// in one call, and sets `terminal_emitted = true` so the
 /// guard's `Drop` safety-net cannot double-emit.
 ///
 /// `err_info` should faithfully describe which preflight failed
 /// (e.g. `from_action_failure("harness_plan", msg)`) so a user-authored
-/// `blocked.stack` can reference `{{ err.msg }}` meaningfully.
+/// `blocked` stack can reference `{{ err.msg }}` meaningfully.
 ///
 /// A late-binding evaluation error raised by the `blocked` or `finalize`
 /// stack (a crashed `when:` guard, an unknown function)
@@ -79,7 +78,8 @@ pub(super) enum PreflightBlockedOutcome {
 /// Decision #3 / `handle_terminal_evaluation_error`).
 ///
 /// The catch stacks resolve file references through the prepared document's
-/// `file_resolution_context`.
+/// `file_resolution_context` and read `loop_values` (the loop iteration the
+/// document was prepared for, if any) as the `loop` global.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_preflight_blocked_and_finalize(
     guard: &mut LifecycleRunGuard<'_>,
@@ -94,6 +94,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
     ctx_base_dir: Option<&Path>,
     prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    loop_values: Option<&claudine::composition::LoopAmbient>,
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,
@@ -102,6 +103,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
     let timing = LifecycleTiming::from_instants(document_start, None, std::time::Instant::now());
 
     let blocked_ctx = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Blocked,
         scope: None,
         frontmatter,
@@ -112,6 +114,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
         timing: Some(&timing),
         current: current.as_ref().map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
+        loop_values,
         base_dir,
         ctx_base_dir,
         prepared_context,

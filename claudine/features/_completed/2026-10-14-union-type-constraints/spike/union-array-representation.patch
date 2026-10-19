@@ -1,0 +1,342 @@
+diff --git a/darkmatter/lib/src/markdown/compose/context/catalog.rs b/darkmatter/lib/src/markdown/compose/context/catalog.rs
+index ac49df311..819604d04 100644
+--- a/darkmatter/lib/src/markdown/compose/context/catalog.rs
++++ b/darkmatter/lib/src/markdown/compose/context/catalog.rs
+@@ -293,7 +293,7 @@ fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDe
+     let base = match &atom.ty {
+         TypeExpr::Primitive(ty) => *ty,
+         // `ctx.*` never authors an inline object or import; fall back defensively.
+-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => SimplifiedType::Object,
++        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => SimplifiedType::Object,
+     };
+ 
+     let required = atom
+diff --git a/darkmatter/lib/src/markdown/schemas/completion.rs b/darkmatter/lib/src/markdown/schemas/completion.rs
+index 4453c106d..a35dd89be 100644
+--- a/darkmatter/lib/src/markdown/schemas/completion.rs
++++ b/darkmatter/lib/src/markdown/schemas/completion.rs
+@@ -230,7 +230,7 @@ fn is_completable(ty: &TypeExpr) -> bool {
+         // property level — they describe a typed shape. Imported types are
+         // resolved before completion runs; an unresolved one is not
+         // completable here.
+-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => false,
++        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => false,
+     }
+ }
+ 
+@@ -248,7 +248,7 @@ fn match_groups(atom: &PropertyAtom) -> Vec<Vec<String>> {
+ fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
+     let ty = match &atom.ty {
+         TypeExpr::Primitive(ty) => *ty,
+-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => return None,
++        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => return None,
+     };
+     match ty {
+         SimplifiedType::File => {
+diff --git a/darkmatter/lib/src/markdown/schemas/detect.rs b/darkmatter/lib/src/markdown/schemas/detect.rs
+index 0a996c423..823ec489a 100644
+--- a/darkmatter/lib/src/markdown/schemas/detect.rs
++++ b/darkmatter/lib/src/markdown/schemas/detect.rs
+@@ -430,7 +430,7 @@ fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
+         TypeExpr::Primitive(p) => Some(*p),
+         // Inline objects and imported types do not unify with any other type
+         // in detection (detecting either is a non-goal of this feature).
+-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => None,
++        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
+     }
+ }
+ 
+diff --git a/darkmatter/lib/src/markdown/schemas/resolve.rs b/darkmatter/lib/src/markdown/schemas/resolve.rs
+index 2e2c4d92c..dbaf723c7 100644
+--- a/darkmatter/lib/src/markdown/schemas/resolve.rs
++++ b/darkmatter/lib/src/markdown/schemas/resolve.rs
+@@ -1360,6 +1360,7 @@ impl ImportEngine {
+             TypeExpr::InlineObject(shape) => {
+                 TypeExpr::InlineObject(self.expand_shape(shape, current, path)?)
+             }
++            TypeExpr::Union(arms) => TypeExpr::Union(self.expand_union_arms(arms, current, path)?),
+         };
+         let atom = PropertyAtom {
+             ty,
+@@ -1785,13 +1786,54 @@ fn apply_import_postfix(
+ 
+     let (base_atom, base_provenance) = match base {
+         ExpandedDef::Single(atom, provenance) => (*atom, provenance),
+-        ExpandedDef::Union(_) => {
+-            return Err(SchemaError::Convert {
+-                property: name.to_string(),
+-                message: format!(
+-                    "cannot apply `[]`/constraints to the union-typed named type `{name}@{reference}`"
+-                ),
+-            });
++        ExpandedDef::Union(arms) => {
++            // SPIKE: a postfixed union reference becomes one atom whose type
++            // is the ordered, flattened union.
++            // A named reference has one constraint list; after `[]` it was
++            // parsed at the array level and belongs to the container.
++            let (constraints, array_constraints) = if is_array {
++                (Vec::new(), constraints.into_iter().chain(array_constraints).collect())
++            } else {
++                (constraints, array_constraints)
++            };
++            if let Some(rejected) = constraints.iter().find(|constraint| {
++                !matches!(
++                    constraint,
++                    Constraint::Required | Constraint::Generated | Constraint::Eager
++                )
++            }) {
++                return Err(SchemaError::Convert {
++                    property: name.to_string(),
++                    message: format!(
++                        "SPIKE: `{}` cannot apply to the union-typed named type `{name}@{reference}`",
++                        rejected.keyword()
++                    ),
++                });
++            }
++            if is_array && arms.iter().any(|arm| arm.is_array) {
++                return Err(SchemaError::Convert {
++                    property: name.to_string(),
++                    message: format!(
++                        "SPIKE: cannot apply `[]` to `{name}@{reference}`: an arm is already an array"
++                    ),
++                });
++            }
++            let (value_origins, array_origins) =
++                authored_origins(&constraints, &array_constraints, &site.source, &site.path);
++            return Ok(ExpandedDef::Single(
++                Box::new(PropertyAtom {
++                    ty: TypeExpr::Union(arms),
++                    is_array,
++                    constraints,
++                    array_constraints,
++                    description,
++                }),
++                AtomProvenance {
++                    value: value_origins,
++                    array: array_origins,
++                    shape: Vec::new(),
++                },
++            ));
+         }
+     };
+ 
+@@ -2245,6 +2287,7 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
+     match &atom.ty {
+         TypeExpr::Imported { .. } => true,
+         TypeExpr::InlineObject(shape) => shape_has_imports(shape),
++        TypeExpr::Union(arms) => arms.iter().any(atom_has_imports),
+         TypeExpr::Primitive(_) => false,
+     }
+ }
+diff --git a/darkmatter/lib/src/markdown/schemas/simplified/convert.rs b/darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+index 24c246046..78e498c70 100644
+--- a/darkmatter/lib/src/markdown/schemas/simplified/convert.rs
++++ b/darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+@@ -408,6 +408,14 @@ fn atom_fragment_without_null_wrap(
+     let inner = match &atom.ty {
+         TypeExpr::Primitive(ty) => type_fragment(name, *ty, &atom.constraints)?,
+         TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
++        // SPIKE: item (or property) alternatives; no per-arm null wrapping.
++        TypeExpr::Union(arms) => {
++            let mut any_of = Vec::with_capacity(arms.len());
++            for arm in arms {
++                any_of.push(atom_fragment_without_null_wrap(name, arm, false)?.0);
++            }
++            json!({ "anyOf": any_of })
++        }
+         // An imported type must be inline-expanded by the resolver before
+         // conversion, just as a root-union `FileRef` arm is. Reaching the
+         // converter with one unresolved is a hard error (resolution lands in
+diff --git a/darkmatter/lib/src/markdown/schemas/simplified/lint.rs b/darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+index a75d6b6c9..3e100149c 100644
+--- a/darkmatter/lib/src/markdown/schemas/simplified/lint.rs
++++ b/darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+@@ -186,7 +186,7 @@ fn lint_atom(
+         // A named reference's target is known only after resolution, which a
+         // passive lint never performs; linting the resolved schema judges its
+         // candidates against the resolved target.
+-        TypeExpr::Imported { .. } => return Ok(()),
++        TypeExpr::Imported { .. } | TypeExpr::Union(_) => return Ok(()),
+         TypeExpr::Primitive(_) => {}
+     }
+     let Some(candidates) = atom.constraints.iter().find_map(|constraint| match constraint {
+diff --git a/darkmatter/lib/src/markdown/schemas/simplified/query.rs b/darkmatter/lib/src/markdown/schemas/simplified/query.rs
+index 20157a19f..acb526b0e 100644
+--- a/darkmatter/lib/src/markdown/schemas/simplified/query.rs
++++ b/darkmatter/lib/src/markdown/schemas/simplified/query.rs
+@@ -233,7 +233,7 @@ fn descend<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Option<&'a SchemaSh
+ fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
+     atoms_of(def).iter().find_map(|atom| match &atom.ty {
+         TypeExpr::InlineObject(inner) => Some(inner),
+-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => None,
++        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
+     })
+ }
+ 
+diff --git a/darkmatter/lib/src/markdown/schemas/simplified/serialize.rs b/darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+index 35ae0ce07..310272d48 100644
+--- a/darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
++++ b/darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+@@ -68,6 +68,16 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
+                 out.push_str(reference);
+             }
+         }
++        // SPIKE: display-only; the passive parser never produces this form.
++        TypeExpr::Union(arms) => {
++            out.push('[');
++            let rendered: Vec<String> = arms.iter().map(serialize_property_atom).collect();
++            out.push_str(&rendered.join(", "));
++            out.push(']');
++            if atom.is_array {
++                out.push_str("[]");
++            }
++        }
+     }
+ 
+     if let Some(desc) = &atom.description {
+diff --git a/darkmatter/lib/src/markdown/schemas/simplified/source.rs b/darkmatter/lib/src/markdown/schemas/simplified/source.rs
+index ddd8ba41e..ce982dfca 100644
+--- a/darkmatter/lib/src/markdown/schemas/simplified/source.rs
++++ b/darkmatter/lib/src/markdown/schemas/simplified/source.rs
+@@ -2247,6 +2247,7 @@ fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
+         || match &atom.ty {
+             TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
+                 || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
++            TypeExpr::Union(arms) => arms.iter().any(atom_has_suggestions),
+             TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => false,
+         }
+ }
+diff --git a/darkmatter/lib/src/markdown/schemas/simplified/types.rs b/darkmatter/lib/src/markdown/schemas/simplified/types.rs
+index aa5ef9889..b60a918d8 100644
+--- a/darkmatter/lib/src/markdown/schemas/simplified/types.rs
++++ b/darkmatter/lib/src/markdown/schemas/simplified/types.rs
+@@ -199,6 +199,8 @@ pub enum TypeExpr {
+         /// The raw file reference (right of `@`); `"this"` is the current file.
+         reference: String,
+     },
++    /// SPIKE: a resolved union of item/property alternatives.
++    Union(Vec<PropertyAtom>),
+ }
+ 
+ /// The [`TypeExpr::Imported`] reference that names the current schema's
+@@ -279,6 +281,8 @@ impl PropertyAtom {
+     pub(crate) fn is_required(&self) -> bool {
+         self.property_constraints()
+             .any(|constraint| matches!(constraint, Constraint::Required))
++            // SPIKE: presence inherited from union arms hoists to the container.
++            || matches!(&self.ty, TypeExpr::Union(arms) if arms.iter().any(PropertyAtom::is_required))
+     }
+ 
+     /// Whether this atom supplies a default for its containing property.
+diff --git a/darkmatter/lib/src/markdown/schemas/triggers/matcher.rs b/darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+index e2ba55ebd..6a6b9bb21 100644
+--- a/darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
++++ b/darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+@@ -256,6 +256,8 @@ fn scalar_conforms(atom: &PropertyAtom, value: &Value) -> bool {
+ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
+     match ty {
+         TypeExpr::Primitive(p) => primitive_matches(*p, value),
++        // SPIKE
++        TypeExpr::Union(arms) => arms.iter().any(|arm| value_matches_type(&arm.ty, value)),
+         TypeExpr::InlineObject(shape) => {
+             let Some(map) = value.as_object() else {
+                 return false;
+diff --git a/darkmatter/lib/tests/l1/main.rs b/darkmatter/lib/tests/l1/main.rs
+index c9caf1909..7d3097e5c 100644
+--- a/darkmatter/lib/tests/l1/main.rs
++++ b/darkmatter/lib/tests/l1/main.rs
+@@ -134,3 +134,4 @@ mod tree_features_characterization;
+ mod unknown_identifier_warning;
+ mod url_root_identity;
+ mod yaml_block_parity;
++mod schemas_union_array_spike;
+diff --git a/darkmatter/lib/tests/l1/schemas_union_array_spike.rs b/darkmatter/lib/tests/l1/schemas_union_array_spike.rs
+new file mode 100644
+index 000000000..1e29d1953
+--- /dev/null
++++ b/darkmatter/lib/tests/l1/schemas_union_array_spike.rs
+@@ -0,0 +1,84 @@
++//! SPIKE (2026-10-14-union-type-constraints, Phase 1): proves the
++//! array-of-union representation end to end. Not a production test.
++
++use std::path::PathBuf;
++
++use darkmatter::markdown::Markdown;
++use darkmatter::markdown::compose::ComposeSource;
++use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
++use darkmatter::markdown::schemas::{DarkmatterSchemas, PropertyDef, SimplifiedSchema, TypeExpr};
++use serde_json::json;
++
++use crate::request_support::context_at;
++
++const POLICY: &str = "kind: schema\ntypes:\n  short_form: [\"string(pattern(^Evergreen$))\", \"string(pattern(^ValidFor))\"]\n  long_form: \"{ rule: short_form(required), action: enum(refresh, archive; required) }\"\n  policy: [short_form, long_form]\n";
++
++fn root() -> (tempfile::TempDir, PathBuf) {
++    let dir = tempfile::tempdir().expect("temp dir");
++    let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical");
++    std::fs::write(root.join("policy.yaml"), POLICY).expect("write policy");
++    (dir, root)
++}
++
++fn valid(root: &PathBuf, frontmatter: &str) -> bool {
++    let document = format!(
++        "---\n$schema:\n  content_policy: \"policy[](min(1))@./policy.yaml\"\n{frontmatter}---\nBody\n"
++    );
++    let path = root.join("doc.md");
++    std::fs::write(&path, &document).expect("write doc");
++    let markdown = Markdown::from(document.as_str()).with_source(ComposeSource::File(path));
++    let report = DarkmatterSchemas::new(context_at(root)).validate(&markdown).expect("resolves");
++    report.valid
++}
++
++#[test]
++fn spike_union_array_lowers_to_items_any_of_and_validates() {
++    let (_dir, root) = root();
++    let declaration: serde_yaml_ng::Value =
++        serde_yaml_ng::from_str("content_policy: \"policy[](min(1))@./policy.yaml\"\n").unwrap();
++    let resolved = resolve_yaml_schema(&declaration, &root, &context_at(&root))
++        .expect("resolves");
++    let property = &resolved.json_schema["properties"]["content_policy"];
++    println!("{}", serde_json::to_string_pretty(property).unwrap());
++    let array = &property["anyOf"][1];
++    assert_eq!(property["anyOf"][0], json!({ "type": "null" }));
++    assert_eq!(array["type"], "array");
++    assert_eq!(array["minItems"], 1);
++    let arms = array["items"]["anyOf"].as_array().expect("items.anyOf");
++    assert_eq!(arms.len(), 3, "short_form's two arms flatten beside long_form");
++    assert_eq!(arms[2]["required"], json!(["rule", "action"]), "inherited required hoists to the parent");
++    assert!(arms[2]["properties"]["rule"].get("anyOf").is_some());
++
++    let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else { panic!() };
++    let Some(PropertyDef::Single(atom)) = shape.properties.get("content_policy") else { panic!() };
++    assert!(atom.is_array);
++    assert!(matches!(&atom.ty, TypeExpr::Union(arms) if arms.len() == 3));
++
++    assert!(valid(&root, "content_policy: [ValidFor(3mo), {rule: Evergreen, action: archive}]\n"));
++    assert!(valid(&root, ""));
++    assert!(valid(&root, "content_policy: null\n"));
++    assert!(!valid(&root, "content_policy: [null]\n"));
++    assert!(!valid(&root, "content_policy: ValidFor(3mo)\n"));
++    assert!(!valid(&root, "content_policy: []\n"));
++    assert!(!valid(&root, "content_policy: [Duration(3mo)]\n"));
++    assert!(!valid(&root, "content_policy: [{action: archive}]\n"));
++    assert!(!valid(&root, "content_policy: [{rule: null, action: archive}]\n"));
++    assert!(!valid(&root, "content_policy: [{rule: ValidFor(3mo), action: delete}]\n"));
++}
++
++#[test]
++fn spike_inherited_marker_hoists_without_distributing_array_bounds() {
++    let (_dir, root) = root();
++    let declaration: serde_yaml_ng::Value = serde_yaml_ng::from_str(
++        "choice: [\"string(required; min(3))\", number]\nlist: choice[](max(2))\n",
++    )
++    .unwrap();
++    let resolved = resolve_yaml_schema(&declaration, &root, &context_at(&root)).expect("resolves");
++    println!("{}", serde_json::to_string_pretty(&resolved.json_schema).unwrap());
++    let list = &resolved.json_schema["properties"]["list"];
++    assert!(resolved.json_schema["required"].as_array().unwrap().contains(&json!("list")));
++    assert_eq!(list["type"], "array", "a required array has no null wrapper");
++    assert_eq!(list["maxItems"], 2);
++    assert!(list.get("minItems").is_none(), "the arm's string min stays on the arm");
++    assert_eq!(list["items"]["anyOf"][0]["minLength"], 3);
++}

@@ -88,32 +88,36 @@ functions on them.
 
 ## Binding time: eager `ctx`, lazy `current`
 
-`ctx` and `current` are the same data structure, and so are `env` and
-`current_env`; they differ only in *when* each key is evaluated.
+`ctx` and `current` are the same data structure; they differ only in *when*
+each key is evaluated.
 
 | Surface | Binding |
 |---------|---------|
 | `ctx.<key>` | Eager — evaluated once for each composition run and shared by that run |
 | `current.<key>` | Lazy — the same key as `ctx.<key>`, observed once per lifecycle event (in a document body, once per expression) |
-| `env.<key>` | Eager — the frozen invocation snapshot |
-| `current_env.<key>` | Lazy — the same key as `env.<key>`, reread from the live process environment when the reference is reached |
+| `env.<key>` | Eager — the map the document captured when it started; it does not change during that document's lifecycle |
 
-**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.
+**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (a concurrent group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.
 
 A later run therefore sees what an earlier run changed: a `proxy` target, a
 later sequence step, a later loop iteration, and a retried attempt each observe
 the branch and the staged, dirty, and untracked files as they are when that
 run starts, however many runs asked for them before. Only Git working state is
-observed per run; the launch directory, the repository and its packages, host
-facts, and the environment are observed once per invocation. See
+observed per run; the launch directory, the repository and its packages, and
+host facts are observed once per invocation. The environment is captured once
+per document (the launched document, each sequence step and group leg, each
+`proxy` target) and shared by every run of that document; see
+[Composition — One Environment per Document](../composition.md#one-environment-per-document).
+See
 [Composition — Launch-Anchored Prepared Context](../composition.md#launch-anchored-prepared-context)
 for the parallel-group, `initialize`, and include rules.
 
 The spelling is a direct mirror: write `current.branch` for the live value of
-`ctx.branch` and `current_env.HOME` for the live value of `env.HOME`. `current`
-does not contain a `ctx` member and `current_env` does not contain an `env`
-member; a nested path under either root names no member and fails as an
-unknown path.
+`ctx.branch`. `current` does not contain a `ctx` or `env` member; a nested path
+under it names no member and fails as an unknown path. `current_env` is not a
+root: it is an ordinary frontmatter property, so `{{ current_env.HOME }}` reads
+the document's `current_env` value, and `env.HOME` is the captured
+environment.
 
 **Fixed versus refreshable.** Lazy does not mean everything can change.
 Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and
@@ -121,8 +125,7 @@ the rest of the repository keys) are fixed by the request's repository
 observation, captured once when the request is created, so `current.repo`
 always reads what `ctx.repo` does. Only mutable Git and filesystem facts
 refresh from one event to the next: `branch`, recent history (`recent_commits`),
-and `dirty_files` and the other working-tree keys. Every `current_env.<key>` is
-reread when the reference is reached.
+and `dirty_files` and the other working-tree keys.
 The invocation directory and the root document's identity (`cwd`, `self`,
 `hash`, `id`, `sid`) are request-owned and never refresh either.
 
@@ -135,8 +138,8 @@ newest `count` commits when the call is reached. Both are projected from one
 descriptor entry, so `claudine context` and `claudine context --expressions`
 cannot drift.
 
-Under Claudine, `current` and `current_env` are Darkmatter reserved roots
-served by the invocation's refresh capability: a key that capability does not
+Under Claudine, `current` is a Darkmatter reserved root served by the
+invocation's refresh capability: a key that capability does not
 hold renders `null` with a `PartialRuntimeCapture` diagnostic rather than
 probing the host. Their primary use is inside lifecycle events, where state may
 have changed since launch — see

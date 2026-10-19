@@ -1221,21 +1221,19 @@ This is content."#;
         let content = concat!(
             "---\n",
             "start:\n",
-            "  stack:\n",
-            "    - action:\n",
-            "        set:\n",
-            "          z_last_lexically: true\n",
-            "          a_first_lexically: false\n",
+            "  - set:\n",
+            "      z_last_lexically: true\n",
+            "      a_first_lexically: false\n",
             "---\n",
         );
 
         let (frontmatter, _) = parse_frontmatter(content).unwrap();
 
         assert_eq!(
-            frontmatter.mapping_key_order("/start/stack/0/action/set"),
+            frontmatter.mapping_key_order("/start/0/set"),
             Some(["z_last_lexically".to_string(), "a_first_lexically".to_string()].as_slice()),
         );
-        let set = &frontmatter.as_map()["start"]["stack"][0]["action"]["set"];
+        let set = &frontmatter.as_map()["start"][0]["set"];
         assert_eq!(
             set.as_object().unwrap().keys().collect::<Vec<_>>(),
             vec!["a_first_lexically", "z_last_lexically"],

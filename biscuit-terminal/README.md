@@ -48,7 +48,7 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     The `biscuit-terminal` library defines a **Renderable** trait which provides a consistent interface for components. These components include:
 
     - [`BlockQuote`](./docs/components/block_quote.md)
-    - [`FileSystem`](./docs/components/file_system.md)
+    - [`FileSystem`](./docs/components/file_system.md) — directory trees with terminal-aware icons and linked entries
     - [`GraphExpression`](./docs/components/graph_expression.md) (graph adapter backed by `biscuit-visualized`)
     - [`MermaidDiagram`](./docs/components/mermaid_diagram.md) (Mermaid adapter backed by `biscuit-visualized`)
     - [`OrderedList` and `UnorderedList`](./docs/components/list.md)

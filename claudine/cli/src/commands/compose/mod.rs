@@ -171,8 +171,21 @@ pub struct SharedComposeArgs {
     pub repo: bool,
 
     /// Show the composed result without requiring or launching the provider executable.
+    ///
+    /// A sequence previews each loop body once and runs no lifecycle event,
+    /// `prep` target, `shell:` task, or `side_effect:` task: each task is
+    /// reported as `rendered (dry-run): would run …`. Composition's `$( … )`
+    /// expansions still run, so their side effects still happen.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// With `--dry-run`, run each `shell:` task once during the preview.
+    ///
+    /// This mutates: the commands run for real (a `git add` stages). It never
+    /// launches a provider, runs no `side_effect:` task, and turns no loop or
+    /// lifecycle event back on.
+    #[arg(long, requires = "dry_run")]
+    pub dry_run_shell: bool,
 
     /// Suppress env details and info messages, but still show the system prompt when set.
     #[arg(short = 'q', long)]
@@ -185,6 +198,14 @@ pub struct SharedComposeArgs {
     /// Override frontmatter values as JSON/JSON5 (e.g. `--set '{"key":"val"}'`).
     #[arg(long, value_name = "JSON")]
     pub set: Option<String>,
+
+    /// Caller-input records for values in [`Self::set`] that were authored
+    /// somewhere other than the launch directory. A lifecycle `prep` hands
+    /// its target the `with:` overlay as caller values; a relative file value
+    /// in it resolves from the document that authored the `prep`. Applied by
+    /// [`caller_input_records`]. Not parsed by clap.
+    #[arg(skip)]
+    pub set_records: darkmatter::markdown::compose::CallerInputRecords,
 
     /// Enable Claudine-managed MCP session composition.
     #[arg(long)]
@@ -654,6 +675,7 @@ pub fn run_compose(
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let ComposeArgs { shared, args } = args;
+    let _prep = super::prep_target::install_for(&shared, verbose);
     prep::run_composition_inner(
         shared,
         args,
@@ -674,6 +696,7 @@ pub fn run_inline_compose(
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let InlineComposeArgs { shared, args } = args;
+    let _prep = super::prep_target::install_for(&shared, verbose);
     prep::run_composition_inner(
         shared,
         args,
@@ -685,3 +708,24 @@ pub fn run_inline_compose(
 
 #[cfg(test)]
 mod tests;
+
+/// The caller-input records of `set_overrides`: each value's record from the
+/// launch context `launch`, unless `shared` carries the record it was authored
+/// with ([`SharedComposeArgs::set_records`]) and the value is still the one
+/// that record holds.
+pub(crate) fn caller_input_records(
+    shared: &SharedComposeArgs,
+    set_overrides: Option<serde_json::Value>,
+    launch: biscuit_file::FileResolutionContext,
+) -> darkmatter::markdown::compose::CallerInputRecords {
+    let mut records =
+        claudine::composition::CallerInputLayers::from_caller_overrides(set_overrides, launch).caller_input_records;
+    for (key, record) in &mut records {
+        if let Some(authored) = shared.set_records.get(key)
+            && authored.raw() == record.raw()
+        {
+            *record = authored.clone();
+        }
+    }
+    records
+}

@@ -2,77 +2,67 @@
 
 Part of the `rust-testing` skill; [SKILL.md](SKILL.md) is the index.
 
-Before adding or changing a test, identify the observable failure it must
-catch, the boundary needed to prove it, and the state that boundary consumes.
-Reuse or extend existing coverage when it already provides that proof; a new
-test is not required for every implementation edit.
+Before adding or changing a test, name the observable failure it must catch,
+the cheapest boundary that proves it, and the state that boundary consumes. If
+existing coverage already proves it, extend that instead; not every
+implementation edit needs a new test.
 
-- **Assertion quality.** For a regression, retain the original failing input
-  and show that the relevant assertion distinguishes the broken behavior from
-  the fix when feasible. Assert dependent output/state and meaningful error
-  behavior. An exit-success check or a value compared with itself is not proof
-  of a promised result. Review names and comments when behavior changes.
-- **Boundary and cost.** Put exhaustive value/representation combinations at
-  the cheapest boundary that proves them. Keep representative real-CLI,
-  persistence, or protocol coverage where wiring matters. Stub external
-  providers, not the application behavior under test. Extend a shared passive
-  shipped-artifact corpus test rather than rescan the whole corpus in a new
-  process for every regression; keep an end-to-end case through a real shipped
+- **Assertion quality.** A regression test keeps the original failing input,
+  and its assertion must tell the broken behavior from the fix. Assert the
+  dependent output, state, or error; an exit-success check or a value compared
+  with itself proves nothing. Update test names and comments when behavior
+  changes.
+- **Boundary and cost.** Put exhaustive value and representation combinations
+  at the cheapest boundary that proves them, and keep a few representative
+  real-CLI, persistence, or protocol cases where the wiring matters. Stub
+  external providers, never the behavior under test. Extend an existing
+  shipped-artifact corpus test rather than rescanning the corpus in a new
+  process per regression, but keep one end-to-end case through a real shipped
   artifact when changing its parser, schema, template, or configuration path.
-- **Explicit inputs.** Use the area's command builder and fixture-owned
-  directories, home/config/cache state, environment, and tool lookup. Disable
-  unrelated service connections. A temporary input file alone does not isolate
-  launch CWD or parent repository discovery. Host discovery tests retain the
-  real detector only when that observation is the subject of the test.
-- **Time and ownership.** Synchronize on readiness or the final condition being
-  asserted, with a deadline; do not use a fixed sleep as readiness proof. When
-  elapsed time is the contract, preserve its semantic floor and justify the
-  budget, polling cadence, and shutdown margin under CI contention. Also check
-  whether the *child* is waiting on the harness: a bare PTY answers no terminal
-  query, so a child that probes it — DSR cursor position (`ESC[6n`), OSC 10/11
-  foreground and background colour — pays a full timeout per unanswered probe
-  before it emits anything. Answer each on observation, as
-  `claudine/cli/tests/common/pty.rs` and `biscuit-terminal`'s `ProbeAnswer` do;
-  match the newly-read chunk, not the cumulative transcript, so a late
-  duplicate reply cannot land in a raw-mode prompt as an `ESC` keystroke.
-  Fixtures own and clean up children, threads, sockets, and directories on
-  failure too. Serialize only tests sharing an actual resource, using
-  runner-visible coordination when tests execute in separate processes — and
-  do not label a per-test resource shared: nextest gives every test its own
-  process, so a `#[serial]` group there enforces nothing and misleads.
-- **Reachability.** Confirm that the test's name, `cfg`, required features, and
-  recipe select it on the intended platforms. L1 includes hermetic subprocess
-  and filesystem tests. OS-specific behavior alone does not require L2/L3.
-  Missing tests, skipped tests, and unavailable resources are not passing
-  evidence; terminal/browser tests must preserve focus.
-- **Performance evidence.** Use stable work counters for contracts such as
-  “no repository walk” or “one request per operation”; use timings to measure
-  actual latency. Compare matched tests with the same features, profile,
-  concurrency, platform, and cache conditions. Separate build time from test
-  execution. Do not hide cost by changing tiers, dropping assertions, adding
-  retries, or raising runner limits without diagnosing the cause.
-- **Growing corpora.** A test that loops a shared row corpus that every new
-  matrix row extends gets slower with each row until it passes the per-test
-  timeout under ordinary parallel load. Partition it into statically
-  registered groups, one `#[test]` per group stamped by a macro, and keep a
-  test proving every row lands in exactly one group and no group exceeds a
-  size bound; when the bound trips, add a group. Each process repeats fixed
-  setup (grammar or query compilation), so size groups against that floor.
-  Assert "some row exercised X" guards on one bounded group that contains the
-  witnesses. Examples: tree-hugger's `declaration_fact_group_tests!` (row
-  groups) and `shape_tests!` (one test per labeled shape).
+- **Configuration matrices.** Test each decision once, where it is made. Field
+  shapes (absent, null, wrong type, empty) belong to the field's validator:
+  test them once per validator, whatever the source format. Document shapes
+  (duplicate key, trailing content, format syntax) belong to the loader: test
+  them once per distinct loader, and formats sharing a loader branch are one
+  loader. Assert cells in-process through the crate's public result; spawn the
+  binary only for a control and one or two errors per loader, to prove wiring
+  and location rendering.
+- **Explicit inputs.** Use the area's command builder
+  ([spawning-binaries.md](spawning-binaries.md)) and fixture-owned directories,
+  home/config/cache, environment, and tool lookup; disable unrelated service
+  connections. A temporary input file does not isolate the launch directory or
+  parent-repository discovery. Keep a real host detector only when that
+  observation is the subject of the test.
+- **Time.** Synchronize on readiness or on the asserted condition, with a
+  deadline; a fixed sleep is not readiness proof. When elapsed time is the
+  contract, keep its semantic floor and justify the budget and polling cadence
+  under CI contention.
+- **Terminal probes.** A bare PTY answers no terminal query, so a child that
+  probes it (cursor position, OSC 10/11 colors) waits a full timeout per probe
+  before printing anything. Answer each probe as it appears, matching the newly
+  read chunk rather than the whole transcript so a late duplicate reply cannot
+  land in a raw-mode prompt as a keystroke. See
+  `claudine/cli/tests/common/pty.rs` and `biscuit-terminal`'s `ProbeAnswer`
+  (`biscuit-terminal/lib/tests/common/pty.rs`).
+- **Ownership.** Fixtures own and clean up children, threads, sockets, and
+  directories, on failure too. Serialize only tests that share a real resource,
+  with coordination the runner can see: nextest gives every test its own
+  process, so `#[serial]` there enforces nothing and labeling a per-test
+  resource as shared misleads.
+- **Reachability.** Confirm that the test's name, `cfg`, required features,
+  and recipe select it on the intended platforms
+  ([tier-filters.md](tier-filters.md)). Missing, skipped, or resource-gated
+  tests are not passing evidence.
+- **Performance evidence.** Prove contracts such as "no repository walk" or
+  "one request per operation" with stable work counters, not timings. Compare
+  timings only between matched runs, and do not hide cost by changing tiers,
+  dropping assertions, adding retries, or raising limits
+  ([test-speed.md](test-speed.md)).
 
-When a test exposes defective shared setup, inspect its siblings even if they
-have never crossed a slow threshold. Repair the shared fixture within the
-authorized scope and record remaining consumers for follow-up. Report which
-behavior the targeted tests prove, relevant broader gates, and evidence still
-pending on CI; distinguish implementation completion from verification.
+When a test exposes defective shared setup, check its sibling consumers too,
+repair the shared fixture within scope, and record remaining consumers for
+follow-up. Report what the targeted tests prove and which evidence is still
+pending on CI; implementation complete and verified are separate claims.
 
-For a requested comprehensive test audit or test-performance specification,
-read [test-suite-audits.md](test-suite-audits.md). Ordinary feature work does
-not require a suite-wide audit. The tooling those audits run on (listing
-captures, CI JUnit gates, inventory reconciliation, cost attribution,
-alternating-run measurement, and work-count comparison) is the shared
-`tools/test-audit` package, driven by a per-area `audit.config.json`; see
-[test-audit-tooling.md](test-audit-tooling.md) for install, commands,
-configuration, and how to read its numbers.
+A comprehensive audit or test-performance spec, and only that, follows
+[test-suite-audits.md](test-suite-audits.md).

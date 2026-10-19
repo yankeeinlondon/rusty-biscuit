@@ -24,6 +24,15 @@ Use heading search to jump to the listed subsystem.
 The darkmatter compose pipeline provides document preparation through four phases:
 Inline Pre, Transclusion, Inline Post, and Finalization.
 
+Host binding presentation uses the lookup's configured name-coercion keys
+for globals as well as document values; typed evaluation stays unchanged.
+`HostGlobals::with_document_fallbacks` is an explicit opt-in for migration
+diagnostics: a present property (including null) in the reading document
+wins for those selected roots, while an absent property reads the registered
+fallback. Normal lexical roots keep whole-root shadowing. Body and
+frontmatter seed lookups share this rule, including transcluded children;
+the selected fallback roots participate in the compose fingerprint.
+
 ## Pipeline Overview
 
 **Inline Pre** (serial):
@@ -38,7 +47,7 @@ available for fresh preparation. Ordinary strings and document-authored file
 references keep their existing source-relative and repository-aware rules.
 
 1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing an authored whole-value `$(...)` are deferred to pass 2; each string is scanned once (see [Inserted Text Is Data](#inserted-text-is-data))
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Data (a data override, an expression result, a decoded literal token) is never pending: it is judged now. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping pending values. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a value holding an authored `{{ }}` template, and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--no-trigger-schemas` removes trigger schemas, not the document/baseline verdict on resolved values
 3. **Frontmatter Shell Expansion** - top-level frontmatter values whose *authored source* is a whole-value `$(cmd)` execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
 5. **Text Replacement** - `replace:` frontmatter replaces literal strings
@@ -89,7 +98,7 @@ the compose pipeline.
 
 - **Link Normalization** - Converts absolute link destinations back into portable
   references through `biscuit_file::PortablePath` (default strategy, root document's
-  context): nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
+  context): verified bare tree-root (`docs/x`), nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
   (written as the literal `{{{VAR}}}` so recompose is stable), `~/`, else the absolute
   path is kept with a `link_normalization` warning (the document still holds a
   host-tied link); `ComposeOptions::with_absolute_fallback_warning(false)`
@@ -121,7 +130,7 @@ let options = ComposeOptions::new()
     .disable(ComposeOperation::Cleanup)
     .disable(ComposeOperation::Normalization);
 
-// With a baseline schema (library-only; no CLI flag)
+// With a custom baseline schema (CLI: `md compose --baseline-schema <path>`)
 let baseline: darkmatter::markdown::schemas::SimplifiedSchema = /* ... */;
 let options = ComposeOptions::new()
     .with_baseline_schema(baseline);
@@ -141,6 +150,16 @@ let request = ComposeRequest::prepare(options, &snapshot)?;
 let (composed, report) = md.compose_with(&request)?;
 println!("{}", report.summary());
 ```
+
+`Markdown::compose_with_frontmatter_hook(&request, &mut hook)` is
+`compose_with` plus one host callback, `ResolvedFrontmatterHook`, called for
+the root document only, after its frontmatter fully resolves (both
+interpolation passes and every `$( … )`) and before any body stage: it may edit
+the request environment the body, transclusions, and `as_markdown()` read. The
+hook is a borrowed parameter threaded to `run_compose_pipeline_node`, never a
+`ComposeOptions` field, so a non-`'static` host closure fits and no compose
+runs twice. Claudine selects a prompt's launch identity with it. User docs:
+`darkmatter/docs/topics/compose-requests.md`.
 
 `ComposeRequest::prepare` fails with `ContextBuildError` (relative request
 directory, opening reference outside the request's repository, repository
@@ -301,7 +320,7 @@ directives of a pathless source run in `context.cwd()`
 (`resolve_working_directory(opts, source, &context)`), never the process
 directory.
 
-### Lazy reserved roots (`current`, `current_env`)
+### Lazy reserved root (`current`)
 
 `context/current.rs` owns the request's refresh authority. Three pieces:
 
@@ -348,17 +367,17 @@ the document lookup first, and refuses to register a global under one
   through the provider.
 - A key the provider does not hold is `null` plus one `PartialRuntimeCapture`
   diagnostic — never the stale `ctx` value and never ambient discovery.
-- `current_env.<KEY>` is `std::env::var` at reference time, with `env`'s
-  missing-value semantics.
-- Bare `current` enumerates the descriptor names with null values; bare
-  `current_env` resolves to nothing, as bare `env` does.
-- Any other path (`current.ctx.x`, `current.env.x`, `current_env.ctx.x`,
-  `current.<typo>`) raises the authoring-fatal
-  `ExpressionError::ReservedRootPathUnknown`.
+- Bare `current` enumerates the descriptor names with null values.
+- Any other path (`current.ctx.x`, `current.env.x`, `current.<typo>`) raises
+  the authoring-fatal `ExpressionError::ReservedRootPathUnknown`.
+- `current_env` is not reserved: it is an ordinary frontmatter property
+  (absent → `null` plus `dm.expression.undeclared_property`). No expression
+  reads the live process environment; `env` is the request's one captured map,
+  and a request composes one document (see [requests.md](requests.md)).
 
 `DeferredCapabilities` (`capture/capabilities.rs`) is the planning twin of
-`ContextRequirements`: it names the `current` keys, `current_env` names, and
-cataloged function calls a source can reach, and observes none of them. A
+`ContextRequirements`: it names the `current` keys and cataloged function
+calls a source can reach, and observes none of them. A
 `current.*` reference adds no eager requirement, and an eager requirement never
 answers a `current.*` read. `ComposePreflightReport::deferred_context` carries
 the union across the walked graph.
@@ -486,23 +505,45 @@ optional-target idiom is condition-aware and warning-free:
 | `{{ foo }}` | Frontmatter value |
 | `{{ user.name }}` | Nested object path |
 | `{{ spec-name }}` | A kebab-case key; `-` joins mid-identifier only before an identifier character, so `a - b`, `4-2`, `foo--bar` stay subtraction and `iteration-1` is a key |
-| `{{ doc['foo--bar'] }}` | Bracket access for a key the identifier form cannot spell (`.`, `--`, leading digit, trailing `-`) |
-| `{{ doc }}` | The whole frontmatter object |
-| `{{ doc.build }}` | A frontmatter property by the `doc.*` namespace (a property literally named `doc` is `doc.doc`); intercepted before any `ctx.*` fallback |
+| `{{ fm['foo--bar'] }}` | Bracket access for a key the identifier form cannot spell (`.`, `--`, leading digit, trailing `-`) |
+| `{{ fm }}` | A snapshot of the whole effective frontmatter object at evaluation time |
+| `{{ fm.build }}` | A frontmatter property by the `fm.*` namespace (a property literally named `fm` is `fm.fm`); missing is `null`, never a fallback. A key named after a reserved root is read only this way: `{{ env }}` is the environment, `{{ fm.env }}` the property. `doc` is an ordinary property name |
 | `{{ ctx.today }}` | Runtime context, captured once per request |
 | `{{ env.HOME }}` | Environment variable, from the snapshot frozen at capture |
 | `{{ current.branch }}` | The same key as `ctx.branch`, observed when this expression evaluates |
-| `{{ current_env.HOME }}` | The same key as `env.HOME`, reread from the live process environment |
+| `{{ current_env.HOME }}` | Member `HOME` of an ordinary frontmatter property `current_env` (it was a live-environment root; use `env.HOME`) |
 | `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
 | `{{ find_files('&area/fixes/**/2026-01-01-x/spec.md') }}` | `GlobReference::list_files` in the document's context: every match merged across the prefix's roots, most local first (a bare glob: document folder, then repository root), absolute paths, `[]` when nothing matches. Unfiltered (`_completed/` included). Skipped out-of-tree file symlinks go to the request's `GlobWarningSink` (`dm.glob.skipped_symlink`, drained by the root pipeline); parse/root failures are `ExpressionError::GlobReference`. Use it to see ambiguity, which `%` (most local match) hides |
 | `{{ try_frontmatter(file) }}` | `frontmatter(file)` as `{ok, value, error}`: a missing, unreadable, or unparsable file is `ok: false` with the reason instead of failing the composition |
 
-Read-side functions and `doc.*` resolve identically on every surface
+Read-side functions and `fm.*` resolve identically on every surface
 (frontmatter both passes, body, `when=`, `$()` ternary condition/branches,
-claudine loop/hook). Every frontmatter surface (both interpolation passes and
+claudine loop). Claudine hook expressions have no frontmatter; they read the
+hook payload through the hook-only `hook` root. Every frontmatter surface (both interpolation passes and
 the `$()` ternary condition/branch) is local-only, so a remote URL argument
 fails loudly there; only body interpolation carries a remote runtime. See
 `darkmatter/docs/topics/darkmatter-expressions.md`.
+
+### Path functions: build, keep anchors, report failures
+
+Every path function resolves through `resolve_ctx.rs` (`FileReference` in the
+captured request context); never add a second resolver or re-read CWD/home.
+Document in `/r/prompts`, repository `/r`:
+
+| Call | On disk | Result |
+|---|---|---|
+| `absolute("notes.md")` | `/r/prompts/notes.md` and `/r/notes.md` | `/r/prompts/notes.md` (native spelling) |
+| `absolute("sub/new.md")` | nothing | `/r/prompts/sub/new.md`: the first candidate, so `absolute` does **not** prove existence |
+| `absolute("https://…")`, `absolute("%x.md")` with no match | — | error (URLs are never fetched; a recursive miss has no file shape) |
+| `dirname("/r/claudine/x/spec.md")` | either | `/r/claudine/x`: an absolute input keeps its absolute parent, even inside the repository |
+| `dirname("sub/x.md")` | either | `sub` (relative input: display form, unchanged) |
+| `increment_file_index("/r/claudine/x/review-1.md")` | either | `/r/claudine/x/review-2.md`; the file-index family and `find_*` resolve first, edit the name, and keep an absolute anchor |
+| `file_exists("missing.md")` | nothing | `false` |
+| `file_exists("~/x.md")` without home, `"../../out.md"` escaping the tree, a locked directory, a denied remote fetch | — | error, never `false` |
+
+So `dirname(absolute(spec)) + '/review-1.md'` stays beside the caller's spec
+whether the prompt lives in the repository or outside it.
+`darkmatter/lib/tests/l1/path_function_contracts.rs` is the contract table.
 
 How text becomes an AST — scanning, lexing (including the `-` identifier
 rule), the grammar ladder, the failure table (every full-document surface is
@@ -701,7 +742,7 @@ Numeric strings auto-convert for comparisons.
 {{ round(3.7) }}             // Round to integer (4)
 {{ round(value, 0) }}        // With default
 
-{{ link(doc.path) }}         // Markdown link using relative text and absolute destination
+{{ link(fm.path) }}          // Markdown link using relative text and absolute destination
 {{ link("https://example.com", "Example") }}  // Link with explicit description
 {{ code_link(plan) }}        // Same link, text as inline code: [`plans/foo.md`](/abs/plans/foo.md)
 {{ code_link(url, "a]b") }}  // Code-span text is literal; never wrap {{ link(x) }} in backticks
@@ -840,9 +881,12 @@ Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw text: pass 1
 neither decodes their tokens nor converts their `{{{ … }}}` literals, so the
 caller's event-time evaluation sees each escape as authored.
 
-**Schema pending.** Data is final, so it is judged at validation and never
-deferred. `value_pending_composition` in `compose/schema_validation.rs`
-checks only the `DataPaths::authored_view`. The shared lexical test,
+**Schema pending.** Pending is decided by what a later stage resolves, never
+by text shape alone (`PendingDeferral` in `compose/schema_validation.rs`).
+Data is final except a key pass 1 resolved provisionally from an unexpanded
+command, and template checks read only the `DataPaths::authored_view`. The
+caller-owned post-shell pass keeps the older text test
+(`value_pending_composition`). The shared lexical test,
 `literal_token::holds_pending_syntax`, never treats a whole valid token as
 pending. Outside compose, `EffectiveSchema::validate_with_options` validates
 the token-decoded instance, while it computes pending on the raw one.
@@ -953,6 +997,114 @@ candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
 raw `ShellCommandEntry` list. See
 `docs/inline/preflight-checks.md`.
 
+### Typed shell templates (`shell_expansion/template/`)
+
+The shared model for template-mode approval. `parse_authored` parses
+*authored* command text (holes found with `ExpressionFinder::scan_plain` before
+quotes, spaces, or operators are read) into a `CommandTemplate`; never
+interpolate and then tokenize. `project_types` types each hole from the owning
+document's `EffectiveSchema.simplified`, and only a bare top-level property
+(`dir`, `fm.dir`) reads a declaration. Each `HoleType` keeps the approval type
+(`BroadString` or `StringLike`) separate from its validator, so a numeric
+declaration is approved as `{{ string }}` but still validated as a number.
+`TemplateShape` is what a `template` rule stores and matches, and
+`canonical_text`/`parse_rule` round-trip it. Covers is `rule_covers`, which
+gates `schemas::is_subtype` behind `is_string_like`, because `is_subtype`
+accepts any identical pair. Blacklist matching errs toward refusing: holes
+ignore type, redirects are ignored, a one-segment rule matches any chain
+segment, and `blocks_filled` treats holes as `*` against filled argv.
+
+The runtime template rejection chain never stores a rejected value; this does
+not cover the earlier document-schema verdict, which can display it. Template
+authorization and command-result caching remain separate: fill, validate,
+check blacklists, and resolve direct targets before result reuse. The native
+redirection regressions preserve original stream destinations, so `2>&1 >
+/dev/null` retains stderr on original stdout whereas `> /dev/null 2>&1`
+discards both. Do not replace a surviving `ToStdout`/`ToStderr` with that
+stream's own capture channel.
+`check_user_blacklist` already applies template blacklist rules to
+resolved-byte commands. `store::load_ruleset_with_warnings` returns the
+skipped lines with file and line; `load_ruleset` logs them.
+
+Discovery (`preflight/collect.rs`) also reads each command site as authored
+(`parser::authored_directive_commands` + `authored_template`, which drops
+directive options; shell-block lines; `authored_shell_template` for
+frontmatter `$( … )`) and reports one `ShellCandidate` per site in
+`ComposePreflightReport::candidates`, never merged by bytes. Each candidate keeps
+`authored_command` independently of template parse success; `program_words_fixed`
+and `offered()` retain program-hole restrictions for byte-only host commands.
+A site is matched
+to its resolved bytes by document order (`resolved`); a count mismatch leaves
+it unlinked rather than guessed. `CandidateScope::build` types holes from the
+owner's schema (assembled lazily, only for a site with holes), marks a hole
+`HoleTiming::Deferred` when it reads a root from
+`ComposeOptions::with_deferred_shell_roots` directly or through a derived
+frontmatter key (`derived_deferred_keys`, inherited by children), and raises
+`ShellExpansionError::MissingValue` for an approval-time hole that evaluates
+to `null`. A deferred site is `ModeRequirement::TemplateRequired`, contributes
+no entry, and is `TemplateGrammar` if its text is not a template. A host that
+places commands late (Claudine's later sequence tasks) adds
+`DeferredShellRoots::with_placeholders_template_required()`: every site with a
+placeholder is then `TemplateRequired` too. `DeferredShellRoots::late_roots_of`
+is the one root-read check (a late root matches only a bare read; `fm.<root>`
+is the document's property; a derived key matches either way), and
+`derived_deferred_keys` and `compose::authored_shell_template` are public so a
+host building its own candidates (Claudine's sequence `shell:` tasks and stack
+`set` values) shares them.
+`MissingValue`/`TemplateGrammar` are `shell_input_violation()`s, fatal through
+transclusion notices and nested `||`. `ComposeOptions.pre_approved_commands`
+is `ShellPreApprovals` (exact bytes + shapes; a `HashSet<String>` converts to
+exact only); `validate_pre_approved` admits a site by bytes or shape.
+The runtime allow-once set and Claudine's session cache key on `ApprovalKey`
+(mode + policy root). `compose_preflight_approvals` decides per site (exact
+rule, template rule, prefix rule, then the handler with
+`ShellApprovalRequest::offered`/`template`) and persists every chosen row.
+The `md` prompt (`cli/src/approval.rs`, also Claudine's installed handler)
+numbers only the offered choices (exact, shape, prefix, once, deny,
+blacklist), shows `template.display` as `Command:` with the resolved bytes as
+`Resolved:` only when exact is offered, re-asks on an unlisted number, and
+denies at end of input; `approve_with_io` is its scripted-I/O test seam
+(`cli/tests/l1/approval_prompt.rs`).
+A site whose interpolated text no longer parses (a value holding `;`, quotes,
+`&&`) is not an error when its authored text is a template: discovery marks
+it `TemplateRequired` (`parser::scan_directive_lines` keeps each line's parse
+result; blocks and frontmatter fall back to their authored commands, the
+latter as `FrontmatterShellAst::Unparsed`).
+
+**Execution (`shell_expansion/site.rs`).** Each stage builds a `TemplateSite`
+for a command whose *authored* text has a placeholder: body `::shell` lines
+recover it through `BodyProvenance::authored` (an identity `BodyOrigin` over
+the pristine body, advanced with every edit), `::shell-block` through
+`BlockTemplates`, frontmatter through `FrontmatterProvenance::authored_source`.
+`SiteScope::site` types it against `PreparedSchemas::effective_for(..).simplified`
+(threaded into the inline stages) and evaluates holes with `LookupEvaluator`
+over the stage's state (`ResolvingLookup` for the body, `FrontmatterSeedState`
+for frontmatter). `prepare_site` picks the mode: pre-approved → exact bytes
+member, else shape member, else `NotPreApproved`; policy → blacklists, exact
+rule/cached exact key, template rule/cached shape key, prefix (bytes) or
+prefix-per-program (template-only), then the handler. `prepare_resolved` (the
+old `prepare_directive` body) offers the shape beside the bytes and handles
+`AllowTemplatePersist`. `TemplateSite::prepare_template` fills, runs
+`check_filled_chain`, resolves each program with `resolve_direct_target`, and
+returns `ExecutionMode::Template` with authored `raw_command`; its cache key is
+`template_command_key` (length-prefixed argv), never the rendered line.
+Resolved-byte preparation now also runs `check_filled_chain` (pre-approved
+path included) so chain `template` blacklists reach bytes.
+
+**Shared API for hosts (`template/fill.rs`, `template/target.rs`).**
+`HoleEvaluator` (closures and `LookupEvaluator<L: EvaluationLookup>`),
+`fill_template(&CommandTemplate, &dyn HoleEvaluator, Option<&SiteValues>) ->
+Result<FilledChain, HoleError>` (evaluate once → null/container/NUL refusal →
+`HoleValidator::accepts` on the original value → `scalar_string` → concatenate;
+`HoleError::into_shell_error` maps to `MissingValue`/`TemplateValueRejected`/
+`ExpressionEvaluation`), `resolve_late_values(sites, eval) -> LateValues`
+(only `HoleTiming::Deferred` holes, keyed by host site id + hole index),
+`resolve_direct_target(program, path, cwd)` (Windows `.exe`/`.com` only; Unix
+ELF/Mach-O/fat or `#!`). `TemplateValueRejected` and `TemplateTarget` are
+`shell_input_violation()`s like `MissingValue`. The native argv recorder for
+tests is `test_toolkit::argv_recorder` (bins `darkmatter-argv-recorder`,
+`claudine-argv-recorder`, both behind `test-fixtures`).
+
 ### Frontmatter-surface projection
 
 `ComposeOptions::only_frontmatter_surface()` narrows a compose to frontmatter
@@ -992,8 +1144,14 @@ and DMLS: at most one result suffix, no suffix twice, no trailing text. A
 suffix is never part of the approved bytes. `ResolvedShellValue` and
 `execute_resolved_shell_values` (`frontmatter_shell_expansion/assignment.rs`)
 serve a `$( … )` that runs outside a compose (Claudine's lifecycle `set`): bytes
-are fixed at `resolve`, and every execution gets a fresh cache. See
-`docs/inline/fm-shell-expansion.md`.
+are fixed at `resolve`, and every execution gets a fresh cache. A value given
+`with_template` runs as its typed template instead (`prepare_template_value` →
+`site::prepare_site`, pre-approved by shape; `with_late_values` fills barrier
+values; `execute_shell_values_with` takes the host's `HoleEvaluator`), and
+`template_only` keeps one whose interpolated text no longer parses. Discovery
+(`preflight/collect.rs::DiscoverySiteContext::awaits_execution`) leaves a body
+site reading an `ExecutionDependent` host global to the preparation that binds
+it, and skips its presence check. See `docs/inline/fm-shell-expansion.md`.
 
 A repeated command whose executable is on the built-in volatile allowlist
 (`uuidgen`, `date`, `openssl`) emits a one-time discoverability warning
@@ -1025,9 +1183,10 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   before interpolation must report its edits through `body_origin::advance`.
 - **Frontmatter.** `interpolate_frontmatter_located` records the failing
   string's key/index path and the construct's span in it; the pipeline walks
-  the crate-private `locate_frontmatter_value` (the schema locator with block
-  and multi-line scalars enabled; schema documents keep the closed v1 grammar
-  that rejects them) to the authoring scalar and projects through its
+  the crate-private `locate_frontmatter_value` (the schema locator's tolerant
+  grammar, which also follows tags, block scalars, quoted continuations, and
+  empty values; schema documents keep the strict v1 grammar, which shares only
+  indentless sequences and continued plain scalars) to the authoring scalar and projects through its
   quoting, escapes, line folding, and indentation with
   `yaml_scalar::decode_scalar_node`, which follows libyaml's rules for plain,
   quoted, literal `|`, and folded `>` scalars on one line or several
@@ -1161,7 +1320,7 @@ darkmatter/lib/src/
     │   ├── functions/   # domain-owned registrations and dispatch
     │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
     │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
-    │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution
+    │   ├── fm_namespace.rs  # Reserved fm / fm.* namespace resolution
     │   └── resolve_ctx.rs   # ResolutionContext (cwd, base_dir() tree root, magic paths, remote)
     └── interpolation/
         ├── mod.rs       # Module exports

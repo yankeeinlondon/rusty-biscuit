@@ -1,13 +1,6 @@
-//! Typed domain model for Sequence Plus.
-//!
-//! This module replaces the loosely-shaped "list of raw JSON blobs" with typed
-//! states, sources, and the reserved per-step overlay. It is the vocabulary the
-//! later phases (source resolution, preflight, JIT execution, groups) build on;
-//! phase 3 wires the state/source/overlay portion and defines the remaining
-//! executable/task/output/runtime representations so those phases share one
-//! model rather than re-inventing shapes.
-//!
-//! See `claudine/features/2026-07-11-sequence-plus/spec.md`.
+//! Typed sequence states, sources, executables, and results shared by source
+//! resolution, preflight, and container execution. Per-step `seq` values travel
+//! separately from authored frontmatter.
 
 use std::path::PathBuf;
 
@@ -23,8 +16,7 @@ use super::super::authored_order::AuthoredOrder;
 ///
 /// Every step's authored `name` (or a normalized scalar) plus the generated
 /// identity/position fields and any arbitrary authored state keys (`extra`).
-/// [`Self::to_value`] renders it as the JSON object injected under `state`,
-/// `previous`, and `next`.
+/// `SequenceBinding` projects this internal row into `seq` and shallow neighbors.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepState {
     /// Authored (or scalar-normalized) display name. Always a non-empty string.
@@ -47,7 +39,8 @@ pub struct StepState {
 }
 
 impl StepState {
-    /// Render this state as the JSON object placed under `state`/`previous`/`next`.
+    /// Internal row projection. `SequenceBinding` relocates the invocation
+    /// token to `seq.run_id` and omits it from neighboring rows.
     ///
     /// Generated fields are emitted first, then the authored `extra` keys. An
     /// `extra` key never shadows a generated field: normalization already
@@ -87,6 +80,8 @@ pub enum ExecutableField {
     Group,
     /// `task: <file-ref>` — expand an externalized `kind: task` file.
     Task,
+    /// `sequence: <list | file-ref>` — a nested sequence container.
+    Sequence,
 }
 
 impl ExecutableField {
@@ -98,6 +93,7 @@ impl ExecutableField {
             ExecutableField::SideEffect => "side_effect",
             ExecutableField::Group => "group",
             ExecutableField::Task => "task",
+            ExecutableField::Sequence => "sequence",
         }
     }
 
@@ -109,6 +105,7 @@ impl ExecutableField {
             "side_effect" => Some(ExecutableField::SideEffect),
             "group" => Some(ExecutableField::Group),
             "task" => Some(ExecutableField::Task),
+            "sequence" => Some(ExecutableField::Sequence),
             _ => None,
         }
     }
@@ -122,11 +119,11 @@ impl ExecutableField {
 /// so they are retained verbatim here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepExecutable {
-    /// Which of the five executable fields was declared.
+    /// Which executable field was declared.
     pub field: ExecutableField,
     /// The declared executable value, verbatim.
     pub value: Value,
-    /// The task-option keys/values (`params`, `timeout`, …) declared alongside.
+    /// The task-option keys/values (`with`, `timeout`, …) declared alongside.
     pub options: Map<String, Value>,
 }
 
@@ -262,7 +259,7 @@ pub struct SequencePlan {
     pub source: SequenceSource,
     /// Ordered, normalized steps.
     pub steps: Vec<SequenceStep>,
-    /// The invoking document's `fail_fast` setting (defaults to `true`).
+    /// Internal sequence failure policy; authored `fail_fast` is group-only.
     pub document_fail_fast: bool,
     /// The generated invocation correlation token, copied into every step's
     /// state and the root overlay.
@@ -280,13 +277,8 @@ pub struct SequencePlan {
 // Overlay
 // ---------------------------------------------------------------------------
 
-/// The reserved per-step overlay injected into each composition run.
-///
-/// Always present: `state`, `sequence_id`. Present-as-`null` on the
-/// boundaries: `previous` on the first step, `next` on the last step — an
-/// absent neighbor never coerces to an empty-named state. The retired root keys
-/// (`previous_state`, `next_state`, `step`, `total_steps`, `is_first`,
-/// `is_last`) are gone; their information moved inside each `step_state`.
+/// Complete child position used to build the lexical `seq` root.
+/// Neighbor rows are shallow and absent at sequence boundaries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SequenceStepOverlay {
     /// The current step's state.
@@ -295,17 +287,13 @@ pub struct SequenceStepOverlay {
     pub previous: Option<StepState>,
     /// The next step's state, or `None` on the last step.
     pub next: Option<StepState>,
-    /// The sequence invocation token (also present inside every state).
+    /// The invocation token exposed as `seq.run_id`.
     pub sequence_id: String,
 }
 
 impl SequenceStepOverlay {
-    /// Build a `serde_json::Value::Object` suitable for `set_overrides`.
-    ///
-    /// Merge order: user `--set` first, then the overlay (reserved keys always
-    /// win). `previous`/`next` are emitted as `null` when their neighbor is
-    /// absent so `{{ previous }}` reads as empty rather than an unknown
-    /// variable.
+    /// Build the internal overlay payload. `layered_set_overrides` extracts
+    /// `seq` into its separate runtime channel before applying frontmatter.
     pub fn as_set_overrides(&self, user_set: Option<Value>) -> Value {
         let mut map = Map::new();
 
@@ -315,20 +303,7 @@ impl SequenceStepOverlay {
             }
         }
 
-        map.insert("state".into(), self.state.to_value());
-        map.insert(
-            "previous".into(),
-            self.previous.as_ref().map_or(Value::Null, StepState::to_value),
-        );
-        map.insert(
-            "next".into(),
-            self.next.as_ref().map_or(Value::Null, StepState::to_value),
-        );
-        map.insert("sequence_id".into(), Value::String(self.sequence_id.clone()));
-        // `outputs` is deliberately absent: it lives in the runtime layer,
-        // which sits *below* this overlay. Emitting the (always-empty) overlay
-        // copy would clobber the accumulator every step, so a later step would
-        // read `[]` instead of what earlier steps produced.
+        map.insert("seq".into(), crate::composition::lifecycle::bindings::SequenceBinding::step(self, Vec::new()).to_value());
 
         Value::Object(map)
     }

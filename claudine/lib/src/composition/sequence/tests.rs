@@ -77,7 +77,7 @@ fn inline_scalar_list_normalizes_correctly() {
     let source = make_source(
         &dir,
         &[("sequence", json!(["one", "two", "three"]))],
-        "Prompt: {{state}}",
+        "Prompt: {{seq}}",
     );
     let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert!(matches!(plan.source, SequenceSource::Inline));
@@ -142,11 +142,11 @@ fn inline_object_step_name_wrong_type_fails() {
 // -- resolve_sequence_plan: empty list ------------------------------------
 
 #[test]
-fn empty_list_fails() {
+fn empty_list_returns_empty_plan() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("sequence", json!([]))], "Prompt");
-    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
-    assert!(matches!(err, CompositionError::SequenceEmpty), "got: {err}");
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
+    assert!(plan.steps.is_empty());
 }
 
 // -- resolve_sequence_plan: invalid type -----------------------------------
@@ -165,7 +165,7 @@ fn invalid_sequence_type_fails() {
 // -- resolve_sequence_plan: fail_fast frontmatter -------------------------
 
 #[test]
-fn fail_fast_false_from_frontmatter() {
+fn fail_fast_false_from_frontmatter_is_removed() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -175,8 +175,8 @@ fn fail_fast_false_from_frontmatter() {
         ],
         "Prompt",
     );
-    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
-    assert!(!plan.document_fail_fast);
+    let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+    assert!(matches!(error, CompositionError::RemovedGrammar {..}));
 }
 
 // -- resolve_sequence_plan: external YAML (sequence: form) ----------------
@@ -194,7 +194,7 @@ fn external_sequence_form_loads() {
     let source = make_source(
         &dir,
         &[("sequence", json!("steps.yaml"))],
-        "Prompt: {{state.name}}",
+        "Prompt: {{seq.name}}",
     );
     let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert!(matches!(plan.source, SequenceSource::External { .. }));
@@ -225,7 +225,7 @@ sequence:
     let source = make_source(
         &dir,
         &[("sequence", json!("agents.yaml"))],
-        "Research {{state.name}}",
+        "Research {{seq.name}}",
     );
     let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert_eq!(plan.steps.len(), 2);
@@ -291,7 +291,7 @@ fn external_template_reserved_key_collision_fails() {
         &yaml_path,
         r#"kind: sequence
 template:
-  state: "{{name}}"
+  seq: "{{name}}"
 sequence:
   - name: One
 "#,
@@ -301,7 +301,7 @@ sequence:
     let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "state"),
+        matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "seq"),
         "got: {err}"
     );
 }
@@ -360,7 +360,7 @@ fn fail_fast_wrong_type_fails() {
     );
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceInvalid(ref msg) if msg.contains("fail_fast")),
+        matches!(err, CompositionError::RemovedGrammar { ref removed, .. } if removed == "fail_fast"),
         "got: {err}"
     );
 }
@@ -583,47 +583,50 @@ fn env_reference_expands_environment_variables() {
     assert_eq!(resolved, target);
 }
 
+/// An external sequence reference reads the map of the document that resolves
+/// it: the launch document under its own map, and a document entered later
+/// under the map it captured, without disturbing the first. The maps are
+/// supplied; the process environment is never read.
 #[test]
-#[serial]
-fn external_sequence_reuses_request_snapshot_after_environment_mutation() {
+fn an_external_sequence_reference_resolves_under_each_documents_own_map() {
+    const ROOT: &str = "SEQ_DOCUMENT_ROOT";
+    assert!(std::env::var_os(ROOT).is_none(), "the process must not carry {ROOT}");
     let dir = TempDir::new().unwrap();
-    let captured = dir.path().join("captured");
-    fs::create_dir_all(&captured).unwrap();
-    fs::write(captured.join("steps.yaml"), "sequence:\n  - captured\n").unwrap();
-    let ambient = TempDir::new().unwrap();
-    let prior = std::env::var_os("SEQ_SNAPSHOT_ROOT");
-    let mut env = std::collections::HashMap::new();
-    env.insert(
-        "SEQ_SNAPSHOT_ROOT".to_string(),
-        captured.display().to_string(),
-    );
-    let snapshot = biscuit_file::FileResolutionContext::new(dir.path()).with_env(env);
-    let source = make_source(
-        &dir,
-        &[(
-            "sequence",
-            json!("{{SEQ_SNAPSHOT_ROOT}}/steps.yaml"),
-        )],
-        "Prompt",
-    );
-
-    // SAFETY: this test is serialized while mutating process-global state.
-    unsafe { std::env::set_var("SEQ_SNAPSHOT_ROOT", ambient.path()) };
-    let plan = resolve_sequence_plan_with(
-        &source,
-        SequenceSourceOptions {
-            shell_runner: None,
-            file_resolution_context: &snapshot,
-        },
-    );
-    match prior {
-        Some(value) => unsafe { std::env::set_var("SEQ_SNAPSHOT_ROOT", value) },
-        None => unsafe { std::env::remove_var("SEQ_SNAPSHOT_ROOT") },
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    for (name, step) in [("a", "first"), ("b", "second")] {
+        fs::create_dir_all(root.join(name)).unwrap();
+        fs::write(root.join(name).join("steps.yaml"), format!("sequence:\n  - {step}\n")).unwrap();
     }
+    let map = |name: &str| {
+        crate::invocation_context::DocumentEnvironment::from_iter([(
+            ROOT,
+            root.join(name).display().to_string(),
+        )])
+    };
+    let source = make_source(&dir, &[("sequence", json!(format!("{{{{{ROOT}}}}}/steps.yaml")))], "Prompt");
+    let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&root)
+        .with_home(Some(root.join("home")))
+        .with_env(map("a").vars().clone());
+    let launch = crate::invocation_context::InvocationContext::capture(&snapshot).unwrap();
+    let first_step = |view: &crate::invocation_context::InvocationContext| {
+        let context = view.derive_source(&source.resolved_path).unwrap();
+        let plan = resolve_sequence_plan_with(
+            &source,
+            SequenceSourceOptions {
+                shell_runner: None,
+                file_resolution_context: context.file_resolution_context(),
+            },
+        )
+        .unwrap()
+        .expect("sequence plan");
+        plan.steps[0].name.clone()
+    };
 
-    let plan = plan.unwrap().expect("sequence plan");
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].name, "captured");
+    let later = launch.enter_document(map("b"));
+
+    assert_eq!(first_step(&launch), "first");
+    assert_eq!(first_step(&later), "second");
+    assert_eq!(first_step(&launch), "first", "the launch document keeps its own map");
 }
 
 /// A `~`-prefixed sequence reference now resolves through [`FileReference`]'s
@@ -1048,22 +1051,13 @@ fn overlay_as_set_overrides_emits_new_root_keys_and_reserves_them() {
     let overrides = build_step_overlay(&plan, 0).as_set_overrides(Some(user_set));
     let map = overrides.as_object().unwrap();
 
-    // Always-present root keys.
-    assert!(map["state"].is_object());
-    assert_eq!(map["state"]["name"], json!("a"));
-    assert_eq!(map["state"]["index"], json!(1));
-    assert!(map["sequence_id"].is_string());
-    // `outputs` is NOT an overlay key: the runtime layer below owns the
-    // accumulator, and an overlay copy would reset it at every step boundary.
-    assert!(!map.contains_key("outputs"), "overlay must not emit `outputs`");
-    // First step: previous is null, next is the second state object.
-    assert!(map["previous"].is_null());
-    assert_eq!(map["next"]["name"], json!("b"));
-
-    // Reserved overlay keys always win over user setters.
-    assert_eq!(map["state"]["name"], json!("a"));
-    assert_ne!(map["sequence_id"], json!("nope"));
-    // Non-reserved user keys survive.
+    assert_eq!(map["seq"]["name"], json!("a"));
+    assert_eq!(map["seq"]["index"], json!(1));
+    assert!(map["seq"]["run_id"].is_string());
+    assert!(map["seq"]["previous"].is_null());
+    assert_eq!(map["seq"]["next"]["name"], json!("b"));
+    assert_eq!(map["state"], json!("should-lose"), "authored legacy names are data");
+    assert_eq!(map["sequence_id"], json!("nope"));
     assert_eq!(map["color"], json!("red"));
 }
 
@@ -1106,26 +1100,29 @@ fn object_step_rejects_two_executables() {
     );
 }
 
+/// `with` is a prompt task's option alone: every other executable rejects it
+/// by name, including a `task:` reference (put `with` inside the task file).
 #[test]
-fn shell_step_rejects_prompt_only_task_option() {
-    let dir = TempDir::new().unwrap();
-    let source = make_source(
-        &dir,
-        &[(
-            "sequence",
-            json!([{"name": "alpha", "shell": "just test", "params": {"x": 1}}]),
-        )],
-        "Prompt",
-    );
-    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            CompositionError::SequenceInvalidTaskField { index: 0, ref field, ref executable }
-                if field == "params" && executable == "shell"
-        ),
-        "`params` on a shell task must be rejected, got: {err:?}"
-    );
+fn with_is_rejected_on_every_executable_but_prompt() {
+    for (executable, step) in [
+        ("shell", json!({"name": "alpha", "shell": "just test", "with": {"x": 1}})),
+        ("side_effect", json!({"name": "alpha", "side_effect": {"stderr": "note"}, "with": {"x": 1}})),
+        ("group", json!({"name": "alpha", "group": {"name": "g", "tasks": [{"name": "leg", "shell": "true"}]}, "with": {"x": 1}})),
+        ("task", json!({"name": "alpha", "task": "./task.yaml", "with": {"x": 1}})),
+        ("sequence", json!({"name": "alpha", "sequence": [{"name": "inner", "shell": "true"}], "with": {"x": 1}})),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!([step]))], "Prompt");
+        let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                CompositionError::SequenceInvalidTaskField { index: 0, field, executable: got }
+                    if field == "with" && got == executable
+            ),
+            "`with` on a {executable} task must be rejected, got: {err:?}"
+        );
+    }
 }
 
 #[test]
@@ -1135,7 +1132,7 @@ fn single_executable_step_extracts_executable_and_options() {
         &dir,
         &[(
             "sequence",
-            json!([{"name": "review", "prompt": "@p.md", "params": {"topic": "x"}, "color": "blue"}]),
+            json!([{"name": "review", "prompt": "@p.md", "with": {"topic": "x"}, "color": "blue"}]),
         )],
         "Prompt",
     );
@@ -1143,11 +1140,69 @@ fn single_executable_step_extracts_executable_and_options() {
     let step = &plan.steps[0];
     let executable = step.executable.as_ref().expect("executable extracted");
     assert_eq!(executable.field, ExecutableField::Prompt);
-    assert_eq!(executable.options.get("params"), Some(&json!({"topic": "x"})));
+    assert_eq!(executable.options.get("with"), Some(&json!({"topic": "x"})));
     // Arbitrary state stays in the generated state; task keys never leak into it.
     assert_eq!(step.state.extra.get("color"), Some(&json!("blue")));
     assert!(!step.state.extra.contains_key("prompt"));
-    assert!(!step.state.extra.contains_key("params"));
+    assert!(!step.state.extra.contains_key("with"));
+}
+
+/// `params` is no longer a task option: on any step, with or without an
+/// executable, it is ordinary step data.
+#[test]
+fn params_on_a_step_is_ordinary_step_data() {
+    for step in [
+        json!({"name": "review", "prompt": "@p.md", "params": {"topic": "x"}}),
+        json!({"name": "check", "shell": "true", "params": {"topic": "x"}}),
+        json!({"name": "body", "params": {"topic": "x"}}),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!([step.clone()]))], "Prompt");
+        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
+            .unwrap_or_else(|err| panic!("{step}: {err:?}"))
+            .unwrap();
+        let state = &plan.steps[0];
+        assert_eq!(state.state.extra.get("params"), Some(&json!({"topic": "x"})), "{step}");
+        if let Some(executable) = &state.executable {
+            assert!(!executable.options.contains_key("params"), "{step}");
+        }
+    }
+}
+
+/// A prompt task's `with` shares every `with`'s shape errors, located at the
+/// task in the file that authored it. `{}` is valid and equals no `with`.
+#[test]
+fn task_with_shape_errors_are_the_with_family_at_the_task() {
+    let leg = |with: Value| json!({"name": "g", "group": {"name": "g", "tasks": [{"name": "leg", "prompt": "@p.md", "with": with}]}});
+    let top = |with: Value| json!({"name": "review", "prompt": "@p.md", "with": with});
+    for (label, step, variant, at) in [
+        ("null", top(Value::Null), "NotMapping", "sequence[0].with"),
+        ("number", top(json!(42)), "NotMapping", "sequence[0].with"),
+        ("string", top(json!("plain")), "NotMapping", "sequence[0].with"),
+        ("list", top(json!([{"x": 1}])), "NotMapping", "sequence[0].with"),
+        ("whole mapping", top(json!("{{ payload }}")), "WholeMapping", "sequence[0].with"),
+        ("dynamic key", top(json!({"{{ key }}": 1})), "DynamicKey", "sequence[0].with"),
+        ("shell key", top(json!({"$(echo k)": 1})), "DynamicKey", "sequence[0].with"),
+        ("group leg", leg(json!(7)), "NotMapping", "sequence[0].group.tasks[0].with"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[("sequence", json!([step]))], "Prompt");
+        let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+        let (got, source_path) = match &err {
+            CompositionError::LifecycleWithNotMapping { source_path, .. } => ("NotMapping", source_path),
+            CompositionError::LifecycleWithWholeMapping { source_path, .. } => ("WholeMapping", source_path),
+            CompositionError::LifecycleWithDynamicKey { source_path, .. } => ("DynamicKey", source_path),
+            other => panic!("{label}: expected a `with` shape error, got {other:?}"),
+        };
+        assert_eq!(got, variant, "{label}: {err}");
+        assert_eq!(source_path, &source.resolved_path, "{label}");
+        assert!(err.to_string().contains(&format!("`{at}")), "{label}: {err}");
+    }
+
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("sequence", json!([top(json!({}))]))], "Prompt");
+    resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
+        .expect("`with: {}` is valid");
 }
 
 // -- template rendering (Darkmatter expression engine) --------------------
@@ -1226,12 +1281,10 @@ fn item_fields_shadow_document_globals() {
 // -- Sequence Plus: characterization + clean-break guardrails --------------
 //
 // These pin the deliberate removals of the Sequence Plus clean break: the
-// retired root overlay names, the external `list:` shape, and group `loop`.
-// Each was authored `#[ignore]`d in Phase 1 against behavior that did not yet
-// exist, then un-ignored by the phase that implemented the removal — overlay
-// names and `list:` in Phase 3, group `loop` in Phase 5. All now run in the
-// default suite, so a regression that reinstates any retired name or shape
-// fails `just test` rather than passing silently.
+// retired root overlay names and the external `list:` shape, plus the refusal
+// of a group `loop` until container loops run. A regression that reinstates
+// a retired name or shape, or runs a group loop once, fails `just test`
+// rather than passing silently.
 
 mod clean_break {
     use super::*;
@@ -1251,22 +1304,13 @@ mod clean_break {
         let overrides = build_step_overlay(&plan, 0).as_set_overrides(None);
         let map = overrides.as_object().expect("overlay is a JSON object");
 
-        for key in ["state", "previous", "next", "sequence_id"] {
-            assert!(map.contains_key(key), "overlay must emit `{key}`");
+        assert_eq!(map.len(), 1);
+        let seq = map["seq"].as_object().unwrap();
+        for inner in ["index", "count", "is_first", "is_last", "id", "run_id", "previous", "next", "outputs"] {
+            assert!(seq.contains_key(inner), "seq must carry `{inner}`");
         }
-        assert!(
-            !map.contains_key("outputs"),
-            "`outputs` belongs to the runtime layer, not the overlay: {map:?}"
-        );
-        assert_eq!(
-            map.len(),
-            4,
-            "overlay emits exactly four reserved root keys: {map:?}"
-        );
-        // The generated position fields live inside each state, not at the root.
-        let state = map["state"].as_object().unwrap();
-        for inner in ["index", "count", "is_first", "is_last", "id", "sequence_id"] {
-            assert!(state.contains_key(inner), "state must carry `{inner}`");
+        for retired in ["state", "previous", "next", "sequence_id", "outputs"] {
+            assert!(!map.contains_key(retired), "retired root {retired}");
         }
     }
 
@@ -1312,14 +1356,9 @@ mod clean_break {
         );
     }
 
-    /// Group execution without `loop` is in scope, but group-loop commit
-    /// semantics remain unratified (spec Open Questions), so a group carrying
-    /// `loop` must be rejected with a typed, actionable error rather than
-    /// executed. Groups are parsed by the Phase 5 preflight walk, which is
-    /// where the rejection lands — plan resolution stays shape-agnostic about
-    /// a step's executable value.
+    /// A valid group `loop` passes plan resolution: the group repeats.
     #[test]
-    fn group_loop_rejected() {
+    fn group_loop_is_accepted() {
         let dir = TempDir::new().unwrap();
         let source = make_source(
             &dir,
@@ -1337,19 +1376,8 @@ mod clean_break {
             )],
             "Prompt",
         );
-        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
-            .expect("the plan itself is well-formed")
-            .expect("the fixture declares a sequence");
-        let error = super::preflight::build_preflight_graph(&plan, &source, &crate::test_support::context_for(&source.resolved_path))
-            .expect_err("a group carrying `loop` must be rejected");
-        assert!(
-            matches!(
-                &error,
-                CompositionError::SequenceUnsupportedConstruct { construct, .. }
-                    if construct.contains("group `loop`")
-            ),
-            "the rejection must be typed and name the construct, got: {error}",
-        );
+        resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
+            .expect("a group carrying a valid `loop` resolves");
     }
 }
 
@@ -2018,16 +2046,10 @@ mod dynamic_sources {
 
     // -- empty static vs empty dynamic ------------------------------------
 
-    /// The ratified split: a static empty list is an authoring error, while a
-    /// dynamic source resolving to nothing is a graceful no-op that yields a
-    /// zero-step plan for the caller to report and exit `0` on.
+    /// Both authored and dynamic empty sequences are valid no-ops.
     #[test]
-    fn empty_static_errors_but_empty_dynamic_is_a_no_op() {
-        let static_error = plan_from_frontmatter(&[("sequence", json!([]))]).unwrap_err();
-        assert!(
-            matches!(static_error, CompositionError::SequenceEmpty),
-            "got: {static_error}"
-        );
+    fn empty_static_and_dynamic_are_no_ops() {
+        assert!(plan_from_frontmatter(&[("sequence", json!([]))]).unwrap().steps.is_empty());
 
         for (label, frontmatter) in [
             (
@@ -2067,15 +2089,14 @@ mod dynamic_sources {
         assert!(plan.steps.is_empty());
     }
 
-    /// A *formal* sequence document is authored for sequences, so an empty
-    /// `sequence:` list there is still the typo it looks like.
+    /// Formal sequence documents share the empty-list contract.
     #[test]
-    fn an_empty_formal_sequence_document_is_an_error() {
+    fn an_empty_formal_sequence_document_is_a_no_op() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("s.yaml"), "sequence: []\n").unwrap();
         let source = make_source(&dir, &[("sequence", json!("s.yaml"))], "Prompt");
-        let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
-        assert!(matches!(error, CompositionError::SequenceEmpty), "got: {error}");
+        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
+        assert!(plan.steps.is_empty());
     }
 
     // -- shell sources ----------------------------------------------------
@@ -2240,6 +2261,30 @@ $schema:
         );
     }
 
+    /// A field missing inside a state value is located by the value's
+    /// instance pointer; the message names the field.
+    #[test]
+    fn a_nested_missing_field_reports_its_instance_path() {
+        let error = plan_from(
+            r#"kind: sequence
+sequence:
+  - name: blue
+    config: {}
+$schema:
+  config: "{ shade: string(required) }"
+"#,
+        )
+        .unwrap_err();
+
+        match error {
+            CompositionError::SequenceStateSchemaViolation { index: 0, ref property, ref message, .. } => {
+                assert_eq!(property, "/config");
+                assert!(message.contains("shade"), "{message}");
+            }
+            other => panic!("expected SequenceStateSchemaViolation, got {other}"),
+        }
+    }
+
     /// The schema judges the *state* portion only: executable and task keys
     /// are not state and must not be validated as such.
     #[test]
@@ -2258,5 +2303,431 @@ $schema:
 
         assert!(plan.steps[0].executable.is_some());
         assert!(!plan.steps[0].state.extra.contains_key("shell"));
+    }
+}
+
+mod container_grammar {
+    use super::*;
+
+    #[test]
+    fn nested_sequence_and_removed_task_keys() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sequence.md");
+        for key in ["setup", "teardown", "execution", "fail_fast"] {
+            for value in [Value::Null, json!(false), json!("serial"), json!([])] {
+                let mut item = json!({"name": "work", "shell": "echo untouched"});
+                item[key] = value;
+                let error = normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true).unwrap_err();
+                assert!(matches!(error, CompositionError::RemovedGrammar { .. }), "{key}: {error}");
+            }
+        }
+        let plan = normalize::normalize_plan(&[json!({"name": "nested", "sequence": [], "cancelled": []})], SequenceSource::Inline, &path, true).unwrap();
+        assert_eq!(plan.steps[0].executable.as_ref().unwrap().field.key(), "sequence");
+        assert!(plan.steps[0].state.extra.is_empty());
+    }
+
+    /// The well-formed spelling of every action `cancelled` forbids.
+    fn forbidden_in_cancelled() -> [(&'static str, Value); 8] {
+        [
+            ("retry", json!({"retry": 2})),
+            ("resume", json!({"resume": "continue"})),
+            ("proxy", json!({"proxy": "@prompts/next.md"})),
+            ("prep", json!({"prep": "@prompts/next.md"})),
+            ("skip", json!({"skip": null})),
+            ("error", json!({"error": "stopped"})),
+            ("break", json!({"break": "done"})),
+            ("defer", json!({"defer": "5m"})),
+        ]
+    }
+
+    #[derive(Clone, Copy)]
+    enum Container {
+        Sequence,
+        Group,
+    }
+
+    /// One sequence item whose containers nest in `chain` order, outermost
+    /// first; the innermost owns `cancelled`.
+    fn nested_item(chain: &[Container], cancelled: Value) -> Value {
+        let (innermost, outer) = chain.split_last().expect("at least one container");
+        let depth = chain.len();
+        let wrap = |container: Container, level: usize, child: Option<Value>, cancelled: Option<Value>| {
+            let name = format!("level-{level}");
+            let children = json!([child.unwrap_or_else(|| json!({"name": "leaf", "sequence": []}))]);
+            let mut body = match container {
+                Container::Sequence => json!({"name": name, "sequence": children}),
+                Container::Group => json!({"name": name, "group": {"name": format!("group-{level}"), "tasks": children}}),
+            };
+            if let Some(cancelled) = cancelled {
+                match container {
+                    Container::Sequence => body["cancelled"] = cancelled,
+                    Container::Group => body["group"]["cancelled"] = cancelled,
+                }
+            }
+            body
+        };
+        outer.iter().enumerate().rev().fold(wrap(*innermost, depth, None, Some(cancelled)), |child, (index, container)| {
+            wrap(*container, index + 1, Some(child), None)
+        })
+    }
+
+    /// Every forbidden verb in the innermost `cancelled` of `chain` fails plan
+    /// normalization, which runs before the root `initialize` and every task;
+    /// `[stop]` and a permitted action are accepted at the same site.
+    fn assert_innermost_cancelled_checked(chain: &[Container]) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sequence.md");
+        for (verb, action) in forbidden_in_cancelled() {
+            let item = nested_item(chain, json!([action]));
+            let error = normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true)
+                .expect_err(verb);
+            let message = error.to_string();
+            assert!(message.contains("cancelled") && message.contains(&format!("`{verb}`")), "{verb}: {message}");
+        }
+        for permitted in [json!(["stop"]), json!([{"warn": "x"}])] {
+            let item = nested_item(chain, permitted.clone());
+            normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true)
+                .unwrap_or_else(|error| panic!("{permitted}: {error}"));
+        }
+    }
+
+    /// The shipped schema types `cancelled` on the first two container
+    /// levels; the parser judges the `cancelled` stack of a container at the
+    /// third level and below.
+    macro_rules! deep_cancelled_is_checked {
+        ($($name:ident: [$($container:ident),+];)+) => {$(
+            #[test]
+            fn $name() {
+                assert_innermost_cancelled_checked(&[$(Container::$container),+]);
+            }
+        )+};
+    }
+
+    deep_cancelled_is_checked! {
+        deep_cancelled_seq_seq_seq: [Sequence, Sequence, Sequence];
+        deep_cancelled_seq_seq_group: [Sequence, Sequence, Group];
+        deep_cancelled_seq_group_seq: [Sequence, Group, Sequence];
+        deep_cancelled_seq_group_group: [Sequence, Group, Group];
+        deep_cancelled_group_seq_seq: [Group, Sequence, Sequence];
+        deep_cancelled_group_seq_group: [Group, Sequence, Group];
+        deep_cancelled_group_group_seq: [Group, Group, Sequence];
+        deep_cancelled_group_group_group: [Group, Group, Group];
+        deep_cancelled_fourth_level_seq: [Sequence, Sequence, Sequence, Sequence];
+        deep_cancelled_fourth_level_mixed: [Group, Sequence, Group, Sequence];
+    }
+
+    #[test]
+    fn sequence_task_shape_matrix_and_exclusivity() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sequence.md");
+        for (value, valid) in [(json!([]), true), (json!("@steps.yaml -> items::name(label)"), true), (Value::Null, false), (json!(123), false), (json!([{"name":"ok", "shell":"ok"}, 123]), false), (json!([123]), false)] {
+            let result = normalize::normalize_plan(&[json!({"name":"nested", "sequence":value})], SequenceSource::Inline, &path, true);
+            assert_eq!(result.is_ok(), valid, "{value}: {result:?}");
+        }
+        for executable in ["prompt", "shell", "side_effect", "group", "task"] {
+            let mut item = json!({"name":"nested", "sequence":[]});
+            item[executable] = json!("original input");
+            assert!(matches!(normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true), Err(CompositionError::SequenceExclusiveExecutable {..})));
+        }
+        for key in ["id", "index", "count", "is_first", "is_last", "previous", "next", "outputs", "run_id"] {
+            let mut item = json!({"name":"work", "shell":"echo untouched"});
+            item[key] = json!("authored reserved value");
+            assert!(matches!(normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true), Err(CompositionError::SequenceReservedStateKey {..})), "{key}");
+        }
+        for event in ["initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"] {
+            let mut item = json!({"name":"work", "shell":"echo untouched"});
+            item[event] = json!([]);
+            assert!(matches!(normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true), Err(CompositionError::RemovedGrammar {..})));
+        }
+    }
+}
+
+mod container_yaml_matrix {
+    use super::*;
+
+    #[test]
+    fn shipped_sequence_corpus_uses_normal_resolution_path() {
+        let dir = TempDir::new().unwrap();
+        for (name, text) in [
+            ("local-runners.yaml", include_str!("../../../../docs/local-runners.yaml")),
+            ("providers.yaml", include_str!("../../../../docs/providers.yaml")),
+        ] {
+            let path = dir.path().join(name);
+            fs::write(&path, text).unwrap();
+            let source = make_source(&dir, &[("sequence", json!(name))], "Corpus body");
+            let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&path)).unwrap().unwrap();
+            assert!(!plan.steps.is_empty(), "{name}");
+            assert!(plan.steps.iter().all(|step| !step.name.is_empty()));
+            crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+                &source.resolved_path,
+                crate::composition::lifecycle::bindings::AuthoredDocument {
+                    frontmatter: &crate::composition::prepare::frontmatter_to_value(source.markdown.frontmatter()),
+                    body: source.markdown.content(), body_line_offset: 0,
+                }, None, None,
+            ).unwrap();
+        }
+    }
+
+    #[test]
+    fn markdown_and_sequence_yaml_fields_matrix() {
+        let dir = TempDir::new().unwrap();
+        let control = "sequence: [{name: nested, sequence: []}]\n";
+        // Each row edits one field of the same valid document. An absent task
+        // executable remains a headed step; absent lifecycle stacks do nothing.
+        let edits = [
+            ("control", "sequence: []", "sequence: []", true),
+            ("sequence absent", ", sequence: []", "", true),
+            ("sequence null", "sequence: []", "sequence: null", false),
+            ("sequence wrong type", "sequence: []", "sequence: 123", false),
+            ("sequence bad element", "sequence: []", "sequence: [{name: good, shell: echo}, 123]", false),
+            ("sequence all bad", "sequence: []", "sequence: [123]", false),
+            ("sequence duplicate", "sequence: []", "sequence: [], sequence: []", false),
+            ("sequence invalid", "sequence: []", "sequence: [", false),
+            ("cancelled empty", "sequence: []", "sequence: [], cancelled: []", true),
+            ("cancelled null", "sequence: []", "sequence: [], cancelled: null", false),
+            ("cancelled wrong type", "sequence: []", "sequence: [], cancelled: 123", false),
+            ("cancelled bad element", "sequence: []", "sequence: [], cancelled: [{warn: good}, 123]", false),
+            ("cancelled all bad", "sequence: []", "sequence: [], cancelled: [123]", false),
+            ("cancelled duplicate", "sequence: []", "sequence: [], cancelled: [], cancelled: []", false),
+            ("cancelled invalid", "sequence: []", "sequence: [], cancelled: [", false),
+            ("name absent", "name: nested, ", "", false),
+            ("name empty", "name: nested", "name: ''", false),
+            ("name null", "name: nested", "name: null", false),
+            ("name wrong type", "name: nested", "name: 123", false),
+            ("name duplicate", "name: nested", "name: nested, name: again", false),
+            ("name invalid", "name: nested", "name: [", false),
+            ("setup null regression", "sequence: []", "sequence: [], setup: null", false),
+        ];
+        for markdown in [true, false] {
+            let path = dir.path().join(if markdown {"sequence.md"} else {"sequence.yaml"});
+            let context = crate::test_support::context_for(&path);
+            let mut cases: Vec<_> = edits.iter().map(|(label, from, to, valid)| {
+                (*label, control.replacen(from, to, 1), *valid)
+            }).collect();
+            cases.extend([
+                ("empty root", "sequence: []\n".into(), true),
+                ("root fail_fast native", "sequence: []\nfail_fast: true\n".into(), false),
+                ("root fail_fast quoted", "sequence: []\nfail_fast: 'true'\n".into(), false),
+                ("root fail_fast null", "sequence: []\nfail_fast: null\n".into(), false),
+                ("root duplicate", "sequence: []\nsequence: []\n".into(), false),
+                ("invalid trailing content", "sequence: []\ninvalid: [\n".into(), false),
+            ]);
+            for (label, yaml, valid) in cases {
+                let text = if markdown {format!("---\n{yaml}---\nBody\n")} else {format!("kind: sequence\n{yaml}")};
+                fs::write(&path, text).unwrap();
+                let loaded = if markdown {
+                    crate::composition::resolve_fixture_source(path.to_str().unwrap())
+                } else {
+                    crate::composition::resolve::load_yaml_document(&path).map(|markdown| ResolvedCompositionSource {
+                        original_ref: path.display().to_string(), resolved_path: path.clone(),
+                        original_text: fs::read_to_string(&path).unwrap(), markdown,
+                    })
+                };
+                let result = loaded.and_then(|source| resolve_sequence_plan(&source, &context));
+                assert_eq!(result.is_ok(), valid, "markdown={markdown}: {label}: {yaml}: {result:?}");
+                if let Ok(Some(plan)) = result {
+                    if label == "empty root" { assert!(plan.steps.is_empty()); }
+                    else {
+                        assert_eq!(plan.steps.len(), 1);
+                        assert_eq!(plan.steps[0].name, "nested");
+                        assert_eq!(plan.steps[0].executable.is_none(), label == "sequence absent");
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -- task `when`, container `loop`, and JSON-family duplicate keys ---------
+//
+// Grammar ahead of behavior: each construct is fully validated, and a valid
+// one is refused with its not-yet-supported error rather than ignored.
+
+mod task_guards_and_container_loops {
+    use super::*;
+    use crate::composition::LoopOwner;
+
+    fn origin() -> std::path::PathBuf {
+        std::path::PathBuf::from("/work/seq.md")
+    }
+
+    fn validate(task: Value) -> Result<(), CompositionError> {
+        grammar::validate_task_grammar(task.as_object().unwrap(), &origin(), "sequence[1]")
+    }
+
+    #[test]
+    fn a_valid_task_guard_is_accepted() {
+        validate(json!({"name": "a", "shell": "x", "when": "ready && n > 1"})).unwrap();
+    }
+
+    #[test]
+    fn an_invalid_task_guard_is_a_typed_error_for_every_shape() {
+        for (value, says) in [
+            (Value::Null, "must be an expression string, got null"),
+            (json!(true), "must be an expression string"),
+            (json!(3), "must be an expression string"),
+            (json!(["x"]), "must be an expression string"),
+            (json!({"x": 1}), "must be an expression string"),
+            (json!(""), "must not be an empty expression"),
+            (json!("   "), "must not be an empty expression"),
+            (json!("n >="), "is not a valid expression"),
+        ] {
+            let error = validate(json!({"name": "a", "shell": "x", "when": value})).unwrap_err();
+            assert!(
+                matches!(&error, CompositionError::TaskWhenInvalid { property, message, .. }
+                    if property == "sequence[1].when" && message.contains(says)),
+                "{value}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_misplaced_task_loop_names_where_the_loop_belongs() {
+        for (task, hint) in [
+            (json!({"name": "a", "shell": "x"}), "shell and side-effect tasks"),
+            (json!({"name": "a", "side_effect": {"append_line": ["f", "x"]}}), "shell and side-effect tasks"),
+            (json!({"name": "a", "prompt": "p.md"}), "frontmatter `loop:`"),
+            (json!({"name": "a", "task": "t.yaml"}), "references a task file"),
+            (json!({"name": "a", "group": "g.yaml"}), "that group file's object"),
+            (json!({"name": "a", "group": {"name": "g", "tasks": [{"name": "l", "shell": "x"}]}}), "on its group object"),
+            (json!({"name": "a", "sequence": "s.yaml"}), "at that document's root"),
+            (json!({"name": "a"}), "runs the document body"),
+        ] {
+            let mut task = task;
+            task["loop"] = json!({"until": "true"});
+            let error = validate(task.clone()).unwrap_err();
+            assert!(
+                matches!(&error, CompositionError::TaskLoopMisplaced { property, hint: said, .. }
+                    if property == "sequence[1].loop" && said.contains(hint)),
+                "{task}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_inline_sequence_loop_is_validated_and_accepted() {
+        let nested = |loop_value: Value| json!({"name": "a", "sequence": [{"name": "b", "shell": "x"}], "loop": loop_value});
+        validate(nested(json!({"until": "true"}))).unwrap();
+        let error = validate(nested(json!({}))).unwrap_err();
+        assert!(matches!(&error, CompositionError::LoopInvalid { property, .. } if property == "sequence[1].loop"), "{error}");
+        let error = validate(nested(json!({"until": "true", "on_rate_limit": "pause"}))).unwrap_err();
+        assert!(matches!(error, CompositionError::LoopRateLimitPolicyNotAccepted { owner: LoopOwner::Sequence, .. }), "{error}");
+    }
+
+    #[test]
+    fn a_group_object_loop_is_accepted_and_its_when_is_misplaced() {
+        let group = |key: &str, value: Value| {
+            let mut group = json!({"name": "g", "tasks": [{"name": "l", "shell": "x"}]});
+            group[key] = value;
+            json!({"name": "a", "group": group})
+        };
+        validate(group("loop", json!({"while": "true"}))).unwrap();
+        let error = validate(group("loop", json!({"while": "true", "fail_fast": true}))).unwrap_err();
+        assert!(matches!(error, CompositionError::RemovedGrammar { .. }), "{error}");
+        let error = validate(group("when", json!("true"))).unwrap_err();
+        assert!(matches!(&error, CompositionError::WhenMisplaced { property, .. } if property == "sequence[1].group.when"), "{error}");
+    }
+
+    #[test]
+    fn a_leg_guard_and_a_non_object_leg_are_located_inside_the_group() {
+        validate(json!({"name": "a", "group": {"name": "g", "tasks": [{"name": "l", "shell": "x", "when": "true"}]}})).unwrap();
+        let error = validate(json!({"name": "a", "group": {"name": "g", "tasks": [{"name": "l", "shell": "x", "when": 1}]}})).unwrap_err();
+        assert!(matches!(&error, CompositionError::TaskWhenInvalid { property, .. } if property == "sequence[1].group.tasks[0].when"), "{error}");
+        let error = validate(json!({"name": "a", "group": {"name": "g", "tasks": ["l"]}})).unwrap_err();
+        assert!(matches!(&error, CompositionError::SequenceGroupInvalid { problem, .. } if problem.contains("task 1 must be an object")), "{error}");
+    }
+
+    #[test]
+    fn a_sequence_root_rejects_when_and_accepts_a_valid_loop() {
+        let root = |key: &str, value: Value| json!({"sequence": [], key: value});
+        let error = grammar::validate_sequence_root(root("when", json!("true")).as_object().unwrap(), &origin()).unwrap_err();
+        assert!(matches!(&error, CompositionError::WhenMisplaced { property, .. } if property == "when"), "{error}");
+        grammar::validate_sequence_root(root("loop", json!({"until": "true"})).as_object().unwrap(), &origin()).unwrap();
+        let error = grammar::validate_sequence_root(root("loop", json!({"until": "true", "max": 0})).as_object().unwrap(), &origin()).unwrap_err();
+        assert!(matches!(&error, CompositionError::LoopInvalid { property, .. } if property == "loop.max"), "{error}");
+        grammar::validate_sequence_root(json!({"sequence": []}).as_object().unwrap(), &origin()).unwrap();
+    }
+
+    #[test]
+    fn when_is_a_task_option_not_step_state() {
+        // A step that runs the document body has no task to guard, so its
+        // `when` is never read as step data.
+        let error = normalize::normalize_plan(&[json!({"name": "a", "when": "true"})], SequenceSource::Inline, &origin(), true).unwrap_err();
+        assert!(matches!(&error, CompositionError::WhenMisplaced { property, .. } if property == "[0].when" || property.ends_with(".when")), "{error}");
+        for field in [ExecutableField::Prompt, ExecutableField::Shell, ExecutableField::SideEffect, ExecutableField::Group, ExecutableField::Task, ExecutableField::Sequence] {
+            assert!(reserved::allowed_task_options(field).contains(&"when"), "{field:?}");
+        }
+        assert_eq!(
+            [ExecutableField::Prompt, ExecutableField::Shell, ExecutableField::SideEffect, ExecutableField::Group, ExecutableField::Task, ExecutableField::Sequence]
+                .into_iter().filter(|field| reserved::allowed_task_options(*field).contains(&"loop")).collect::<Vec<_>>(),
+            vec![ExecutableField::Sequence],
+        );
+    }
+
+    #[test]
+    fn a_referenced_list_locates_task_errors_in_its_own_file() {
+        let data = std::path::PathBuf::from("/work/tasks.jsonl");
+        let error = normalize::normalize_plan_at(
+            &[json!({"name": "a", "shell": "x", "when": ""})],
+            SequenceSource::DataFile { path: data.clone() }, &origin(), true, "",
+        ).unwrap_err();
+        assert!(
+            matches!(&error, CompositionError::TaskWhenInvalid { source_path, property, .. } if source_path == &data && property == "[0].when"),
+            "{error}"
+        );
+    }
+}
+
+mod json_duplicate_keys {
+    use super::*;
+
+    fn load(file: &str, contents: &str) -> Result<data::LoadedDocument, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(file);
+        fs::write(&path, contents).unwrap();
+        data::load_document(&path)
+    }
+
+    fn duplicate(error: CompositionError) -> (String, String, Option<usize>) {
+        match error {
+            CompositionError::SequenceExternalLoad { source: SequenceLoadCause::DuplicateKey { key, path, line }, .. } => (key, path, line),
+            other => panic!("expected a duplicate-key load error, got {other}"),
+        }
+    }
+
+    #[test]
+    fn json_and_json5_reject_a_repeated_key_at_any_depth() {
+        for file in ["d.json", "d.json5"] {
+            let (key, path, line) = duplicate(load(file, r#"{"a": 1, "a": 2}"#).unwrap_err());
+            assert_eq!((key.as_str(), path.as_str(), line), ("a", "<root>", None), "{file}");
+            let (key, path, _) = duplicate(load(file, r#"{"sequence": [{"name": "x"}, {"group": {"name": "g", "name": "h"}}]}"#).unwrap_err());
+            assert_eq!((key.as_str(), path.as_str()), ("name", "sequence[1].group"), "{file}");
+        }
+    }
+
+    #[test]
+    fn equal_keys_in_sibling_objects_and_json5_comments_are_content() {
+        load("d.json", r#"{"a": {"name": 1}, "b": {"name": 2}, "c": [{"name": 3}, {"name": 4}]}"#).unwrap();
+        let loaded = load("d.json5", "// lead\n{ a: 1, /* inline */ b: { a: 2 }, }\n").unwrap();
+        assert_eq!(loaded.value, json!({"a": 1, "b": {"a": 2}}));
+    }
+
+    #[test]
+    fn line_delimited_formats_name_the_record_line() {
+        for file in ["d.jsonl", "d.ndjson"] {
+            let (key, path, line) = duplicate(load(file, "{\"name\": \"ok\"}\n\n{\"name\": \"x\", \"v\": {\"k\": 1, \"k\": 2}}\n").unwrap_err());
+            assert_eq!((key.as_str(), path.as_str(), line), ("k", "v", Some(3)), "{file}");
+            let loaded = load(file, "{\"name\": \"a\"}\n{\"name\": \"b\"}\n").unwrap();
+            assert_eq!(loaded.value, json!([{"name": "a"}, {"name": "b"}]), "{file}");
+        }
+    }
+
+    #[test]
+    fn the_rendered_error_names_the_file_key_and_line() {
+        let error = load("d.jsonl", "{\"a\": 1, \"a\": 2}\n").unwrap_err();
+        let text = error.to_string();
+        let cause = std::error::Error::source(&error).map(ToString::to_string).unwrap_or_default();
+        assert!(text.contains("d.jsonl"), "{text}");
+        assert_eq!(cause, "line 1: duplicate key `a` at `<root>`; each key may appear once per object");
     }
 }

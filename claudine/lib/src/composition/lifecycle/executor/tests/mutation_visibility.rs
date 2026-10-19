@@ -6,10 +6,9 @@ use super::*;
 #[test]
 fn stack_action_sees_prior_set_frontmatter() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": [
-            {"set_frontmatter": ["t.md", "status", "done"]},
-            {"message": "{{status}}"}
-        ]}]}}),
+        &json!({
+            "success": [{ "set_frontmatter": ["t.md", "status", "done"] }, { "message": "{{status}}" }],
+        }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -40,9 +39,9 @@ fn stack_action_sees_prior_set_frontmatter() {
     assert_eq!(recorder.events(), vec![Emitted::Message("done".to_string())]);
 }
 
-/// Cross-event visibility (review-2 High finding): a `start.stack`
+/// Cross-event visibility (review-2 High finding): a `start` stack
 /// `set_frontmatter` mutation persists into the shared per-attempt live cell,
-/// so a *later* event's top-level `success.message` AND `finalize.message`
+/// so a *later* event's `success.message` AND `finalize.message`
 /// — each built from a separate context sharing the same cell — interpolate
 /// the MUTATED value, not the original composed value. This is the harness
 /// orchestration contract (`start` → `success`/`finalize`) driven at the
@@ -51,9 +50,9 @@ fn stack_action_sees_prior_set_frontmatter() {
 fn frontmatter_mutation_in_start_is_visible_to_later_events() {
     let config = parse_lifecycle_config(
         &json!({
-            "start": {"stack": [{"action": {"set_frontmatter": ["t.md", "status", "running"]}}]},
-            "success": {"message": "status={{status}}"},
-            "finalize": {"message": "final={{status}}"}
+            "start": [{ "set_frontmatter": ["t.md", "status", "running"] }],
+            "success": { "message": "status={{status}}" },
+            "finalize": { "message": "final={{status}}" },
         }),
         Path::new("t.md"),
     )
@@ -138,8 +137,8 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
 fn without_live_cell_later_event_resolves_against_its_own_base() {
     let config = parse_lifecycle_config(
         &json!({
-            "start": {"stack": [{"action": {"set_frontmatter": ["t.md", "status", "running"]}}]},
-            "success": {"message": "status={{status}}"}
+            "start": [{ "set_frontmatter": ["t.md", "status", "running"] }],
+            "success": { "message": "status={{status}}" },
         }),
         Path::new("t.md"),
     )

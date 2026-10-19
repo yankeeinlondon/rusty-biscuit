@@ -12,11 +12,13 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         source_path: source.to_path_buf(),
         original_ref: source.display().to_string(),
         base_prompt: None,
-        overlay: IndexMap::new(),
+        overlay: Default::default(),
+        pending_retry_overlay: None,
         prompt_tail: Vec::new(),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
         last_final_output: None,
+        launched_providers: Vec::new(),
         input_layers: claudine::composition::CallerInputLayers::new(crate::request::test_context_at(
             source.parent().unwrap(),
         )),
@@ -46,6 +48,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
+        loop_values: None,
         mcp_body_tags: Vec::new(),
     }
 }

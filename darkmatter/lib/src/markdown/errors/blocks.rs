@@ -519,15 +519,20 @@ fn involved_keys(key: Option<&str>, expression: &str) -> Vec<YamlKeyPath> {
 }
 
 /// Pushes the root segment of every frontmatter `Expr::Variable` onto `names`,
-/// skipping `ctx.*`/`env.*`/`doc` (which resolve from the runtime context, not
-/// the frontmatter block the excerpt slices).
+/// skipping `ctx.*`/`env.*` (which resolve from the runtime context, not the
+/// frontmatter block the excerpt slices) and bare `fm` (a whole-object
+/// snapshot that names no one key). `fm.<key>` and a literal `fm['<key>']`
+/// name the same key as bare `<key>`.
 fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
+    use crate::markdown::compose::expression::fm_namespace::{
+        FRONTMATTER_ROOT, literal_index_key, strip_fm_prefix,
+    };
     match expr {
         Expr::Variable(path) => {
-            if path.starts_with("ctx.") || path.starts_with("env.") || path == "doc" {
+            if path.starts_with("ctx.") || path.starts_with("env.") || path == FRONTMATTER_ROOT {
                 return;
             }
-            let effective = path.strip_prefix("doc.").unwrap_or(path);
+            let effective = strip_fm_prefix(path);
             let root = effective.split('.').next().unwrap_or(effective);
             if !root.is_empty() {
                 names.push(root.to_string());
@@ -556,6 +561,10 @@ fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
             collect_frontmatter_roots(right, names);
         }
         Expr::Index { base, index } => {
+            if let Some(key) = literal_index_key(base, index) {
+                names.push(key.to_string());
+                return;
+            }
             collect_frontmatter_roots(base, names);
             collect_frontmatter_roots(index, names);
         }
@@ -636,12 +645,15 @@ pub(crate) fn parameter_binding_block(
 /// error (malformed `$schema`, unresolved reference, baseline build failure,
 /// etc.) rather than an instance validation failure. In that case the
 /// `summary` carries the underlying diagnostic and is rendered as a body
-/// line so authors see the root cause instead of an empty problem list.
+/// line so authors see the root cause instead of an empty problem list, and
+/// `preparation_hint` (the preparation error's own hint, when it has one)
+/// replaces the generic hint.
 pub(crate) fn schema_validation_failed_block(
     path: &std::path::Path,
     problems: &[ValidationProblem],
     summary: &str,
     description: &Option<String>,
+    preparation_hint: Option<&'static str>,
 ) -> StatusBlock {
     let path_attr = Prose::quoted_attr(&path.to_string_lossy());
     let path_escaped = Prose::escape_text(&path.to_string_lossy());
@@ -684,9 +696,9 @@ pub(crate) fn schema_validation_failed_block(
                 "schema validation failed",
             ))
             .body(Prose::new(body_lines.join("\n")).with_line_breaks(LineBreaks::Hard))
-            .hint(
+            .hint(preparation_hint.unwrap_or(
                 "Check that the document's $schema (or the baseline schema) is well-formed and resolvable.",
-            );
+            ));
     }
 
     // One bullet per problem. The category label is chosen from
@@ -705,15 +717,22 @@ pub(crate) fn schema_validation_failed_block(
             None => String::new(),
         };
 
-        let target = if let Some(ref prop) = problem.property {
-            Prose::escape_text(prop)
-        } else {
-            let trimmed = problem.path.trim_start_matches('/');
-            if trimmed.is_empty() {
-                "<root>".to_string()
-            } else {
-                Prose::escape_text(trimmed.split('/').next().unwrap_or(trimmed))
-            }
+        // The full instance path, spelled as `md schema validate` spells it
+        // (`content_policy/1/rule`); a missing property has no node of its
+        // own, so its name is appended to the parent's path.
+        let instance = problem.path.trim_start_matches('/');
+        let missing = problem
+            .property
+            .as_deref()
+            .filter(|_| problem.kind == ValidationProblemKind::Missing);
+        let target = match (instance.is_empty(), missing) {
+            (true, Some(property)) => Prose::escape_text(property),
+            (false, Some(property)) => Prose::escape_text(&format!("{instance}/{property}")),
+            (true, None) => problem
+                .property
+                .as_deref()
+                .map_or_else(|| "<root>".to_string(), Prose::escape_text),
+            (false, None) => Prose::escape_text(instance),
         };
 
         let bullet = match problem.kind {
@@ -1230,7 +1249,7 @@ mod tests {
     fn schema_validation_failed_block_renders_summary_when_problems_empty() {
         let path = std::path::PathBuf::from("/tmp/test/bad-schema.md");
         let summary = "schema could not be prepared: could not resolve ./missing.yaml";
-        let block = schema_validation_failed_block(&path, &[], summary, &None);
+        let block = schema_validation_failed_block(&path, &[], summary, &None, None);
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing summary: {out}");
         assert!(out.contains("could not resolve ./missing.yaml"), "missing detail: {out}");
@@ -1242,7 +1261,7 @@ mod tests {
     #[test]
     fn schema_validation_failed_block_handles_empty_summary() {
         let path = std::path::PathBuf::from("/tmp/test/empty.md");
-        let block = schema_validation_failed_block(&path, &[], "", &None);
+        let block = schema_validation_failed_block(&path, &[], "", &None, None);
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
     }
@@ -1272,7 +1291,7 @@ mod tests {
     fn schema_validation_failed_block_renders_problem_description() {
         let path = std::path::PathBuf::from("/tmp/test/post.md");
         let problem = problem_with_description(Some("The headline shown in listing pages"));
-        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None);
         let out = render_block(&block);
         assert!(out.contains("type"), "missing problem bullet: {out}");
         assert!(
@@ -1293,6 +1312,7 @@ mod tests {
             std::slice::from_ref(&problem),
             "",
             &doc_description,
+            None,
         );
         let out = render_block(&block);
         assert!(
@@ -1311,7 +1331,7 @@ mod tests {
     fn schema_validation_failed_block_omits_absent_problem_description() {
         let path = std::path::PathBuf::from("/tmp/test/post.md");
         let problem = problem_with_description(None);
-        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None, None);
         let out = render_block(&block);
         // The bullet is present, but no extra description text rides beneath it.
         assert!(out.contains("type"), "missing problem bullet: {out}");
@@ -1319,6 +1339,29 @@ mod tests {
             out.contains("expected string"),
             "missing problem message: {out}",
         );
+    }
+
+    /// A nested problem names its whole instance path, and a missing nested
+    /// property names its parent's path plus its own name.
+    #[test]
+    fn schema_validation_failed_block_names_nested_instance_paths() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let nested = |pointer: &str, kind, property: Option<&str>| ValidationProblem {
+            path: pointer.to_string(),
+            kind,
+            property: property.map(String::from),
+            instance_path: crate::markdown::schemas::JsonPointer::parse(pointer),
+            ..problem_with_description(None)
+        };
+        let problems = [
+            nested("/content_policy/1/rule", ValidationProblemKind::Invalid, None),
+            nested("/content_policy/0", ValidationProblemKind::Missing, Some("rule")),
+            nested("", ValidationProblemKind::Missing, Some("title")),
+        ];
+        let out = render_block(&schema_validation_failed_block(&path, &problems, "", &None, None));
+        assert!(out.contains("invalid content_policy/1/rule: "), "{out}");
+        assert!(out.contains("missing content_policy/0/rule: "), "{out}");
+        assert!(out.contains("missing title: "), "{out}");
     }
 
     /// `reqwest::Error` cannot be constructed without firing a real HTTP

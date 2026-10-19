@@ -74,7 +74,7 @@ pub use coordinator::{
 };
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
-    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource,
+    ActionExprError, CompositionError, DroppedOptional, DroppedOptionalSource, SequenceTaskProviderProblem,
     DroppedOptionalStage, FileReferenceContext, InteractiveShape, LOOP_RATE_LIMITED_EXIT_CODE,
     LifecycleEvaluationReason, LoopExpressionCause, MarkdownLoadCause, MissingProperty,
     SequenceExpressionCause,
@@ -94,12 +94,13 @@ pub use lifecycle::runtime::{
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
-    LifecycleNotification, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState,
-    LifecycleSignal, parse_lifecycle_config,
+    LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
+    parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
-    LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, RetryBackoff, ShellAction,
+    LifecycleActionKind, LifecycleConditional, LifecycleControlAction, LifecycleNode,
+    LifecyclePath, RetryBackoff, ShellAction,
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
 pub use lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};
@@ -108,8 +109,8 @@ pub use lifecycle_control::{
     parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
 };
 pub use lifecycle_executor::{
-    LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner, StackControl,
-    StackExecutionContext, SystemShellRunner,
+    DocumentShellRunner, LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner,
+    StackControl, StackExecutionContext, SystemShellRunner,
 };
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
@@ -118,8 +119,9 @@ pub use looping::{
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use looping::{
-    extract_control_variables, resolve_fail_fast_from_env, resolve_loop_config,
-    resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
+    LoopBlock, check_loop_config_keys, extract_control_variables, parse_loop_block,
+    resolve_loop_config, resolve_max_iterations_from_env, resolve_pause_reset_margin_from_env,
+    resolve_templated_loop_max,
 };
 pub use mismatch::{capture_frontmatter_yaml, is_inline_sequence_mismatch};
 pub use preflight::{
@@ -129,8 +131,9 @@ pub use preflight::{
 pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
-    approve_document_shell, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
-    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline,
+    approve_document_shell, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
+    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline, prepare_loop_seed, prepare_sequence_probe,
+    read_selection_hints, replace_env_overrides, ResolvedIdentitySelector,
 };
 #[cfg(test)]
 pub(crate) use resolve::resolve_fixture_source;
@@ -152,12 +155,13 @@ pub use schema::{
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
     description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
     pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,
-    prepare_direct_with_schema,
-    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema, render_optional_line,
+    prepare_direct_with_schema, prepare_direct_with_schema_selecting,
+    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema,
+    prepare_inline_with_schema_selecting, render_optional_line,
     render_required_line, schema_status_report_prose,
 };
 pub use select::{
-    ambient_env_lookup, build_candidate_set, build_installed_snapshot, build_picker_plan,
+    build_candidate_set, build_installed_snapshot, build_picker_plan, prepared_environment,
     build_picker_plan_with_hints, classify_agent_resolution, detect_installed_providers,
     resolve_model, resolve_model_with_catalog, resolve_model_with_hints,
     resolve_model_with_hints_from, resolve_target_non_tty, resolve_target_non_tty_with_catalog,
@@ -165,9 +169,10 @@ pub use select::{
 };
 pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
-    PreflightStep, PreflightTask, PromptDocument, build_preflight_graph,
-    build_preflight_graph_with_context,
-    build_preflight_graph_with_invocation, reject_non_sequence_kind,
+    PreflightStep, PreflightTask, PreparedShellSite, PromptDocument, PromptReference,
+    ShellSiteKind, SiteMode, TaskPosition, build_preflight_graph,
+    build_preflight_graph_with_context, build_preflight_graph_with_invocation,
+    reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots,
 };
 pub use sequence::task::{
     DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,
@@ -181,9 +186,10 @@ pub use sequence::{
     build_step_overlay, resolve_sequence_plan, resolve_sequence_plan_with,
 };
 pub use types::{
-    AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
-    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
-    InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, ModelHint,
+    AgentHint, AnchoredOverlay, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
+    CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan, LaunchLog,
+    InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, LoopLocation,
+    LoopOwner, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,

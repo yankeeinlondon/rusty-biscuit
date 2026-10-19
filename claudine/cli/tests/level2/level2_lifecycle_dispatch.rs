@@ -3,7 +3,7 @@
 //! Drives the real `claudine compose --goose <doc>` binary end-to-end inside a
 //! real tmux pane (the L2 resource) with a fake provider on `PATH`, and asserts
 //! the **externally observable** ordered side-effect log the lifecycle stacks
-//! wrote. Each lifecycle event's `stack` ends in
+//! wrote. Each lifecycle event's list ends in
 //! `{append_line: ["events.log", "<event-name>"]}`, so the file records the exact
 //! firing order without depending on stderr interleaving (which scrolls off a
 //! capped pane and collapses under SGR re-emission).
@@ -230,7 +230,7 @@ fn event_lines(staged: &Staged) -> Vec<String> {
 
 /// A lifecycle event block whose stack appends the event name to `events.log`.
 fn marker(event: &str) -> String {
-    format!("{event}:\n  stack:\n    - action: {{append_line: [\"events.log\", \"{event}\"]}}\n")
+    format!("{event}:\n    - {{append_line: [\"events.log\", \"{event}\"]}}\n")
 }
 
 /// A lifecycle event block whose stack appends, for each `field` in `fields`,
@@ -248,13 +248,13 @@ fn err_marker(event: &str, fields: &[&str]) -> String {
     let actions: String = fields
         .iter()
         .map(|f| {
-            format!("    - action: {{append_line: [\"events.log\", \"{{{{ 'err-{f}=' + err.{f} }}}}\"]}}\n")
+            format!("    - {{append_line: [\"events.log\", \"{{{{ 'err-{f}=' + err.{f} }}}}\"]}}\n")
         })
         .collect();
-    format!("{event}:\n  stack:\n{actions}")
+    format!("{event}:\n{actions}")
 }
 
-/// Whether the captured pane carries the success top-level `info` line text.
+/// Whether the captured pane carries the success `info` line text.
 ///
 /// `info` renders through a `Status` component, so the captured (NO_COLOR)
 /// plain text contains the message body verbatim even though the surrounding
@@ -336,12 +336,12 @@ fn level2_lifecycle_failure_path_event_order() {
     );
 }
 
-/// Composition-preflight blocked path: a `start.stack` carrying a shell
+/// Composition-preflight blocked path: a `start` list carrying a shell
 /// command that the **builtin blacklist** rejects (here `rm`) fails shell
 /// audit during composition preflight — the earlier preflight phase the
 /// spec calls out (Finding 1 of review-3). The fix routes this failure
-/// through the stack-aware event runner, so `blocked.stack` AND
-/// `finalize.stack` must both fire even though `start` never does.
+/// through the stack-aware event runner, so `blocked` list AND
+/// `finalize` list must both fire even though `start` never does.
 ///
 /// Before the fix the preflight failure path called
 /// `guard.emit_blocked_or_failure()`, which only emits the legacy top-level
@@ -359,12 +359,12 @@ fn level2_lifecycle_failure_path_event_order() {
 fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_stacks() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    // `start.stack` carries a blacklisted shell command, so composition
+    // `start` list carries a blacklisted shell command, so composition
     // preflight shell-audit denies it and routes the run to `blocked` —
-    // before `start` itself fires. `blocked.stack` and `finalize.stack`
+    // before `start` itself fires. `blocked` list and `finalize` list
     // each append their event name to `events.log`, proving the typed
     // stacks fire (not just the legacy top-level communication surface).
-    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
+    let start = "start:\n  - {shell: \"rm -rf /tmp/nonexistent\"}\n";
     let doc = format!(
         "---\ntitle: lifecycle preflight blocked (shell audit)\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -403,7 +403,7 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
 /// not traverse a dynamic proxy route").
 ///
 /// The staged document is a router: every event carries an `append_line` side
-/// effect, `start.stack` carries a blacklisted `rm` that a live composition
+/// effect, `start` list carries a blacklisted `rm` that a live composition
 /// preflight would reject (routing `blocked`→`finalize`), and `initialize`
 /// proxies to a second document whose own `initialize` would also append. So
 /// each of the three ways lifecycle could leak into a rehearsal — a plain
@@ -420,10 +420,10 @@ fn level2_lifecycle_blocked_preflight_shell_audit_fires_blocked_and_finalize_sta
 fn level2_lifecycle_dry_run_fires_no_lifecycle_events_and_no_proxy_traversal() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
-    let init = "initialize:\n  stack:\n    \
-        - action: {append_line: [\"events.log\", \"initialize\"]}\n    \
-        - action: {proxy: \"handoff-target.md\"}\n";
+    let start = "start:\n  - {shell: \"rm -rf /tmp/nonexistent\"}\n";
+    let init = "initialize:\n  \
+        - {append_line: [\"events.log\", \"initialize\"]}\n  \
+        - {proxy: \"handoff-target.md\"}\n";
     let doc = format!(
         "---\ntitle: lifecycle dry-run side effects\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nROUTER-BODY\n",
@@ -480,22 +480,22 @@ fn level2_lifecycle_dry_run_fires_no_lifecycle_events_and_no_proxy_traversal() {
     );
 }
 
-/// Top-level-before-stack ordering for `success`: a `success` block carrying
-/// BOTH a top-level `info:` communication AND a `stack:` side effect fires the
-/// top-level before the stack. The top-level `info` line is captured in the
-/// pane and the stack marker is recorded in `events.log`; both must be present
-/// (the comm is not dropped when a stack is added) and the file order remains
+/// A `success` list carrying BOTH an `info` communication AND a side effect
+/// runs both. The `info` line is captured in the pane and the side-effect
+/// marker is recorded in `events.log`; both must be present (the communication
+/// is not dropped beside a side effect) and the file order remains
 /// `initialize→start→success→finalize`.
 #[test]
 #[serial(level2_lifecycle)]
-fn level2_lifecycle_success_top_level_fires_with_stack() {
+fn level2_lifecycle_success_communication_fires_beside_a_side_effect() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    // `success` carries a top-level `info:` AND a stack side effect.
-    let success = "success:\n  info: \"SUCCESS_TOPLEVEL_MARK\"\n  \
-        stack:\n    - action: {append_line: [\"events.log\", \"success\"]}\n";
+    // `success` carries an `info` item AND a side-effect item.
+    let success = "success:\n  \
+        - info: \"SUCCESS_TOPLEVEL_MARK\"\n  \
+        - {append_line: [\"events.log\", \"success\"]}\n";
     let doc = format!(
-        "---\ntitle: lifecycle success top-level\n{init}{start}{success}{finalize}---\nBody\n",
+        "---\ntitle: lifecycle success communication\n{init}{start}{success}{finalize}---\nBody\n",
         init = marker("initialize"),
         start = marker("start"),
         success = success,
@@ -512,30 +512,31 @@ fn level2_lifecycle_success_top_level_fires_with_stack() {
         "event order must stay initialize→start→success→finalize; \
          events.log was {lines:?}; pane:\n{pane}"
     );
-    // The top-level `info` communication fired (not dropped because a stack
-    // was added) — it is visible in the pane.
+    // The `info` communication fired (not dropped beside the side effect) —
+    // it is visible in the pane.
     assert!(
         pane_has(&pane, "SUCCESS_TOPLEVEL_MARK"),
-        "success top-level `info` must fire when the event also has a stack; \
+        "success `info` must fire beside a side effect; \
          pane:\n{pane}"
     );
 }
 
-/// Downgrade path for `success.stack` ending in `{error: "..."}`: the top-level
-/// `info:` communication STILL fires (top-level fires before stack processing,
-/// per the spec), then the stack's `{error: "..."}` downgrades the run to `failure` —
-/// the `failure` event fires and `finalize` fires. Proven by the ordered
-/// `events.log` (`success`-stack → `failure`-stack → `finalize`) plus the
-/// success top-level line captured in the pane.
+/// Downgrade path for a `success` list ending in `{error: "..."}`: the `info`
+/// communication authored ahead of it STILL fires (items run in list order),
+/// then the `{error: "..."}` downgrades the run to `failure` — the `failure`
+/// event fires and `finalize` fires. Proven by the ordered `events.log`
+/// (`success` → `failure` → `finalize`) plus the success `info` line captured
+/// in the pane.
 #[test]
 #[serial(level2_lifecycle)]
 fn level2_lifecycle_success_stack_error_downgrades_keeps_success_comm() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    // `success` has a top-level `info:` and a stack whose final action is
-    // `{error: "bad"}`, downgrading the run to `failure`.
-    let success = "success:\n  info: \"SUCCESS_TOPLEVEL_MARK\"\n  stack:\n    \
-        - action:\n        - {append_line: [\"events.log\", \"success\"]}\n        \
+    // `success` lists an `info` item and ends in `{error: "bad"}`,
+    // downgrading the run to `failure`.
+    let success = "success:\n  \
+        - info: \"SUCCESS_TOPLEVEL_MARK\"\n  \
+        - {append_line: [\"events.log\", \"success\"]}\n  \
         - {error: \"bad\"}\n";
     let doc = format!(
         "---\ntitle: lifecycle success downgrade\n{init}{start}{success}{failure}{finalize}---\nBody\n",
@@ -557,19 +558,19 @@ fn level2_lifecycle_success_stack_error_downgrades_keeps_success_comm() {
     assert_eq!(
         lifecycle,
         vec!["initialize", "start", "success", "failure", "finalize"],
-        "success.stack {{error: \"bad\"}} must downgrade to failure then finalize; \
+        "success stack {{error: \"bad\"}} must downgrade to failure then finalize; \
          events.log was {lines:?}; pane:\n{pane}"
     );
-    // The success top-level `info` fired BEFORE the stack's downgrade and is
-    // NOT suppressed by the later `error()`.
+    // The success `info` fired BEFORE the downgrade and is NOT suppressed by
+    // the later `error()`.
     assert!(
         pane_has(&pane, "SUCCESS_TOPLEVEL_MARK"),
-        "success top-level `info` must still fire even when the stack downgrades \
+        "success `info` must still fire even when the list downgrades \
          via error(); pane:\n{pane}"
     );
 }
 
-/// `failure.stack` observes the runtime `err` payload (review-4 critical
+/// `failure` list observes the runtime `err` payload (review-4 critical
 /// finding). A provider exiting non-zero (99) routes through
 /// `LifecycleErrorInfo::from_action_failure("agent_failure", msg)` at
 /// `loop_control.rs:1772-1775`, so `err.kind`/`err.variant`/`err.msg` must
@@ -629,8 +630,8 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
     );
 }
 
-/// `blocked.stack` observes the runtime `err` payload (review-4 critical
-/// finding). A blacklisted shell command in `start.stack` fails shell audit
+/// `blocked` list observes the runtime `err` payload (review-4 critical
+/// finding). A blacklisted shell command in `start` list fails shell audit
 /// during composition preflight and routes through the blocked path, so
 /// `err.kind`/`err.variant` must reach the stack expression engine.
 ///
@@ -660,7 +661,7 @@ fn level2_lifecycle_failure_stack_observes_err_payload() {
 fn level2_lifecycle_blocked_stack_observes_err_payload() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
+    let start = "start:\n  - {shell: \"rm -rf /tmp/nonexistent\"}\n";
     let blocked = err_marker("blocked", &["kind", "variant"]);
     let doc = format!(
         "---\ntitle: lifecycle blocked err payload\n\
@@ -697,10 +698,10 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 
 /// Failed-`finalize` observes the runtime `err` payload on the **blocked**
 /// route (review-4 critical finding — the explicitly-named blocked-then-
-/// finalize case). A blacklisted shell command in `start.stack` fails shell
+/// finalize case). A blacklisted shell command in `start` list fails shell
 /// audit during composition preflight and routes to `blocked` then `finalize`
 /// with the same `err_info` attached, so the `when: "err"` guard on the
-/// `finalize.stack` must be truthy and observe `err.variant` carrying the
+/// `finalize` list must be truthy and observe `err.variant` carrying the
 /// typed error's code (see the alias and `composition.shell_approval` notes on
 /// `level2_lifecycle_blocked_stack_observes_err_payload`).
 ///
@@ -715,12 +716,13 @@ fn level2_lifecycle_blocked_stack_observes_err_payload() {
 fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let start = "start:\n  stack:\n    - action: {shell: \"rm -rf /tmp/nonexistent\"}\n";
-    // `finalize.stack` guards an `err.variant` append with `when: "err"`, then
+    let start = "start:\n  - {shell: \"rm -rf /tmp/nonexistent\"}\n";
+    // `finalize` list guards an `err.variant` append with `when: "err"`, then
     // appends the trailing `finalize` marker the polling loop awaits.
-    let finalize = "finalize:\n  stack:\n    \
-        - when: \"err\"\n      action: {append_line: [\"events.log\", \"{{ 'finalize-err-variant=' + err.variant }}\"]}\n    \
-        - action: {append_line: [\"events.log\", \"finalize\"]}\n";
+    let finalize = "finalize:\n  \
+        - when: \"err\"\n    \
+        then: {append_line: [\"events.log\", \"{{ 'finalize-err-variant=' + err.variant }}\"]}\n  \
+        - {append_line: [\"events.log\", \"finalize\"]}\n";
     let doc = format!(
         "---\ntitle: lifecycle finalize err after blocked\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -766,7 +768,7 @@ fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
 /// finding). When a provider exits non-zero, `failure` fires first then
 /// `finalize` fires with the same `err_info` attached
 /// (`loop_control.rs:1826-1836`). The `when: "err"` guard on a
-/// `finalize.stack` action must evaluate truthy — a non-empty JSON object
+/// `finalize` list action must evaluate truthy — a non-empty JSON object
 /// is truthy per Darkmatter's rule — so the action fires and observes
 /// `err.msg`.
 ///
@@ -781,11 +783,12 @@ fn level2_lifecycle_finalize_stack_observes_err_after_blocked() {
 fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    // `finalize.stack` guards an err.msg append with `when: "err"`, then
+    // `finalize` list guards an err.msg append with `when: "err"`, then
     // appends a trailing `finalize` marker the polling loop awaits.
-    let finalize = "finalize:\n  stack:\n    \
-        - when: \"err\"\n      action: {append_line: [\"events.log\", \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n    \
-        - action: {append_line: [\"events.log\", \"finalize\"]}\n";
+    let finalize = "finalize:\n  \
+        - when: \"err\"\n    \
+        then: {append_line: [\"events.log\", \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n  \
+        - {append_line: [\"events.log\", \"finalize\"]}\n";
     let doc = format!(
         "---\ntitle: lifecycle finalize err payload\n\
          {init}{start}{success}{blocked}{failure}{finalize}---\nBody\n",
@@ -822,7 +825,7 @@ fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
     );
 }
 
-/// Lifecycle `failure` recovery: a `failure.stack` ending in `{retry: 2}` re-enters
+/// Lifecycle `failure` recovery: a `failure` list ending in `{retry: 2}` re-enters
 /// the harness loop after the first provider failure. The provider fails on its
 /// first invocation (exit 99) and succeeds on the second (exit 0), proving the
 /// lifecycle recovery action replaced the removed handler DSL retry path.
@@ -831,9 +834,9 @@ fn level2_lifecycle_finalize_stack_observes_err_after_failure() {
 fn level2_lifecycle_failure_retry_recovers_to_success() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let failure = "failure:\n  stack:\n    \
-        - action: {append_line: [\"events.log\", \"failure\"]}\n    \
-        - action: {retry: 2}\n";
+    let failure = "failure:\n  \
+        - {append_line: [\"events.log\", \"failure\"]}\n  \
+        - {retry: 2}\n";
     let doc = format!(
         "---\ntitle: lifecycle failure retry\n\
          {init}{start}{success}{failure}{finalize}---\nBody\n",

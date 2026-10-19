@@ -1,27 +1,35 @@
 ---
 $schema:
-    review: file(required;eager;match(**/*review*.md)) -> the underlying review file who's findings we will implement
-    target: file -> the review this prompt will be writing
+    review: file(required;eager;match(**/*review*.md)) -> the non-indexed review (e.g. `review.md`) which started this review/implement cycle
+    target: file -> the review whose findings this run implements
     iteration: number
     initial_review: file -> the OG review that kicked off this review/implement cycle
 description: |-
     This prompt expects that the originating content was a review and that we are either _implementing_ the findings/suggestions of that original review, or, if the review has been marked as "implemented" then we will move to the highest indexed review in the same directory and implement that (unless that too is marked as "implemented").
 
-target: "{{ review }}"
-iteration: {{ file_index(review) }}
-report: "{{ dirname(review) + '/' + 'implementation-report-' + iteration + '.md' }}"
-initial_review: {{ review }}
+# `review.md` until it is implemented; then the latest `review-{n}.md`
+# (`find_last_index` returns `review` itself when no indexed review exists)
+target: "{{ frontmatter(review, 'implemented') ? find_last_index(review) : review }}"
+# the non-indexed review is iteration 0 (`file_index` reports it as -1)
+iteration: "{{ file_index(target) < 0 ? 0 : file_index(target) }}"
+report: "{{ dirname(target) + '/' + 'implementation-report-' + iteration + '.md' }}"
+initial_review: "{{ review }}"
 yolo: true
 initialize:
-    - when: "!frontmatter(review, 'implemented') && !is_indexed_file(review)"
+    - when: "frontmatter(target, 'implemented')"
+      then:
+          - message: "😵  `{{target}}` is the most recent review of `{{parent_dir(review)}}` and it is already _implemented_! Nothing to implement."
+          - error: "the review `{{target}}` and the follow-on review/implement cycle is ready for another _review_ not an _implementation_!"
+    - when: "target == review"
       then:
           - message: "🏃  starting the _implementation_ of the findings/suggestions in the review {{parent_dir(review)}}"
-    - when: "frontmatter(review, 'implemented') && !is_indexed_file(review) && find_latest_index(review) && frontmatter(find_latest_index(review), 'implemented')"
+    - when: "target != review"
       then:
-          - message: "😵  the initial review `{{review}}` was _implemented_ and so was the most recent iteration of the review cycle: `find_latest_index(review)`! Nothing to implement."
-          - error: "the review `{{review}}` and the follow-on review/implement cycle is ready for another _review_ not an _implemenation_!"
+          - message: "🏃  implementing the findings/suggestions of review iteration #{{iteration}} (`{{target}}`) in {{parent_dir(review)}}"
 ---
 ::file "../_no_formatting.md"
+
+::file "../_frontmatter_edits.md"
 
 # Implementation of Review Findings
 
@@ -63,15 +71,15 @@ Your task is to review the _findings_ in the review and then iterate over each a
 
 Once the review is complete you must set Frontmatter metadata on both the review and implementation report:
 
-- On the underlying review ({{review}}):
+- On the underlying review ({{target}}):
     - set `implemented` to `true`
     - set `implemented_by` to `{{ctx.agent}}/{{ctx.model}}`
-    ::block when="initial_review != review"
+    ::block when="initial_review != target"
     - set `initial_review` to `{{ parent_dir(initial_review) + '/' + basename(initial_review) }}`
     ::end-block
 - On your implementation report ({{report}}):
     - set `reviewed_by` to `{{ctx.agent}}/{{ctx.model}}`
     - set `created` to "{{ ctx.now }}"
-    - set `underlying` to "{{ parent_dir(review) + '/' + basename(review) }}"
+    - set `underlying` to "{{ parent_dir(target) + '/' + basename(target) }}"
 
 > Note: make sure both documents, along with their updated Frontmatter properties, are saved to disk before considering the task done

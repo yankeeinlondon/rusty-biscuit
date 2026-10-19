@@ -12,7 +12,7 @@ are identical everywhere.
 ### Availability across every surface
 
 The same grammar — including the [read-side functions](#read-side-functions)
-and the [`doc.*` namespace](#namespaces) — evaluates identically on every
+and the [`fm.*` namespace](#namespaces) — evaluates identically on every
 surface that runs it:
 
 | Surface | Form |
@@ -28,8 +28,10 @@ surface that runs it:
 | Claudine loop conditions | `until=` / `while=` / `action=` |
 | Claudine hook conditions | `when=` |
 
-This is the **availability invariant**: a read-side function or `doc.*`
-reference resolves on every surface above. The historical asymmetry — where
+This is the **availability invariant**: a read-side function or `fm.*`
+reference resolves on every surface above, except that Claudine hook conditions
+have no document: they read the hook payload through their own `hook` root
+instead of `fm`. The historical asymmetry — where
 read-side functions worked only in body interpolation — is gone; the compose
 pipeline and public condition API use the same evaluation contract.
 
@@ -103,7 +105,7 @@ Full detail lives under [Parsing](./parsing/index.md):
 Expressions evaluate against Darkmatter's effective state, which can include:
 
 - frontmatter values from the current document
-- the whole frontmatter object and its properties under `doc` / `doc.*` (see [Namespaces](#namespaces))
+- the whole frontmatter object and its properties under `fm` / `fm.*` (see [Namespaces](#namespaces))
 - inherited state passed from parent documents during recursive composition
 - runtime context values under `ctx.*`
 - environment variables under `env.*`
@@ -111,9 +113,10 @@ Expressions evaluate against Darkmatter's effective state, which can include:
 An unprefixed name is a document property and nothing else: when frontmatter
 and inherited state do not hold it, it is absent (`null`). It never falls back
 to `ctx`, so `repo` and `ctx.repo` are different names. The reserved namespaces
-(`doc`, `ctx`, `env`, `current`, `current_env`) are resolved first, exact roots
-included, so bare `env` is the environment even when the frontmatter has an
-`env` key; that key is reachable as `doc.env`.
+(`fm`, `ctx`, `env`, `current`) are resolved first, exact roots included, so
+bare `env` is the environment even when the frontmatter has an `env` key; that
+key is reachable as `fm.env`. `doc` and `current_env` are not reserved: each is
+an ordinary property name like any other.
 
 ```markdown
 ---
@@ -130,7 +133,7 @@ property.
 
 ```mermaid
 flowchart TD
-    R["root name, e.g. err in err.message"] --> N{"reserved namespace?<br/>doc ctx env current current_env"}
+    R["root name, e.g. err in err.message"] --> N{"reserved namespace?<br/>fm ctx env current"}
     N -- yes --> NS["read the namespace"]
     N -- no --> G{"global registered<br/>by the host?"}
     G -- "yes, available" --> GV["the global's value<br/>(possibly null)"]
@@ -245,7 +248,7 @@ Use interpolation literals when documentation needs to display `{{ ... }}` synta
 Supported variable forms:
 
 - simple keys: `draft`
-- kebab-case keys: `spec-name`, `doc.spec-name`
+- kebab-case keys: `spec-name`, `fm.spec-name`
 - nested keys: `user.role`
 - context variables: `ctx.today`, `ctx.repo`, `ctx.current_package` — see [context variables](state-management/context-variables.md)
 - environment keys: `env.AGENT`, `env.HOME`
@@ -285,24 +288,25 @@ access returns `null` and never errors.
 
 ## Namespaces
 
-Five reserved prefixes select a distinct value source. They are intercepted
+Four reserved prefixes select a distinct value source. They are intercepted
 before ordinary key lookup, so neither a frontmatter property nor a
 caller-injected global that happens to share a namespace name can shadow the
 namespace.
 
 | Namespace | Resolves to | Observed |
 | --- | --- | --- |
-| `doc` / `doc.*` | the **current** document's frontmatter (this document) | eager |
+| `fm` / `fm.*` | the **current** document's frontmatter (this document) | eager |
 | `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
 | `env.*` | environment variables from the request's snapshot (the same map `{{VAR}}` file references read) | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
-| `current_env.*` | the same keys as `env.*`, each reread from the live process environment | lazy |
 
-### The lazy `current` and `current_env` namespaces
+`env` does not change during a composition: every `env.*` read in a request
+sees the same captured map.
 
-`current` mirrors `ctx` key for key and `current_env` mirrors `env` key for
-key. There is no nesting: `current.ctx.x`, `current.env.x`, and
-`current_env.ctx.x` name no member and fail as unknown paths.
+### The lazy `current` namespace
+
+`current` mirrors `ctx` key for key. There is no nesting: `current.ctx.x` and
+`current.env.x` name no member and fail as unknown paths.
 
 - **Freshness.** `ctx.branch` is the branch at the start of the request;
   `current.branch` is the branch when the expression evaluating it runs.
@@ -316,8 +320,8 @@ key. There is no nesting: `current.ctx.x`, `current.env.x`, and
   other repository keys) are fixed by the request's repository observation,
   made once when the request is created: `current` answers them from that one
   observation, never by discovering the repository again. Only mutable Git and
-  filesystem facts (`branch`, `recent_commits`, `dirty_files`) and
-  `current_env.*` refresh at reference time.
+  filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh at
+  reference time.
 - **Cost.** A `current.*` reference adds no eager capture, and an unreached
   reference observes nothing.
 - **Bare `current`** enumerates the context variable names with no value
@@ -328,36 +332,101 @@ key. There is no nesting: `current.ctx.x`, `current.env.x`, and
   resolves to nothing and raises a partial-capture warning rather than falling
   back to host discovery or to the stale `ctx` value.
 
-### The `doc` namespace
+#### Migrating from `current_env`
 
-- **Bare `doc`** is the whole root frontmatter object.
-- **`doc.<path>`** is a root frontmatter property, with dotted traversal for
-  nested values: `doc.build`, `doc.config.retries`.
-- A property literally named `doc` is reached as **`doc.doc`** (its nested child
-  as `doc.doc.child`).
+`current_env` used to be a lazy reserved root that reread the live process
+environment. It has no alias: `current_env` is now an ordinary property, so an
+old expression still parses but reads the document.
 
-`doc.*` is available in every expression surface (frontmatter and body
+| Expression | Before | Now |
+| --- | --- | --- |
+| `{{ current_env.HOME }}` | the live process value of `HOME` | member `HOME` of the frontmatter property `current_env` (usually absent) |
+
+Rewrite `current_env.` to `env.` to read the request's captured environment.
+An old `current_env.X` with no `current_env` property renders empty and is
+reported as the advisory `dm.expression.undeclared_property`.
+
+### The `fm` namespace
+
+`fm` ("frontmatter") reads the current document's own frontmatter.
+
+- **Bare `fm`** is a snapshot of the document's effective frontmatter at the
+  moment the expression runs: the authored values, caller overrides, injected
+  values, and any lifecycle `set` written before it. It is a copy: an object an
+  earlier expression returned does not change when a later `set` lands.
+- **`fm.<path>`** is a root frontmatter property, with dotted traversal for
+  nested values: `fm.build`, `fm.config.retries`. Bracket access reaches keys
+  the identifier form cannot spell: `fm['release.channel']`.
+- A missing `fm.<path>` is absent (`null`). It never falls back to `ctx` or any
+  other root.
+- Reading a value never runs it: a stored string that looks like `{{ … }}` or
+  `$( … )` is returned as data.
+- A property literally named `fm` is reached as **`fm.fm`**.
+
+A bare name is the same property as its `fm.` form (`{{ title }}` and
+`{{ fm.title }}` agree), with one exception: a bare name that is a reserved
+root resolves to that root. A frontmatter key named after a reserved root is
+read through `fm.`, and `doc` is an ordinary property name:
+
+```md
+---
+env: staging
+ctx:
+  area: docs
+doc: specs/notes.md
+---
+{{ env.HOME }}     <!-- the environment, not "staging" -->
+{{ fm.env }}       <!-- "staging" -->
+{{ fm.ctx.area }}  <!-- "docs": the document's own `ctx` key -->
+{{ doc }}          <!-- "specs/notes.md": an ordinary property -->
+```
+
+A frontmatter `ctx` key must be a mapping of context variable names.
+Darkmatter also deep-merges it into the runtime context: the runtime value wins
+a collision (with a warning), so `ctx.area` above is still the captured area.
+A scalar `ctx` is a composition error unless `--allow-override` is passed.
+
+`fm.*` is available in every expression surface (frontmatter and body
 interpolation, `when=` conditions, the `$()` ternary condition/branches, and
-claudine loop/hook conditions). It is the explicit, unambiguous form of a bare
+claudine loop conditions). It is the explicit, unambiguous form of a bare
 property reference — useful when a property name collides with an executable
 during [`$()` token resolution](#token-resolution-in--shell-expressions), where
-`doc.build` bypasses the executable-first ladder and always reads the property.
+`fm.build` bypasses the executable-first ladder and always reads the property.
+Claudine hook conditions have no frontmatter; they read the hook payload
+through their own `hook` root.
 
-`doc.*` is distinct from the [`frontmatter()`](#read-side-functions) function:
-`doc.build` reads *this* document's frontmatter, whereas
+`fm.*` is distinct from the [`frontmatter()`](#read-side-functions) function:
+`fm.build` reads *this* document's frontmatter, whereas
 `frontmatter('other.md')` reads *another* file's frontmatter.
 
-During frontmatter interpolation, `doc.<root>` is dependency-ordered exactly
-like the bare `<root>` reference: `b: "{{ doc.a }}"` waits for the templated key
-`a`, and `doc.doc` waits for a literal key named `doc`. Bare `doc` is a snapshot
+During frontmatter interpolation, `fm.<root>` is dependency-ordered exactly
+like the bare `<root>` reference: `b: "{{ fm.a }}"` waits for the templated key
+`a`, and `fm.fm` waits for a literal key named `fm`. A literal bracket key
+waits the same way: `fm['a']` waits for `a`, and `fm['release.channel']` waits
+for the single key `release.channel`, not `release`. Bare `fm` is a snapshot
 of the currently-resolved frontmatter and contributes no dependency — it does
 not wait for every templated key (which would create all-key dependencies or a
-self-cycle). To read the complete final frontmatter object, reference `doc` from
+self-cycle). To read the complete final frontmatter object, reference `fm` from
 body interpolation, `when=`, or another post-frontmatter surface.
 
-> **Breaking change.** Bare `doc` previously resolved to a frontmatter
-> *property* named `doc`; it now means the whole object. Existing bare `{{doc}}`
-> references that mean the property must migrate to `{{doc.doc}}`.
+#### Migrating from the `doc` root
+
+This root was previously named `doc`. The rename has no alias: `doc` is now an
+ordinary property, so an old expression still parses but reads a different
+value. Nothing rewrites documents automatically, because a property named
+`doc` is valid data.
+
+| Expression | Before | Now |
+| --- | --- | --- |
+| `{{ doc.title }}` | the frontmatter `title` | member `title` of a property named `doc` (usually absent) |
+| `{{ doc }}` | the whole frontmatter object | the frontmatter property `doc` |
+| `{{ doc.doc }}` | the frontmatter property `doc` | member `doc` of the property `doc` |
+| `{{ fm.title }}` | member `title` of a property named `fm` | the frontmatter `title` |
+| `has_key(fm, 'x')` | whether a property named `fm` has `x` | whether the frontmatter has `x` |
+
+Rewrite `doc.` to `fm.` where it meant the frontmatter, and `doc.doc` to `doc`
+(or `fm.doc`). An old `doc.x` with no `doc` property renders empty and is
+reported as the advisory `dm.expression.undeclared_property`.
 
 ## Interpolation vs. Condition Mode
 
@@ -525,9 +594,9 @@ refresh it after changing the catalog.
 | Collection | `length(x)` | Returns the length of a string, array, or object. | `length("hello")` ⇒ `5` |
 | Type Conversion | `number(x, [default])` | Converts a value to a number, with an optional default. | `number("42")` ⇒ `42` |
 | Math | `round(x, [default])` | Rounds a value to the nearest integer, with an optional default. | `round(3.7)` ⇒ `4` |
-| Filesystem | `absolute(file)` | Resolves a file path to an absolute path. |  |
+| Filesystem | `absolute(file)` | Returns the absolute path a file reference names, in native spelling; a missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs. |  |
 | Filesystem | `relative(file)` | Returns a best-effort relative path from the document base directory. | `relative("fixture.md")` ⇒ `fixture.md` |
-| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL). | `file_exists("fixture.md")` ⇒ `true` |
+| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL) and false when it is absent or the argument is null; a non-string argument, an invalid reference, missing context, probe failure, or failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
 | Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
 | Filesystem | `frontmatter(file, prop)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
 | Filesystem | `try_frontmatter(file)` | Reads the frontmatter of a Markdown file as `{ok, value, error}`; a missing, unreadable, or unparsable file gives `ok` false and its reason instead of failing. | `try_frontmatter("fixture.md").value.title` ⇒ `Fixture Title` |
@@ -538,11 +607,11 @@ refresh it after changing the catalog.
 | Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`), as absolute paths merged across every root of its prefix in native order (most local root first, then shallowest, then by path component). A bare pattern searches the document's folder, then the repository root. A file symlink a bare, `./`, or `../` pattern matches whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning. A directory the search must enter but cannot read fails the expression with an I/O failure instead of shortening the list. | `length(find_files("**/note.md"))` ⇒ `2` |
 | Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
-| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
-| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width, in the resolved file's directory; an absolute input returns an absolute path. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
+| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0, in the resolved file's directory; an absolute input returns an absolute path. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
 | Filesystem | `basename(file)` | Returns the final path component including extension. | `basename("sub/note.md")` ⇒ `note.md` |
 | Filesystem | `basename_without_index(file)` | Returns the basename with any indexed suffix removed from the stem. | `basename_without_index("review-1.md")` ⇒ `review.md` |
-| Filesystem | `dirname(file)` | Returns the directory portion of the display path. | `dirname("sub/note.md")` ⇒ `sub` |
+| Filesystem | `dirname(file)` | Returns the directory portion of the display path; an absolute input returns its absolute parent directory. | `dirname("sub/note.md")` ⇒ `sub` |
 | Filesystem | `ext(file)` | Returns the final extension without the leading dot. | `ext("sub/note.md")` ⇒ `md` |
 | Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename. | `parent_dir("sub/note.md")` ⇒ `sub` |
 | Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename. | `file_trailing("sub/note.md")` ⇒ `sub/note.md` |
@@ -561,8 +630,8 @@ refresh it after changing the catalog.
 | List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
 | List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
 | List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
-| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member. | `find_first_index("review-2.md")` ⇒ `review-1.md` |
-| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member. | `find_last_index("review-1.md")` ⇒ `review-2.md` |
+| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member. An absolute input returns an absolute path. | `find_first_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member. An absolute input returns an absolute path. | `find_last_index("review-1.md")` ⇒ `review-2.md` |
 | Git | `predict_conflicts(branch)` | Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch. |  |
 | Git | `branch_exists_on_remote()` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
 | Git | `branch_exists_on_remote(branch)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
@@ -631,15 +700,59 @@ whether a local path exists; they operate on the resolved path shape.
   bare implicit paths from the source directory first and then the repository
   root, plus magic (`@`), repository-root (`&`), and repository-scoped (`^`)
   forms.
-- Output paths use `/` as the separator, regardless of platform.
+- Output paths use `/` as the separator, regardless of platform. `absolute`
+  is the exception: it returns the platform's native spelling.
 - Missing local files are generally **not** an error for path helpers; existence
-  is checked only when the operation genuinely needs it.
+  is checked only when the operation genuinely needs it. A missing target takes
+  the first location the reference would be resolved at, so a path helper and
+  a later read or write agree on where the file is.
 - HTTP(S) URL strings are rejected by the path helpers. URL support for the
   document-reading functions (`file_exists`, `frontmatter`, `markdown_title`,
   `markdown_body_empty`, `validate_schema`) is available only in **body
   interpolation**, where a remote runtime exists.
 - `absolute` and `relative` are local-only path transforms; they never perform
   remote egress.
+
+#### Building Paths That Stay Anchored
+
+`absolute(file)` builds a path; it does not prove the file exists. With the
+document in `/r/prompts` inside repository `/r`:
+
+| Expression | Files on disk | Result |
+| --- | --- | --- |
+| `absolute("notes.md")` | `/r/prompts/notes.md` and `/r/notes.md` | `/r/prompts/notes.md` (document first) |
+| `absolute("sub/x.md")` | only `/r/sub/x.md` | `/r/sub/x.md` |
+| `absolute("./sub/new.md")` | none | `/r/prompts/sub/new.md` |
+| `absolute("https://example.com/x.md")` | — | error: `absolute() does not accept HTTP(S) URLs` |
+| `absolute("%x.md")` | none | error: a recursive search found nothing |
+
+Use `file_exists(file)` to ask whether the file is there.
+
+`dirname`, `increment_file_index`, `decrement_file_index`, `find_first_index`,
+and `find_last_index` resolve their input first and change only the filename,
+so the result stays in the resolved directory. When the input is **absolute**
+the result is absolute too, even inside the repository, because a
+repository-relative result would be looked up from the document's directory
+first by whoever reads it next:
+
+```md
+---
+review: "{{ dirname(absolute(spec)) + '/review-1.md' }}"
+---
+```
+
+With `spec` = `/r/claudine/features/x/spec.md` and the document in
+`/r/prompts`, `review` is `/r/claudine/features/x/review-1.md` whether or not
+that file exists yet, and `increment_file_index(review)` is
+`/r/claudine/features/x/review-2.md`. A relative input keeps the relative
+display form: `dirname("sub/x.md")` is `sub`.
+
+`file_exists(file)` is `false` only when the file is genuinely absent (a
+directory also reads `false`). It fails, rather than answering `false`, when
+it cannot tell: an invalid reference, a relative path that leaves the file
+tree, a `~`, `&`, `^`, or `vault:` reference whose home, repository, or vault
+is not available, a permission error while probing a candidate, or a remote
+URL whose fetch was denied or failed.
 
 #### Filesystem Helpers
 
@@ -652,7 +765,7 @@ whether a local path exists; they operate on the resolved path shape.
 | `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
 | `validate_schema(path)` | a file against its declared `$schema` | yes (body only) |
 | `validate_schema(path, obj)` | accepted for forward compatibility | yes (body only) |
-| `absolute(path)` | the absolute form of a path | **no** |
+| `absolute(path)` | the absolute path a reference names, existing or not | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
 | `find_files(pattern)` | every file a glob reference matches | **no** |
@@ -756,11 +869,11 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | --- | --- |
 | `is_indexed_file(file)` | `true` when the filename stem matches `base-NNN` |
 | `file_index(file)` | the parsed index suffix, or `-1` when non-indexed |
-| `increment_file_index(file)` | bumps the index; non-indexed files start at `2`; preserves zero-padding width |
-| `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0` |
+| `increment_file_index(file)` | bumps the index; non-indexed files start at `2`; preserves zero-padding width; stays in the resolved directory |
+| `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0`; stays in the resolved directory |
 | `basename(file)` | final component including extension |
 | `basename_without_index(file)` | basename with any indexed suffix removed from the stem |
-| `dirname(file)` | directory portion of the display path |
+| `dirname(file)` | directory portion of the display path; the absolute parent for an absolute input |
 | `ext(file)` | final extension without the leading dot; `""` when none |
 | `parent_dir(file)` | directory segment immediately above the basename |
 | `file_trailing(file)` | last directory segment plus basename |
@@ -1032,8 +1145,8 @@ directive body, or a ternary branch) resolves by this precedence ladder:
      - property absent → **`null`**.
 
 Because a bare name can resolve to an executable *or* a property depending on
-what is installed, use [`doc.<name>`](#namespaces) to force the property
-reading: `doc.build` always reads the `build` frontmatter property even when a
+what is installed, use [`fm.<name>`](#namespaces) to force the property
+reading: `fm.build` always reads the `build` frontmatter property even when a
 `build` executable is on `PATH`.
 
 ### Validity rule and the no-command diagnostic
@@ -1098,7 +1211,7 @@ assert!(result);
 
 This shortcut resolves variables in the same order as the compose pipeline:
 
-1. `doc` / `doc.*` against the provided `data` (intercepted first; never falls back to `ctx.doc`).
+1. `fm` / `fm.*` against the provided `data` (intercepted first; never falls back to `ctx.fm`).
 2. Top-level and nested paths against the provided `data`.
 3. `env.*` against the context's environment, never the process's.
 4. `ctx.*` via lazy runtime context capture.
@@ -1179,9 +1292,9 @@ condition, `$()` ternary, and interpolation errors.
 A host that adds its own globals to expressions (for example an `err` value
 that exists only while handling a failure) declares them in a `BindingView` and
 evaluates through an `EvaluationSession`. A root then resolves in this order:
-reserved namespace (`doc`, `ctx`, `env`, `current`, `current_env`), registered
+reserved namespace (`fm`, `ctx`, `env`, `current`), registered
 global, document property. A registered global shadows a document property of
-the same name, and `doc.<name>` still reads the document.
+the same name, and `fm.<name>` still reads the document.
 
 ```rust
 use std::sync::Arc;
@@ -1261,6 +1374,49 @@ let rendered = SubtreeCompose::new(&json!("{{ err.msg }}: {{ missing }}"), &docu
     .with_global("err", InjectedGlobal::eager(json!({ "msg": "boom" })))
     .compose()?;
 assert_eq!(rendered, json!("boom: ")); // an absent property renders empty
+```
+
+A whole composition takes host globals too. `HostGlobals::associate(view,
+entries)` runs the same registration checks once, and
+`ComposeOptions::with_host_globals` hands the result to every evaluation
+surface of the document and of each document it transcludes: frontmatter
+values, the body, `when=` conditions, and page blocks. A declared global wins
+over a frontmatter key of the same name for bare, dotted, and bracket reads,
+while `fm.<name>` still reads the key. A compose-time frontmatter value may read
+a declared global even when a deferred key (`with_exclude_keys`) shares its
+name; an explicit `fm.<name>` read of that key is still rejected. A read of a
+global declared unavailable fails the composition, in a transcluded document
+too, and `MarkdownError::unavailable_binding` finds it in the cause chain.
+A host can opt selected roots into `with_document_fallbacks(["previous"])`.
+For those roots, a present property in the reading document wins, including
+an explicit null; the registered global is used only when that property is
+absent. This supports typed migration errors for retired names while keeping
+ordinary authored properties. The default remains complete-root shadowing.
+Configured name coercion applies in string presentation to host globals too;
+whole-value expression results retain their original types.
+
+Without host globals nothing changes: every non-reserved root is a document
+property.
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::expression::HostGlobals;
+
+// `loop:` is a configuration key the host defers; `loop` is also its global.
+let view = Arc::new(
+    BindingView::builder(ScopeId::new("iteration"))
+        .declare("loop", "The iteration's values.", Availability::Available)
+        .build()?,
+);
+let globals = HostGlobals::associate(
+    view,
+    [("loop".to_string(), RuntimeBinding::eager(json!({ "count": 2 })))],
+)?;
+let options = ComposeOptions::new()
+    .with_exclude_keys(["loop"])
+    .with_host_globals(globals);
+// `label: "pass {{ loop.count }}"` composes to `pass 2`; `{{ fm.loop }}` in the
+// body renders the configuration block.
 ```
 
 ### Lazy `ctx.*` Resolution
@@ -1381,7 +1537,7 @@ Unsupported or easy-to-misread forms:
 - unspaced subtraction after a name: `{{ iteration-1 }}` reads a key named
   `iteration-1` (and warns when nothing defines it) — write `{{ iteration - 1 }}`
 - keys the identifier form cannot spell — containing `.` or `--`, starting with
-  a digit, or ending in `-` — use bracket access: `{{ doc['foo--bar'] }}`
+  a digit, or ending in `-` — use bracket access: `{{ fm['foo--bar'] }}`
 - number forms with an exponent (`1e3`), a leading dot (`.5`), or digit
   separators (`1_000`)
 

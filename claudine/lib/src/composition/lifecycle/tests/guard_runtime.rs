@@ -328,6 +328,7 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
     // touch the guard's terminal flag, so Finalize is still skipped.
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Failure,
         scope: None,
         frontmatter: &serde_json::Map::new(),
@@ -337,6 +338,7 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
@@ -371,9 +373,9 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
 /// `redesignate_terminal_to_failure` overwrites a recorded `Success`/
 /// `Blocked` terminal slot with `Failure` while keeping `terminal_emitted`
 /// true — so a `success`/`blocked` stack's `error()` downgrade can run the
-/// `failure` event and still reach `finalize`. The success/blocked top-level
-/// emission stays fired (it happened before the stack), and re-designation
-/// is a no-op for any other slot.
+/// `failure` event and still reach `finalize`. Actions the success/blocked
+/// stack already ran stay fired, and re-designation is a no-op for any other
+/// slot.
 #[test]
 fn redesignate_terminal_to_failure_overwrites_success_keeps_finalize() {
     let config = test_config();
@@ -415,13 +417,8 @@ fn redesignate_terminal_to_failure_overwrites_success_keeps_finalize() {
 }
 
 #[test]
-fn run_event_stack_emits_top_level_and_stack() {
-    let fm = json!({
-        "start": {
-            "stderr": "top-level",
-            "stack": [{"action": {"stderr": "stack"}}]
-        }
-    });
+fn run_event_stack_emits_the_stack_in_order() {
+    let fm = json!({ "start": [{ "stderr": "first" }, { "stderr": "second" }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let (settings, messaging, term) = test_ctx();
     let emitter = RecordingEmitter::new();
@@ -442,6 +439,7 @@ fn run_event_stack_emits_top_level_and_stack() {
     assert!(guard.record_event_emission(LifecycleSignal::Start));
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &serde_json::Map::new(),
@@ -451,6 +449,7 @@ fn run_event_stack_emits_top_level_and_stack() {
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
@@ -486,7 +485,7 @@ fn run_event_stack_emits_top_level_and_stack() {
             _ => None,
         })
         .collect();
-    assert_eq!(texts, vec!["top-level", "stack"]);
+    assert_eq!(texts, vec!["first", "second"]);
 }
 
 #[test]
@@ -510,6 +509,7 @@ fn execute_event_still_runs_full_event() {
     );
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &serde_json::Map::new(),
@@ -519,6 +519,7 @@ fn execute_event_still_runs_full_event() {
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
@@ -574,11 +575,11 @@ impl LifecycleEmitter for ScopeProbeEmitter {
 
 /// `run_event_stack` is the choke point every production lifecycle path
 /// (`execute_event` included) runs a stack through, so observing the scope from
-/// inside each event's top-level notification and stack action proves all four
+/// inside each of an event's two stack actions proves all four
 /// terminal events enter it — and that `start` does not.
 #[test]
 fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
-    let event = |label: &str| json!({"stderr": label, "stack": [{"action": {"stderr": label}}]});
+    let event = |label: &str| json!([{"stderr": label}, {"stderr": label}]);
     let config = parse_lifecycle_config(
         &json!({
             "start": event("start"),
@@ -609,6 +610,7 @@ fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
         .auto_rehash(false)
         .build();
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &serde_json::Map::new(),
@@ -618,6 +620,7 @@ fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
@@ -666,4 +669,59 @@ fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
             "{signal:?}'s top-level notification and stack must run inside the scope"
         );
     }
+}
+
+/// The drop safety net has no execution context, so it emits only root-level,
+/// unguarded communication whose text is literal. A guarded item (either
+/// branch), a whole-value or mixed `{{ … }}` template, and non-communication
+/// verbs are skipped instead of being emitted unevaluated.
+#[test]
+#[serial_test::serial]
+fn guard_drop_emits_only_root_literal_communication() {
+    let config = parse_lifecycle_config(
+        &json!({
+            "failure": [
+                { "stderr": "root literal" },
+                { "when": "true", "then": [{ "say": "guarded then" }], "else": [{ "effect": "doorbell-2" }] },
+                { "say": "{{ fm.title }}" },
+                { "message": "done: {{ fm.title }}" },
+                { "shell": "cleanup.sh" },
+                { "effect": "confirmation" },
+            ],
+        }),
+        dummy_path(),
+    )
+    .unwrap();
+    let (settings, messaging, term) = test_ctx();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: Path::new("/tmp/test.md"),
+        repo_root: None,
+        launch_area: None,
+        context: None,
+    };
+    let emitter = RecordingEmitter::new();
+
+    crate::interrupt::clear_for_tests();
+    {
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.mark_provider_launched();
+        // dropped after launch without a terminal event
+    }
+
+    assert_eq!(
+        emitter.actions(),
+        vec![
+            EmittedAction::Stderr {
+                signal: LifecycleSignal::Failure,
+                text: "root literal".to_string(),
+            },
+            EmittedAction::Effect {
+                name: "confirmation".to_string(),
+            },
+        ]
+    );
 }

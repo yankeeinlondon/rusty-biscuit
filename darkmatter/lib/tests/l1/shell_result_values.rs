@@ -122,6 +122,22 @@ impl Repo {
         allow_timeout: bool,
         timeout: std::time::Duration,
     ) -> Result<Value, String> {
+        self.compose_configured(frontmatter, allow_timeout, timeout, false)
+    }
+
+    /// [`Self::compose`] for a caller that re-validates the post-shell
+    /// frontmatter itself.
+    fn compose_caller_owned(&self, frontmatter: &str) -> Result<Value, String> {
+        self.compose_configured(frontmatter, false, std::time::Duration::from_secs(60), true)
+    }
+
+    fn compose_configured(
+        &self,
+        frontmatter: &str,
+        allow_timeout: bool,
+        timeout: std::time::Duration,
+        caller_owned: bool,
+    ) -> Result<Value, String> {
         let path = self.path().join("doc.md");
         std::fs::write(&path, format!("---\n{frontmatter}\n---\nBody\n")).expect("write doc");
         let document = Markdown::try_from(path.as_path()).map_err(|error| error.to_string())?;
@@ -129,13 +145,14 @@ impl Repo {
             .with_source_file(&path)
             .with_shell_policy_root(self.path())
             .with_shell_timeout(timeout)
-            .with_allow_shell_timeout(allow_timeout);
+            .with_allow_shell_timeout(allow_timeout)
+            .with_caller_owned_post_shell_verdict(caller_owned);
         let approved = document
             .compose_preflight(&crate::request_support::request(options.clone()))
             .map_err(|error| error.to_string())?
             .approval_set()
             .into_iter()
-            .collect();
+            .collect::<std::collections::HashSet<String>>();
         let (composed, _report) = document
             .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
             .map_err(|error: MarkdownError| error.to_string())?;
@@ -412,7 +429,7 @@ fn a_transcluded_document_reads_a_result_and_shares_the_cache() {
         .with_source_file(&path)
         .with_shell_policy_root(repo.path())
         .with_shell_timeout(std::time::Duration::from_secs(60));
-    let approved = document.compose_preflight(&crate::request_support::request(options.clone())).unwrap().approval_set().into_iter().collect();
+    let approved = document.compose_preflight(&crate::request_support::request(options.clone())).unwrap().approval_set().into_iter().collect::<std::collections::HashSet<String>>();
     let (composed, _) = document.compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved))).unwrap();
     assert!(composed.content().contains("clean=true"), "{}", composed.content());
     assert_eq!(repo.runs("included"), 1, "the root and the partial share one run");
@@ -438,6 +455,64 @@ fn schema_validates_the_expanded_value() {
             false,
         )
         .expect_err("a boolean is not a number");
+    assert!(error.contains("schema"), "{error}");
+}
+
+/// Compose judges unsuffixed stdout against the schema after expansion unless
+/// the caller owns that verdict; a value a result suffix typed is judged
+/// either way, since such a caller does not expect to coerce it.
+#[test]
+fn post_shell_verdict_follows_its_owner() {
+    let repo = Repo::new();
+    let stdout = format!("$schema:\n  v: number\nv: {}", yaml(&format!("$({SUCCEEDS})")));
+    let typed = format!("$schema:\n  v: number\nv: {}", yaml(&format!("$({SUCCEEDS})::ok")));
+
+    let error = repo.compose(&stdout, false).expect_err("`true` text is not a number");
+    assert!(error.contains("schema"), "{error}");
+    let owned = repo.compose_caller_owned(&stdout).expect("the caller judges stdout text");
+    assert_eq!(owned["v"], json!("true"));
+
+    for error in [repo.compose(&typed, false), repo.compose_caller_owned(&typed)] {
+        let error = error.expect_err("a boolean is not a number");
+        assert!(error.contains("schema"), "{error}");
+    }
+}
+
+/// Schema problems wait only for a value a later stage resolves, in both
+/// verdict modes: a command whose arguments pass 1 interpolated, and a
+/// template reading a command's output, are judged on what they resolve to;
+/// `$( … )` text that is never run is judged as written.
+#[test]
+fn schema_defers_exactly_what_a_later_stage_resolves() {
+    let repo = Repo::new();
+    let count = "$(git rev-list --count HEAD)";
+    let interpolated_command = format!(
+        "$schema:\n  v: number\nref: HEAD\nv: {}",
+        yaml("$(git rev-list --count {{ ref }})")
+    );
+    let template_over_output = format!("$schema:\n  v: number[]\nn: {}\nv: ['{{{{ n }}}}']", yaml(count));
+    let invalid_output = format!("$schema:\n  v: number[]\nn: {}\nv: ['{{{{ n }}}}']", yaml(&format!("$({SUCCEEDS})")));
+    let never_run = format!("$schema:\n  v: number[]\nv: [{}]", yaml(count));
+    let never_run_text = format!("$schema:\n  v: number\nv: {}", yaml(&format!("1 {count}")));
+
+    for caller_owned in [false, true] {
+        let compose = |frontmatter: &str| {
+            repo.compose_configured(frontmatter, false, std::time::Duration::from_secs(60), caller_owned)
+        };
+        let values = compose(&interpolated_command)
+            .unwrap_or_else(|error| panic!("caller_owned={caller_owned}: {error}"));
+        // A caller that owns the post-shell verdict also owns coercing stdout.
+        let one = if caller_owned { json!("1") } else { json!(1) };
+        assert_eq!(values["v"], one, "caller_owned={caller_owned}");
+        let values = compose(&template_over_output)
+            .unwrap_or_else(|error| panic!("caller_owned={caller_owned}: {error}"));
+        assert_eq!(values["v"], json!([one]), "caller_owned={caller_owned}");
+        for frontmatter in [&never_run, &never_run_text] {
+            let error = compose(frontmatter).expect_err(frontmatter);
+            assert!(error.contains("schema"), "caller_owned={caller_owned} {frontmatter}: {error}");
+        }
+    }
+    let error = repo.compose(&invalid_output, false).expect_err("`true` is not a number");
     assert!(error.contains("schema"), "{error}");
 }
 
@@ -589,6 +664,95 @@ mod resolved_values {
             .with_pre_approved_commands(HashSet::new());
         let error = execute_resolved_shell_values(&[&value], HashMap::new(), &crate::request_support::request(options.clone())).unwrap_err();
         assert!(error.to_string().contains("not pre-approved"), "{error}");
+    }
+
+    fn shape_only(repo: &Repo, template: &darkmatter::markdown::compose::shell_expansion::template::CommandTemplate) -> ComposeOptions {
+        let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+        approved.insert_template(
+            darkmatter::markdown::compose::shell_expansion::template::TemplateShape::from_template(template),
+        );
+        ComposeOptions::new()
+            .with_source_file(repo.path().join("doc.md"))
+            .with_shell_timeout(std::time::Duration::from_secs(60))
+            .with_pre_approved_commands(approved)
+    }
+
+    /// A value run as its template reads its placeholder when it executes,
+    /// from the state supplied then, and needs its shape approved, never its
+    /// bytes.
+    #[test]
+    fn a_value_run_as_its_template_reads_its_placeholder_when_it_executes() {
+        use darkmatter::markdown::compose::shell_expansion::template::parse_authored;
+        let repo = Repo::new();
+        let template = parse_authored("git rev-parse --verify {{ target }}").unwrap();
+        let value = resolve(
+            &repo,
+            "$(git rev-parse --verify {{ target }})::ok",
+            "$(git rev-parse --verify HEAD)::ok",
+            &[("target", json!("HEAD"))],
+        )
+        .with_template(template.clone());
+        let approved_shape = shape_only(&repo, &template);
+
+        for (target, ok) in [("HEAD", true), ("nope", false)] {
+            let results = execute_resolved_shell_values(
+                &[&value],
+                state(&[("target", json!(target))]),
+                &crate::request_support::request(approved_shape.clone()),
+            )
+            .unwrap();
+            assert_eq!(results[0].1, json!(ok), "target={target}");
+        }
+
+        let bytes_only = options(&repo, &[&value]);
+        let error = execute_resolved_shell_values(
+            &[&value],
+            state(&[("target", json!("HEAD"))]),
+            &crate::request_support::request(bytes_only),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("not pre-approved"), "{error}");
+    }
+
+    /// A template value refuses a missing value before anything starts,
+    /// whatever its result suffix, and fills a barrier's late value without
+    /// reading it again.
+    #[test]
+    fn a_template_value_refuses_a_missing_value_and_fills_late_values() {
+        use darkmatter::markdown::compose::shell_expansion::template::{
+            ArgPart, HoleTiming, parse_authored, resolve_late_values,
+        };
+        let repo = Repo::new();
+        let mut template = parse_authored("git rev-parse --verify {{ target }}").unwrap();
+        let authored = "$(git rev-parse --verify {{ target }})::ok";
+        let value = ResolvedShellValue::template_only("v", authored, "unread", &ComposeContext::capture_for_content(repo.path(), ""))
+            .expect("an authored template")
+            .with_template(template.clone());
+        assert!(value.commands().is_empty(), "a template-only value has no bytes");
+        let options = shape_only(&repo, &template);
+
+        let error = execute_resolved_shell_values(&[&value], HashMap::new(), &crate::request_support::request(options.clone()))
+            .unwrap_err();
+        assert!(
+            matches!(error, darkmatter::markdown::compose::ShellExpansionError::MissingValue { .. }),
+            "{error:?}"
+        );
+
+        if let ArgPart::Hole(hole) = &mut template.segments[0].args[2].parts[0] {
+            hole.timing = HoleTiming::Deferred { roots: vec!["target".to_string()] };
+        }
+        let late = resolve_late_values([("v", &template)], &|_: &str| Ok(json!("HEAD")))
+            .unwrap()
+            .site("v")
+            .cloned()
+            .unwrap();
+        let results = execute_resolved_shell_values(
+            &[&value.clone().with_late_values(late)],
+            HashMap::new(),
+            &crate::request_support::request(options),
+        )
+        .unwrap();
+        assert_eq!(results[0].1, json!(true));
     }
 
     #[test]

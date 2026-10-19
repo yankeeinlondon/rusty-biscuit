@@ -2,8 +2,8 @@
 //!
 //! A variable root is exactly one of:
 //!
-//! - a **reserved namespace** (`doc`, `ctx`, `env`, `current`, `current_env`;
-//!   the set is [`reserved_root_descriptors`]);
+//! - a **reserved namespace** (`fm`, `ctx`, `env`, `current`; the set is
+//!   [`reserved_root_descriptors`]);
 //! - a **global** a host registered for the current scope, available (its
 //!   value may be `null`) or unavailable (reading it is a typed
 //!   [`BindingError::Unavailable`]);
@@ -17,7 +17,7 @@
 //! ([`validate_prepared`](super::prepared::validate_prepared)) reads the same
 //! view without runtime values.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -35,7 +35,7 @@ use crate::markdown::span::SourceSpan;
 /// stays a `Global` holding `null` and never falls through to the document.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolvedBinding {
-    /// A document property, read bare or through `doc.`'s owner.
+    /// A document property, read bare or through `fm.`.
     Document {
         /// The property value, or `None` when absent.
         value: Option<Value>,
@@ -579,30 +579,7 @@ impl<'a> EvaluationSession<'a> {
     where
         I: IntoIterator<Item = (String, RuntimeBinding<'a>)>,
     {
-        let mut entries = HashMap::new();
-        for (root, binding) in runtime {
-            check_root(&root)?;
-            if let RuntimeBinding::Unavailable(reason) = &binding {
-                check_reason(&root, reason)?;
-            }
-            let Some(declaration) = view.global(&root) else {
-                return Err(BindingError::UnknownGlobal {
-                    root,
-                    scope: view.scope.clone(),
-                });
-            };
-            check_agreement(&view.scope, declaration, &binding)?;
-            if entries.contains_key(&root) {
-                return Err(BindingError::Duplicate { root });
-            }
-            entries.insert(root, binding);
-        }
-        if let Some(omitted) = view.globals().find(|global| !entries.contains_key(&global.root)) {
-            return Err(BindingError::OmittedDeclaredGlobal {
-                root: omitted.root.clone(),
-                scope: view.scope.clone(),
-            });
-        }
+        let entries = check_registration(&view, runtime)?;
         Ok(Self {
             view,
             document,
@@ -624,31 +601,205 @@ impl<'a> EvaluationSession<'a> {
     pub fn view(&self) -> &BindingView {
         &self.view
     }
+}
 
-    /// Reads an available global's `root`, running a lazy provider on first
-    /// read. The cache lock is never held while the provider runs.
-    fn global_root(&self, root: &str, binding: &RuntimeBinding<'a>, rest: &str) -> Value {
-        match binding {
-            RuntimeBinding::Eager(value) => project(value, rest),
-            RuntimeBinding::Lazy(provider) => {
-                if let Some(cached) = self.lock_cache().get(root) {
-                    return project(cached, rest);
-                }
-                let value = provider();
-                let mut cache = self.lock_cache();
-                // A re-entrant provider may have filled the slot first; the
-                // first value wins so every read in the session agrees.
-                let cached = cache.entry(root.to_string()).or_insert(value);
-                project(cached, rest)
-            }
-            RuntimeBinding::Unavailable(_) => Value::Null,
+/// Checks a complete runtime registration against `view`: one valid entry per
+/// declared global, each agreeing with its declaration.
+fn check_registration<'a, I>(
+    view: &BindingView,
+    runtime: I,
+) -> Result<HashMap<String, RuntimeBinding<'a>>, BindingError>
+where
+    I: IntoIterator<Item = (String, RuntimeBinding<'a>)>,
+{
+    let mut entries = HashMap::new();
+    for (root, binding) in runtime {
+        check_root(&root)?;
+        if let RuntimeBinding::Unavailable(reason) = &binding {
+            check_reason(&root, reason)?;
         }
+        let Some(declaration) = view.global(&root) else {
+            return Err(BindingError::UnknownGlobal {
+                root,
+                scope: view.scope.clone(),
+            });
+        };
+        check_agreement(&view.scope, declaration, &binding)?;
+        if entries.contains_key(&root) {
+            return Err(BindingError::Duplicate { root });
+        }
+        entries.insert(root, binding);
+    }
+    if let Some(omitted) = view.globals().find(|global| !entries.contains_key(&global.root)) {
+        return Err(BindingError::OmittedDeclaredGlobal {
+            root: omitted.root.clone(),
+            scope: view.scope.clone(),
+        });
+    }
+    Ok(entries)
+}
+
+/// Reads an available global's `root`, running a lazy provider on first read.
+/// The cache lock is never held while the provider runs.
+fn read_global(
+    cache: &Mutex<HashMap<String, Value>>,
+    root: &str,
+    binding: &RuntimeBinding<'_>,
+    rest: &str,
+) -> Value {
+    match binding {
+        RuntimeBinding::Eager(value) => project(value, rest),
+        RuntimeBinding::Lazy(provider) => {
+            if let Some(cached) = lock_cache(cache).get(root) {
+                return project(cached, rest);
+            }
+            let value = provider();
+            let mut cache = lock_cache(cache);
+            // A re-entrant provider may have filled the slot first; the
+            // first value wins so every read agrees.
+            let cached = cache.entry(root.to_string()).or_insert(value);
+            project(cached, rest)
+        }
+        RuntimeBinding::Unavailable(_) => Value::Null,
+    }
+}
+
+/// The cache only ever gains complete entries, so a poisoned lock still
+/// guards consistent data.
+fn lock_cache(cache: &Mutex<HashMap<String, Value>>) -> MutexGuard<'_, HashMap<String, Value>> {
+    cache.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The typed error for a read of `path` under a global `root` that `scope`
+/// declares unavailable.
+fn unavailable_read(
+    scope: &ScopeId,
+    root: &str,
+    path: &str,
+    reason: &UnavailabilityReason,
+) -> ExpressionError {
+    ExpressionError::Binding(Box::new(BindingError::Unavailable(Box::new(UnavailableBinding {
+        root: root.to_string(),
+        path: path.to_string(),
+        scope: scope.clone(),
+        reason: reason.clone(),
+        span: None,
+    }))))
+}
+
+/// Globals a host declares for one whole composition
+/// ([`ComposeOptions::with_host_globals`](crate::markdown::compose::ComposeOptions::with_host_globals)):
+/// a [`BindingView`] and one checked runtime entry per declared global.
+///
+/// Composition classifies every variable root against it in the order of
+/// [`BindingView::classify_root`]: a reserved namespace, then a declared
+/// global, then a document property. A declared global therefore wins over a
+/// same-named frontmatter key for bare, dotted, and bracket reads in body and
+/// frontmatter interpolation, conditions, and page blocks; `fm.<name>` still
+/// reads the key. The globals reach every transcluded child, because a child
+/// composes with its parent's options.
+///
+/// Unlike an [`EvaluationSession`], which is one evaluation, a value spans a
+/// composition and every clone of its options: a lazy provider runs at most
+/// once across them.
+#[derive(Clone)]
+pub struct HostGlobals {
+    document_fallbacks: BTreeSet<String>,
+    view: Arc<BindingView>,
+    runtime: Arc<HashMap<String, RuntimeBinding<'static>>>,
+    cache: Arc<Mutex<HashMap<String, Value>>>,
+}
+
+impl fmt::Debug for HostGlobals {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HostGlobals")
+            .field("view", &self.view)
+            .field("runtime", &self.runtime)
+            .finish_non_exhaustive()
+    }
+}
+
+impl HostGlobals {
+    /// Checks the complete runtime registration against `view`, exactly as
+    /// [`EvaluationSession::associate`] does. No lazy provider runs here.
+    ///
+    /// ## Errors
+    ///
+    /// Any [`BindingError`] configuration variant [`EvaluationSession::associate`]
+    /// reports.
+    pub fn associate<I>(view: Arc<BindingView>, runtime: I) -> Result<Self, BindingError>
+    where
+        I: IntoIterator<Item = (String, RuntimeBinding<'static>)>,
+    {
+        let runtime = check_registration(&view, runtime)?;
+        Ok(Self {
+            document_fallbacks: BTreeSet::new(),
+            view,
+            runtime: Arc::new(runtime),
+            cache: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
-    /// The cache only ever gains complete entries, so a poisoned lock still
-    /// guards consistent data.
-    fn lock_cache(&self) -> MutexGuard<'_, HashMap<String, Value>> {
-        self.cache.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Let present document properties take precedence for selected roots.
+    /// Presence includes null. This opt-in supports migration diagnostics
+    /// whose unavailable fallback applies only to undeclared names; lexical
+    /// globals should keep the default whole-root shadowing behavior.
+    pub fn with_document_fallbacks(mut self, roots: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.document_fallbacks = roots.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub(crate) fn prefers_document(&self, root: &str) -> bool {
+        self.document_fallbacks.contains(root)
+    }
+
+    /// The view these globals were associated against.
+    pub fn view(&self) -> &BindingView {
+        &self.view
+    }
+
+    /// A canonical description of the declaration and every entry, for the
+    /// compose-options fingerprints. A lazy entry is identified by this value's
+    /// shared cache, so independently built globals never compare equal.
+    pub(crate) fn identity(&self) -> String {
+        use crate::markdown::compose::cache::hashing::canonical_json_sorted;
+        let mut roots: Vec<&String> = self.runtime.keys().collect();
+        roots.sort_unstable();
+        let mut identity = format!("scope={};document_fallbacks={:?}", self.view.scope(), self.document_fallbacks);
+        for root in roots {
+            let entry = match &self.runtime[root] {
+                RuntimeBinding::Eager(value) => format!("eager:{}", canonical_json_sorted(value)),
+                RuntimeBinding::Lazy(_) => format!("lazy:{:p}", Arc::as_ptr(&self.cache)),
+                RuntimeBinding::Unavailable(reason) => format!("unavailable:{reason}"),
+            };
+            identity.push_str(&format!(";{root}={entry}"));
+        }
+        identity
+    }
+
+    /// Every declared global root.
+    pub(crate) fn roots(&self) -> impl Iterator<Item = &str> {
+        self.runtime.keys().map(String::as_str)
+    }
+
+    /// Whether `root` is a declared global (never a reserved namespace).
+    pub(crate) fn declares(&self, root: &str) -> bool {
+        self.runtime.contains_key(root)
+    }
+
+    /// Resolves `path` when its root is a declared global; `None` leaves it to
+    /// the reserved namespaces or the document.
+    pub(crate) fn resolve(&self, path: &str) -> Option<Result<ResolvedBinding, ExpressionError>> {
+        let root = root_of(path);
+        let binding = self.runtime.get(root)?;
+        Some(match binding {
+            RuntimeBinding::Unavailable(reason) => {
+                Err(unavailable_read(self.view.scope(), root, path, reason))
+            }
+            binding => Ok(ResolvedBinding::Global {
+                value: read_global(&self.cache, root, binding, &path[root.len()..]),
+            }),
+        })
     }
 }
 
@@ -713,18 +864,10 @@ impl EvaluationLookup for EvaluationSession<'_> {
         }
         match self.runtime.get(root) {
             Some(RuntimeBinding::Unavailable(reason)) => {
-                Err(ExpressionError::Binding(Box::new(BindingError::Unavailable(Box::new(
-                    UnavailableBinding {
-                        root: root.to_string(),
-                        path: path.to_string(),
-                        scope: self.view.scope.clone(),
-                        reason: reason.clone(),
-                        span: None,
-                    },
-                )))))
+                Err(unavailable_read(&self.view.scope, root, path, reason))
             }
             Some(binding) => Ok(ResolvedBinding::Global {
-                value: self.global_root(root, binding, &path[root.len()..]),
+                value: read_global(&self.cache, root, binding, &path[root.len()..]),
             }),
             None => self.document.resolve(path),
         }
@@ -735,12 +878,7 @@ impl EvaluationLookup for EvaluationSession<'_> {
     }
 
     fn format_resolved(&self, path: &str, value: &Value) -> String {
-        let root = root_of(path);
-        if !is_reserved_namespace(root) && self.runtime.contains_key(root) {
-            super::default_format(value)
-        } else {
-            self.document.format_resolved(path, value)
-        }
+        self.document.format_resolved(path, value)
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {

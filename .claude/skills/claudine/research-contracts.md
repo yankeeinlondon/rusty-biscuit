@@ -17,8 +17,14 @@ relations gate also runs the generator over the document.
 | `docs/research/<topic>/_types.yaml` | The topic's named types |
 | `docs/research/_types.yaml` | Types every topic shares: identifier, version, pointer, evidence, the researchers |
 | `docs/research/<topic>/_relations.py` | The relations gate, until one configurable checker replaces it |
-| `docs/research/<topic>/_fleet.md` | The prompt a researcher receives, with the lifecycle events that check its work |
+| `docs/research/<topic>/_fleet.md` | Sequence coordinator; selects the shared task roster and topic prompt |
+| `docs/research/<topic>/_research.md` | Per-row prompt, freshness checks, and success validation |
+| `docs/research/_provider-tasks.yaml`, `_local-runner-tasks.yaml` | Formal task projections of canonical rosters, with per-row prompt execution; parity tests enforce identical row data/order |
 | `docs/research/<topic>/<slug>.md` | One research document per provider |
+
+A fleet's root lifecycle belongs to its container. Keep row-dependent hooks
+on `_research.md`, where `seq` holds the current provider or runner. A failed
+row stops the sequence; rerun after correcting it to skip current research.
 
 ## Running research
 
@@ -110,7 +116,7 @@ Each of these cost a failed run.
 | A dry run composes prompts and fires no lifecycle event | Prove a prompt with a real run. For events alone, use a copy of the prompt with a one-line task |
 | A lifecycle command may not take its executable from interpolation | Use `has_binary(name)`, or a literal executable with interpolated arguments |
 | `err.message` is not a field | Use `err.msg` |
-| A lifecycle write outside the repository is dropped without a message, with every later action in that stack item | Keep test documents inside the repository, such as under `target/` |
+| A lifecycle write outside the repository is dropped without a message, with every later action in its list | Keep test documents inside the repository, such as under `target/` |
 | `validate_schema()` in a lifecycle event cannot resolve a relative `$schema` | Run `md schema validate` through `set` with `$( … )::result` |
 | Runs work in parallel and may read a document another is writing | Guard file reads with `env.AGENT == agent &&` |
 | A usage limit is not cured by retrying | Test `err.category == 'cap'` before `retry` |

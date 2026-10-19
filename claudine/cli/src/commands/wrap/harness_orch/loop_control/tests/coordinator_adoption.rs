@@ -27,7 +27,7 @@ fn request_for_authored(
         indexmap::IndexMap::new(),
         ProxyProvenance::new(
             source.to_path_buf(),
-            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, claudine::composition::LifecyclePath::root("failure").index(0).field("proxy")),
             chain,
         ),
     )
@@ -300,7 +300,7 @@ fn adopt_rejects_a_missing_target_without_activating_it() {
         .expect("the commit refusal retains its typed diagnostic");
     assert_eq!(snapshot.code, "composition.invalid_file_reference");
     assert_eq!(snapshot.detail["event"], "failure");
-    assert_eq!(snapshot.detail["property"], "failure.stack[*].proxy");
+    assert_eq!(snapshot.detail["property"], "failure[*].proxy");
     assert_eq!(snapshot.detail["reference"], missing.display().to_string());
     assert_eq!(
         state.source_path, fx.source_path,
@@ -540,8 +540,8 @@ fn inline_closure_ownership_follows_the_adopted_target() {
 #[test]
 fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() {
     let fx = fixture(serde_json::json!({
-        "blocked": {"stack": [{"action": {"append_line": ["events.log", "source-blocked"]}}]},
-        "finalize": {"stack": [{"action": {"append_line": ["events.log", "source-finalize"]}}]},
+        "blocked": [{"append_line": ["events.log", "source-blocked"]}],
+        "finalize": [{"append_line": ["events.log", "source-finalize"]}]
     }));
     std::fs::write(&fx.source_path, "---\n---\nbody\n").unwrap();
     let target = fx._dir.path().join("target.md");
@@ -559,7 +559,7 @@ fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() 
     };
     let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
     assert!(
-        guard.config().stack(LifecycleSignal::Blocked).is_some(),
+        !guard.config().stack(LifecycleSignal::Blocked).is_empty(),
         "precondition: the source declares a blocked stack"
     );
 
@@ -575,11 +575,11 @@ fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() 
         .expect("the hop is resolvable and uncontested");
 
     assert!(
-        guard.config().stack(LifecycleSignal::Blocked).is_none(),
+        guard.config().stack(LifecycleSignal::Blocked).is_empty(),
         "the source's blocked stack must not survive the hand-off"
     );
     assert!(
-        guard.config().stack(LifecycleSignal::Finalize).is_none(),
+        guard.config().stack(LifecycleSignal::Finalize).is_empty(),
         "the source's finalize stack must not survive the hand-off"
     );
 }
@@ -588,9 +588,7 @@ fn adopt_discards_the_sources_lifecycle_config_so_the_boot_has_no_stale_catch() 
 /// the source is still the active document and still owns its own closure.
 #[test]
 fn a_refused_hop_leaves_the_active_documents_lifecycle_config_installed() {
-    let fx = fixture(serde_json::json!({
-        "finalize": {"stack": [{"action": {"append_line": ["events.log", "source-finalize"]}}]},
-    }));
+    let fx = fixture(serde_json::json!({"finalize": [{"append_line": ["events.log", "source-finalize"]}]}));
     std::fs::write(&fx.source_path, "---\n---\nbody\n").unwrap();
     let missing = fx._dir.path().join("does-not-exist.md");
 
@@ -618,7 +616,7 @@ fn a_refused_hop_leaves_the_active_documents_lifecycle_config_installed() {
         .expect_err("an unresolvable target must be refused");
 
     assert!(
-        guard.config().stack(LifecycleSignal::Finalize).is_some(),
+        !guard.config().stack(LifecycleSignal::Finalize).is_empty(),
         "a refused hand-off never half-activates a target: the source keeps its \
          own closure"
     );
@@ -744,7 +742,7 @@ fn an_unresolvable_target_exposes_its_typed_cause_to_the_error_chain() {
 }
 
 /// A refused hand-off's `err` payload is built from the concrete cause rather
-/// than from a rendered message, so a `failure.stack` branching on `err.kind`
+/// than from a rendered message, so a `failure` stack branching on `err.kind`
 /// branches correctly per variant.
 #[test]
 fn a_refused_handoff_projects_typed_err_facets_per_variant() {

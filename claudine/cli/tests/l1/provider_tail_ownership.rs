@@ -45,7 +45,7 @@ fn probe(fixture: &CliProcessFixture) -> String {
 }
 
 /// A `success` stack that records `phase`, `x`, and `argv` as composed.
-const PROBE: &str = "success:\n  stack:\n    - action: {append_line: ['probe.log', 'phase=[{{ phase }}] x=[{{ x }}] argv={{ argv }}']}\n";
+const PROBE: &str = "success:\n  - {append_line: ['probe.log', 'phase=[{{ phase }}] x=[{{ x }}] argv={{ argv }}']}\n";
 
 /// A document with `extra` frontmatter, a `phase` schema parameter, and the
 /// probe.
@@ -182,7 +182,7 @@ fn a_resume_is_checked_at_the_resume_entrypoint() {
          printf '%s\\n' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}'\n\
          exit 1",
     );
-    let file = doc(&fixture, "plan.md", "---\nfailure:\n  stack:\n    - action: {resume: 'continue'}\n---\nBody\n");
+    let file = doc(&fixture, "plan.md", "---\nfailure:\n  - {resume: 'continue'}\n---\nBody\n");
 
     let (code, stderr) = run(&fixture, &["compose", &file, "--codex", "--image", "a.png", "b.png"]);
 
@@ -406,12 +406,12 @@ fn argv_cannot_be_set_by_name() {
 fn argv_reaches_every_sequence_step_and_a_proxy_target() {
     let fixture = CliProcessFixture::named("own-argv-sequence");
     stub(&fixture, "codex", "exit 0");
-    let record = "success:\n  stack:\n    - action: {append_line: ['probe.log', '{{ title }} argv={{ argv }}']}\n";
+    let record = "success:\n  - {append_line: ['probe.log', '{{ title }} argv={{ argv }}']}\n";
     doc(&fixture, "a.md", &format!("---\ntitle: a\n{record}---\nTask A\n"));
     doc(
         &fixture,
         "b.md",
-        "---\ntitle: b\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nTask B\n",
+        "---\ntitle: b\ninitialize:\n  - {proxy: './target.md'}\n---\nTask B\n",
     );
     doc(&fixture, "target.md", &format!("---\ntitle: target\nagent: codex\n{record}---\nTarget\n"));
     let seq = doc(
@@ -521,8 +521,6 @@ fn help_needs_no_required_argument_on_any_command() {
 
     for root_form in [
         &["--help", "completions"][..],
-        &["--help", "budget"],
-        &["--help", "budget", "grant"],
         &["-h", "mcp", "alias"],
         &["--help", "handle"],
         &["--help", "hooks"],
@@ -538,9 +536,6 @@ fn help_needs_no_required_argument_on_any_command() {
         (&["providers", "--help"], "Usage: claudine providers"),
         (&["actions", "--help"], "Usage: claudine actions"),
         (&["completions", "--help"], "Usage: claudine completions"),
-        (&["budget", "--help"], "Usage: claudine budget"),
-        (&["budget", "grant", "--help"], "Usage: claudine budget grant"),
-        (&["budget", "init", "-h"], "Usage: claudine budget init"),
         (&["mcp", "alias", "--help"], "Usage: claudine mcp alias"),
         (&["logs", "sessions", "-h"], "Usage: claudine logs sessions"),
     ] {

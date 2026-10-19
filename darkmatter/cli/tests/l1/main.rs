@@ -8,7 +8,17 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+// Shared with the darkmatter lib and DMLS suites; declared in `Cargo.toml`
+// `source-inputs`, and each test that uses it spells it with `include_str!`.
+#[path = "../../../lib/tests/union_fixtures/mod.rs"]
+mod union_fixtures;
+#[path = "../../../lib/tests/position_fixtures/mod.rs"]
+mod position_fixtures;
+#[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
+mod content_policy_fixtures;
 
+mod approval_prompt;
+mod claudine_schema_bundle;
 mod clean;
 mod clean_fidelity;
 mod clean_frontmatter;
@@ -40,6 +50,7 @@ mod compose_schema;
 mod compose_schema_file_rewrite;
 mod compose_scope_matrix;
 mod compose_shell;
+mod compose_shell_template;
 mod compose_state_set;
 mod compose_terminal_detection;
 mod compose_transclusion;
@@ -47,6 +58,7 @@ mod compose_unknown_identifiers;
 mod compose_value_provenance;
 mod context_construction_guard;
 mod delta;
+mod diagnostic_positions;
 mod get_set_rm;
 mod graph;
 mod hash;
@@ -68,9 +80,18 @@ mod rm;
 mod schema_about;
 mod schema_detect;
 mod schema_triggers;
+mod schema_union_matrix;
+mod schema_union_matrix_cells;
+mod schema_union_pipeline;
 mod schema_validate;
 mod schema_validate_baseline;
+mod schema_validate_baseline_selection;
+mod schema_robustness_matrix;
+mod schema_validate_core_types;
+mod schema_validate_shipped_artifacts;
+mod schema_validate_phase;
 mod spawn_site_guard;
+mod standalone_baseline;
 mod test_layout;
 mod toc;
 mod validate_refs;

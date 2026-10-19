@@ -216,7 +216,7 @@ fn capture_approval_prompt(staged: &StagedApproval, dry_run: bool) -> Vec<String
     // anything the handler rendered.
     let transcript = wait_for_marker(
         &mut session,
-        "(persists to blacklist)",
+        "the blacklist; stops the run)",
         Duration::from_secs(10),
     );
     let region = approval_prompt_region(&transcript);

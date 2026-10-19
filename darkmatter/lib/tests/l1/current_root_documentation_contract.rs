@@ -3,9 +3,8 @@
 //! `current_root_migration_guard` proves only that the removed nesting did not
 //! return; this test proves the required pages actually explain the model:
 //!
-//! - the direct lazy-root spelling — `current.<key>` mirrors `ctx.<key>` and
-//!   `current_env.<key>` mirrors `env.<key>`, with no nesting under either
-//!   root;
+//! - the direct lazy-root spelling — `current.<key>` mirrors `ctx.<key>`,
+//!   with no nesting under the root;
 //! - the variable/function pair rule, through its first pair
 //!   (`ctx.recent_commits` and `recent_commits(count)`);
 //! - the fixed-versus-refreshable distinction — repository metadata and
@@ -29,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 /// Claudine's per-composition-run rule, which every Claudine page that
 /// explains binding time states in exactly these words.
-const RUN_RULE: &str = "**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.";
+const RUN_RULE: &str = "**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (a concurrent group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.";
 
 /// Workspace-relative `/`-separated page path, phrases it must contain.
 const PAGES: &[(&str, &[&str])] = &[
@@ -39,8 +38,7 @@ const PAGES: &[(&str, &[&str])] = &[
         &[
             "| `ctx.<key>` | Eager",
             "| `current.<key>` | Lazy — the same key as `ctx.<key>`",
-            "| `current_env.<key>` | Lazy — the same key as `env.<key>`",
-            "`current` does not contain a `ctx` member and `current_env` does not contain an `env` member",
+            "`current` does not contain a `ctx` or `env` member",
             "`ctx.recent_commits` holds the last 10 commits captured at the start of the run; `recent_commits(count)`",
             "are fixed by the request's repository observation",
             "Only mutable Git and filesystem facts refresh from one event to the next",
@@ -51,7 +49,6 @@ const PAGES: &[(&str, &[&str])] = &[
         ".claude/skills/claudine/cli-commands.md",
         &[
             "`current.<key>` is the same key as `ctx.<key>` read lazily",
-            "`current_env.<key>` is the lazy mirror of `env.<key>`",
             "(`ctx.recent_commits` / `recent_commits(count)`) shares one definition",
             "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
             "refresh between events",
@@ -62,7 +59,6 @@ const PAGES: &[(&str, &[&str])] = &[
         ".claude/skills/darkmatter/compose.md",
         &[
             "`current.<key>` where `<key>` is cataloged",
-            "`current_env.<KEY>` is `std::env::var` at reference time",
             "`ctx.recent_commits` is the eager snapshot of the same descriptor",
             "from the request's one repository observation (D3)",
         ],
@@ -71,8 +67,7 @@ const PAGES: &[(&str, &[&str])] = &[
         "darkmatter/docs/topics/darkmatter-expressions.md",
         &[
             "| `current.*` | the same keys as `ctx.*`",
-            "| `current_env.*` | the same keys as `env.*`",
-            "`current` mirrors `ctx` key for key and `current_env` mirrors `env` key for key",
+            "`current` mirrors `ctx` key for key",
             "`ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time",
             "are fixed by the request's repository observation, made once when the request is created",
         ],
@@ -81,7 +76,6 @@ const PAGES: &[(&str, &[&str])] = &[
         "claudine/docs/topics/flow-control/lifecycle.md",
         &[
             "`current.<key>` for every `ctx.<key>`",
-            "`current_env.<KEY>` for every `env.<KEY>`",
             "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
         ],
     ),
@@ -89,7 +83,6 @@ const PAGES: &[(&str, &[&str])] = &[
         "claudine/docs/topics/composition.md",
         &[
             "`current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event",
-            "`current_env.<KEY>` rereads the live process environment",
             "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
             RUN_RULE,
         ],

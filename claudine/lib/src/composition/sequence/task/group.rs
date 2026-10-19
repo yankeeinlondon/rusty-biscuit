@@ -1,49 +1,7 @@
-//! Group scheduling — the only place in a sequence where work runs concurrently.
-//!
-//! A group is a bundle of tasks executed under one sequence step. `execution:`
-//! picks the scheduler; everything else about a group is shared between the two.
-//!
-//! Common to both (spec → *Groups*):
-//!
-//! - **`group.*` is a scope, not state.** Group variables are evaluated once at
-//!   group start, enter as a lexical scope for the duration of the group, and are
-//!   gone the moment it finishes; the next sequence step cannot see them.
-//! - **First failure decides the group, `fail_fast` decides the sequence.** A
-//!   group has no fail-fast control of its own.
-//!
-//! ## `execution: serial` (the default)
-//!
-//! Member tasks run one at a time against the *same* runtime cell as the rest of
-//! the sequence, so task 2 sees task 1's `set` writes and reads task 1's entry
-//! through `{{ last(outputs) }}` — exactly as if the two had been sequence steps.
-//! Each member commits its own entry, so a serial group grows `outputs` entry by
-//! entry rather than adding a wrapper entry. The first failure stops the group
-//! and the remaining tasks do not run.
-//!
-//! ## `execution: parallel`
-//!
-//! Members run on scoped threads, admitted in declaration order and bounded by
-//! `max_parallel` when set. Three rules make the observable result independent of
-//! completion order (spec → *Concurrency*):
-//!
-//! - **Snapshot isolation.** State and `outputs` are captured once at group start
-//!   and shared by every member; each member's own writes go to private cells —
-//!   both the runtime buffer a `set` accumulates in and the live document view a
-//!   lifecycle stack resolves against, because a write reaches both. No live file
-//!   is re-read between siblings.
-//! - **All siblings finish.** A failure never cancels in-flight work — discarding
-//!   a half-finished agent run costs more than letting it land — and every member
-//!   keeps an `outputs` slot holding whatever stdout it produced.
-//! - **Declaration-ordered folding.** The nested `outputs` entry, the mutation
-//!   merge (later-declared wins, with a warning on a contested key), and the
-//!   summary all walk the tasks in declaration order, never completion order.
-//!
-//! An interrupted parallel group commits neither mutations nor outputs: the run
-//! is being torn down, and a half-scheduled group's state is not a state any
-//! later step should read.
+//! Concurrent group legs use isolated runtime branches and declaration-order
+//! admission and folding. A failed atomic group publishes no leg state or result.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -53,10 +11,14 @@ use serde_json::{Map, Value};
 use super::super::super::error::CompositionError;
 use super::super::super::lifecycle::context::LifecycleErrorInfo;
 use super::super::super::lifecycle::executor::StackExecutionContext;
-use super::super::super::runtime_state::{OUTPUTS_KEY, RuntimeSnapshot, RuntimeState};
-use super::super::preflight::{GroupExecution, PreflightGroup, PreflightTask};
-use super::{PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskOutcome, TaskStage, TaskStatus};
+use super::super::super::runtime_state::{RuntimeSnapshot, RuntimeState};
+use super::super::preflight::{PreflightGroup, PreflightTask};
+use super::{
+    PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskOutcome, TaskRun, TaskStage, TaskStatus,
+};
 use crate::render::{TaskBar, TaskLiveOutput, TaskStream};
+use crate::composition::lifecycle::bindings::{GroupBinding, GroupLegResult, LegOutcome};
+use crate::composition::looping::LoopResultKind;
 
 /// A poisoned result slot means a member task panicked; the group's result is
 /// incomplete and cannot be reported honestly.
@@ -76,10 +38,6 @@ struct MemberRun {
     duration: Duration,
 }
 
-/// The `group` global's name at the frontmatter root and in the lifecycle
-/// injected-globals layer.
-pub(super) const GROUP_SCOPE_KEY: &str = "group";
-
 /// One member task's contribution to the owning step's summary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupTaskResult {
@@ -87,11 +45,319 @@ pub struct GroupTaskResult {
     pub name: String,
     /// How the task finished.
     pub status: TaskStatus,
-    /// Wall-clock time across the task's three stages.
+    /// `true` when the leg's `when:` guard was false and nothing ran.
+    pub skipped: bool,
+    /// Wall-clock time across the leg's execution.
     pub duration: Duration,
 }
 
+pub(super) struct ValidatedGroup {
+    variables: Map<String, Value>,
+    members: Vec<super::ValidatedTask>,
+    runs: Vec<Option<TaskRun>>,
+    group_run: Option<TaskRun>,
+}
+
 impl TaskExecution<'_> {
+    pub(super) fn run_group_container(&self, group: &PreflightGroup) -> PrimaryOutcome {
+        if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
+        use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+        use crate::composition::lifecycle::executor::DisabledShellRunner;
+        use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
+
+        let before = self.runtime.map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
+        let runtime = Arc::new(RuntimeState::from_snapshot(before));
+        let live = Mutex::new(self.stack.live_frontmatter_snapshot()
+            .unwrap_or_else(|| self.stack.frontmatter.clone()));
+        let private_stack = self.stack.with_private_cells(&runtime, Some(&live));
+        let execution = TaskExecution { runtime: Some(&runtime), stack: &private_stack, ..*self };
+        let context = LifecycleRuntimeContext {
+            settings: self.stack.settings, messaging: self.stack.messaging, term: self.stack.term,
+            source_path: &group.origin_path, repo_root: self.stack.repo_root,
+            launch_area: self.stack.ctx_base_dir, context: self.stack.prepared_context,
+        };
+        let mut runner = ContainerRunner::new(LifecycleRunGuard::new(
+            &group.lifecycle, &context, self.stack.emitter));
+        let mut frame = match self.open_loop(group.loop_config.as_deref(), LoopResultKind::Group, self.stack.frontmatter, &runtime) {
+            Ok(frame) => frame,
+            Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+        };
+        // Taken as each pass enters `start`; a retry of the pass returns here.
+        let mut checkpoint = crate::composition::looping::PassCheckpoint::take(&runtime);
+        let mut binding = GroupBinding::default();
+        let mut signal = LifecycleSignal::Initialize;
+        let mut result = PrimaryOutcome::succeeded(String::new());
+        let mut error = None;
+        let mut shell_enabled = false;
+        let mut prepared = None;
+        let mut current_group = None;
+        loop {
+            // The `loop` values this group's events and legs read: its own
+            // loop's, else the enclosing loop's.
+            let own_ambient = frame.as_ref().map(crate::composition::looping::LoopFrame::ambient);
+            let loop_stack = StackExecutionContext {
+                loop_values: own_ambient.as_ref().or(private_stack.loop_values),
+                ..private_stack.with_signal(private_stack.signal)
+            };
+            let execution = TaskExecution { stack: &loop_stack, ..execution };
+            if !matches!(signal, LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
+                && self.interrupted()
+            {
+                runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                    .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                error = runner.primary_error().cloned();
+                signal = LifecycleSignal::Cancelled;
+            }
+            if signal == LifecycleSignal::Start {
+                shell_enabled = false;
+                let preparation = execution.member_state().and_then(|state| {
+                    let context = self.stack.prepared_context.cloned()
+                        .unwrap_or_else(|| state.context().clone());
+                    let fresh = if self.graph.sources_unchanged() {
+                        group.clone()
+                    } else {
+                        let (fresh, graph) = super::super::preflight::prepare_nested_group(
+                            self.task, group, &state, context, self.stack.file_resolution_context,
+                        )?;
+                        self.verify_nested_graph(&graph)?;
+                        fresh
+                    };
+                    let validated = (TaskExecution { state: &state, ..execution }).validate_group(&fresh)?;
+                    Ok((fresh, validated))
+                });
+                match preparation {
+                    Ok((fresh, validated)) => {
+                        runner.guard_mut().set_config((*fresh.lifecycle).clone());
+                        binding.variables = validated.variables.clone();
+                        current_group = Some(fresh);
+                        prepared = Some(validated);
+                        shell_enabled = true;
+                    }
+                    Err(failure) => {
+                        let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                        runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                        result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                    }
+                }
+            }
+            if signal == LifecycleSignal::Start && self.interrupted() {
+                runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                    .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                error = runner.primary_error().cloned();
+                signal = LifecycleSignal::Cancelled;
+            }
+            let group = current_group.as_ref().unwrap_or(group);
+            live.lock().expect(SLOT_POISONED).extend(runtime.snapshot().mutations);
+            let group_value = binding.event_value(signal);
+            let mut stack = loop_stack.with_signal(signal);
+            stack.scope = None;
+            stack.group = Some(&group_value);
+            stack.err = error.as_ref();
+            if !shell_enabled { stack.shell_runner = &DisabledShellRunner; }
+            let event = if self.prompt.is_dry_run() {
+                let outcome = Default::default();
+                let decision = runner.record_outcome(signal, &outcome);
+                crate::composition::lifecycle::runtime::ContainerEventResult { outcome, decision }
+            } else { runner.execute_event(signal, &stack) };
+            match event.decision {
+                Decision::Continue if signal == LifecycleSignal::Initialize => {
+                    checkpoint = crate::composition::looping::PassCheckpoint::take(&runtime);
+                    signal = LifecycleSignal::Start;
+                }
+                Decision::Continue => {
+                    let state = match execution.member_state() {
+                        Ok(state) => state,
+                        Err(failure) => {
+                            let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                            runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                            result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                            continue;
+                        }
+                    };
+                    let attempt = TaskExecution { state: &state, ..execution };
+                    match prepared.take().map_or_else(|| attempt.validate_group(group), Ok) {
+                        Ok(validated) => {
+                            result = attempt.run_group(group, &validated);
+                            binding = result.group_binding.take().unwrap_or_default();
+                            binding.variables = validated.variables;
+                            // The pass's dictionary is its result: its terminal
+                            // event, `finalize`, and gate read it.
+                            if let Some(frame) = frame.as_mut()
+                                && !matches!(result.result, super::PrimaryResult::Interrupted)
+                            {
+                                frame.record_pass(
+                                    result.group_output.clone().unwrap_or_else(|| LoopResultKind::Group.empty()),
+                                    i32::from(matches!(result.result, super::PrimaryResult::Failed(_))),
+                                );
+                            }
+                            match &result.result {
+                                // A `break` fires no further event but `finalize`.
+                                super::PrimaryResult::Succeeded
+                                    if loop_stack.loop_values.is_some_and(|ambient| ambient.breaks.is_pending()) =>
+                                {
+                                    runner.guard_mut().defuse();
+                                    signal = LifecycleSignal::Finalize;
+                                }
+                                super::PrimaryResult::Succeeded => signal = LifecycleSignal::Success,
+                                super::PrimaryResult::Failed(diagnostic) => {
+                                    runner.set_error(diagnostic.info.clone());
+                                    error = Some(diagnostic.info.clone()); signal = LifecycleSignal::Failure;
+                                }
+                                super::PrimaryResult::Interrupted => {
+                                    runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                                        .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                                    error = runner.primary_error().cloned();
+                                    signal = LifecycleSignal::Cancelled;
+                                }
+                            }
+                        }
+                        Err(failure) => {
+                            let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                            runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                            result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                        }
+                    }
+                }
+                Decision::Failure { error: raised } => {
+                    error = raised.or(error); signal = LifecycleSignal::Failure;
+                }
+                Decision::Finalize { error: raised, .. } => {
+                    error = raised.or(error); signal = LifecycleSignal::Finalize;
+                }
+                Decision::Finished { .. } if runner.is_cancelled() => {
+                    result.secondary.extend(runner.secondary_errors().iter().cloned().map(|info|
+                        TaskDiagnostic { stage: TaskStage::Primary, info }));
+                    result.result = super::PrimaryResult::Interrupted;
+                    return result;
+                }
+                // A dry run previews one pass: it never runs the gate or reads
+                // the condition.
+                Decision::Finished { failed: false } if frame.is_some() && !self.prompt.is_dry_run() => {
+                    let frame = frame.as_mut().expect("guarded by the match");
+                    let ambient = frame.ambient();
+                    let gate_value = binding.event_value(LifecycleSignal::Loop);
+                    let gate_frontmatter = crate::composition::looping::container_state(self.stack.frontmatter, &runtime);
+                    let mut gate = loop_stack.with_signal(LifecycleSignal::Loop);
+                    gate.scope = None;
+                    gate.group = Some(&gate_value);
+                    gate.err = None;
+                    gate.frontmatter = &gate_frontmatter;
+                    gate.loop_values = Some(&ambient);
+                    let end = crate::composition::looping::finish_container_pass(frame, runner.guard_mut(), &gate, &runtime);
+                    if let Ok(crate::composition::looping::ContainerPassEnd::Broken(broken)) = &end {
+                        self.stack.emitter.emit_info(&broken.summary(), self.stack.term);
+                    }
+                    match end {
+                        Ok(crate::composition::looping::ContainerPassEnd::Continue) => {
+                            // The next pass rebuilds its leg results and
+                            // summaries from nothing.
+                            runner.begin_next_pass();
+                            checkpoint = crate::composition::looping::PassCheckpoint::take(&runtime);
+                            binding = GroupBinding { variables: binding.variables.clone(), legs: Vec::new() };
+                            result = PrimaryOutcome::succeeded(String::new());
+                            error = None;
+                            signal = LifecycleSignal::Start;
+                            continue;
+                        }
+                        Ok(crate::composition::looping::ContainerPassEnd::Complete | crate::composition::looping::ContainerPassEnd::Broken(_)) => {
+                            if let Some(parent) = self.runtime
+                                && let Err(failure) = parent.set_batch(self.stack.effect_engine,
+                                    &runtime.snapshot().mutations, &Map::new())
+                            {
+                                return PrimaryOutcome::failed(TaskDiagnostic {
+                                    stage: TaskStage::Primary,
+                                    info: LifecycleErrorInfo::from_error_or_action("set", &failure),
+                                });
+                            }
+                            return result;
+                        }
+                        // The loop owner failed after the pass settled: no
+                        // pass state reaches the parent.
+                        Err(failure) => {
+                            return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &failure));
+                        }
+                    }
+                }
+                Decision::Finished { failed } => {
+                    if failed {
+                        // A failure beats a pending `break`.
+                        if let Some(ambient) = loop_stack.loop_values { ambient.breaks.discard(); }
+                        let info = runner.primary_error().cloned().or(error)
+                            .unwrap_or_else(|| LifecycleErrorInfo::from_action_failure("error", "group finalization failed"));
+                        result.secondary.extend(runner.secondary_errors().iter().cloned().map(|info|
+                            TaskDiagnostic { stage: TaskStage::Primary, info }));
+                        result.result = super::PrimaryResult::Failed(TaskDiagnostic { stage: TaskStage::Primary, info });
+                    } else if let Some(parent) = self.runtime
+                        && let Err(failure) = parent.set_batch(self.stack.effect_engine,
+                            &runtime.snapshot().mutations, &Map::new())
+                    {
+                        return PrimaryOutcome::failed(TaskDiagnostic {
+                            stage: TaskStage::Primary,
+                            info: LifecycleErrorInfo::from_error_or_action("set", &failure),
+                        });
+                    }
+                    return result;
+                }
+                Decision::Retry { delay, overlay } => {
+                    binding = GroupBinding::default();
+                    // A looping group replaces only the failed attempt of
+                    // this pass: its runtime writes return to the pass's
+                    // entry before the retry's own values apply.
+                    if let Some(frame) = frame.as_mut() {
+                        frame.retry_pass();
+                        checkpoint.restore(&runtime);
+                    }
+                    if let Err(failure) = runtime.set_batch(self.stack.effect_engine, &overlay, &Map::new()) {
+                        let diagnostic = TaskDiagnostic {
+                            stage: TaskStage::Primary,
+                            info: LifecycleErrorInfo::from_error_or_action("set", &failure),
+                        };
+                        runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                        result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                        continue;
+                    }
+                    if !delay.is_zero() { std::thread::sleep(delay); }
+                    error = None;
+                    // Re-enter preparation without re-emitting initialize.
+                    signal = LifecycleSignal::Start;
+                }
+                Decision::Skip => return PrimaryOutcome::succeeded(String::new()),
+                Decision::Abort(abort) => {
+                    let failure = match abort {
+                        crate::composition::lifecycle::runtime::LifecycleTransitionAbort::ResumeWithoutSession =>
+                            CompositionError::LifecycleResumeWithoutSession { source_path: group.origin_path.clone() },
+                        _ => CompositionError::LifecycleDeferNotImplemented { source_path: group.origin_path.clone() },
+                    };
+                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                    runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Finalize;
+                }
+                Decision::SetupRecoveryUnsupported { event, action } => {
+                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
+                        &CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                            source_path: group.origin_path.clone(), event: event.property_name().into(), action: action.into(),
+                        });
+                    runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Failure;
+                }
+                Decision::Proxy { target, overlay } => {
+                    let result = execution.run_container_proxy(&target, overlay);
+                    if matches!(result.result, super::PrimaryResult::Succeeded)
+                        && let Some(parent) = self.runtime
+                        && let Err(failure) = parent.set_batch(self.stack.effect_engine,
+                            &runtime.snapshot().mutations, &Map::new())
+                    {
+                        return PrimaryOutcome::failed(TaskDiagnostic {
+                            stage: TaskStage::Primary,
+                            info: LifecycleErrorInfo::from_error_or_action("set", &failure),
+                        });
+                    }
+                    return result;
+                }
+            }
+        }
+    }
+
     /// The attributed live stream for one member task, when a sink is wired.
     ///
     /// `None` — the `--silent` shape — costs nothing: no frame is rendered at
@@ -109,116 +375,48 @@ impl TaskExecution<'_> {
         })
     }
 
-    /// Schedule a group's tasks and report the group as one primary outcome.
-    pub(super) fn run_group(&self, group: &PreflightGroup) -> PrimaryOutcome {
-        let variables = match self.resolve_group_variables(group) {
-            Ok(variables) => variables,
-            Err(error) => {
-                return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
-                    TaskStage::Primary,
-                    &error,
-                ));
-            }
-        };
-
-        let scope_overlay = self.overlay_with_group(&variables);
-        let scope_stack = self.stack.with_group(&variables);
-
-        match group.execution {
-            GroupExecution::Serial => self.run_serial(group, &variables, &scope_overlay, &scope_stack),
-            GroupExecution::Parallel => {
-                self.run_parallel(group, &variables, &scope_overlay, &scope_stack)
-            }
-        }
-    }
-
-    /// Declaration-ordered execution against the sequence's own live layers.
-    fn run_serial(
-        &self,
-        group: &PreflightGroup,
-        variables: &Map<String, Value>,
-        scope_overlay: &Value,
-        scope_stack: &StackExecutionContext<'_>,
-    ) -> PrimaryOutcome {
-        let mut results = Vec::with_capacity(group.tasks.len());
-        let mut collected: Vec<String> = Vec::with_capacity(group.tasks.len());
-        let mut failure: Option<TaskDiagnostic> = None;
-        let mut secondary: Vec<TaskDiagnostic> = Vec::new();
-        let mut interrupted = false;
-
+    /// Freeze every member's late shell inputs before the group begins effects.
+    pub(super) fn validate_group(&self, group: &PreflightGroup) -> Result<ValidatedGroup, CompositionError> {
+        let variables = self.resolve_group_variables(group)?;
+        let overlay = self.member_overlay();
+        let stack = self.stack.with_group(&variables);
+        let state = self.member_state()?;
+        let group_run = self.prompt.open_group_run(group);
+        let mut members = Vec::with_capacity(group.tasks.len());
+        let mut runs = Vec::with_capacity(group.tasks.len());
         for task in &group.tasks {
-            let started = Instant::now();
-            // Serial work shares the parallel geometry with nothing drawn in the
-            // gutter, so switching between the two modes does not shift the
-            // stream sideways (spec → *Reporting Concurrency*).
-            let stream = self.task_stream(task, TaskBar::Invisible);
-            if let Some(stream) = &stream {
-                stream.open();
-            }
-            // Rebuilt per task, not once per group: a serial member reads the
-            // `set` writes and the `outputs` entry its predecessor produced.
-            let member_state = match self.member_state(variables) {
-                Ok(state) => state,
-                Err(error) => {
-                    failure = Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error));
-                    break;
-                }
-            };
-            // Each serial member is a composition run of its own, so its
-            // fields and its document see what earlier members changed.
-            let member_run = self.prompt.open_member_run(task);
+            let run = self.prompt.open_leg_run(task, group_run.as_ref());
             let member_stack = StackExecutionContext {
                 source_path: &task.diagnostic.source_path,
-                prepared_context: member_run
-                    .as_ref()
-                    .map(|opened| &opened.context)
-                    .or(scope_stack.prepared_context),
-                ..scope_stack.with_signal(scope_stack.signal)
+                prepared_context: run.as_ref().map(|opened| &opened.context)
+                    .or(group_run.as_ref().map(|opened| &opened.context))
+                    .or(stack.prepared_context),
+                ..stack.with_signal(stack.signal)
             };
             let member = TaskExecution {
-                task,
-                state: &member_state,
-                stack: &member_stack,
-                overlay: Some(scope_overlay),
-                live: stream.as_ref(),
-                run_evidence: member_run.as_ref().map(|opened| &opened.run),
+                task, state: &state, stack: &member_stack, overlay: Some(&overlay),
+                run_evidence: run.as_ref().map(|opened| &opened.run)
+                    .or(group_run.as_ref().map(|opened| &opened.run)).or(self.run_evidence),
+                document: run.as_ref().and_then(|opened| opened.document.as_ref()).or(self.document),
                 ..*self
             };
-            let outcome = member.run();
-            let duration = started.elapsed();
-            if let Some(stream) = &stream {
-                stream.close(outcome.status.into(), duration);
+            let mut validated = member.validate_task()?;
+            let has_late_document = validated.prompt.as_ref()
+                .is_some_and(|request| !request.document_shell_values.is_empty());
+            if !has_late_document {
+                validated.prompt = None;
             }
-            results.push(GroupTaskResult {
-                name: task.name.clone().unwrap_or_else(|| task.label.clone()),
-                status: outcome.status,
-                duration,
-            });
-            collected.push(outcome.stdout);
-            secondary.extend(outcome.secondary_errors);
-
-            match outcome.status {
-                TaskStatus::Succeeded => {}
-                TaskStatus::Failed => {
-                    failure = outcome.error;
-                    break;
-                }
-                TaskStatus::Interrupted => {
-                    interrupted = true;
-                    break;
-                }
-            }
+            members.push(validated);
+            runs.push(run);
         }
+        Ok(ValidatedGroup { variables, members, runs, group_run })
+    }
 
-        // The group's own text is informational: each member already committed
-        // its entry, so nothing here reaches `outputs`.
-        let stdout = collected.join("\n");
-        let outcome = match (interrupted, failure) {
-            (true, _) => PrimaryOutcome::interrupted(stdout),
-            (false, Some(diagnostic)) => PrimaryOutcome::failed_with(stdout, diagnostic),
-            (false, None) => PrimaryOutcome::succeeded(stdout),
-        };
-        outcome.with_group_tasks(results).with_secondary(secondary)
+    pub(super) fn run_group(&self, group: &PreflightGroup, validated: &ValidatedGroup) -> PrimaryOutcome {
+        let variables = &validated.variables;
+        let scope_overlay = self.member_overlay();
+        let scope_stack = self.stack.with_group(variables);
+        self.run_parallel(group, &scope_overlay, &scope_stack, validated)
     }
 
     /// Bounded-concurrency execution with snapshot isolation.
@@ -231,16 +429,16 @@ impl TaskExecution<'_> {
     fn run_parallel(
         &self,
         group: &PreflightGroup,
-        variables: &Map<String, Value>,
         scope_overlay: &Value,
         scope_stack: &StackExecutionContext<'_>,
+        validated: &ValidatedGroup,
     ) -> PrimaryOutcome {
         // Taken once. A sibling's `set` or `outputs` entry is invisible until the
         // merge below, and no live file is re-read between siblings.
         let base = self
             .runtime
             .map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        let member_state = match self.member_state_from(variables, &base) {
+        let member_state = match self.member_state_from(&base) {
             Ok(state) => state,
             Err(error) => {
                 return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
@@ -273,7 +471,7 @@ impl TaskExecution<'_> {
         // a single shared cursor, so a freed slot always takes the next task.
         // One run for the whole group, captured before any sibling starts;
         // a sibling that re-enters later opens its own.
-        let group_run = self.prompt.open_group_run(group);
+        let group_run = validated.group_run.as_ref();
         let group_context = group_run
             .as_ref()
             .map(|opened| &opened.context)
@@ -282,12 +480,36 @@ impl TaskExecution<'_> {
             .as_ref()
             .map(|opened| &opened.run)
             .or(self.run_evidence);
+        // Each leg is a document of its own and captures its own environment,
+        // in declaration order and before any leg starts, so which leg holds
+        // which capture does not depend on scheduling. The legs share the
+        // group's run, not one another's document.
+        let leg_runs = &validated.runs;
 
         let workers = group
             .max_parallel
             .unwrap_or(group.tasks.len())
             .clamp(1, group.tasks.len().max(1));
-        let cursor = AtomicUsize::new(0);
+        let admission = Mutex::new((0usize, false, None));
+        let parent_cancellation = crate::composition::lifecycle::cancellation::current();
+        // Each leg calls `prep` targets through the same runner, on a branch
+        // of the active call chain of its own.
+        let prep_scope = crate::composition::lifecycle::prep::inherit();
+        let cancellations: Vec<_> = group.tasks.iter().map(|_| parent_cancellation.child()).collect();
+        // A leg records its `break` in a slot of its own, so a pending break
+        // stops no sibling and no admission; the fold below picks the first
+        // breaking leg in declaration order once every leg has settled.
+        let leg_loops: Vec<Option<crate::composition::LoopAmbient>> = group.tasks.iter()
+            .map(|_| scope_stack.loop_values.map(crate::composition::LoopAmbient::with_isolated_breaks))
+            .collect();
+        let cancellable: Vec<_> = group.tasks.iter().map(|task| match &task.action {
+            super::super::preflight::PreflightAction::Sequence(sequence) => sequence.lifecycle.cancelled_declared,
+            super::super::preflight::PreflightAction::Group(group) => group.lifecycle.cancelled_declared,
+            super::super::preflight::PreflightAction::Prompt { path, .. } => self.graph.prompt_documents.iter()
+                .find(|document| &document.path == path)
+                .is_some_and(|document| document.markdown.frontmatter().as_map().contains_key("cancelled")),
+            _ => false,
+        }).collect();
 
         std::thread::scope(|scope| {
             for _ in 0..workers {
@@ -295,10 +517,18 @@ impl TaskExecution<'_> {
                     .stack_size(MEMBER_THREAD_STACK_BYTES)
                     .spawn_scoped(scope, || {
                     loop {
-                        let index = cursor.fetch_add(1, Ordering::SeqCst);
-                        let Some(task) = group.tasks.get(index) else {
-                            break;
+                        let index = {
+                            let mut admission = admission.lock().expect(SLOT_POISONED);
+                            if self.interrupted() || admission.0 >= group.tasks.len() || (group.fail_fast && admission.1) {
+                                break;
+                            }
+                            let index = admission.0;
+                            admission.0 += 1;
+                            index
                         };
+                        let _cancellation_scope = cancellations[index].enter();
+                        let _prep_scope = prep_scope.enter();
+                        let task = &group.tasks[index];
                         let started = Instant::now();
                         // Each concurrent task takes its own palette entry, so
                         // interleaved frames stay attributable without relying
@@ -310,9 +540,13 @@ impl TaskExecution<'_> {
                         // The stack's cells must be the member's too: a lifecycle
                         // `set` inside the task accumulates through the stack,
                         // not through `TaskExecution::runtime`.
+                        let leg_run = leg_runs[index].as_ref();
                         let task_stack = StackExecutionContext {
                             source_path: &task.diagnostic.source_path,
-                            prepared_context: group_context,
+                            prepared_context: leg_run
+                                .map(|opened| &opened.context)
+                                .or(group_context),
+                            loop_values: leg_loops[index].as_ref(),
                             ..scope_stack.with_signal(scope_stack.signal)
                         };
                         let member_stack = task_stack
@@ -324,16 +558,38 @@ impl TaskExecution<'_> {
                             overlay: Some(scope_overlay),
                             runtime: Some(&buffers[index]),
                             live: stream.as_ref(),
-                            run_evidence: group_evidence,
+                            run_evidence: leg_run
+                                .map(|opened| &opened.run)
+                                .or(group_evidence),
+                            document: leg_run
+                                .and_then(|opened| opened.document.as_ref())
+                                .or(self.document),
                             ..*self
                         };
-                        // A sibling's failure never cancels in-flight work:
-                        // discarding a half-finished agent run costs more than
-                        // letting it land in its slot.
-                        let outcome = member.run();
+                        // The guard reads the group-start state the member was built
+                        // from, even for a leg admitted late.
+                        let outcome = member.run_guarded(Some(&validated.members[index]));
                         let duration = started.elapsed();
                         if let Some(stream) = &stream {
                             stream.close(outcome.status.into(), duration);
+                        }
+                        if outcome.status != TaskStatus::Succeeded {
+                            let mut admission = admission.lock().expect(SLOT_POISONED);
+                            admission.1 = true;
+                            if admission.2.is_none() && outcome.status == TaskStatus::Failed {
+                                admission.2 = outcome.error.as_ref().map(|error| error.info.clone());
+                                if group.fail_fast {
+                                    let cause = crate::composition::lifecycle::cancellation::CancellationCause::SiblingFailure {
+                                        group: group.name.clone(), leg: task.name.clone().unwrap_or_else(|| task.label.clone()),
+                                        error: outcome.error.as_ref().expect("failed task has a diagnostic").info.clone(),
+                                    };
+                                    for sibling in 0..admission.0 {
+                                        if sibling != index && cancellable[sibling] {
+                                            cancellations[sibling].cancel(cause.clone());
+                                        }
+                                    }
+                                }
+                            }
                         }
                         *slots[index].lock().expect(SLOT_POISONED) =
                             Some(MemberRun { duration, outcome });
@@ -343,7 +599,23 @@ impl TaskExecution<'_> {
             }
         });
 
-        self.fold_parallel_results(group, slots)
+        let triggering_failure = admission.into_inner().expect(SLOT_POISONED).2;
+        let statuses: Vec<Option<TaskStatus>> = slots.iter()
+            .map(|slot| slot.lock().expect(SLOT_POISONED).as_ref().map(|run| run.outcome.status))
+            .collect();
+        let outcome = self.fold_parallel_results(group, slots, triggering_failure);
+        // A settled, successful group carries the first breaking leg's
+        // `break` to its own loop slot. A leg whose own failure beat its break
+        // is not a breaking leg, and a failed group carries none.
+        if matches!(outcome.result, super::PrimaryResult::Succeeded)
+            && let Some(ambient) = scope_stack.loop_values
+            && let Some(broken) = statuses.iter().zip(&leg_loops)
+                .filter(|(status, _)| **status == Some(TaskStatus::Succeeded))
+                .find_map(|(_, leg)| leg.as_ref().and_then(|leg| leg.breaks.pending()))
+        {
+            ambient.breaks.record(broken);
+        }
+        outcome
     }
 
     /// Reduce the finished members into one group outcome, in declaration order.
@@ -351,28 +623,53 @@ impl TaskExecution<'_> {
         &self,
         group: &PreflightGroup,
         slots: Vec<Mutex<Option<MemberRun>>>,
+        triggering_failure: Option<LifecycleErrorInfo>,
     ) -> PrimaryOutcome {
-        let runs: Vec<MemberRun> = slots
+        let runs: Vec<Option<MemberRun>> = slots
             .into_iter()
-            .filter_map(|slot| slot.into_inner().expect(SLOT_POISONED))
+            .map(|slot| slot.into_inner().expect(SLOT_POISONED))
             .collect();
 
         let mut results = Vec::with_capacity(runs.len());
-        let mut entries: Vec<Value> = Vec::with_capacity(runs.len());
+        let mut entries = Map::new();
         let mut secondary: Vec<TaskDiagnostic> = Vec::new();
         let mut failure: Option<TaskDiagnostic> = None;
         let mut interrupted = false;
+        let mut binding = GroupBinding { variables: Map::new(), legs: Vec::new() };
+        let cancellation_error = triggering_failure.or_else(||
+            crate::composition::lifecycle::cancellation::cause().map(|cause| cause.error()))
+            .or_else(|| self.interrupted().then(||
+                crate::composition::lifecycle::cancellation::CancellationCause::Interrupt.error()));
+        let cancelled_error = cancellation_error.as_ref().map_or(Value::Null, LifecycleErrorInfo::to_value);
 
         for (task, run) in group.tasks.iter().zip(&runs) {
             let name = task.name.clone().unwrap_or_else(|| task.label.clone());
+            let Some(run) = run else {
+                binding.legs.push(GroupLegResult { name, outcome: LegOutcome::Cancelled,
+                    output: Value::Null, err: cancelled_error.clone() });
+                continue;
+            };
+            binding.legs.push(GroupLegResult {
+                name: name.clone(),
+                outcome: match run.outcome.status {
+                    TaskStatus::Succeeded if run.outcome.result.is_null() && !run.outcome.output_committed => LegOutcome::Skipped,
+                    TaskStatus::Succeeded => LegOutcome::Succeeded,
+                    TaskStatus::Failed => LegOutcome::Failed,
+                    TaskStatus::Interrupted => LegOutcome::Cancelled,
+                },
+                output: run.outcome.result.clone(),
+                err: run.outcome.error.as_ref().map_or_else(
+                    || if run.outcome.status == TaskStatus::Interrupted { cancelled_error.clone() } else { Value::Null },
+                    |error| error.info.to_value()),
+            });
             results.push(GroupTaskResult {
-                name,
+                name: name.clone(),
                 status: run.outcome.status,
+                skipped: run.outcome.skipped,
                 duration: run.duration,
             });
-            // Every task keeps a slot, including a failed one — its partial
-            // stdout is the only record of what the work managed to produce.
-            entries.push(Value::String(run.outcome.stdout.clone()));
+            // Failed legs retain their native partial result for terminal summaries.
+            entries.insert(name, run.outcome.result.clone());
             secondary.extend(run.outcome.secondary_errors.clone());
             match run.outcome.status {
                 TaskStatus::Succeeded => {}
@@ -387,25 +684,23 @@ impl TaskExecution<'_> {
             }
         }
 
-        let stdout = entries
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>()
-            .join("\n");
+        let stdout = runs.iter().flatten()
+            .map(|run| run.outcome.stdout.as_str()).collect::<Vec<_>>().join("\n");
 
         // An interrupted group commits nothing: the run is being torn down, and a
         // half-scheduled group's state is not a state any later step should read.
-        let outcome = if interrupted {
+        let outcome = if interrupted && (self.interrupted() || failure.is_none()) {
             PrimaryOutcome::interrupted(stdout)
+        } else if group.fail_fast && failure.is_some() {
+            PrimaryOutcome::failed_with(stdout, failure.expect("failed leg has a diagnostic"))
+                .with_group_output(Value::Object(entries))
         } else {
             secondary.extend(self.merge_parallel_mutations(group, &runs));
-            let outcome = match failure {
-                Some(diagnostic) => PrimaryOutcome::failed_with(stdout, diagnostic),
-                None => PrimaryOutcome::succeeded(stdout),
-            };
-            outcome.with_group_output(Value::Array(entries))
+            PrimaryOutcome::succeeded(stdout).with_group_output(Value::Object(entries))
         };
-        outcome.with_group_tasks(results).with_secondary(secondary)
+        let mut outcome = outcome.with_group_tasks(results).with_secondary(secondary);
+        outcome.group_binding = Some(binding);
+        outcome
     }
 
     /// Fold every member's mutation delta into the sequence cell.
@@ -423,7 +718,7 @@ impl TaskExecution<'_> {
     fn merge_parallel_mutations(
         &self,
         group: &PreflightGroup,
-        runs: &[MemberRun],
+        runs: &[Option<MemberRun>],
     ) -> Vec<TaskDiagnostic> {
         let mut refused = Vec::new();
         let Some(runtime) = self.runtime else {
@@ -431,6 +726,7 @@ impl TaskExecution<'_> {
         };
         let mut written: HashMap<&str, String> = HashMap::new();
         for (task, run) in group.tasks.iter().zip(runs) {
+            let Some(run) = run else { continue; };
             let name = task.name.clone().unwrap_or_else(|| task.label.clone());
             for mutation in &run.outcome.mutations {
                 if let Some(earlier) = written.get(mutation.key.as_str()) {
@@ -478,31 +774,19 @@ impl TaskExecution<'_> {
         Ok(resolved)
     }
 
-    /// The effective state one member task resolves `params`/`timeout`/action
-    /// stacks against.
-    ///
-    /// Layered lowest-first, matching
-    /// [`layered_set_overrides`][super::super::super::runtime_state::layered_set_overrides]:
-    /// the step's own state, the mutations accumulated so far, `outputs` as it
-    /// stands, the reserved overlay, and the group scope.
+    /// Apply accumulated runtime writes without exposing group variables as frontmatter.
     fn member_state(
         &self,
-        variables: &Map<String, Value>,
     ) -> Result<EffectiveState, CompositionError> {
         let snapshot = self
             .runtime
             .map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        self.member_state_from(variables, &snapshot)
+        self.member_state_from(&snapshot)
     }
 
-    /// [`Self::member_state`] against a caller-supplied snapshot.
-    ///
-    /// A serial member passes the *live* snapshot so it reads its predecessor's
-    /// writes; a parallel group passes the group-start snapshot once and shares
-    /// the result with every sibling.
+    /// All concurrent siblings compose against the same group-entry snapshot.
     fn member_state_from(
         &self,
-        variables: &Map<String, Value>,
         snapshot: &RuntimeSnapshot,
     ) -> Result<EffectiveState, CompositionError> {
         let mut data = self.state.data().clone();
@@ -510,17 +794,12 @@ impl TaskExecution<'_> {
             for (key, value) in &snapshot.mutations {
                 data.insert(key.clone(), value.clone());
             }
-            data.insert(OUTPUTS_KEY.to_string(), snapshot.outputs_value());
         }
         if let Some(Value::Object(overlay)) = self.overlay {
             for (key, value) in overlay {
-                data.insert(key.clone(), value.clone());
+                if key != "seq" { data.insert(key.clone(), value.clone()); }
             }
         }
-        data.insert(
-            GROUP_SCOPE_KEY.to_string(),
-            Value::Object(variables.clone()),
-        );
         EffectiveStateBuilder::new()
             .with_frontmatter(data)
             .with_context(self.state.context().clone())
@@ -529,19 +808,9 @@ impl TaskExecution<'_> {
             .map_err(|source| CompositionError::PreFlightStateBuildFailed { source })
     }
 
-    /// The reserved overlay a member task composes a prompt document under.
-    ///
-    /// `group` rides the overlay because that is the layer rebuilt per task —
-    /// which is precisely what makes the scope end with the group.
-    fn overlay_with_group(&self, variables: &Map<String, Value>) -> Value {
-        let mut overlay = match self.overlay {
-            Some(Value::Object(map)) => map.clone(),
-            _ => Map::new(),
-        };
-        overlay.insert(
-            GROUP_SCOPE_KEY.to_string(),
-            Value::Object(variables.clone()),
-        );
-        Value::Object(overlay)
+    /// Group variables travel through the lexical stack and prompt request,
+    /// never the frontmatter overlay.
+    fn member_overlay(&self) -> Value {
+        self.overlay.cloned().unwrap_or_else(|| Value::Object(Map::new()))
     }
 }

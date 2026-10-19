@@ -25,21 +25,18 @@ resides_in: |-
             : 'are spread across {{length(ctx.dirty_package_areas)}}:\n {{as_unordered_list(ctx.dirty_package_areas)}}'
     }}
 initialize:
-    stack:
-        - when: "length(ctx.staged_files) == 0"
-          action:
-              - message: "🤨  there were no staged files to commit in the {{repo.name}} !"
-              - stop
+    - when: "length(ctx.staged_files) == 0"
+      then:
+          - message: "🤨  there were no staged files to commit in the {{repo.name}} !"
+          - stop
 success:
-    message: |-
-        staged files committed in {{
-            ctx.area
-                ? ctx.area
-                : ctx.repo
-        }}
-    stack:
-        - action:
-              - shell: "just gitnexus"
+    - message: |-
+          staged files committed in {{
+              ctx.area
+                  ? ctx.area
+                  : ctx.repo
+          }}
+    - shell: "just gitnexus"
 ---
 
 # Commit Staged Files

@@ -1,96 +1,133 @@
-//! `dmls --bench-index <dir>`: the R-6 measurement harness.
+//! `dmls --bench-index <dir>`: the index store benchmark.
 //!
-//! Ships with the first indexer slice so performance budgets are enforced from
-//! day one rather than retrofitted. It runs the exact discovery + parse +
-//! graph-build path the server uses, times each stage, and emits the R-6 JSON
-//! shape (per-stage timings, peak RSS, graph counts) for `--json` or a compact
-//! human summary otherwise.
+//! It measures what the first workspace-wide request costs, in two halves:
 //!
-//! Discovery runs once; the resulting file list is reused for indexing (there
-//! is no second walk). Each R-6 stage carries its own measurement:
+//! - **cold** ([`bench_cold`]): no store exists. List the files, open (create)
+//!   the store, and fill it: read, hash, parse, and write every listed
+//!   Markdown file.
+//! - **warm** ([`bench_warm`]): the cold half's store is present and no file
+//!   changed, as after an editor restart. List the files, open the store,
+//!   revalidate (read and hash every file, parse none), then answer a
+//!   references request, a heading rename, and a workspace-symbols request
+//!   the way the server does: a small graph over the store's candidates, and
+//!   the stored headings.
 //!
-//! - `discover`, `graph_build`, `reverse_index`, `snapshot_swap` are
-//!   single-threaded wall clock around, respectively, the workspace walk, the
-//!   node/edge assembly pass (`WorkspaceGraph::assemble`), the reverse-index
-//!   pass (`WorkspaceGraph::finalize`), and the immutable-snapshot `Arc` swap.
-//! - `read`, `hash`, `frontmatter`, `parse_markdown`, `directives` are
-//!   aggregate CPU time summed across the parallel worker pool (they overlap
-//!   in wall clock), captured per document by
-//!   [`index_document_timed`](crate::graph::index_document_timed) and the
-//!   read step in the worker.
-//! - `diagnostics` stays zero: DMLS computes diagnostics request-time in the
-//!   providers, not during cold indexing, so the index bench does not exercise
-//!   that stage.
+//! The warm half reports the first references latency with and without the
+//! file-list walk, and the resident memory serving those requests adds: the
+//! process's peak resident set after the requests minus its peak after the
+//! file-list walk. A peak counts every allocation the cold half made, so the
+//! binary runs the warm half in a fresh process; [`bench_index`] runs both in
+//! one process and its warm memory figure includes the cold half's.
+//!
+//! The store directory is the caller's; the binary uses a temporary one, so
+//! a bench never reads or writes the editor's stores.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::config::WorkspaceConfig;
-use crate::graph::{DocumentContexts, WorkspaceGraph};
-use crate::workspace::discover_workspace;
-use crate::workspace::startup::{SilentProgress, collect_indices_from_files};
+use crate::capabilities::ClientProfile;
+use crate::clock::SystemClock;
+use crate::config::ConfigState;
+use crate::context::RepositoryContexts;
+use crate::graph::{DocumentIndex, WorkspaceGraph};
+use crate::index_store::{PassReport, StoreLocation, WorkspaceFacts, store_path};
+use crate::providers::{DocumentContext, ProviderRegistry};
+use crate::source_map::{PositionEncoding, SourceMap};
+use crate::wiki::WikiUniverse;
+use crate::workspace::discover::effective_roots;
+use crate::workspace::startup::{SilentProgress, list_files};
+use crate::workspace::{DocumentStore, file_path_to_uri, resolve_wiki_roots};
 
-/// Snapshot generation stamped on the bench-built graph (mirrors the batch
-/// startup path, [`WorkspaceIndex::from_indices`](crate::graph::WorkspaceIndex),
-/// which builds at generation 1).
-const BENCH_GENERATION: u64 = 1;
+/// The `workspace` field of the store's log lines during a bench.
+const BENCH_WORKSPACE: &str = "bench";
 
-/// Per-stage wall-clock timings in milliseconds (R-6 stage names).
-#[derive(Debug, Default, Serialize)]
-pub struct StageTimings {
-    /// Workspace discovery (walk + glob filtering).
-    pub discover_ms: f64,
-    /// Reading file contents from disk.
-    pub read_ms: f64,
-    /// Content hashing (xxHash identity).
-    pub hash_ms: f64,
-    /// Markdown parsing (headings, links, images, wiki links).
-    pub parse_markdown_ms: f64,
-    /// Frontmatter block extraction + span-aware AST read.
-    pub frontmatter_ms: f64,
-    /// Darkmatter DSL scanning (transclusion/file directives, `{{ }}`
-    /// interpolation).
-    pub directives_ms: f64,
-    /// Graph node/edge construction.
-    pub graph_build_ms: f64,
-    /// Reverse-index (+ key-index) construction.
-    pub reverse_index_ms: f64,
-    /// Diagnostics — zero here: DMLS diagnostics are request-time, not part of
-    /// cold indexing.
-    pub diagnostics_ms: f64,
-    /// Immutable snapshot swap.
-    pub snapshot_swap_ms: f64,
+/// What one store pass did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PassCounts {
+    /// Files read and hashed.
+    pub read: usize,
+    /// Files whose rows already matched their bytes.
+    pub unchanged: usize,
+    /// Files parsed and written.
+    pub reparsed: usize,
+    /// Files that could not be read.
+    pub failed: usize,
 }
 
-/// Graph size counters for the indexed workspace.
-#[derive(Debug, Default, Serialize)]
-pub struct GraphCounts {
-    /// Documents indexed.
-    pub documents: usize,
-    /// Total nodes.
-    pub nodes: usize,
-    /// Total edges.
-    pub edges: usize,
+impl From<&PassReport> for PassCounts {
+    fn from(report: &PassReport) -> Self {
+        Self { read: report.read, unchanged: report.unchanged, reparsed: report.reparsed, failed: report.failed.len() }
+    }
 }
 
-/// The full R-6 bench report.
-#[derive(Debug, Serialize)]
+/// The cold half: no store, then a filled one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColdReport {
+    /// The file-list walk.
+    pub list_ms: f64,
+    /// Opening (creating) every root's store.
+    pub open_ms: f64,
+    /// The fill: read, hash, parse, and write every listed file.
+    pub fill_ms: f64,
+    pub fill: PassCounts,
+    /// The store files' size on disk after the fill, when it is a file.
+    pub store_bytes: Option<u64>,
+    /// The process's peak resident set, when the platform reports it.
+    pub peak_rss_bytes: Option<u64>,
+}
+
+/// The warm half: the store present and every file unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WarmReport {
+    /// The file-list walk.
+    pub list_ms: f64,
+    /// Opening every root's existing store.
+    pub open_ms: f64,
+    /// The revalidation: read and hash every listed file.
+    pub revalidate_ms: f64,
+    pub revalidate: PassCounts,
+    /// The document the requests are about, and the heading under the
+    /// cursor (its first heading), when it has one.
+    pub target: PathBuf,
+    pub heading: Option<String>,
+    /// The candidate referrers of `target`.
+    pub candidates: usize,
+    /// A references request on the heading (or the document start): the
+    /// request graph and the provider.
+    pub references_ms: f64,
+    pub references: usize,
+    /// A heading rename of the heading: re-reading the candidates, the
+    /// request graph, and the provider. `None` without a heading.
+    pub rename_ms: Option<f64>,
+    /// A workspace-symbols request for the heading's title (or the empty
+    /// query).
+    pub symbols_ms: f64,
+    pub symbols: usize,
+    /// `open_ms + revalidate_ms + references_ms`: the first references
+    /// answer after a restart, excluding the file-list walk.
+    pub first_references_ms: f64,
+    /// `first_references_ms + list_ms`.
+    pub first_references_with_list_ms: f64,
+    /// The process's peak resident set after the file-list walk and after
+    /// the requests, and their difference, when the platform reports it.
+    pub peak_rss_after_list_bytes: Option<u64>,
+    pub peak_rss_bytes: Option<u64>,
+    pub added_rss_bytes: Option<u64>,
+}
+
+/// The `--bench-index` report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchReport {
     /// The directory that was indexed.
     pub root: PathBuf,
-    /// Files discovered (after filtering).
+    /// Markdown files listed.
     pub files: usize,
-    /// Total wall-clock time for the whole index.
-    pub total_ms: f64,
-    /// Per-stage timings.
-    pub stages: StageTimings,
-    /// Graph size counters.
-    pub counts: GraphCounts,
-    /// Peak resident set size in bytes, when the platform exposes it.
-    pub peak_rss_bytes: Option<u64>,
+    pub cold: ColdReport,
+    pub warm: WarmReport,
 }
 
 impl BenchReport {
@@ -99,86 +136,284 @@ impl BenchReport {
         serde_json::to_string_pretty(self).expect("BenchReport serializes")
     }
 
-    /// A compact one-block human summary.
+    /// A compact human summary.
     pub fn to_summary(&self) -> String {
-        let rss = match self.peak_rss_bytes {
-            Some(bytes) => format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0)),
-            None => "n/a".to_string(),
-        };
+        let (cold, warm) = (&self.cold, &self.warm);
         format!(
-            "indexed {files} files in {total:.1} ms\n  \
-             discover {discover:.1} · read {read:.1} · hash {hash:.1} · \
-             parse {parse:.1} · frontmatter {fm:.1} · build {build:.1} · \
-             reverse {rev:.1} · swap {swap:.1}\n  \
-             graph: {docs} docs / {nodes} nodes / {edges} edges · peak RSS {rss}",
+            "index store bench over {files} Markdown files in {root}\n  \
+             cold: list {cold_list:.1} ms · open {cold_open:.1} ms · fill {fill:.1} ms \
+             ({reparsed} parsed) · store {store} · peak RSS {cold_rss}\n  \
+             warm: list {warm_list:.1} ms · open {warm_open:.1} ms · revalidate {revalidate:.1} ms \
+             ({unchanged} unchanged, {warm_reparsed} parsed)\n  \
+             first references {first:.1} ms ({with_list:.1} ms with the list walk) · \
+             {references} locations over {candidates} candidates\n  \
+             requests: references {references_ms:.1} ms · rename {rename} · symbols {symbols_ms:.1} ms \
+             ({symbols} symbols) · added RSS {added}",
             files = self.files,
-            total = self.total_ms,
-            discover = self.stages.discover_ms,
-            read = self.stages.read_ms,
-            hash = self.stages.hash_ms,
-            parse = self.stages.parse_markdown_ms,
-            fm = self.stages.frontmatter_ms,
-            build = self.stages.graph_build_ms,
-            rev = self.stages.reverse_index_ms,
-            swap = self.stages.snapshot_swap_ms,
-            docs = self.counts.documents,
-            nodes = self.counts.nodes,
-            edges = self.counts.edges,
-            rss = rss,
+            root = self.root.display(),
+            cold_list = cold.list_ms,
+            cold_open = cold.open_ms,
+            fill = cold.fill_ms,
+            reparsed = cold.fill.reparsed,
+            store = mib(cold.store_bytes),
+            cold_rss = mib(cold.peak_rss_bytes),
+            warm_list = warm.list_ms,
+            warm_open = warm.open_ms,
+            revalidate = warm.revalidate_ms,
+            unchanged = warm.revalidate.unchanged,
+            warm_reparsed = warm.revalidate.reparsed,
+            first = warm.first_references_ms,
+            with_list = warm.first_references_with_list_ms,
+            references = warm.references,
+            candidates = warm.candidates,
+            references_ms = warm.references_ms,
+            rename = warm.rename_ms.map_or_else(|| "n/a".to_string(), |ms| format!("{ms:.1} ms")),
+            symbols_ms = warm.symbols_ms,
+            symbols = warm.symbols,
+            added = mib(warm.added_rss_bytes),
         )
     }
 }
 
-/// Runs the bench index over `root`, resolving path references through
-/// `contexts` as the server does.
-pub fn bench_index(root: &Path, contexts: &dyn DocumentContexts) -> BenchReport {
-    let config = WorkspaceConfig::default();
-    let total_start = Instant::now();
-    let mut stages = StageTimings::default();
+/// Both halves in this process; see the [module docs](self) for why the
+/// binary runs the warm half in a fresh one.
+///
+/// ## Errors
+///
+/// As [`bench_warm`].
+pub fn bench_index(
+    root: &Path,
+    contexts: &RepositoryContexts,
+    store_dir: &Path,
+    target: Option<&Path>,
+) -> Result<BenchReport, String> {
+    let (files, cold) = bench_cold(root, store_dir);
+    let warm = bench_warm(root, contexts, store_dir, target)?;
+    Ok(BenchReport { root: root.to_path_buf(), files, cold, warm })
+}
 
-    // Discover once; the file list is reused by indexing so the walk runs
-    // exactly once (no second discovery inside `collect_indices`).
-    let discover_start = Instant::now();
-    let report = discover_workspace(&[root.to_path_buf()], &config);
-    stages.discover_ms = elapsed_ms(discover_start);
-
-    // Read + parse across the worker pool (the same path the server takes at
-    // startup, so the total reflects real cold-start latency). The per-stage
-    // figures are aggregate CPU time summed across workers.
-    let (indices, index_stages) = collect_indices_from_files(&report.files, &SilentProgress);
-    stages.read_ms = ms(index_stages.read);
-    stages.hash_ms = ms(index_stages.hash);
-    stages.frontmatter_ms = ms(index_stages.frontmatter);
-    stages.parse_markdown_ms = ms(index_stages.parse_markdown);
-    stages.directives_ms = ms(index_stages.directives);
-
-    // Graph build → reverse index → snapshot swap, timed as the three R-6
-    // stages the batch startup path runs back to back inside `from_indices`.
-    let build_start = Instant::now();
-    let assembly = WorkspaceGraph::assemble(&indices, BENCH_GENERATION, &[], contexts);
-    stages.graph_build_ms = elapsed_ms(build_start);
-
-    let reverse_start = Instant::now();
-    let graph = WorkspaceGraph::finalize(assembly);
-    stages.reverse_index_ms = elapsed_ms(reverse_start);
-
-    let swap_start = Instant::now();
-    let snapshot = Arc::new(graph);
-    stages.snapshot_swap_ms = elapsed_ms(swap_start);
-
-    let counts = GraphCounts {
-        documents: snapshot.document_count(),
-        nodes: snapshot.node_count(),
-        edges: snapshot.edge_count(),
+/// The cold half over `root`, filling a store in `store_dir`, which should
+/// hold no store for `root`.
+///
+/// ## Returns
+///
+/// The number of listed Markdown files, and the report.
+pub fn bench_cold(root: &Path, store_dir: &Path) -> (usize, ColdReport) {
+    let workspace = Workspace::list(root);
+    let location = StoreLocation::prepare(Some(store_dir.as_os_str()), None);
+    let started = Instant::now();
+    let mut facts = WorkspaceFacts::open(&workspace.store_roots, &location, Arc::new(SystemClock), BENCH_WORKSPACE);
+    let open_ms = elapsed_ms(started);
+    let started = Instant::now();
+    let fill = facts.revalidate(&workspace.files, &Default::default(), &SilentProgress, &AtomicBool::new(false));
+    let fill_ms = elapsed_ms(started);
+    drop(facts);
+    let store_bytes = match &location {
+        StoreLocation::Directory(dir) => workspace
+            .store_roots
+            .iter()
+            .map(|root| std::fs::metadata(store_path(dir, root)).map(|metadata| metadata.len()).ok())
+            .sum(),
+        _ => None,
     };
-
-    BenchReport {
-        root: root.to_path_buf(),
-        files: report.files.len(),
-        total_ms: elapsed_ms(total_start),
-        stages,
-        counts,
+    let report = ColdReport {
+        list_ms: workspace.list_ms,
+        open_ms,
+        fill_ms,
+        fill: PassCounts::from(&fill),
+        store_bytes,
         peak_rss_bytes: peak_rss_bytes(),
+    };
+    (workspace.files.len(), report)
+}
+
+/// The warm half over `root`, reading the store [`bench_cold`] filled in
+/// `store_dir`. The requests are about `target` (default: `root`'s
+/// `README.md`, else its first listed file).
+///
+/// ## Errors
+///
+/// When `root` lists no Markdown file, or the target cannot be read as
+/// UTF-8 text.
+pub fn bench_warm(
+    root: &Path,
+    contexts: &RepositoryContexts,
+    store_dir: &Path,
+    target: Option<&Path>,
+) -> Result<WarmReport, String> {
+    let workspace = Workspace::list(root);
+    let peak_rss_after_list_bytes = peak_rss_bytes();
+    let location = StoreLocation::prepare(Some(store_dir.as_os_str()), None);
+    let started = Instant::now();
+    let mut facts = WorkspaceFacts::open(&workspace.store_roots, &location, Arc::new(SystemClock), BENCH_WORKSPACE);
+    let open_ms = elapsed_ms(started);
+    let started = Instant::now();
+    let revalidate = facts.revalidate(&workspace.files, &Default::default(), &SilentProgress, &AtomicBool::new(false));
+    let revalidate_ms = elapsed_ms(started);
+    facts.mark_ready();
+
+    let target = workspace.target(target).ok_or_else(|| format!("{} lists no Markdown file", root.display()))?;
+    let text = std::fs::read_to_string(&target).map_err(|error| format!("cannot read {}: {error}", target.display()))?;
+    let document = crate::graph::index_document(&target, &text);
+    let heading = document.headings.first();
+    let offset = heading.map_or(0, |heading| heading.span.start);
+    let session = Session::new(&workspace, &target, &text, contexts);
+
+    // The server's references path: candidates, a request graph with the
+    // target's buffer in place of its row, then the provider.
+    let started = Instant::now();
+    let graph = session.request_graph(&mut facts, &workspace, &document);
+    let references = session.references(&graph, offset);
+    let references_ms = elapsed_ms(started);
+    let candidates = facts.candidates_for(std::slice::from_ref(&target), &workspace.listed).len();
+
+    // The server's heading-rename path: re-read the candidates first.
+    let rename_ms = heading.map(|heading| {
+        let started = Instant::now();
+        let referrers = facts.candidates_for(std::slice::from_ref(&target), &workspace.listed);
+        facts.refresh(&referrers, &Default::default());
+        let graph = session.request_graph(&mut facts, &workspace, &document);
+        let _ = session.rename(&graph, heading.title_span.start, &format!("{} renamed", heading.title));
+        elapsed_ms(started)
+    });
+
+    let query = heading.map_or("", |heading| heading.title.as_str());
+    let started = Instant::now();
+    let documents = facts.symbol_documents(&workspace.listed, [&document]);
+    let symbols = session.registry.workspace_symbols(query, &documents).len();
+    let symbols_ms = elapsed_ms(started);
+
+    let peak = peak_rss_bytes();
+    let first_references_ms = open_ms + revalidate_ms + references_ms;
+    Ok(WarmReport {
+        list_ms: workspace.list_ms,
+        open_ms,
+        revalidate_ms,
+        revalidate: PassCounts::from(&revalidate),
+        target: target.clone(),
+        heading: heading.map(|heading| heading.title.clone()),
+        candidates,
+        references_ms,
+        references,
+        rename_ms,
+        symbols_ms,
+        symbols,
+        first_references_ms,
+        first_references_with_list_ms: first_references_ms + workspace.list_ms,
+        peak_rss_after_list_bytes,
+        peak_rss_bytes: peak,
+        added_rss_bytes: peak.zip(peak_rss_after_list_bytes).map(|(peak, before)| peak.saturating_sub(before)),
+    })
+}
+
+/// The listed workspace a bench half runs over.
+struct Workspace {
+    roots: Vec<PathBuf>,
+    store_roots: Vec<PathBuf>,
+    config: ConfigState,
+    files: Vec<PathBuf>,
+    listed: std::collections::BTreeSet<PathBuf>,
+    list_ms: f64,
+}
+
+impl Workspace {
+    fn list(root: &Path) -> Self {
+        let roots = vec![biscuit_file::canonicalize_simplified(root).unwrap_or_else(|_| root.to_path_buf())];
+        let config = ConfigState::load(roots.clone(), None);
+        let started = Instant::now();
+        let report = list_files(&roots, &config.effective().workspace);
+        let list_ms = elapsed_ms(started);
+        let store_roots = effective_roots(&roots, &config.effective().workspace);
+        let listed = report.files.iter().cloned().collect();
+        Self { roots, store_roots, config, files: report.files, listed, list_ms }
+    }
+
+    /// The requested target, made absolute; by default `README.md`, else
+    /// the first listed file (`None` when nothing is listed).
+    fn target(&self, target: Option<&Path>) -> Option<PathBuf> {
+        if let Some(target) = target {
+            let target = if target.is_absolute() { target.to_path_buf() } else { self.roots[0].join(target) };
+            // A target that does not exist fails at the read, naming the path.
+            return Some(biscuit_file::canonicalize_simplified(&target).unwrap_or(target));
+        }
+        let readme = self.roots[0].join("README.md");
+        if self.listed.contains(&readme) {
+            return Some(readme);
+        }
+        self.files.first().cloned()
+    }
+}
+
+/// What a request needs beyond the store: the target as an open document.
+struct Session<'a> {
+    uri: lsp_types::Uri,
+    target: &'a Path,
+    text: &'a str,
+    source_map: SourceMap,
+    contexts: &'a RepositoryContexts,
+    config: &'a ConfigState,
+    roots: &'a [PathBuf],
+    universe: Arc<WikiUniverse>,
+    profile: ClientProfile,
+    documents: DocumentStore,
+    registry: ProviderRegistry,
+}
+
+impl<'a> Session<'a> {
+    fn new(workspace: &'a Workspace, target: &'a Path, text: &'a str, contexts: &'a RepositoryContexts) -> Self {
+        let uri = file_path_to_uri(target).expect("the bench target is an absolute path");
+        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let wiki_roots = resolve_wiki_roots(&workspace.roots, workspace.config.effective().wiki.wiki_root.as_deref());
+        Self {
+            uri,
+            target,
+            text,
+            source_map,
+            contexts,
+            config: &workspace.config,
+            roots: &workspace.roots,
+            universe: Arc::new(WikiUniverse::new(workspace.files.iter().cloned(), &wiki_roots)),
+            profile: ClientProfile::from_initialize(&Default::default(), PositionEncoding::Utf16),
+            documents: DocumentStore::new(PositionEncoding::Utf16),
+            registry: ProviderRegistry::with_substrate(),
+        }
+    }
+
+    fn request_graph(&self, facts: &mut WorkspaceFacts, workspace: &Workspace, document: &DocumentIndex) -> WorkspaceGraph {
+        let targets = [self.target.to_path_buf()];
+        facts.request_graph(&targets, &workspace.listed, [document], Arc::clone(&self.universe), self.contexts)
+    }
+
+    fn references(&self, graph: &WorkspaceGraph, offset: usize) -> usize {
+        let resolution = self.contexts.for_document(self.target);
+        let ctx = DocumentContext {
+            uri: &self.uri,
+            path: self.target,
+            text: self.text,
+            source_map: &self.source_map,
+            graph,
+            doc_id: graph.document_id(self.target),
+            config: self.config.effective(),
+            profile: &self.profile,
+            overlay: None,
+            resolution: &resolution,
+        };
+        self.registry.references(&ctx, offset, false).len()
+    }
+
+    fn rename(&self, graph: &WorkspaceGraph, offset: usize, new_name: &str) -> bool {
+        let Some(position) = self.source_map.byte_to_lsp(offset) else {
+            return false;
+        };
+        let env = crate::providers::rename::RenameEnv {
+            documents: &self.documents,
+            graph,
+            config: self.config.effective(),
+            profile: &self.profile,
+            roots: self.roots,
+            encoding: PositionEncoding::Utf16,
+        };
+        crate::providers::rename::rename(&env, &self.uri, position, new_name).is_ok()
     }
 }
 
@@ -186,8 +421,8 @@ fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
 }
 
-fn ms(duration: Duration) -> f64 {
-    duration.as_secs_f64() * 1000.0
+fn mib(bytes: Option<u64>) -> String {
+    bytes.map_or_else(|| "n/a".to_string(), |bytes| format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0)))
 }
 
 /// Peak resident set size in bytes.
@@ -195,7 +430,7 @@ fn ms(duration: Duration) -> f64 {
 /// Uses `getrusage` on Unix (`ru_maxrss` — KiB on Linux, bytes on macOS);
 /// returns `None` where unavailable (Windows here — a later pass can add the
 /// `GetProcessMemoryInfo` path).
-fn peak_rss_bytes() -> Option<u64> {
+pub fn peak_rss_bytes() -> Option<u64> {
     #[cfg(unix)]
     {
         use std::mem::MaybeUninit;
@@ -254,93 +489,6 @@ mod libc_rusage {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_contexts(root: &Path) -> crate::context::RepositoryContexts {
-        crate::context::RepositoryContexts::new(
-            darkmatter::markdown::compose::RequestSnapshot::new(root),
-        )
-    }
-
-    fn write(root: &Path, rel: &str, body: &str) {
-        let path = root.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::write(path, body).unwrap();
-    }
-
-    #[test]
-    fn test_bench_report_counts_and_json_shape() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path();
-        write(root, "a.md", "# A\n\n[to b](b.md)\n");
-        write(root, "b.md", "# B\n\n## Sub\n");
-
-        let report = bench_index(root, &test_contexts(root));
-        assert_eq!(report.files, 2);
-        assert_eq!(report.counts.documents, 2);
-        assert!(report.counts.nodes >= 4); // 2 docs + headings + links
-        assert!(report.total_ms >= 0.0);
-
-        let json: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
-        assert_eq!(json["files"], 2);
-        assert!(json["stages"]["read_ms"].is_number());
-        assert!(json["stages"]["graph_build_ms"].is_number());
-        assert!(json["stages"]["reverse_index_ms"].is_number());
-        assert!(json["counts"]["edges"].is_number());
-    }
-
-    #[test]
-    fn test_stage_fields_are_populated_over_a_corpus() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path();
-        // A multi-file corpus that exercises every timed stage: frontmatter
-        // (with an inline-schema `file(...)` value), headings, links between
-        // documents, a `::file` transclusion directive, and `{{ }}`
-        // interpolation.
-        for i in 0..6 {
-            let next = (i + 1) % 6;
-            write(
-                root,
-                &format!("doc{i}.md"),
-                &format!(
-                    "---\ntitle: Doc {i}\n$schema:\n  cover: \"file\"\ncover: ./img{i}.png\n---\n\n\
-                     # Doc {i}\n\n## Section\n\nSee [next](doc{next}.md) and {{{{ title }}}}.\n\n\
-                     ::file ./doc{next}.md\n"
-                ),
-            );
-        }
-
-        let report = bench_index(root, &test_contexts(root));
-        assert_eq!(report.files, 6);
-        assert_eq!(report.counts.documents, 6);
-
-        let s = &report.stages;
-        // Every stage that performs real work over this corpus must be nonzero.
-        assert!(s.discover_ms > 0.0, "discover: {s:?}");
-        assert!(s.read_ms > 0.0, "read: {s:?}");
-        assert!(s.hash_ms > 0.0, "hash: {s:?}");
-        assert!(s.frontmatter_ms > 0.0, "frontmatter: {s:?}");
-        assert!(s.parse_markdown_ms > 0.0, "parse_markdown: {s:?}");
-        assert!(s.directives_ms > 0.0, "directives: {s:?}");
-        assert!(s.graph_build_ms > 0.0, "graph_build: {s:?}");
-        assert!(s.reverse_index_ms > 0.0, "reverse_index: {s:?}");
-        // The snapshot swap is a single `Arc::new`; it is measured but can round
-        // below the timer floor, so it need only be recorded (non-negative).
-        assert!(s.snapshot_swap_ms >= 0.0, "snapshot_swap: {s:?}");
-        // Diagnostics are request-time, never part of cold indexing.
-        assert_eq!(s.diagnostics_ms, 0.0, "diagnostics: {s:?}");
-    }
-
-    #[test]
-    fn test_summary_renders() {
-        let temp = tempfile::tempdir().unwrap();
-        write(temp.path(), "a.md", "# A\n");
-        let report = bench_index(temp.path(), &test_contexts(temp.path()));
-        let summary = report.to_summary();
-        assert!(summary.contains("indexed 1 files"));
-        assert!(summary.contains("graph:"));
-    }
 
     #[test]
     fn test_peak_rss_is_positive_where_available() {

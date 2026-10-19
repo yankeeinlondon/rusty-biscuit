@@ -1,18 +1,18 @@
 ---
 name: rust-testing
 description: |-
-  Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
-  test design, fixture isolation, `require_level!` / `expect_level!` gating,
-  nextest filtersets, suite audits, and fuzzing. Load this
-  before writing or reviewing tests in the rusty-biscuit workspace.
+  Rules for testing in the rusty-biscuit monorepo: L1/L2/L3 tiers and
+  `require_level!` / `expect_level!` gating, canonical just recipes, test
+  design and speed, fixtures and spawning binaries, CI archive execution,
+  verification scope, and suite audits. Load this before writing, running, or
+  reviewing tests in the rusty-biscuit workspace.
 hash: 61d07be7e22c9f45-43ee6f6bd18f4fb0
 last_updated: 2026-10-09
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
 This page is the index. Read the rules below and the decision tree, then open
-the topic page that matches the task; each rule links to its reasoning and
-evidence.
+the topic page that matches the task; each rule links to its detail page.
 
 ## Rules that fail silently when broken
 
@@ -58,8 +58,9 @@ the wrong thing.
    use `retries = 0` and fail on `LEAK`. Synchronize on the condition you
    assert. → [test-design.md](test-design.md), [recipes.md](recipes.md)
 10. **Scope final gates by blast radius**, never by a workspace-wide run, and
-    do not add `--no-fail-fast`: CI already passes it.
-    → [verification-scope.md](verification-scope.md), [recipes.md](recipes.md)
+    do not add `--no-fail-fast`: CI already passes it. When work is split
+    across agents, each runs only its slice's tests and the full suite runs
+    once, after merging. → [verification-scope.md](verification-scope.md)
 11. **An L1 test over 5 s is a failing test.** It passes on a development host
     and times out on a 2-core CI runner. Make it fast; a `slow_` prefix or a
     nextest `slow-timeout` override is not a fix. → [test-speed.md](test-speed.md)
@@ -71,9 +72,8 @@ Start at the **requirement**, not the code:
 ```text
 Does the test need a real terminal, browser, or device to verify behaviour?
 ├── NO  → Does it hammer an external API?
-│   ├── NO  → L1 (default). Name it normally. Over 5 s? It is failing:
-│   │         make it fast (test-speed.md), don't rename it.
-│   └── YES → L1 with `slow_` prefix so sanity skips it.
+│   ├── NO  → L1 (default). Name it normally (and see rule 11).
+│   └── YES → Real tier. Name it `real_*`; `just test-real` runs it.
 ├── YES → Is it a headless browser test?
 │   ├── YES → Browser tier. Name it `browser_*`.
 │   └── NO  → Does it need OS keyboard/mouse injection?
@@ -122,7 +122,7 @@ Every curated package area defines these recipes, delegating to the shared
 | `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`. |
 | `test`         | Full L1 suite.                                                          |
 | `slow-tests`   | Nextest's SLOW report over the `test` tier (local diagnostic).         |
-| `test-l2`      | Real-terminal tests; serial with a shared pane by default, parallel with `BISCUIT_L2_THREADS=N` — see [l2-tests.md](l2-tests.md). |
+| `test-l2`      | Real-terminal tests; parallel by default, serial with a shared pane for packages that declare `l2-serial` (`BISCUIT_L2_THREADS` overrides) — see [l2-tests.md](l2-tests.md). |
 | `test-l3`      | OS keyboard/mouse tests.                                                |
 | `test-browser` | Headless browser tests, one Chrome at a time (`-j 1`).                  |
 | `test-real`    | External resource tests.                                                |
@@ -130,7 +130,7 @@ Every curated package area defines these recipes, delegating to the shared
 | `bench`        | Criterion benchmarks (no-op if opted out).                              |
 | `coverage`     | Per-package LCOV (local only; CI produces none).                        |
 | `doctest`      | `cargo test --doc`.                                                     |
-| `fuzz`         | `cargo +nightly fuzz run` (no-op if no targets).                        |
+| `fuzz`         | `cargo +nightly fuzz run` over `<crate>/fuzz/` targets (no-op if none); nightly CI only, never a PR gate. |
 | `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.              |
 
 To narrow a recipe to one module, pass a positional filter:
@@ -149,7 +149,7 @@ To narrow a recipe to one module, pass a positional filter:
 
 ## Topic Pages
 
-**This repository's contracts:**
+**Rules for this repository:**
 
 | Open when you are…                                                          | File |
 |-----------------------------------------------------------------------------|------|
@@ -167,21 +167,19 @@ To narrow a recipe to one module, pass a positional filter:
 | deciding on fail-fast, restoring sources after a proof, hunting leaked processes | [recipes.md](recipes.md) |
 | auditing a whole suite or writing a test-performance spec                   | [test-suite-audits.md](test-suite-audits.md), [test-audit-tooling.md](test-audit-tooling.md) |
 
-**Techniques:**
+**Techniques in this repository** (general crate usage — nextest, insta,
+proptest, mockall, criterion — is not repeated here; the `nextest` skill covers
+the runner):
 
 | Topic | File |
 |---|---|
-| L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form) | [wezterm-harness-pitfalls.md](wezterm-harness-pitfalls.md) |
-| L2 Apple Terminal pitfalls (`do script` reuse, focus steal, sentinel waits) | [apple-terminal-harness-pitfalls.md](apple-terminal-harness-pitfalls.md) |
-| Browser tests: the headless invariant and computed-style assertions | [browser-testing.md](browser-testing.md) |
-| CLI output (channels, color modes, completions, snapshots) | [cli-output-testing.md](cli-output-testing.md) |
+| L2 WezTerm capture traps | [wezterm-harness-pitfalls.md](wezterm-harness-pitfalls.md) |
+| L2 Apple Terminal traps | [apple-terminal-harness-pitfalls.md](apple-terminal-harness-pitfalls.md) |
+| Browser render tests | [browser-testing.md](browser-testing.md) |
+| CLI output: channels, color modes, completions | [cli-output-testing.md](cli-output-testing.md) |
 | TUI rendering and event/reducer tests | [tui-testing.md](tui-testing.md) |
-| Unit, integration, and doc tests | [unit-tests.md](unit-tests.md), [integration-tests.md](integration-tests.md), [doc-tests.md](doc-tests.md) |
-| Snapshots and redaction | [snapshots.md](snapshots.md), [snapshot-redaction.md](snapshot-redaction.md) |
-| Mocking and property testing | [mocking.md](mocking.md), [property-testing.md](property-testing.md) |
-| Fuzzing (nightly only, never a PR gate) | [fuzzing.md](fuzzing.md) |
-| Benchmarks: tool choice, then Criterion | [performance-testing.md](performance-testing.md), [criterion.md](criterion.md) |
-| Nextest itself | [nextest.md](nextest.md) |
+| Snapshot redaction | [snapshot-redaction.md](snapshot-redaction.md) |
+| Benchmarks: which tool, where they live | [performance-testing.md](performance-testing.md) |
 
 ## Resources
 

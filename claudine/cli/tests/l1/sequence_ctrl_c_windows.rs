@@ -130,7 +130,6 @@ fn sequence_document() -> String {
          \x20 - name: blocking-group\n\
          \x20   group:\n\
          \x20     name: bundle\n\
-         \x20     execution: parallel\n\
          \x20     tasks:\n\
          {task_entries}\
          \x20 - name: must-not-run\n\

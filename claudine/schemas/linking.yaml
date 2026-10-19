@@ -1,0 +1,27 @@
+# The eleven optional linking keys a linked skill, command, or agent may carry.
+# Hand-maintained; see README.md. The types keep every form the linking reader
+# and the providers accept, rather than one provider's preferred output.
+kind: schema
+types:
+    name: "string -> the linked resource's name"
+    allowed-tools:
+        - "string -> tools the resource may use, as one comma- or space-separated string"
+        - "string[] -> tools the resource may use"
+    tools:
+        - "string -> tools the resource may use, as one string"
+        - "string[] -> tools the resource may use"
+        - "object -> tools the resource may use, keyed by tool name"
+    skills:
+        - "string -> skills the resource loads, as one string"
+        - "string[] -> skills the resource loads"
+    license: "string -> the resource's license"
+    compatibility:
+        - "string -> the environments the resource supports"
+        - "object -> the environments the resource supports, keyed by provider"
+    metadata: "object -> arbitrary author metadata, preserved unchanged"
+    user-invocable: "boolean -> whether a user may invoke the resource directly"
+    disable-model-invocation: "boolean -> whether the model is prevented from invoking the resource"
+    argument-hint:
+        - "string -> the argument hint shown to the user"
+        - "string[] -> the argument hint shown to the user (a bracketed hint such as [msg] reads as a list)"
+    max_turns: "number(integer) -> the most agent turns the resource may take"

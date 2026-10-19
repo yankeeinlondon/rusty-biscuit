@@ -117,6 +117,28 @@ impl CompositionPrepContext {
         })
     }
 
+    /// This context for another document of the same invocation: `invocation`
+    /// is the view that document entered and `source_context` its source,
+    /// derived from that view.
+    ///
+    /// Provider selection, the installed snapshot, and launch facts do not
+    /// read a document's environment, so they are kept; the environment-derived
+    /// projection is rebuilt from the new view. Nothing is rediscovered.
+    pub fn for_document(&self, invocation: InvocationContext, source_context: SourceContext) -> Self {
+        Self {
+            env_context: invocation.environment_context(),
+            source_repo_root: source_context.repository_root().map(Path::to_path_buf),
+            invocation,
+            source_context,
+            cwd: self.cwd.clone(),
+            selection_config: self.selection_config.clone(),
+            installed_snapshot: self.installed_snapshot.clone(),
+            launch_context: self.launch_context.clone(),
+            launch_workspace: self.launch_workspace.clone(),
+            launch_detection_error: self.launch_detection_error.clone(),
+        }
+    }
+
     /// Effective root used for selection-config / model-override scoping.
     ///
     /// Mirrors the legacy `source_repo_root.unwrap_or(&cwd)` precedence so

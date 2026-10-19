@@ -559,23 +559,22 @@ fn condition_lookup_evaluator_handles_numeric_comparison_on_hardware_cores() {
 }
 
 #[test]
-fn doc_namespace_resolves_event_surface() {
+fn hook_namespace_resolves_event_surface() {
     let meta = sample_meta();
     let lookup = EventMetaExpressionLookup::new(&meta);
 
-    // doc.<path> traverses the same object returned by bare doc.
-    assert_eq!(lookup.get("doc.git.branch"), Some(json!("main")));
-    assert_eq!(lookup.get("doc.extra.status"), Some(json!("success")));
-    assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
+    assert_eq!(lookup.get("hook.git.branch"), Some(json!("main")));
+    assert_eq!(lookup.get("hook.extra.status"), Some(json!("success")));
+    assert_eq!(lookup.get("hook.tool_name"), Some(json!("Bash")));
 
-    // missing doc.* values do not fall back to another namespace.
-    assert_eq!(lookup.get("doc.missing"), None);
-    // env is process environment, not part of the doc object.
-    assert_eq!(lookup.get("doc.env.PATH"), None);
+    // Missing hook.* values do not fall back to a bare field or another root.
+    assert_eq!(lookup.get("hook.missing"), None);
+    assert_eq!(lookup.get("hook.status"), None);
+    assert_eq!(lookup.get("hook.env.PATH"), None);
 
-    // bare doc returns the whole event object, including grouped env paths.
-    let obj = lookup.get("doc").expect("bare doc resolves");
+    let obj = lookup.get("hook").expect("bare hook resolves");
     assert!(obj.is_object());
+    assert!(obj.get("env").is_none(), "process env is not part of the payload");
     assert_eq!(obj.get("provider"), Some(&json!("claude")));
     assert_eq!(obj.get("tool_name"), Some(&json!("Bash")));
     assert_eq!(obj.pointer("/git/branch"), Some(&json!("main")));
@@ -585,29 +584,51 @@ fn doc_namespace_resolves_event_surface() {
 }
 
 #[test]
-fn doc_dotted_path_matches_bare_doc_traversal() {
+fn hook_dotted_path_matches_bare_hook_traversal() {
     let meta = sample_meta();
     let lookup = EventMetaExpressionLookup::new(&meta);
 
-    let doc = lookup.get("doc").expect("bare doc resolves");
-    assert_eq!(lookup.get("doc.git.branch"), nested_pointer(&doc, "git.branch"));
-    assert_eq!(lookup.get("doc.os.type"), nested_pointer(&doc, "os.type"));
+    let hook = lookup.get("hook").expect("bare hook resolves");
+    assert_eq!(lookup.get("hook.git.branch"), nested_pointer(&hook, "git.branch"));
+    assert_eq!(lookup.get("hook.os.type"), nested_pointer(&hook, "os.type"));
 }
 
 #[test]
-fn doc_env_does_not_resolve_even_when_env_does() {
-    let key = "CLAUDINE_DOC_ENV_TEST_VAR";
-    // SAFETY: tests run sequentially within this module by default; the
-    // env var is unique per test scope and is removed before exit.
+fn doc_is_not_a_hook_namespace() {
+    let meta = sample_meta();
+    let lookup = EventMetaExpressionLookup::new(&meta);
+
+    assert_eq!(lookup.get("doc"), None);
+    assert_eq!(lookup.get("doc.tool_name"), None);
+    assert_eq!(lookup.get("doc.git.branch"), None);
+    // Unprefixed event fields keep resolving.
+    assert_eq!(lookup.get("tool_name"), Some(json!("Bash")));
+}
+
+#[test]
+fn hook_extra_doc_reaches_extra_field_named_doc() {
+    let mut meta = sample_meta();
+    meta.extra
+        .insert("doc".to_string(), json!({ "title": "Spec" }));
+    let lookup = EventMetaExpressionLookup::new(&meta);
+
+    assert_eq!(lookup.get("hook.extra.doc.title"), Some(json!("Spec")));
+    assert_eq!(lookup.get("hook.extra.doc"), Some(json!({ "title": "Spec" })));
+    assert_eq!(lookup.get("extra.doc.title"), Some(json!("Spec")));
+}
+
+#[test]
+fn hook_env_does_not_resolve_even_when_env_does() {
+    let key = "CLAUDINE_HOOK_ENV_TEST_VAR";
+    // SAFETY: the env var is unique to this test and removed before exit.
     unsafe {
         std::env::set_var(key, "value-here");
     }
     let meta = sample_meta();
     let lookup = EventMetaExpressionLookup::new(&meta);
 
-    // The env.* namespace resolves, but doc.env.* must not leak into it.
     assert_eq!(lookup.get(&format!("env.{key}")), Some(json!("value-here")));
-    assert_eq!(lookup.get(&format!("doc.env.{key}")), None);
+    assert_eq!(lookup.get(&format!("hook.env.{key}")), None);
 
     unsafe {
         std::env::remove_var(key);
@@ -615,12 +636,24 @@ fn doc_env_does_not_resolve_even_when_env_does() {
 }
 
 #[test]
-fn condition_lookup_doc_namespace_resolves() {
+fn condition_lookup_hook_namespace_resolves() {
     let meta = sample_meta();
     let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
-    assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
-    assert!(lookup.get("doc").is_some_and(|value| value.is_object()));
+    assert_eq!(lookup.get("hook.tool_name"), Some(json!("Bash")));
+    assert!(lookup.get("hook").is_some_and(|value| value.is_object()));
+    assert_eq!(
+        parse_and_evaluate("hook.tool_name == 'Bash'", ParseMode::Condition, &lookup),
+        json!(true)
+    );
+    assert_eq!(
+        parse_and_evaluate("doc.tool_name == 'Bash'", ParseMode::Condition, &lookup),
+        json!(false)
+    );
+    assert_eq!(
+        parse_and_evaluate("tool_name == 'Bash'", ParseMode::Condition, &lookup),
+        json!(true)
+    );
 }
 
 #[test]

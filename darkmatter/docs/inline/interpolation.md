@@ -4,10 +4,10 @@ The Darkmatter compose pipeline provides interpolation of frontmatter, context, 
 
 Interpolation happens in two stages during the compose pipeline (see the [pipeline overview](../darkmatter-compose-pipeline.md)):
 
-1. **Frontmatter Interpolation** — resolves `{{ }}` expressions inside frontmatter values using seed (non-templated) frontmatter, the `doc` / `doc.*` namespace, `ctx.*`, and `env.*`. This stage itself runs in **two passes** that bracket frontmatter shell expansion (pass 1 pre-shell, pass 2 post-shell, which scans only the keys pass 1 deferred). See [Frontmatter Interpolation](./fm-interpolation.md) for full details.
+1. **Frontmatter Interpolation** — resolves `{{ }}` expressions inside frontmatter values using seed (non-templated) frontmatter, the `fm` / `fm.*` namespace, `ctx.*`, and `env.*`. This stage itself runs in **two passes** that bracket frontmatter shell expansion (pass 1 pre-shell, pass 2 post-shell, which scans only the keys pass 1 deferred). See [Frontmatter Interpolation](./fm-interpolation.md) for full details.
 2. **Body Interpolation** — resolves `{{ }}` expressions in the document body using the effective state (frontmatter + external state + context).
 
-Both stages also expose the [read-side functions](../topics/darkmatter-expressions.md#read-side-functions) (`file_exists`, `frontmatter`, `absolute`, `relative`, …) and the `doc.*` namespace — the same grammar resolves identically across every surface.
+Both stages also expose the [read-side functions](../topics/darkmatter-expressions.md#read-side-functions) (`file_exists`, `frontmatter`, `absolute`, `relative`, …) and the `fm.*` namespace — the same grammar resolves identically across every surface.
 
 Body interpolation runs after text replacement and page blocks have been applied. Within the body, all handlebar placeholders like `{{foo}}` or `{{bar}}` are replaced with their resolved values.
 
@@ -126,9 +126,9 @@ approval rather than disappearing and later revealing unapproved content.
 
 - **Kebab-case Keys**
 
-    - a frontmatter key such as `spec-name` is referenced by its name: `{{ spec-name }}` and `{{ doc.spec-name }}` both read it
+    - a frontmatter key such as `spec-name` is referenced by its name: `{{ spec-name }}` and `{{ fm.spec-name }}` both read it
     - a `-` joins an identifier only when it sits between identifier characters, so subtraction whose left operand is a name needs whitespace: `{{ iteration - 1 }}` subtracts, while `{{ iteration-1 }}` reads a key named `iteration-1`
-    - bracket access still reaches keys the identifier form cannot spell, such as `{{ doc['release.channel'] }}`
+    - bracket access still reaches keys the identifier form cannot spell, such as `{{ fm['release.channel'] }}`
     - see [Lexing § `-` inside an identifier](../topics/parsing/lexing.md#--inside-an-identifier) for the full rule
 
 ## Missing Variables
@@ -144,7 +144,7 @@ whether anything **declares** the name:
 | --- | --- |
 | present in frontmatter, `--set`, inherited state, or another caller input — even as `null` or `""` | silent |
 | declared by the effective schema (the document's `$schema`, the configured baseline, or a matched trigger) | silent; a `required` property left unset already failed schema validation |
-| a reserved namespace (`ctx`, `env`, `doc`, `current`, `current_env`) | silent |
+| a reserved namespace (`fm`, `ctx`, `env`, `current`) | silent |
 | none of the above, including a runtime-context name such as `branch` | advisory `dm.expression.undeclared_property`, once per name per source document |
 
 ```text
@@ -403,7 +403,7 @@ Handlebars writes a variable as \{{ name }} and a partial as \{\{> header }}.
 
 A quoted string literal inside an expression is text. The lexer copies it verbatim, so `{{ "in {{ area }}" }}` does not contain a nested expression at parse time. Whether those braces are ever interpolated depends on the surface:
 
-Every surface is single-pass: the literal's braces land in the output as data and are never interpolated. The body and mixed frontmatter strings (`"Hello {{ name }}"`) insert them as text, and a scalar whose trimmed content is **exactly one** `{{ … }}` span takes the whole-value path, which parses and evaluates once and keeps the typed result. `r: "{{ 'b {{ name }}' }}"` composes to `b {{ name }}`, and a body reference `{{ r }}` inserts that text unchanged. Claudine's lifecycle values (communication fields, stack operands, `proxy … with` values, and `when`/`while`/`until` predicates) are single-pass too, and Claudine refuses a nested span there before any provider starts.
+Every surface is single-pass: the literal's braces land in the output as data and are never interpolated. The body and mixed frontmatter strings (`"Hello {{ name }}"`) insert them as text, and a scalar whose trimmed content is **exactly one** `{{ … }}` span takes the whole-value path, which parses and evaluates once and keeps the typed result. `r: "{{ 'b {{ name }}' }}"` composes to `b {{ name }}`, and a body reference `{{ r }}` inserts that text unchanged. Claudine's lifecycle values (verb operands, `set` and `with` values, and `when`/`while`/`until` predicates, at every nesting depth) are single-pass too, and Claudine refuses a nested span there before any provider starts.
 
 Write the value with `+` instead. It resolves on every surface:
 

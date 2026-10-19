@@ -113,7 +113,7 @@ sequence:
   - one
   - two
 ---
-Working on {{topic}} ({{state}}).
+Working on {{topic}} ({{seq}}).
 "#,
     )
     .unwrap();
@@ -220,13 +220,13 @@ Step about {{config}}.
 
 /// Verifies that a step-level `step_timeout` (declared in a sequence step's
 /// raw state object) overrides the document-level `step_timeout`. The step
-/// overlay passes the step's raw state unchanged under the `state` key, so
-/// per-step `step_timeout` is surfaced via `{{ state.step_timeout || ... }}`
+/// binding exposes authored properties under `seq`, so
+/// per-step `step_timeout` is surfaced via `{{ seq.step_timeout || ... }}`
 /// interpolation in the document frontmatter.
 ///
 /// Test shape:
 /// - Document `step_timeout` falls back to `30s` when the step does not
-///   declare one, but uses `state.step_timeout` when the step does.
+///   declare one, but uses `seq.step_timeout` when the step does.
 /// - Step 1 has no `step_timeout`, so the effective deadline is `30s`. The
 ///   fake provider completes quickly and the step succeeds.
 /// - Step 2 declares `step_timeout: 0.5s` at the step level. The fake
@@ -240,7 +240,7 @@ fn sequence_per_step_step_timeout_override() {
 
     // Document-level step_timeout defaults to 30s; a step may override by
     // setting `step_timeout` at the step level, which the overlay exposes
-    // via `state.step_timeout`. Step 2 sets it to 0.5s: the stall below is
+    // via `seq.step_timeout`. Step 2 sets it to 0.5s: the stall below is
     // unconditional, so the budget only has to outlast the gap between the
     // fixture's two `printf` lines (back-to-back, no sleep) — 0.5s is two
     // orders of magnitude above that even under WSL2 contention, and it
@@ -249,13 +249,13 @@ fn sequence_per_step_step_timeout_override() {
     fs::write(
         &md_file,
         r#"---
-step_timeout: '{{ state.step_timeout || "30s" }}'
+step_timeout: '{{ seq.step_timeout || "30s" }}'
 sequence:
   - name: fast
   - name: slow
     step_timeout: 0.5s
 ---
-Run step {{ state.name }}
+Run step {{ seq.name }}
 "#,
     )
     .unwrap();
@@ -298,7 +298,9 @@ exit 0
 "#,
     );
 
-    let run_start = std::time::Instant::now();
+    // The 10s command timeout keeps the run well short of the 30s document
+    // fallback; which budget fired is proven from the diagnostic below, not
+    // from wall time, which a loaded runner stretches.
     let assert = fixture
         .command()
         .env("CLAUDINE_WATCHDOG_INTERVAL", "0.1s")
@@ -308,17 +310,6 @@ exit 0
         .args(["sequence", "--opencode", md_file.to_str().unwrap()])
         .assert()
         .failure();
-    let elapsed = run_start.elapsed();
-
-    // The step-level 0.5s budget must win well before the 30s document
-    // fallback. The bound is 4s rather than the fallback itself so it also
-    // catches the budget silently reverting to a whole-second value: the
-    // whole run — prep, step 1, step 2's budget + 0.1s tick + termination —
-    // lands near 1.4s locally and 1.0–1.5s on the slowest CI environment.
-    assert!(
-        elapsed < std::time::Duration::from_secs(4),
-        "per-step step_timeout override should fire quickly; run took {elapsed:?}"
-    );
 
     let calls = fs::read_to_string(&count_path).unwrap();
     assert_eq!(
@@ -332,6 +323,13 @@ exit 0
     assert!(
         plain.contains("1 succeeded") && plain.contains("1 failed"),
         "summary should record step 1 success and step 2 failure; stderr: {plain}"
+    );
+    // The silence budget is rendered in whole seconds, so the step's 0.5s
+    // budget reads `0s`; the 30s fallback, or the budget reverting to a
+    // whole-second value, would name `30s` or `1s`.
+    assert!(
+        plain.contains("no stream activity for 0") && plain.contains("terminating due to step_timeout"),
+        "the step-level sub-second step_timeout should fire; stderr: {plain}"
     );
 }
 
@@ -365,7 +363,7 @@ sequence:
   - alpha
 tier: $(echo huge)
 ---
-Step {{state}} with tier {{tier}}.
+Step {{seq}} with tier {{tier}}.
 "#,
     )
     .unwrap();
@@ -424,9 +422,9 @@ sequence:
     doc: {}
   - name: malformed
     doc: {}
-loaded_title: "{{{{ frontmatter(state.doc, 'title') }}}}"
+loaded_title: "{{{{ frontmatter(seq.doc, 'title') }}}}"
 ---
-Step {{{{ state.name }}}}: {{{{ loaded_title }}}}
+Step {{{{ seq.name }}}}: {{{{ loaded_title }}}}
 "#,
             valid_doc.display(),
             malformed_doc.display()
@@ -525,11 +523,9 @@ fn sequence_proxy_target_partial_fails_typed_before_the_target_initialize() {
 sequence:
   - alpha
 initialize:
-  stack:
-    - action:
-        - proxy: "./review.md"
+  - proxy: "./review.md"
 ---
-Step {{ state }}.
+Step {{ seq }}.
 "#,
     )
     .unwrap();
@@ -561,7 +557,7 @@ Step {{ state }}.
         .collect::<Vec<_>>()
         .join(" ");
     assert!(
-        collapsed.contains("schema validation failed for"),
+        collapsed.to_ascii_lowercase().contains("schema validation failed for"),
         "expected the typed schema surface; stderr:\n{plain}"
     );
     assert!(

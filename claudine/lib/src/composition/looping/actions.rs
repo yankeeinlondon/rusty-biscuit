@@ -16,7 +16,7 @@ use serde_json::{Map, Number, Value};
 
 use super::super::error::{CompositionError, LoopExpressionCause};
 use super::super::json_util::json_type_name;
-use super::super::types::{AmbientVariable, LoopAction};
+use super::super::types::LoopAction;
 
 /// Staged frontmatter mutations for one loop iteration.
 #[derive(Debug, Clone)]
@@ -477,8 +477,11 @@ fn apply_merge(
 }
 
 fn reject_reserved_property(prop: &str, context: ActionContext) -> Result<(), CompositionError> {
+    // A retired loop name stays unwritable: nothing may read it back.
     if super::super::reserved::SET_ACTION_BLOCKLIST.contains(&prop)
-        || AmbientVariable::is_reserved(prop)
+        || super::super::reserved::RETIRED_LOOP_NAMES
+            .iter()
+            .any(|(retired, _)| *retired == prop)
     {
         return Err(invalid_action(
             context,

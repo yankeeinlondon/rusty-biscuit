@@ -13,7 +13,7 @@
 
 use super::expression::absence::MissingRootObserver;
 use super::expression::{
-    CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, doc_namespace,
+    CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, fm_namespace,
     evaluate,
     evaluate_observed, is_truthy,
     parse_condition,
@@ -365,9 +365,9 @@ impl<'a> ShortcutLookup<'a> {
 impl EvaluationLookup for ShortcutLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
         // Reserved namespaces first, their exact roots included, so no data
-        // key can shadow `doc`, `ctx`, or `env`.
-        if doc_namespace::is_doc_namespace(path) {
-            return doc_namespace::resolve_doc_namespace(path, self.data);
+        // key can shadow `fm`, `ctx`, or `env`.
+        if fm_namespace::is_fm_namespace(path) {
+            return fm_namespace::resolve_fm_namespace(path, self.data);
         }
         if path == "ctx" || path.starts_with("ctx.") {
             return self.ctx.resolve_ctx(path);
@@ -873,32 +873,32 @@ mod tests {
         let lookup = ShortcutLookup::new(&shadowing, &context);
         assert!(lookup.get("env").is_some_and(|env| env.is_object()));
         assert_ne!(lookup.get("ctx"), Some(json!("data")));
-        assert_eq!(lookup.get("doc.ctx"), Some(json!("data")));
-        assert_eq!(lookup.get("doc.env"), Some(json!("data")));
+        assert_eq!(lookup.get("fm.ctx"), Some(json!("data")));
+        assert_eq!(lookup.get("fm.env"), Some(json!("data")));
     }
 
     #[test]
-    fn shortcut_doc_namespace_resolves_against_data_only() {
+    fn shortcut_fm_namespace_resolves_against_data_only() {
         let data = json!({
             "build": "from-data",
-            "doc": { "child": "literal-doc" },
+            "fm": { "child": "literal-fm" },
         });
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
 
-        // doc.<path> resolves a data property.
-        assert_eq!(lookup.get("doc.build"), Some(json!("from-data")));
+        // fm.<path> resolves a data property.
+        assert_eq!(lookup.get("fm.build"), Some(json!("from-data")));
 
-        // bare doc returns the whole data object.
-        let obj = lookup.get("doc").expect("bare doc resolves");
+        // bare fm returns the whole data object.
+        let obj = lookup.get("fm").expect("bare fm resolves");
         assert!(obj.is_object());
         assert_eq!(obj.get("build"), Some(&json!("from-data")));
 
-        // a literal property named `doc` is reached as doc.doc.
-        assert_eq!(lookup.get("doc.doc.child"), Some(json!("literal-doc")));
+        // a literal property named `fm` is reached as fm.fm.
+        assert_eq!(lookup.get("fm.fm.child"), Some(json!("literal-fm")));
 
-        // missing doc.* values do not fall back to ctx.*.
-        assert_eq!(lookup.get("doc.year"), None);
+        // missing fm.* values do not fall back to ctx.*.
+        assert_eq!(lookup.get("fm.year"), None);
         // The shortcut lookup now carries a work-dir-rooted resolution context
         // so read-side functions resolve for external callers.
         assert!(lookup.resolution_context().is_some());

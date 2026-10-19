@@ -95,6 +95,10 @@ pub struct ResolutionContext {
     /// The request's context. Every local reference derives from it, so no
     /// expression reads the process's directory, home, or environment.
     pub(crate) file_resolution_context: biscuit_file::FileResolutionContext,
+    /// The host globals of the composition this context belongs to, read by
+    /// the compose lookups (frontmatter seed state and the body's resolving
+    /// lookup) before the document. `None` declares nothing.
+    pub(crate) host_globals: Option<super::HostGlobals>,
     /// Projected property/array occurrences mapped back to their immutable caller records.
     pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
     /// Caller record selected from the source expression for the active filesystem call.
@@ -129,6 +133,7 @@ impl ResolutionContext {
             alias_resolutions: Default::default(),
             current: Default::default(),
             file_resolution_context: context,
+            host_globals: None,
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
         }
@@ -440,9 +445,9 @@ fn same_directory(left: &Path, right: &Path) -> bool {
 /// file-index family) operate on references whose target need not exist. The
 /// missing-target shape comes from the same document-first candidate order
 /// execution probes (D1/D3) — never a private prefix branch plus
-/// `cwd.join`. An implicit bare miss therefore yields the repository-root
-/// candidate, identical to how an existing implicit reference resolves; a shape
-/// and an existing file can never disagree on anchoring.
+/// `cwd.join`. An implicit bare miss therefore yields the document-directory
+/// (`cwd`) candidate, the first one an existing implicit reference is probed
+/// against. The candidate keeps its authored `./`/`../` segments.
 ///
 /// ## Returns
 ///
@@ -459,6 +464,40 @@ pub(crate) fn resolve_document_file_ref_shape(
     cwd: &Path,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<PathBuf, FileReferenceError> {
+    resolve_document_file_ref_first_candidate(
+        file_ref,
+        cwd,
+        request_context,
+        FileReference::candidate_plan,
+    )
+}
+
+/// [`resolve_document_file_ref_shape`] with a missing target's candidate
+/// lexically normalized (`./` and `..` segments folded, separators made
+/// native), so it can be returned as a built path rather than decomposed.
+///
+/// ## Errors
+///
+/// As [`resolve_document_file_ref_shape`].
+pub(crate) fn resolve_document_file_ref_target(
+    file_ref: &FileReference,
+    cwd: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<PathBuf, FileReferenceError> {
+    resolve_document_file_ref_first_candidate(file_ref, cwd, request_context, |file_ref, ctx| {
+        file_ref.candidate_plan_with_order(ctx, biscuit_file::CandidatePlanOrder::Resolution)
+    })
+}
+
+fn resolve_document_file_ref_first_candidate(
+    file_ref: &FileReference,
+    cwd: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+    plan: impl FnOnce(
+        &FileReference,
+        &biscuit_file::FileResolutionContext,
+    ) -> Result<Vec<biscuit_file::ResolutionCandidate>, FileReferenceError>,
+) -> Result<PathBuf, FileReferenceError> {
     let ctx = document_file_context(cwd, request_context);
     if let Some(path) = file_ref.resolve_in_context(&ctx)? {
         return Ok(path);
@@ -467,8 +506,7 @@ pub(crate) fn resolve_document_file_ref_shape(
     // have probed (document-first for an implicit bare path), taken from
     // `FileReference` itself rather than re-deriving the grammar from the raw
     // string.
-    file_ref
-        .candidate_plan(&ctx)?
+    plan(file_ref, &ctx)?
         .into_iter()
         .next()
         .map(|candidate| candidate.path().to_path_buf())

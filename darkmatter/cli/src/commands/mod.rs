@@ -297,6 +297,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             SchemaTarget::Validate {
                 inputs,
                 schema,
+                no_baseline_schema,
                 format,
                 quiet,
                 no_trigger_schemas,
@@ -304,6 +305,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 schema::run_validate(
                     &inputs,
                     schema.as_deref(),
+                    no_baseline_schema,
                     format,
                     quiet,
                     no_trigger_schemas,

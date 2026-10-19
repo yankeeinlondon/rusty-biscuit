@@ -7,7 +7,7 @@ dirty: {{ as_unordered_list( ctx.dirty_files ) }}
 initialize:
     - when: "length(ctx.dirty_files) > 0"
       then:
-          - error: |-
+          - error: |- 
                 The **format** prompt expects there to be no dirty files in the repo as a pre-requisite to applying consistent Rust formatting across this repo! Please commit the following files before running this prompt:
 
                 {{dirty}}

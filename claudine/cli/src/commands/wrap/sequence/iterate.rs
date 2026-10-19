@@ -1,16 +1,16 @@
-//! Just-in-time serial execution (Phase 2) for the sequence orchestrator.
+//! Just-in-time ordered execution for the sequence orchestrator.
 //!
 //! Each step is composed **at its turn**, against the live file on disk and the
 //! runtime layers as they stand at that moment. That ordering is the contract:
 //! step 3 sees step 2's inline-compose write-back, step 2's `set` mutations, and
-//! step 2's committed `outputs` entry, none of which exist when the sequence
+//! step 2's committed `seq.outputs` entry, none of which exist when the sequence
 //! starts. Nothing here re-resolves the *step list* — dynamic sources snapshot
 //! once during static preflight.
 //!
 //! A step either runs the source document's own body (the default) or the one
 //! executable its declaration named, which replaces the body entirely. Both
-//! paths report the same [`SequenceStepResult`], so `fail_fast`, the summary,
-//! and the interrupt story do not branch on task kind.
+//! paths report the same [`SequenceStepResult`] for container failure handling,
+//! summaries, and interruption.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -49,18 +49,28 @@ use crate::log;
 use super::jit::{self, StepComposeContext};
 use super::task_run;
 
-/// Everything the serial loop needs that does not vary per step.
+/// Everything the serial loop needs.
+///
+/// The loop's own context carries the launch document's view. Each step runs
+/// under [`Self::for_document`], whose `prep_context` and `compose` are the
+/// step's own document view.
 pub(super) struct SequenceRunContext<'a> {
     pub(super) plan: &'a SequencePlan,
     pub(super) graph: &'a PreflightGraph,
+    /// Each step's target as planned under the launch map; a step re-selects
+    /// it under its own map through `selection` when it enters.
     pub(super) resolved_targets: &'a [Option<claudine::composition::ResolvedExecutionTarget>],
+    /// Every provider-launching task's selection, by graph identity: what
+    /// a task prepares under, and the hints its model is re-selected from.
+    pub(super) task_selections: &'a super::providers::TaskSelections,
+    pub(super) selection: super::resolve::StepSelection<'a>,
     pub(super) source: &'a ResolvedCompositionSource,
     pub(super) prep_context: &'a CompositionPrepContext,
     pub(super) shared: &'a SharedComposeArgs,
     pub(super) compose: &'a StepComposeContext<'a>,
     /// Every command approved during the sequence-wide validation pass, so a
     /// step's just-in-time prepare never stops to prompt.
-    pub(super) approved: HashSet<String>,
+    pub(super) approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     /// User `--set` overrides after the single interactive collection pass.
     pub(super) user_set_overrides: Option<Value>,
     pub(super) interrupted: &'a Arc<AtomicBool>,
@@ -68,13 +78,48 @@ pub(super) struct SequenceRunContext<'a> {
     pub(super) silent: bool,
     pub(super) verbose: u8,
     pub(super) perf_enabled: bool,
+    /// The root sequence's `loop` values for the pass being run; `None` when
+    /// the root does not loop.
+    pub(super) loop_values: Option<claudine::composition::LoopAmbient>,
+}
+
+impl SequenceRunContext<'_> {
+    /// This run context for one step's document: `prep_context` and
+    /// `compose` are that step's own, derived from the view it entered.
+    fn for_document<'b>(
+        &'b self,
+        prep_context: &'b CompositionPrepContext,
+        compose: &'b StepComposeContext<'b>,
+    ) -> SequenceRunContext<'b> {
+        SequenceRunContext {
+            plan: self.plan,
+            graph: self.graph,
+            resolved_targets: self.resolved_targets,
+            task_selections: self.task_selections,
+            selection: self.selection,
+            source: self.source,
+            prep_context,
+            shared: self.shared,
+            compose,
+            approved: self.approved.clone(),
+            user_set_overrides: self.user_set_overrides.clone(),
+            interrupted: self.interrupted,
+            effective_fail_fast: self.effective_fail_fast,
+            silent: self.silent,
+            verbose: self.verbose,
+            perf_enabled: self.perf_enabled,
+            loop_values: self.loop_values.clone(),
+        }
+    }
 }
 
 /// How one step finished, before it becomes a [`SequenceStepResult`].
 pub(super) enum StepOutcome {
     Succeeded {
-        /// The provider that ran, when one did and can be named.
-        provider: Option<claudine::provider::Provider>,
+        /// The provider each spawned attempt ran, in launch order: retries,
+        /// resumes, handoff targets, and group legs included. Empty when
+        /// nothing launched (a preview, a skip, a shell task).
+        providers: Vec<claudine::provider::Provider>,
         agent_perf: Option<crate::perf::AgentExecutionPerf>,
         /// This step's own composition cost. It is metered *inside* the step's
         /// wall clock now, which is what lets the report nest it under the step.
@@ -101,6 +146,8 @@ pub(super) enum StepOutcome {
         compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
         tasks: Vec<SequenceTaskResult>,
     },
+    /// The step's task had a false `when:` guard: nothing composed or ran.
+    Skipped,
 }
 
 /// Run every step in order, composing each at its turn.
@@ -110,6 +157,7 @@ pub(super) enum StepOutcome {
 pub(super) fn run_sequence_steps(
     run: &SequenceRunContext<'_>,
     perf_accumulator: &mut Option<crate::perf::SequencePerfAccumulator>,
+    runtime_state: &Arc<RuntimeState>,
 ) -> Result<(SequenceRunSummary, bool)> {
     let total_steps = run.plan.steps.len();
     let mut summary = SequenceRunSummary {
@@ -119,13 +167,9 @@ pub(super) fn run_sequence_steps(
         steps: Vec::with_capacity(total_steps),
     };
 
-    // One cell for the whole sequence: `outputs` accumulates across steps and a
-    // `set` from step 1 is still visible in step 5.
-    let runtime_state = std::sync::Arc::new(RuntimeState::new());
 
     let mut interrupt_observed = false;
     for step_index in 0..total_steps {
-        crate::budget::enter_stage(&run.plan.steps[step_index].name);
         if run.interrupted.load(Ordering::SeqCst) {
             interrupt_observed = true;
             if let Some(acc) = perf_accumulator.as_mut() {
@@ -134,6 +178,9 @@ pub(super) fn run_sequence_steps(
             break;
         }
         let step = &run.plan.steps[step_index];
+        runtime_state.set_sequence_binding(claudine::composition::lifecycle::bindings::SequenceBinding::step(
+            &claudine::composition::sequence::build_step_overlay(run.plan, step_index), Vec::new(),
+        ).to_value());
 
         // Dry-run: separate each document's rendered metadata block with a
         // full-width horizontal rule on stderr. The per-document render happens
@@ -167,18 +214,19 @@ pub(super) fn run_sequence_steps(
         }
 
         let start = std::time::Instant::now();
-        let outcome = run_one_step(run, step_index, &runtime_state);
+        let outcome = run_one_step(run, step_index, runtime_state);
         let duration = start.elapsed();
         let interrupted_step = matches!(outcome, StepOutcome::Interrupted { .. });
+        let skipped = matches!(outcome, StepOutcome::Skipped);
 
-        let (success, error, error_snapshot, provider, agent_perf, compose_perf, tasks) =
+        let (success, error, error_snapshot, providers, agent_perf, compose_perf, tasks) =
             match outcome {
             StepOutcome::Succeeded {
-                provider,
+                providers,
                 agent_perf,
                 compose_perf,
                 tasks,
-            } => (true, None, None, provider, agent_perf, compose_perf, tasks),
+            } => (true, None, None, providers, agent_perf, compose_perf, tasks),
             StepOutcome::Failed {
                 message,
                 snapshot,
@@ -189,7 +237,7 @@ pub(super) fn run_sequence_steps(
                 false,
                 Some(message),
                 snapshot,
-                None,
+                Vec::new(),
                 agent_perf,
                 compose_perf,
                 tasks,
@@ -200,17 +248,14 @@ pub(super) fn run_sequence_steps(
                 tasks,
             } => (
                 false,
-                Some(if crate::budget::stopped_by_exhaustion() {
-                    "stopped: execution budget exhausted".to_string()
-                } else {
-                    "interrupted by SIGINT".to_string()
-                }),
+                Some("interrupted by SIGINT".to_string()),
                 None,
-                None,
+                Vec::new(),
                 agent_perf,
                 compose_perf,
                 tasks,
             ),
+            StepOutcome::Skipped => (true, None, None, Vec::new(), None, None, Vec::new()),
         };
 
         if let Some(acc) = perf_accumulator.as_mut() {
@@ -243,13 +288,21 @@ pub(super) fn run_sequence_steps(
             error_snapshot,
             duration,
             tasks: tasks.clone(),
+            skipped,
         });
 
-        if !run.silent {
-            emit_step_status(run, step_index, total_steps, success, &error, provider);
+        if !run.silent && skipped {
+            emit_step_skipped(step_index, total_steps);
+        } else if !run.silent {
+            emit_step_status(run, step_index, total_steps, success, &error, &providers);
             emit_group_task_breakdown(&tasks);
         }
 
+        // A pending `break` starts no later step; the root's loop ends after
+        // this pass's cleanup.
+        if success && run.loop_values.as_ref().is_some_and(|ambient| ambient.breaks.is_pending()) {
+            break;
+        }
         if interrupted_step {
             debug!(step_index = step_index + 1, step_name = %step.name, "sequence step interrupted");
             if let Some(acc) = perf_accumulator.as_mut() {
@@ -286,13 +339,10 @@ fn run_one_step(
         Err(error) => return StepOutcome::failed(&error),
     };
 
-    let target = run.resolved_targets.get(step_index).cloned().flatten();
-    let env_overrides =
-        jit::step_env_overrides(run.effective_fail_fast, run.shared, target.as_ref());
     // Dry-run composes against the *initial* state so late-binding references
     // render exactly as a first-step composition would see them.
     let snapshot = (!run.shared.dry_run).then(|| runtime_state.snapshot());
-    let set_overrides = jit::step_set_overrides(
+    let mut set_overrides = jit::step_set_overrides(
         run.plan,
         step_index,
         run.user_set_overrides.as_ref(),
@@ -307,13 +357,79 @@ fn run_one_step(
         .steps
         .get(step_index)
         .is_some_and(|step| step.task.is_some());
+    if !has_executable {
+        super::container::mask_body_events(&mut set_overrides);
+    }
+    // Each step is a document of its own: it captures its environment here,
+    // once, before anything of it is prepared, and every stage of it — its
+    // composition, `initialize`, task, prompt document, loop iterations,
+    // retry/resume, handlers, and `finalize` — reads that one map. The run
+    // context below carries the step's view, so nothing downstream reaches
+    // back to the launch document's.
+    // Caller layers and lexical sequence bindings differ per step, so pre-warm
+    // treats their keys as late in every document the step prepares.
+    let step_invocation = run
+        .prep_context
+        .invocation
+        .capture_document()
+        .with_prewarm_injected_keys(
+            claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS
+                .iter()
+                .map(|key| (*key).to_string())
+                .chain(set_overrides.values().keys().cloned()),
+        );
+    // The planned target as this step's own map selects its model.
+    let target = run
+        .resolved_targets
+        .get(step_index)
+        .cloned()
+        .flatten()
+        .map(|planned| {
+            let identity = claudine::composition::sequence::preflight::TaskIdentity::root(step_index);
+            let hints = run.task_selections.get(&identity).map_or(run.selection.raw_hints, |selected| &selected.hints);
+            run.selection
+                .for_document(planned, hints, step_invocation.document_environment())
+        });
+    let env_overrides =
+        jit::step_env_overrides(run.effective_fail_fast, run.shared, target.as_ref());
+    let step_source_context = match step_invocation.derive_composition_source(run.source) {
+        Ok(context) => context,
+        // The step's map can name a tree root the launch map did not.
+        Err(claudine::invocation_context::InvocationContextError::ResolutionContext(error)) => {
+            return StepOutcome::failed(&CompositionError::from(error));
+        }
+        Err(error @ claudine::invocation_context::InvocationContextError::SourceWithoutParent(_)) => {
+            panic!("the sequence source was resolved to a file before any step ran: {error}")
+        }
+    };
+    let step_prep_context = run
+        .prep_context
+        .for_document(step_invocation, step_source_context);
     // One composition run per step: the step's composition of this document,
     // its task, and the task's prompt document observe one view of Git state.
     let step_run = claudine::invocation_context::RunEvidence::default();
+    let deferred = super::jit::sequence_shell_roots(step_index);
     let step_compose = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
+        deferred_shell_roots: deferred,
         run_evidence: Some(&step_run),
+        invocation: &step_prep_context.invocation,
+        file_resolution_context: step_prep_context.source_context.file_resolution_context(),
+        loop_values: run.loop_values.clone(),
         ..run.compose.clone()
     };
+    let step_document = run.for_document(&step_prep_context, &step_compose);
+    let run = &step_document;
+    // A guarded task is decided at its turn, before anything of it composes.
+    if let Some(task) = run.graph.steps.get(step_index).and_then(|s| s.task.as_ref()) {
+        match task_run::root_step_guard(run, &run.plan.steps[step_index].name, task, live.markdown.frontmatter().as_map(), &set_overrides, runtime_state) {
+            Ok(true) => {}
+            Ok(false) => return StepOutcome::Skipped,
+            Err(error) => return StepOutcome::failed(&error),
+        }
+    }
     let composed = match compose_with_late_collection(
         run,
         &step_compose,
@@ -327,7 +443,7 @@ fn run_one_step(
     };
 
     // A step that declared an executable runs it *instead of* the document
-    // body; the composition above still happened, because the task's `params`,
+    // body; the composition above still happened, because the task's `with`,
     // `timeout`, and action stacks bind against this step's effective state.
     if let Some(task) = run.graph.steps.get(step_index).and_then(|s| s.task.as_ref()) {
         return task_run::run_step_task(
@@ -356,7 +472,8 @@ fn run_one_step(
         live.resolved_path.clone(),
         Arc::clone(&run.compose.approval_cache),
     )));
-    let request = build_body_request(
+    let launch_log = claudine::composition::LaunchLog::default();
+    let mut request = build_body_request(
         run,
         &live,
         composed.prepared,
@@ -365,14 +482,18 @@ fn run_one_step(
         runtime_state,
         Arc::clone(&step_ledger),
     );
+    request.launch_log = Some(launch_log.clone());
     // The step's own scope, kept by any document a handoff adopts within it.
     let step_scope = StepScope {
+        shell_approvals: Some(run.approved.clone()),
+        lifecycle_group: None,
         caller_overrides: set_overrides,
         runtime_state: Arc::clone(runtime_state),
         suppress_output_commit: false,
         task_frame_writer: None,
         env_overrides: jit::step_owned_env(run.effective_fail_fast),
         operation: None,
+        launch_log: Some(launch_log.clone()),
     };
     let execution = execute_composition_request_inner(request, run.verbose, None, run.perf_enabled)
         .and_then(|mut outcome| {
@@ -403,10 +524,8 @@ fn run_one_step(
             }
         }
         Ok(outcome) if outcome.exit_code == 0 => StepOutcome::Succeeded {
-            // A `--dry-run` step with an unresolved agent state has no real
-            // provider, so it must not be attributed to the placeholder.
-            provider: (!(run.shared.dry_run && target_was_unresolved(run, step_index)))
-                .then_some(outcome.provider),
+            // What spawned, never what was planned: a preview spawns nothing.
+            providers: launch_log.attempts(),
             agent_perf: outcome.agent_perf,
             compose_perf,
             tasks: Vec::new(),
@@ -414,7 +533,7 @@ fn run_one_step(
         Ok(outcome) => StepOutcome::Failed {
             message: format!(
                 "provider {} exited with code {}",
-                outcome.provider, outcome.exit_code
+                launch_log.last().unwrap_or(outcome.provider), outcome.exit_code
             ),
             // The provider ran and exited non-zero; no typed error was raised.
             snapshot: None,
@@ -440,9 +559,8 @@ fn run_one_step(
 ///
 /// This is the mid-sequence human-in-the-loop case the spec warns authors to
 /// design away, and it behaves exactly like direct compose: interactive
-/// collection on a TTY, a typed failure otherwise. The failure is a failure of
-/// *this step* — preflight already passed, so `fail_fast` governs what happens
-/// next rather than the abort-all rule.
+/// collection on a TTY, a typed failure otherwise. A failure enters the
+/// enclosing container's failure lifecycle and stops the sequence if unhandled.
 #[allow(clippy::result_large_err)]
 fn compose_with_late_collection(
     run: &SequenceRunContext<'_>,
@@ -491,11 +609,6 @@ fn compose_with_late_collection(
     )
 }
 
-fn target_was_unresolved(run: &SequenceRunContext<'_>, step_index: usize) -> bool {
-    run.resolved_targets
-        .get(step_index)
-        .is_none_or(Option::is_none)
-}
 
 /// Build the execution request for a step that runs the source document body.
 fn build_body_request(
@@ -545,6 +658,7 @@ fn build_body_request(
         silent: shared.silent,
         env_overrides,
         shared_approval_cache: Some(Arc::clone(&run.compose.approval_cache)),
+        closed_shell_approvals: Some(run.approved.clone()),
         installed_snapshot: Some(run.prep_context.installed_snapshot.clone()),
         invocation_context: Some(run.prep_context.invocation.clone()),
         source_context: Some(run.prep_context.source_context.clone()),
@@ -562,9 +676,11 @@ fn build_body_request(
         suppress_output_commit: false,
         // A bodyless sequence step renders under the step header, not a task bar.
         task_frame_writer: None,
-        proxy_overlay: indexmap::IndexMap::new(),
+        proxy_overlay: Default::default(),
         handoff_ledger: Some(handoff_ledger),
         adopted_handoff: None,
+        // The caller installs the step's log.
+        launch_log: None,
     }
 }
 
@@ -592,6 +708,7 @@ fn emit_group_task_breakdown(tasks: &[SequenceTaskResult]) {
     let mut list = UnorderedList::empty();
     for task in tasks {
         let outcome = match (task.success, task.interrupted) {
+            (true, _) if task.skipped => "<dim>skipped</dim>",
             (true, _) => "<green>succeeded</green>",
             (false, true) => "<yellow>interrupted</yellow>",
             (false, false) => "<red>failed</red>",
@@ -605,20 +722,31 @@ fn emit_group_task_breakdown(tasks: &[SequenceTaskResult]) {
     log::message(&list.render(&log::terminal()));
 }
 
+fn emit_step_skipped(step_index: usize, total_steps: usize) {
+    let status = Status::from_prose(format!(
+        "step <b><yellow>{}/{}</yellow></b> skipped (<dim><i>`when` was false</i></dim>)",
+        step_index + 1,
+        total_steps,
+    ))
+    .state(StatusState::Info);
+    log::message(&status.render(&log::terminal()));
+}
+
 fn emit_step_status(
     run: &SequenceRunContext<'_>,
     step_index: usize,
     total_steps: usize,
     success: bool,
     error: &Option<String>,
-    provider: Option<claudine::provider::Provider>,
+    providers: &[claudine::provider::Provider],
 ) {
-    let prose = match (success, provider) {
+    let prose = match (success, providers.last()) {
         (true, Some(provider)) => format!(
-            "step <b><yellow>{}/{}</yellow></b> succeeded (<dim><i>via {}</i></dim>)",
+            "step <b><yellow>{}/{}</yellow></b> succeeded (<dim><i>via {}{}</i></dim>)",
             step_index + 1,
             total_steps,
-            provider
+            provider,
+            attempt_chain(providers),
         ),
         (true, None) if run.shared.dry_run => format!(
             "step <b><yellow>{}/{}</yellow></b> rendered (<dim><i>dry-run</i></dim>)",
@@ -650,6 +778,81 @@ fn emit_step_status(
     log::message(&Status::from_prose(prose).state(state).render(&log::terminal()));
 }
 
+/// `; attempts: Claude → Codex` when the spawned attempts ran more than one
+/// provider (a retry or handoff that switched, or legs on different
+/// providers), else nothing: the label already names the final attempt's.
+fn attempt_chain(providers: &[claudine::provider::Provider]) -> String {
+    if providers.iter().all(|provider| Some(provider) == providers.first()) {
+        return String::new();
+    }
+    let chain: Vec<String> = providers.iter().map(ToString::to_string).collect();
+    format!("; attempts: {}", chain.join(" → "))
+}
+
+/// Run a looping document as a step's or task's executable, through the
+/// canonical active-document pipeline, so it loops exactly as it does under
+/// `compose`. `scope` keeps everything the step owns, as for a handoff
+/// target; a handoff the document raises continues in
+/// [`run_step_proxy_loop`]. Returns the exit status and the final pass's
+/// output.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_step_document(
+    source: ResolvedCompositionSource,
+    reference: &str,
+    ledger: &SharedRunLedger,
+    run: &SequenceRunContext<'_>,
+    kind: CompositionKind,
+    scope: &StepScope,
+    mut caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
+    document: claudine::invocation_context::InvocationContext,
+    source_context: claudine::invocation_context::SourceContext,
+) -> Result<(i32, Option<String>)> {
+    let shared = run.shared;
+    let system_prompt_args = SystemPromptArgs {
+        append_file: shared.append_system_prompt.clone(),
+        replace_file: shared.replace_system_prompt.clone(),
+    };
+    let launch_area_fallback = Some(run.prep_context.launch_workspace.launch_cwd.clone());
+    let mut caller_overrides = Some(scope.caller_overrides.to_value());
+    let file_resolution_context = source_context.file_resolution_context().clone();
+    let (outcome, _) = prepare_and_run_active_document(
+        shared,
+        kind,
+        source,
+        reference,
+        &Default::default(),
+        None,
+        true,
+        &mut None,
+        &system_prompt_args,
+        &mut caller_overrides,
+        &mut caller_input_records,
+        composition::InteractiveSchemaOptions::default(),
+        &launch_area_fallback,
+        &run.compose.approval_cache,
+        ledger,
+        run.verbose,
+        None,
+        Vec::new(),
+        std::time::Instant::now(),
+        document,
+        source_context,
+        Some(scope),
+    )?;
+    match outcome {
+        ActiveDocumentOutcome::Done { exit_code, final_output } => Ok((exit_code, final_output)),
+        ActiveDocumentOutcome::Handoff(next) => run_step_proxy_loop(
+            next,
+            ledger,
+            run,
+            kind,
+            scope,
+            caller_input_records,
+            &file_resolution_context,
+        ),
+    }
+}
+
 /// Drive the handoff chain contained in one sequence step (or one `prompt:`
 /// task) to completion, returning the final target's exit code and captured
 /// output.
@@ -659,7 +862,8 @@ fn emit_step_status(
 /// owns stays with the step: `ledger` is this step's (or task's) chain, and
 /// `scope` carries its caller layers, runtime cell, and output policy (R8).
 /// `file_resolution_context` is the source document's, against which an
-/// uncommitted request resolves.
+/// uncommitted request resolves. Each target captures its own environment
+/// before it is prepared.
 pub(super) fn run_step_proxy_loop(
     initial: SurfacedHandoff,
     ledger: &SharedRunLedger,
@@ -702,11 +906,17 @@ pub(super) fn run_step_proxy_loop(
             target_source.markdown.frontmatter_mut().as_map_mut(),
             handoff.overlay(),
         );
-        let overlay = handoff.overlay().clone();
+        // Anchored at the source, whose `with` authored the values.
+        let overlay = composition::AnchoredOverlay::new(handoff.overlay().clone(), &active_file_resolution_context);
         let target_file = handoff.authored_target().to_string();
         let mut inline_state = None;
         let adopted_handoff = Some(Box::new(handoff));
-        let source_context = invocation.derive_source(&target_source.resolved_path)?;
+        // The source's map selected the target (the commit above resolved it
+        // in the source's file context); the target is a document of its own
+        // and captures its own map here, before its bootstrap and
+        // `initialize`, for every stage of its lifecycle.
+        let target_invocation = invocation.capture_document();
+        let source_context = target_invocation.derive_source(&target_source.resolved_path)?;
         active_file_resolution_context = source_context.file_resolution_context().clone();
 
         let (outcome, _) = prepare_and_run_active_document(
@@ -729,7 +939,7 @@ pub(super) fn run_step_proxy_loop(
             None,
             Vec::new(),
             std::time::Instant::now(),
-            invocation.clone(),
+            target_invocation,
             source_context,
             Some(scope),
         )?;

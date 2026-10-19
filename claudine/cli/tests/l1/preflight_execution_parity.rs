@@ -4,7 +4,7 @@
 //! Every row composes a document whose shell command interpolates a value and
 //! changes only where the command lives and where the value comes from. The
 //! approval set is exactly the commands the row whitelists by their full
-//! bytes, so a run that succeeds and shows the command's output proves the
+//! bytes (or a typed shape for a lexical sequence read), so a run that succeeds and shows the command's output proves the
 //! command that launched was the command pre-flight approved. The command is
 //! `git check-ref-format --branch ran/<value>`, which prints `ran/<value>`
 //! without a repository.
@@ -87,7 +87,10 @@ fn run(
     for (name, content) in files {
         write(&fixture.cwd().join(name), content);
     }
-    let whitelist: String = approved.iter().map(|command| format!("exact {command}\n")).collect();
+    let whitelist: String = approved.iter().map(|command| {
+        if command.starts_with("template ") { format!("{command}\n") }
+        else { format!("exact {command}\n") }
+    }).collect();
     // Outside a repository, a document's shell policy is read from its own
     // directory, so every directory a row writes a document into gets the list.
     let mut policy_dirs: Vec<std::path::PathBuf> = vec![fixture.cwd().to_path_buf()];
@@ -129,9 +132,9 @@ struct Row {
     executes: bool,
 }
 
-const ROUTER_OVERLAY: &str = "---\nstart:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {base: overlay}}\n---\nrouter body\n";
+const ROUTER_OVERLAY: &str = "---\nstart:\n  - {proxy: {target: './target.md', with: {base: overlay}}}\n---\nrouter body\n";
 const ROUTER_PLAIN: &str =
-    "---\nstart:\n  stack:\n    - action: {action: proxy, target: './target.md'}\n---\nrouter body\n";
+    "---\nstart:\n  - {proxy: {target: './target.md'}}\n---\nrouter body\n";
 const TARGET_REQUIRED: &str = "---\nbase: string(required)\n---\n::file ./part.md\n";
 
 const ROWS: &[Row] = &[
@@ -215,7 +218,7 @@ const ROWS: &[Row] = &[
         name: "reserved sequence input",
         files: &[
             ("seq.md", "---\nsequence:\n  - alpha\n---\n::file ./part-state.md\n"),
-            ("part-state.md", "::shell git check-ref-format --branch ran/{{ state }}\n"),
+            ("part-state.md", "::shell git check-ref-format --branch ran/{{ seq.name }}\n"),
         ],
         args: &["sequence", "--claude", "seq.md"],
         value: "alpha",
@@ -256,7 +259,11 @@ const ROWS: &[Row] = &[
 
 fn assert_row_launches_approved_bytes(row: &Row) {
     let fixture = fixture("preflight-parity");
-    let result = run(&fixture, row.files, &[command_for(row.value)], row.args);
+    let approval = if row.name == "reserved sequence input" {
+        // Lexical sequence reads require shape approval even in the first task.
+        "template git check-ref-format --branch ran/{{ string }}".to_string()
+    } else { command_for(row.value) };
+    let result = run(&fixture, row.files, &[approval], row.args);
     assert_eq!(result.code, Some(0), "{}: {}", row.name, result.output);
     assert_eq!(
         result.output.contains(&format!("ran/{}", row.value)),
@@ -325,7 +332,7 @@ fn an_untaken_branch_is_discovered_without_executing() {
 /// refused non-interactively when only the first iteration's bytes are
 /// approved — for a body command and for a lifecycle `shell` action alike.
 const LOOP_BODY: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n---\n::file ./loop-part.md\n";
-const LOOP_LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  stack:\n    - action: {action: shell, command: \"git check-ref-format --branch ran/{{ n }}\"}\n---\nbody\n";
+const LOOP_LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  - {shell: {command: \"git check-ref-format --branch ran/{{ n }}\"}}\n---\nbody\n";
 
 fn loop_files(document: &'static str) -> [(&'static str, &'static str); 2] {
     [("loop.md", document), ("loop-part.md", "::shell git check-ref-format --branch ran/{{ n }}\n")]
@@ -374,7 +381,7 @@ fn an_unknowable_command_fails_preparation_despite_when_error_and_no_error() {
         &[
             (
                 "target.md",
-                "---\nflag: \"{{ has_alias('ll') }}\"\nfailure:\n  stack:\n    - action: {info: 'failure fired'}\n      no_error: true\nfinalize:\n  stack:\n    - action: {info: 'finalize fired'}\n      no_error: true\n---\n::file ./part.md\n",
+                "---\nflag: \"{{ has_alias('ll') }}\"\nfailure:\n  - {info: 'failure fired', no_error: true}\nfinalize:\n  - {info: 'finalize fired', no_error: true}\n---\n::file ./part.md\n",
             ),
             (
                 "part.md",
@@ -401,7 +408,7 @@ fn an_unknowable_command_fails_preparation_despite_when_error_and_no_error() {
 /// when it runs, which is how the row proves the refused bytes never launched.
 #[test]
 fn a_lifecycle_no_error_shell_does_not_absorb_an_unapproved_command() {
-    const LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  stack:\n    - action: {action: shell, command: \"git init --quiet made-{{ n }}\", no_error: true}\n---\nbody\n";
+    const LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  - {shell: {command: \"git init --quiet made-{{ n }}\", no_error: true}}\n---\nbody\n";
     let fixture = fixture("preflight-parity-no-error");
     let result = run(
         &fixture,

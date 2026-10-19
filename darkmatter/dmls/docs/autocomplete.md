@@ -37,7 +37,7 @@ characters:
 | `/` | link and wiki path segments |
 | `#` | heading anchors (`[...](doc.md#…)`, `[[target#…]]`) |
 | `(` | directive options / expression function arguments |
-| `.` | `ctx.` members inside an open `{{ }}` interpolation |
+| `.` | `ctx.` and `fm.` members inside an open `{{ }}` interpolation |
 
 Each provider re-checks context, so a trigger character in ordinary prose
 produces nothing. In particular, a `.` outside an open interpolation yields no
@@ -68,6 +68,50 @@ the enum / boolish / file families for the same position. The candidates come
 from the schema itself (via the library's `suggestions_for_path`), so DMLS
 holds no parallel suggestion table.
 
+### Items of an array of a union
+
+When an array's items are a union (`policy[](min(1))@./content-policy.yaml`,
+or a property union of several array types), completion inside an item
+comes from the library's `alternatives_for_def`:
+
+- On a new `- ` line, every object alternative's keys (`rule: `, marked
+  `(required)` when every alternative offering it requires it) and every
+  scalar alternative's values (`enum` members, `literal(...)` values, and
+  `suggest(...)` candidates) are offered together.
+- On a later line of an object item, the keys the item already has are left
+  out. If a `literal(...)` tag in the item selects exactly one alternative
+  (`kind: say`), only that alternative's keys are offered; a missing,
+  unknown, or conflicting tag keeps every alternative's keys.
+
+```yaml
+steps:
+  - kind: say
+    # offers `text`, not `run`
+```
+
+### Schema definitions
+
+Inside a schema definition (a standalone schema file, a frontmatter
+`$schema`, or a `type-definition` value), completion reads what you are in
+the middle of typing from the library's tolerant cursor parser:
+
+- At a type position, including a union arm, it offers every built-in type
+  keyword and its `[]` form, plus aliases labeled as such (`any`, detail
+  ``Alias of `unknown` ``), and your named types.
+- Inside `alphanumeric(`, before the first `;`, it offers the type options
+  not yet written in that group, each with its effect as `detail`. While the
+  group is still empty the constraints are offered too; once it holds an
+  option, only options are; after `;`, only constraints are.
+
+```yaml
+types:
+  slug: alphanumeric(allow-dashes, |   # offers the other eight options
+  id: alphanumeric(allow-dashes; |     # offers `min`, `max`, `required`, ...
+```
+
+Options are not offered inside a reference to a named `alphanumeric` type:
+a use site may only repeat its definition's options.
+
 ## Shell suffix completion (`$( … )::`)
 
 After the closing `)` of a frontmatter `$( … )` value, completion offers the
@@ -80,12 +124,19 @@ without a number.
 
 ## Interpolation completion (`{{ … }}`)
 
-Inside an interpolation, the DSL provider offers three candidate families:
+Inside an interpolation, the DSL provider offers four candidate families:
 
-1. **Frontmatter keys** — the document's own top-level keys.
-2. **`ctx.*` context variables** — offered fully qualified (`ctx.today`,
+1. **Frontmatter keys** — the document's own top-level keys, plus the
+   top-level properties its own `$schema` declares but leaves unset. A key
+   named `doc`, `hook`, or `current_env` is offered like any other key.
+2. **The `fm` root and its members** — `fm` itself, documented with its
+   description from Darkmatter's reserved-root catalog, and, once the partial
+   starts with `fm.`, each frontmatter key as `fm.<key>`. A key the dotted
+   form cannot reach as one path (for example `$schema`) is not offered after
+   `fm.`.
+3. **`ctx.*` context variables** — offered fully qualified (`ctx.today`,
    `ctx.packages`, …).
-3. **Expression functions** — every function in the catalog, including the
+4. **Expression functions** — every function in the catalog, including the
    eight list-formatting functions (`as_csv`, `as_tsv`, `as_space_separated`,
    `as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json`,
    `as_json5`).
@@ -155,7 +206,8 @@ Wiki completion never inserts a `.md` extension regardless of style.
 ## Passivity
 
 Answering a completion is read-only: it reads open buffers and the in-memory
-workspace graph and resolves local paths, but never executes a shell command,
+workspace graph (parsing an unopened link target the first time heading
+completion needs its headings) and resolves local paths, but never executes a shell command,
 evaluates an expression, fetches a remote URL, or mutates a file. Offering a
 `ctx.*` variable or a function does **not** compute its value.
 

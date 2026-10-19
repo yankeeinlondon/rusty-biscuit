@@ -26,7 +26,7 @@ use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::TerminalOptions;
 use darkmatter::markdown::schemas::{
-    CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
+    AlphanumericOptionDescriptor, CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
     SchemaConstraintDescriptor, SchemaShapeDescriptor, SchemaTypeDescriptor,
     TriggerGrammarDescriptor, ValidationBehaviorDescriptor,
     coercion_rule_descriptors, inline_object_rule_descriptors, schema_constraint_descriptors,
@@ -133,7 +133,7 @@ impl<'a> SchemaAboutReport<'a> {
             .iter()
             .map(|t| {
                 vec![
-                    prose_cell(format!("<b>{}</b>", escape_prose(t.keyword))),
+                    rows_cell(format_type_names(t)),
                     prose_cell(markdown_inline_to_prose(t.description)),
                     prose_cell(format_constraint_names(t.accepted_constraints)),
                 ]
@@ -158,6 +158,45 @@ impl<'a> SchemaAboutReport<'a> {
             rows,
         );
         self.type_vocabulary_notes()?;
+        for t in types.iter().filter(|t| !t.type_options.is_empty()) {
+            self.type_options(t)?;
+        }
+        Ok(())
+    }
+
+    /// The options a type takes before the first `;`, with their effects and
+    /// the conditions under which the canonical form drops them.
+    fn type_options(&mut self, t: &SchemaTypeDescriptor) -> Result<()> {
+        self.heading(&format!("Type Options: {}", escape_prose(t.keyword)));
+        self.markdown(format!(
+            "Options go before the first `;` in `{keyword}(...)`, separated by commas, and are \
+             part of the type's identity; constraints follow the `;`. For example \
+             `{keyword}(allow-dashes; min(1))`. An option that cannot change the accepted values \
+             is redundant: the canonical form drops it, and options are listed in the order \
+             below.",
+            keyword = t.keyword,
+        ))?;
+        let rows = t
+            .type_options
+            .iter()
+            .map(|option| {
+                vec![
+                    prose_cell(format!("<b>{}</b>", escape_prose(option.keyword()))),
+                    rows_cell(format_option_effect(option)),
+                ]
+            })
+            .collect();
+        self.table(
+            vec![
+                TableColumn::new("Option")
+                    .with_min_width(20)
+                    .with_word_wrap(WordWrap::BespokeProse(Some(4), vec!['-'], None)),
+                TableColumn::new("Effect")
+                    .with_min_width(30)
+                    .with_word_wrap(WordWrap::WrapProse(Some(6), None)),
+            ],
+            rows,
+        );
         Ok(())
     }
 
@@ -521,17 +560,37 @@ fn format_constraint_meaning(constraint: &SchemaConstraintDescriptor) -> String 
     }
 }
 
-fn format_constraint_names(constraints: &str) -> String {
-    split_top_level_constraints(constraints)
-        .into_iter()
-        .map(|part| {
-            part.find('(')
-                .map(|index| &part[..index])
-                .unwrap_or(part)
-                .trim()
-        })
-        .filter(|part| !part.is_empty())
-        .map(escape_prose)
+/// The type keyword, then one row per alias.
+fn format_type_names(t: &SchemaTypeDescriptor) -> String {
+    let mut names = format!("<b>{}</b>", escape_prose(t.keyword));
+    for alias in t.aliases {
+        names.push_str(&format!("\n<dim>alias:</dim> {}", escape_prose(alias)));
+    }
+    names
+}
+
+/// The option's effect, then one row per condition that makes it redundant.
+fn format_option_effect(option: &AlphanumericOptionDescriptor) -> String {
+    let effect = option.effect();
+    let mut chars = effect.chars();
+    let capitalized = match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        None => String::new(),
+    };
+    let mut text = markdown_inline_to_prose(&capitalized);
+    if let Some(needed) = option.redundant_without {
+        text.push_str(&format!("\n- redundant without <b>{}</b>", escape_prose(needed.as_keyword())));
+    }
+    if let Some(other) = option.redundant_with {
+        text.push_str(&format!("\n- redundant with <b>{}</b>", escape_prose(other.as_keyword())));
+    }
+    text
+}
+
+fn format_constraint_names(constraints: &[&str]) -> String {
+    constraints
+        .iter()
+        .map(|keyword| escape_prose(keyword))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -570,27 +629,6 @@ fn escape_markdown(text: &str) -> String {
 
 fn plain_markdown_text(text: &str) -> String {
     text.replace('`', "")
-}
-
-fn split_top_level_constraints(text: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut depth = 0u32;
-
-    for (index, ch) in text.char_indices() {
-        match ch {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            ',' | ';' if depth == 0 => {
-                parts.push(text[start..index].trim());
-                start = index + ch.len_utf8();
-            }
-            _ => {}
-        }
-    }
-
-    parts.push(text[start..].trim());
-    parts
 }
 
 fn markdown_inline_to_prose(text: &str) -> String {

@@ -168,8 +168,8 @@ fn commit_fixture_literal_with_escaped_newline_is_single_line_and_rewritable() {
     assert_eq!(nested_lint_count(&edited), 0);
     assert!(edited.contains(r"' package area'"), "{edited}");
     assert!(edited.contains(r":\n '"), "{edited}");
-    // List items are reached too: the stack message lives inside a sequence.
-    assert!(inventory(COMMIT).iter().any(|(dotted, _, _)| dotted == "initialize.stack[0].action[0].message"));
+    // List items are reached too: the message lives inside a `then` body.
+    assert!(inventory(COMMIT).iter().any(|(dotted, _, _)| dotted == "initialize[0].then[0].message"));
 }
 
 #[test]

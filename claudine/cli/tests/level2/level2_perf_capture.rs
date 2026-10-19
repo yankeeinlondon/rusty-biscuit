@@ -94,10 +94,10 @@ fn run_perf_compose<H: TerminalHarness>(harness: &mut H) -> PerfCapture {
     static NEXT_CAPTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let sequence = NEXT_CAPTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let marker = format!("PERF_{}_{}", std::process::id(), sequence);
-    // A shared pane can retain unrelated text containing duration units. Clear
-    // it before output, and distinguish this command's completion from an old prompt.
+    // Clear shared-pane history as well as its viewport so a complete report
+    // capture cannot include an earlier command's durations or HOT marker.
     let script = format!(
-        "printf '\\033[2J\\033[H'; {} compose --goose --perf --dry-run --yolo {} \
+        "printf '\\033[3J\\033[2J\\033[H'; {} compose --goose --perf --dry-run --yolo {} \
          && printf '\\n{marker}:ok\\n' || printf '\\n{marker}:failed\\n'",
         common::sh_quote(&claudine),
         common::sh_quote(&doc.to_string_lossy()),
@@ -197,7 +197,8 @@ fn has_bold(line: &str) -> bool {
 /// The full report is taller than the harness's 40-row pane, so the
 /// `Performance … 100%` headline scrolls above the captured viewport — its
 /// correctness is locked by the L1 snapshot test (`render_perf_report_snapshot_…`)
-/// instead. Everything asserted here lives in the visible bottom region: the
+/// instead. WezTerm includes history because host load can put HOT above that
+/// viewport. The shared structural assertions cover the
 /// connector hierarchy, the unit-aligned value column, the percent column, the
 /// unique `HOT` marker, the shell directive, and the dry-run placeholder.
 fn assert_tree_structure(frame: &CapturedFrame) {
@@ -320,7 +321,9 @@ fn level2_perf_tree_renders_styled_in_wezterm() {
     // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
     // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
     clear_no_color(&mut harness);
-    let capture = run_perf_compose(&mut harness);
+    let mut capture = run_perf_compose(&mut harness);
+    // Host load can put HOT on an early leaf above the visible viewport.
+    capture.frame = harness.capture_scrollback(200).expect("capture complete perf report");
     assert_tree_structure(&capture.frame);
 
     let hot = raw_line(&capture.frame, "▇ HOT")

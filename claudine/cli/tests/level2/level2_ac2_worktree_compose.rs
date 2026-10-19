@@ -66,8 +66,7 @@ use test_toolkit::{Backend, Level, require_level};
 const PROBE_DOCUMENT: &str = r#"---
 title: AC2 worktree probe
 success:
-  stack:
-    - action: {set_frontmatter: ["state.md", "worktree", "{{ ctx.worktree }}"]}
+  - {set_frontmatter: ["state.md", "worktree", "{{ ctx.worktree }}"]}
 ---
 WT=[{{ ctx.worktree }}]
 "#;

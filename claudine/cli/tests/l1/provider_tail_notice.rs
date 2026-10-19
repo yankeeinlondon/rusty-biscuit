@@ -213,7 +213,6 @@ sequence:
   - name: fan
     group:
       name: fan
-      execution: parallel
       tasks:
         - name: a
           prompt: a.md

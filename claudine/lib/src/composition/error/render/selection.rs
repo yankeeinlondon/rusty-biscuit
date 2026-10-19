@@ -27,6 +27,37 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      interactive terminal, or correct the `agent` frontmatter property."
                 )
         }
+        CompositionError::SequenceTaskProviderSelection {
+            task,
+            task_path,
+            hint_path,
+            property,
+            containers,
+            problem,
+        } => {
+            let hint_link = super::render_file_link(hint_path);
+            let inside = if containers.is_empty() {
+                String::new()
+            } else {
+                format!(", inside {}", containers.join(" → "))
+            };
+            let mut body = format!(
+                "{task} in {}{inside} names its provider with <cyan>{}</cyan> in {hint_link}.",
+                super::render_file_link(task_path),
+                code_span(property),
+            );
+            body.push_str("\n\n");
+            body.push_str(&match problem.as_ref() {
+                SequenceTaskProviderProblem::Unresolvable { state, installed } => {
+                    render_agent_resolution_failed_body(state, installed, &hint_link)
+                }
+                other => format!("It cannot select a provider: {other}."),
+            });
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "task provider selection failed"))
+                .body(crate::composition::agent_message::agent_message_prose(body))
+                .hint(task_selection_hint(problem))
+        }
         CompositionError::AutocompleteNoMatches { query } => StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
             .body(super::with_failure_row(
@@ -116,5 +147,32 @@ pub(crate) fn render_agent_resolution_failed_body(
         // Every other prompting state aborts with the same breakdown the
         // dry-run table predicts and the TTY path shows.
         other => agent_state_breakdown(other),
+    }
+}
+
+/// What can repair a [`CompositionError::SequenceTaskProviderSelection`]. A
+/// provider flag replaces any `agent` hint, and `--model` or a model variable
+/// any `model` hint, so a remedy names one only where it would help: such a
+/// failure never occurs under the source it would recommend.
+fn task_selection_hint(problem: &SequenceTaskProviderProblem) -> &'static str {
+    match problem {
+        SequenceTaskProviderProblem::Unresolvable { .. } => {
+            "No task has started. Name an installed provider in that `agent`, \
+             or pass --claude, --codex, etc. to run every task on one provider."
+        }
+        SequenceTaskProviderProblem::Circular(variable) if variable.ends_with("model") || variable.ends_with("MODEL") => {
+            "No task has started. Write the model in that `model`, or pass --model \
+             or set MODEL so the hint is not read."
+        }
+        SequenceTaskProviderProblem::Circular(_) => {
+            "No task has started. Name the provider in that `agent`, or pass \
+             --claude, --codex, etc. so the hint is not read."
+        }
+        SequenceTaskProviderProblem::WrongType { .. }
+        | SequenceTaskProviderProblem::Evaluation(_)
+        | SequenceTaskProviderProblem::EmptyAgentList => {
+            "No task has started. Correct that value: the task's prompt still reads it, \
+             whatever provider or model is chosen."
+        }
     }
 }

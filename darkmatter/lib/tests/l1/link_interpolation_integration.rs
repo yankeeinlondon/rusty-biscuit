@@ -37,14 +37,9 @@ fn test_end_to_end_link_interpolation() {
     let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let content = composed.content();
 
-    // In the final composed document (which is anchored at root.md), the path to the asset
-    // should be relative to root.md's location.
-    // root is in docs/
-    // asset is in assets/
-    // So relative from root to asset is ../assets/image.png
     assert!(
-        content.contains("../assets/image.png"),
-        "Final content should have path relative to root, got: {}",
+        content.contains("![child_img](assets/image.png)"),
+        "Final content should have the bare repository-root path, got: {}",
         content
     );
 }

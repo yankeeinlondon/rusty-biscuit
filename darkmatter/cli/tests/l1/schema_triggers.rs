@@ -395,7 +395,6 @@ fn schema_validate_applies_triggers_from_schemas_dir_and_home() {
 }
 
 /// `text` without SGR escape sequences (`ESC [ ... m`).
-#[cfg(unix)]
 fn strip_ansi(text: &str) -> String {
     let mut plain = String::with_capacity(text.len());
     let mut chars = text.chars();
@@ -517,4 +516,147 @@ fn shipped_external_schema_example_names_its_sibling_explicitly() {
         .assert()
         .code(1)
         .stdout(predicate::str::contains("name"));
+}
+
+/// The dialect triggers `md schema triggers` reports as matched for `document`,
+/// in fixture order.
+fn matched_dialects(process: &CliProcessFixture, document: &Path) -> Vec<&'static str> {
+    let output = process.command().args(["schema", "triggers"]).arg(document).output().unwrap();
+    assert!(output.status.success(), "schema triggers failed: {}", String::from_utf8_lossy(&output.stderr));
+    let trace = compact(&strip_ansi(&stdout_of(&output)));
+    let matched: Vec<&'static str> = ["claudine", "inline-compose", "sequence"]
+        .into_iter()
+        .filter(|dialect| trace.contains(&format!("{dialect}.trigger.yaml—matched")))
+        .collect();
+    for dialect in ["claudine", "inline-compose", "sequence"] {
+        assert!(
+            trace.contains(&format!("/{dialect}.trigger.yaml—")) || trace.contains(&format!("\\{dialect}.trigger.yaml—")),
+            "the trace must evaluate {dialect}: {trace}"
+        );
+    }
+    matched
+}
+
+/// The registry decision for a malformed or edge-case `steps` value under the
+/// shipped dialect triggers, whose `steps` condition is `unknown[](required)`:
+/// a list (empty, mixed, or all-scalar items) is present, while null, absence,
+/// a scalar, or a mapping is not. A non-list value therefore no longer
+/// excludes a document through a `none` guard, and the target schema then
+/// enforces its own required key; with no trigger selected the document
+/// validates against nothing. `required` is the key the selected target
+/// reports missing, or `None` when validation succeeds.
+macro_rules! steps_registry_decision {
+    ($($name:ident: $frontmatter:literal => [$($dialect:literal),*], $required:expr;)+) => {$(
+        #[test]
+        fn $name() {
+            let process = CliProcessFixture::new();
+            dialect_fixture(&process);
+            let document = write(process.cwd(), "docs/case.md", concat!("---\n", $frontmatter, "---\nBody\n"));
+            let expected: Vec<&str> = vec![$($dialect),*];
+            assert_eq!(matched_dialects(&process, &document), expected, "registry decision");
+            let validate = process.command().args(["schema", "validate"]).arg(&document).assert();
+            let required: Option<&str> = $required;
+            match required {
+                Some(key) => {
+                    validate.code(1).stdout(predicate::str::contains(key));
+                }
+                None => {
+                    validate.success();
+                }
+            }
+        }
+    )+};
+}
+
+steps_registry_decision! {
+    steps_empty_list_selects_sequence: "steps: []\n" => ["sequence"], Some("sequence_name");
+    steps_mixed_list_selects_sequence: "steps: [1, \"a\"]\n" => ["sequence"], Some("sequence_name");
+    steps_all_scalar_items_select_sequence: "steps: [5]\n" => ["sequence"], Some("sequence_name");
+    steps_mapping_selects_no_trigger: "steps: {a: 1}\n" => [], None;
+    steps_scalar_selects_no_trigger: "steps: oops\n" => [], None;
+    steps_empty_scalar_selects_no_trigger: "steps: \"\"\n" => [], None;
+    steps_null_selects_no_trigger: "steps: null\n" => [], None;
+    steps_list_keeps_excluding_inline_compose: "prompt: x\nsteps: []\n" => [], None;
+    steps_scalar_no_longer_excludes_inline_compose: "prompt: x\nsteps: oops\n" => ["inline-compose"], Some("output");
+    steps_null_does_not_exclude_inline_compose: "prompt: x\nsteps: null\n" => ["inline-compose"], Some("output");
+    steps_number_no_longer_excludes_claudine: "kind: claudine\nsteps: 5\n" => ["claudine"], Some("provider");
+    steps_list_keeps_excluding_claudine: "kind: claudine\nsteps: []\n" => [], None;
+}
+
+/// A duplicated `steps` key is a YAML load error on both surfaces, never a
+/// last-wins value that selects (or escapes) a trigger.
+#[test]
+fn duplicate_steps_key_is_a_load_error_not_a_last_wins_selection() {
+    let process = CliProcessFixture::new();
+    dialect_fixture(&process);
+    let document = write(process.cwd(), "docs/case.md", "---\nprompt: x\nsteps: []\nsteps: oops\n---\nBody\n");
+    process
+        .command()
+        .args(["schema", "triggers"])
+        .arg(&document)
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("matched").not());
+    // Exit 3 is an unreadable document; 1 would be a validation failure.
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&document)
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("duplicate entry with key \"steps\""));
+}
+
+/// The 2026-10-17 incident end to end: an ordinary schema-root file that is
+/// mid-edit (invalid YAML, no `kind: trigger-schema` claim) leaves composition
+/// and trigger tracing working, with the neighboring trigger still applied.
+#[test]
+fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working() {
+    let process = CliProcessFixture::new();
+    let document = fixture(&process, "kind: prompt\nowner: me");
+    write(
+        process.cwd(),
+        "schemas/feature-review.yaml",
+        include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml"),
+    );
+    process.command().arg("compose").arg(&document).assert().success();
+    process
+        .command()
+        .args(["schema", "triggers"])
+        .arg(&document)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("prompt.trigger.yaml"))
+        .stdout(predicate::str::contains("matched"));
+    // The trigger still applies: without its required property, compose fails.
+    let missing = write(process.cwd(), "docs/missing.md", "---\nkind: prompt\n---\nBody\n");
+    process
+        .command()
+        .arg("compose")
+        .arg(&missing)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("owner"));
+}
+
+/// A schema-root file that claims the envelope but is not valid YAML fails
+/// with the YAML location and the YAML help, never the match-grammar help.
+#[test]
+fn an_unparseable_claimed_schema_root_file_reports_its_yaml_error() {
+    let process = CliProcessFixture::new();
+    let document = fixture(&process, "kind: prompt\nowner: me");
+    write(process.cwd(), "schemas/broken.yaml", "kind: trigger-schema\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
+    for args in [&["compose"][..], &["schema", "triggers"][..]] {
+        let output = process.command().args(args).arg(&document).output().unwrap();
+        assert!(!output.status.success(), "{args:?}: {output:?}");
+        let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
+        for expected in [
+            "is not valid YAML at line 4, column 9",
+            "mapping values are not allowed",
+            "must be quoted",
+        ] {
+            assert!(stderr.contains(&compact(expected)), "{args:?}: `{expected}` not in {stderr}");
+        }
+        assert!(!stderr.contains("combinators"), "{args:?}: {stderr}");
+    }
 }

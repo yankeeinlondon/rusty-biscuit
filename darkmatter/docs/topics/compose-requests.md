@@ -159,15 +159,99 @@ Finding no repository is not an error: the request directory becomes the
 tree root. `resolution_failure()` uses the same classes as biscuit-file's
 `FileReferenceError::resolution_failure()`.
 
-## One environment per request
+<a id="one-environment-per-request"></a>
+
+## One environment per document
 
 `{{ env.NAME }}`, `ctx.agent`, `ctx.model`, and a `{{NAME}}/file.md` file
-reference all read the snapshot's environment. An expression and a file
-reference in one request therefore always agree, even if the process
-environment changes or differs.
+reference all read the snapshot's environment. A request composes one
+document, and every file that document transcludes shares the request, so an
+expression and a file reference anywhere in that document always agree, even
+if the process environment changes or differs. `md compose` is one document:
+it captures its process once, at its entry point.
+
+```text
+NOTES=/a md compose doc.md     {{ env.NOTES }} renders /a, ::file {{NOTES}}/x.md reads /a/x.md
+```
 
 A `ComposeContext` captured on its own (`ComposeContext::capture_for_document`
 and its siblings) reads no process environment either: its `env` starts empty,
 so `ctx.agent` is `"unknown"` until a request installs the snapshot's
-environment over it. Only `current_env.NAME` reads the live process
-environment, by design: it names the value at the moment it is referenced.
+environment over it. No expression reads the live process environment, so
+`env` does not change during a composition, except at the one point a host
+asks to change it (see [Choosing the body's environment from the
+frontmatter](#choosing-the-bodys-environment-from-the-frontmatter)).
+
+A host that runs several documents in one process gives each document its own
+request, built from a snapshot captured when that document starts. A later
+document may therefore see a different environment from an earlier one, while
+each stays internally consistent. Claudine works this way: every sequence step,
+group leg, and `proxy` target is its own document with its own captured map
+(see Claudine's [composition](../../../claudine/docs/topics/composition.md)
+topic).
+
+### Choosing the body's environment from the frontmatter
+
+Sometimes the environment a body should render with depends on the
+document's own frontmatter. Claudine, for example, picks the provider a prompt
+launches on from its `agent`, and the body's `{{ env.AGENT }}` must name that
+provider, even when `agent` is a `$( … )` command. Composing the document twice
+would run every command twice, so Darkmatter offers one call instead:
+`Markdown::compose_with_frontmatter_hook`.
+
+```mermaid
+flowchart LR
+    A["frontmatter: interpolation,<br/>schema check, $( … ) commands"] --> B["hook(frontmatter, env)"]
+    B --> C["body stages and transclusions<br/>read the env the hook left"]
+```
+
+The hook is called once, for the request's root document only, after every
+frontmatter value has resolved and before any body stage runs. It receives the
+resolved frontmatter and the request's environment, and may change that
+environment. The body, every file it transcludes, and its `as_markdown()`
+content then read the changed environment. Frontmatter values have already
+resolved, so a frontmatter value that reads `env` keeps what it read. An error
+from the hook ends the composition before the body renders.
+
+```rust
+# use darkmatter::markdown::Markdown;
+# use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
+let md: Markdown = "---\nagent: goose\n---\nYou are {{ env.AGENT }}.\n".into();
+let request = ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(std::env::temp_dir()))?;
+
+let (composed, _report) = md.compose_with_frontmatter_hook(&request, &mut |frontmatter, env| {
+    if let Some(agent) = frontmatter.as_map().get("agent").and_then(|value| value.as_str()) {
+        env.insert("AGENT".to_string(), agent.to_string());
+    }
+    Ok(())
+})?;
+assert!(composed.content().contains("You are goose."));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+### The environment shell children start from
+
+A `::shell` directive and a frontmatter `$( … )` command run as child
+processes. By default a child inherits the composing process's environment,
+which is right for `md compose`: it is one document in one process.
+
+A host that composes several documents in one process, each under its own
+environment (Claudine runs every sequence step and group leg as its own
+document), states the child environment on the request instead:
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::shell_expansion::ShellChildEnvironment;
+
+let options = ComposeOptions::new().with_shell_child_environment(ShellChildEnvironment::new([
+    ("PATH", "/usr/bin:/bin"),
+    ("DOC_MARK", "b"),
+]));
+```
+
+The supplied map replaces the inherited environment rather than adding to it.
+The executable is looked up on the supplied `PATH`, `PWD` is set to the
+directory the command runs in, and `NO_COLOR=1` is still added while ANSI
+stripping is on. Values are raw OS strings, so a value that is not valid UTF-8
+reaches the child unchanged. `::shell printenv DOC_MARK` above prints `b`
+whatever this process holds.

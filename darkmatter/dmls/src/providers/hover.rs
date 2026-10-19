@@ -2,8 +2,9 @@
 //!
 //! Content is text-first Markdown everywhere (R-7 hover profile); a link's
 //! preview (target title, heading, resolved path, existence) is drawn from the
-//! already-built graph, so no target document is read from disk on hover. A
-//! target outside the indexed documents shows only its path.
+//! graph, so the provider reads nothing from disk (the router parses an
+//! unparsed target before hover runs). A target outside the graph's documents
+//! shows only its path.
 
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Range};
 

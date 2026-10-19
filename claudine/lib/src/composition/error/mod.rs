@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 use super::frontmatter_excerpt::FrontmatterExcerpt;
 use super::sequence::task::RunawayTrip;
-use super::types::{ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
+use super::types::{LoopOwner, ResolutionMode, ResolvedCompositionSource, SessionInteractivitySource};
 use crate::diagnostics::{
     Category, Diagnostic, DiagnosticRole, DiagnosticSnapshot, Disposition, Origin, code_spec,
     null_detail_for,
@@ -102,6 +102,18 @@ impl ShellApprovalFailure {
             ),
         }
     }
+}
+
+/// Why a task's `when:` guard raised at its turn.
+#[derive(Error, Debug)]
+pub enum TaskGuardFailure {
+    /// The guard no longer parses. Preflight checks it, so this is the
+    /// fail-closed path for a guard that changed after preflight.
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+    /// The guard raised while it was evaluated.
+    #[error(transparent)]
+    Evaluate(#[from] super::lifecycle::context::LifecycleCause),
 }
 
 /// Errors that can occur during composition workflows.
@@ -277,6 +289,27 @@ pub enum CompositionError {
         installed: Vec<Provider>,
     },
 
+    /// A sequence task's own provider hint can never select a provider, found
+    /// at preflight before any task launched or, for a hint decided at
+    /// launch, when the task's document is prepared, before it spawns.
+    #[error("{task} cannot select a provider from `{property}` in {}: {problem}", hint_path.display())]
+    SequenceTaskProviderSelection {
+        /// A label locating the task.
+        task: String,
+        /// The document that authored the task.
+        task_path: PathBuf,
+        /// The file that wrote the hint: the task's prompt document, the file
+        /// whose `with` set it, or the sequence for a caller setter.
+        hint_path: PathBuf,
+        /// The hint's source-rooted property (`agent`, `tasks[1].with.agent`).
+        property: String,
+        /// The enclosing containers, outermost first (`group \`review\``).
+        containers: Vec<String>,
+        /// Why no provider can be selected. Boxed: the classified state it
+        /// may carry would otherwise widen every `CompositionError`.
+        problem: Box<SequenceTaskProviderProblem>,
+    },
+
     /// The `agent` frontmatter property is not a valid type.
     #[error("frontmatter `agent` must be a string or array of strings, got {0}")]
     AgentHintWrongType(String),
@@ -288,6 +321,10 @@ pub enum CompositionError {
     /// The `interactive` frontmatter property is not a boolean.
     #[error("frontmatter `interactive` must be a boolean (true/false), got {0}")]
     InteractiveHintWrongType(String),
+
+    /// The `yolo` frontmatter property is not a boolean.
+    #[error("frontmatter `yolo` must be a boolean (true/false), got {0}")]
+    YoloHintWrongType(String),
 
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
@@ -600,7 +637,7 @@ pub enum CompositionError {
         line: usize,
     },
 
-    /// A lifecycle notification property failed to deserialize.
+    /// A lifecycle frontmatter property has an invalid value.
     #[error("invalid lifecycle property `{property}`: {message}")]
     LifecycleInvalid {
         /// The frontmatter property that failed to parse (e.g. `"success"`).
@@ -611,15 +648,20 @@ pub enum CompositionError {
         source_file: PathBuf,
         /// The unknown field name extracted from the serde error (e.g. `"speak"`).
         unknown_field: Option<String>,
-        /// The list of valid field names for the lifecycle notification.
+        /// The valid field names, when the error is an unknown field.
         expected_fields: Vec<String>,
     },
 
-    /// A lifecycle notification property has both `say` and `say_first`.
-    #[error("lifecycle property `{0}` has both `say` and `say_first`; only one is allowed")]
+    /// One lifecycle dictionary holds both `say` and its alias `speak`.
+    ///
+    /// The two keys name the same canonical verb, and a dictionary holds each
+    /// canonical verb at most once. Carries the dictionary's authored path.
+    #[error("lifecycle dictionary `{0}` has both `say` and `speak`; they are the same verb, so use one")]
     LifecycleSayConflict(String),
 
-    /// A lifecycle notification property references an unknown sound effect.
+    /// A lifecycle `effect` action names an unknown sound effect.
+    ///
+    /// Carries the action's authored path and the name.
     #[error("lifecycle property `{0}` references unknown sound effect `{1}`")]
     LifecycleUnknownEffect(String, String),
 
@@ -639,8 +681,8 @@ pub enum CompositionError {
     LifecycleNestedSpanInLiteral {
         /// The prompt file whose lifecycle frontmatter holds the literal.
         source_path: PathBuf,
-        /// Dotted lifecycle key path, e.g. `success.say` or
-        /// `finalize.stack[0].when`.
+        /// Authored lifecycle path, e.g. `success[0].say.text` or
+        /// `finalize[0].when`.
         property: String,
         /// The authored literal, quotes included.
         literal: String,
@@ -673,12 +715,38 @@ pub enum CompositionError {
         replacement: String,
     },
 
-    /// A lifecycle stack item has an invalid shape (not an object, missing
-    /// `action` key, unknown key, etc.).
+    /// A frontmatter document uses removed lifecycle, loop, or container grammar.
     ///
-    /// Raised at parse time while walking a `stack:` block. The `property`
-    /// names the owning event (e.g. `"start"`) so the diagnostic can point at
-    /// the right frontmatter block.
+    /// One variant covers every retired spelling: the `stack:` key, the
+    /// `action:` item aggregator (including the `{action: verb, …}`
+    /// discriminator map), `say_first`, the communication `message`/`sound`/
+    /// `route` parameters, task `setup`/`teardown`, group `execution`, sequence
+    /// `fail_fast`, misplaced container events, and reads of the five `_loop_*` names. It is not
+    /// `Lifecycle*`-prefixed because a `_loop_*` read in a document body is not
+    /// lifecycle grammar. There is no acceptance period: the old spelling never
+    /// runs.
+    #[error(
+        "`{path}` uses the removed `{removed}` grammar ({source_path}); {replacement}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    RemovedGrammar {
+        /// The document that holds the removed spelling.
+        source_path: PathBuf,
+        /// The authored path of the removed spelling, e.g. `start.stack`,
+        /// `failure[0].say.message`, or `loop.while`.
+        path: String,
+        /// The removed spelling, e.g. `stack`, `say_first`, `_loop_count`.
+        removed: String,
+        /// What to write instead.
+        replacement: String,
+    },
+
+    /// A lifecycle stack, item, or body has an invalid shape (wrong type, an
+    /// empty explicit branch, an orphan `then`/`else`, a sixth nesting level,
+    /// a misplaced `no_error`, and so on).
+    ///
+    /// Raised at parse time. The `property` is the authored path of the
+    /// offending node so the diagnostic can point at the right line.
     #[error(
         "invalid lifecycle stack item in `{property}` ({source_path}): {message}",
         source_path = biscuit_file::to_portable_string(source_path)
@@ -686,13 +754,13 @@ pub enum CompositionError {
     LifecycleStackInvalidShape {
         /// The prompt file whose lifecycle frontmatter held the malformed stack.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`, `"success.stack[2]"`).
+        /// The authored path of the offending node (e.g. `start[0].then`).
         property: String,
         /// Human-readable description of the shape problem.
         message: String,
     },
 
-    /// A lifecycle stack item's `when:` condition failed to parse.
+    /// A lifecycle `when:` condition failed to parse.
     ///
     /// The typed sibling of [`LifecycleStackInvalidShape`] for the one shape
     /// site that holds a concrete [`ParseError`]; every other site rejects a
@@ -712,7 +780,7 @@ pub enum CompositionError {
     LifecycleWhenExpressionInvalid {
         /// The prompt file whose lifecycle frontmatter held the condition.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// Human-readable description of the parse failure.
         message: String,
@@ -734,7 +802,7 @@ pub enum CompositionError {
     LifecycleActionInvalidShortForm {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The raw short-form string exactly as authored.
         raw: String,
@@ -751,7 +819,7 @@ pub enum CompositionError {
     LifecycleActionInvalidLongForm {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The action verb (e.g. `"set_frontmatter"`, `"shell"`).
         action: String,
@@ -780,27 +848,12 @@ pub enum CompositionError {
     LifecycleUnknownVerb {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The unrecognized verb.
         verb: String,
         /// Did-you-mean rewrite, empty when no suggestion is available.
         rewrite: String,
-    },
-
-    /// A lifecycle stack item is ambiguous between positional and key/value
-    /// forms because it is a multi-key object without an explicit `action:` key.
-    #[error(
-        "ambiguous lifecycle stack item in `{property}` ({source_path}): {message}",
-        source_path = biscuit_file::to_portable_string(source_path)
-    )]
-    LifecycleStackAmbiguous {
-        /// The prompt file whose lifecycle frontmatter held the stack item.
-        source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
-        property: String,
-        /// Human-readable description with did-you-mean rewrites.
-        message: String,
     },
 
     /// A positional lifecycle action received a direct YAML map value.
@@ -815,7 +868,7 @@ pub enum CompositionError {
     LifecycleObjectDataThroughInterpolationPositional {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The action verb.
         verb: String,
@@ -830,26 +883,11 @@ pub enum CompositionError {
     LifecycleSetPositionalRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event, indexed stack item, or task `side_effect` property.
+        /// The authored path of the node that holds the `set` verb (e.g.
+        /// `start[0]`, `start` for a root dictionary, or a task's
+        /// `tasks[0].side_effect`).
         property: String,
-        /// Path within the stack item, rooted at `action[N].set`; a task's single
-        /// `side_effect` action has no index, so its path is rooted at `set`.
-        path: String,
-    },
-
-    /// The removed `{action: set, key: ..., value: ...}` form was used.
-    #[error(
-        "lifecycle `{property}.{path}` uses the removed long-form `set` action ({source_path}); \
-         use `set: {{property: value}}`",
-        source_path = biscuit_file::to_portable_string(source_path)
-    )]
-    LifecycleSetLongFormRemoved {
-        /// The prompt file whose lifecycle frontmatter held the action.
-        source_path: PathBuf,
-        /// Owning event, indexed stack item, or task `side_effect` property.
-        property: String,
-        /// Path within the stack item, rooted at `action[N].set`; a task's single
-        /// `side_effect` action has no index, so its path is rooted at `set`.
+        /// The `set`-rooted path below `property`.
         path: String,
     },
 
@@ -862,10 +900,11 @@ pub enum CompositionError {
     LifecycleSetNotMapping {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event, indexed stack item, or task `side_effect` property.
+        /// The authored path of the node that holds the `set` verb (e.g.
+        /// `start[0]`, `start` for a root dictionary, or a task's
+        /// `tasks[0].side_effect`).
         property: String,
-        /// Path within the stack item, rooted at `action[N].set`; a task's single
-        /// `side_effect` action has no index, so its path is rooted at `set`.
+        /// The `set`-rooted path below `property`.
         path: String,
         /// The authored payload type or named unsupported whole-value form.
         actual: String,
@@ -880,7 +919,7 @@ pub enum CompositionError {
     LifecycleSetInvalidKey {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event, indexed stack item, or task `side_effect` property.
+        /// The authored path of the node that holds the `set` verb.
         property: String,
         /// The deepest representable `set` path.
         path: String,
@@ -902,7 +941,7 @@ pub enum CompositionError {
     LifecycleObjectDataThroughInterpolationParameter {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The action verb.
         verb: String,
@@ -910,59 +949,62 @@ pub enum CompositionError {
         param: String,
     },
 
-    /// `proxy.with` was authored with something other than a YAML mapping.
+    /// A `with:` — a prompt task's, or a `proxy`, `retry`, or `prep`
+    /// directive's — was authored with something other than a YAML mapping
+    /// (including `null`).
     #[error(
-        "`{property}.{path}` must be a mapping, got {actual} ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        "`{at}` must be a mapping, got {actual} ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path),
+        at = with_property_path(property, path)
     )]
-    LifecycleProxyWithNotMapping {
-        /// The prompt file whose lifecycle frontmatter held the action.
+    LifecycleWithNotMapping {
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`); the stack annotator upgrades
-        /// this to `"{event}.stack[{i}]"`.
+        /// The authored path of the `with`'s owner: the action (e.g.
+        /// `failure[0].retry`) or the task (`sequence[1]`; empty for the task
+        /// an external `kind: task` file is).
         property: String,
-        /// The `with`-rooted path within the stack item (e.g.
-        /// `"action[0].with"`). Joined to `property` for the rendered
-        /// property path.
+        /// The `with`-rooted path below the action (`with`). Joined to
+        /// `property` for the rendered property path.
         path: String,
         /// The JSON type name of the authored value.
         actual: String,
     },
 
-    /// `proxy.with` was supplied as a single whole-mapping interpolation
+    /// A `with` overlay was supplied as a single whole-mapping interpolation
     /// (`with: "{{ payload }}"`) rather than explicit keys.
     ///
     /// Named out-of-scope for v1: authors write the mapping explicitly and may
     /// inject typed object or array values at individual keys.
     #[error(
-        "`{property}.{path}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        "`{at}` cannot be supplied as a whole-mapping interpolation `{raw}` ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path),
+        at = with_property_path(property, path)
     )]
-    LifecycleProxyWithWholeMapping {
-        /// The prompt file whose lifecycle frontmatter held the action.
+    LifecycleWithWholeMapping {
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// Owning event name; upgraded to `"{event}.stack[{i}]"` by the stack
-        /// annotator.
+        /// The authored path of the `with`'s owner (action or task).
         property: String,
-        /// The `with`-rooted path within the stack item.
+        /// The `with`-rooted path below the action.
         path: String,
         /// The authored string, verbatim.
         raw: String,
     },
 
-    /// A `proxy.with` key carries an interpolation span. Keys name target
+    /// A `with` overlay key carries an interpolation span. Keys name target
     /// frontmatter properties and are never interpolated.
     #[error(
-        "`{property}.{path}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        "`{at}` has a dynamic key `{key}`; `with:` keys must be static strings ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path),
+        at = with_property_path(property, path)
     )]
-    LifecycleProxyWithDynamicKey {
-        /// The prompt file whose lifecycle frontmatter held the action.
+    LifecycleWithDynamicKey {
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// Owning event name; upgraded to `"{event}.stack[{i}]"` by the stack
-        /// annotator.
+        /// The authored path of the `with`'s owner (action or task).
         property: String,
-        /// The `with`-rooted path within the stack item. It gains a trailing
+        /// The `with`-rooted path below the action. It gains a trailing
         /// `.{key}` segment only when the key is a safe path segment — a
         /// dotted path built from an unrepresentable key would point at a
         /// property that does not exist.
@@ -971,26 +1013,32 @@ pub enum CompositionError {
         key: String,
     },
 
-    /// A `proxy.with` value could not be resolved at event time.
+    /// A `with` value could not be resolved: a directive's when it fired, a
+    /// prompt task's at the task's turn.
     ///
     /// The message carries the underlying expression-layer reason. Neither it
     /// nor any other field echoes a resolved overlay value: an overlay may
     /// carry secrets, so a diagnostic names properties, not contents.
     #[error(
-        "`{property}.{path}` could not be resolved for the proxy to `{target}`: {message} \
-         ({source_path})",
-        source_path = biscuit_file::to_portable_string(source_path)
+        "`{at}` could not be resolved for {purpose}: {message} ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path),
+        at = with_property_path(property, path),
+        purpose = with_purpose(property, target)
     )]
-    LifecycleProxyWithEvaluationFailed {
-        /// The prompt file whose lifecycle frontmatter held the action.
+    LifecycleWithEvaluationFailed {
+        /// The file that authored the `with`.
         source_path: PathBuf,
-        /// The `"{event}.stack[{i}]"` property that fired.
+        /// The authored path of the `with`'s owner: the action that fired
+        /// (e.g. `failure[0].proxy`), whose last segment is the directive
+        /// ([`overlay_directive`]; the verb is not stored separately so the
+        /// error enum stays within its size budget), or the prompt task
+        /// (`sequence[1]`; empty for an external `kind: task` file).
         property: String,
-        /// The failing path within the stack item, rooted at the action and
-        /// carried down to the exact nested value (e.g.
-        /// `"action[0].with.metadata.area"`).
+        /// The failing path below the action, carried down to the exact nested
+        /// value (e.g. `with.metadata.area`).
         path: String,
-        /// The evaluated proxy target the overlay was being built for.
+        /// The document the overlay was built for: the evaluated proxy target,
+        /// the current document for `retry`, or the task's prompt reference.
         target: String,
         /// The expression-layer reason.
         message: String,
@@ -999,21 +1047,21 @@ pub enum CompositionError {
         cause: Option<super::lifecycle_context::LifecycleCause>,
     },
 
-    /// A parameter that only `proxy` accepts was authored on another action.
+    /// A `with` overlay was authored on an action that does not take one.
+    ///
+    /// Only `proxy`, `retry`, and `prep` accept `with`.
     #[error(
-        "lifecycle action `{verb}` in `{property}` does not accept a `{param}` parameter; \
-         `{param}` is only valid on `proxy` ({source_path})",
+        "lifecycle action `{verb}` in `{property}` does not accept a `with` overlay; \
+         `with` is only valid on `proxy`, `retry`, and `prep` ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
-    LifecycleProxyOnlyParameter {
+    LifecycleWithUnsupported {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the action (e.g. `failure[0].resume`).
         property: String,
-        /// The action verb that received the parameter.
+        /// The action verb that received the overlay.
         verb: String,
-        /// The proxy-only parameter name.
-        param: String,
     },
 
     /// A positional lifecycle action received the wrong number of arguments.
@@ -1024,7 +1072,7 @@ pub enum CompositionError {
     LifecycleWrongArity {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The action verb.
         verb: String,
@@ -1034,18 +1082,18 @@ pub enum CompositionError {
 
     /// The short-form lifecycle action grammar `verb(args)` has been removed.
     ///
-    /// Authors must use positional (`verb: value`) or key/value
-    /// (`{ action: verb, ... }`) form. The `rewrite` field carries the
-    /// positional equivalent for the did-you-mean message.
+    /// Authors must use short form (`verb: value`) or long form
+    /// (`verb: { param: value }`). The `rewrite` field carries the short-form
+    /// equivalent for the did-you-mean message.
     #[error(
         "short-form lifecycle action `{raw}` in `{property}` has been removed ({source_path}).\n\n\
-         Use the positional or key/value form instead: {rewrite}",
+         Use the short form (`verb: value`) or the long form instead: {rewrite}",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleShortFormRemoved {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The raw short-form string exactly as authored.
         raw: String,
@@ -1053,21 +1101,21 @@ pub enum CompositionError {
         rewrite: String,
     },
 
-    /// A variadic expression-function action was authored in key/value form.
+    /// A variadic expression-function action was authored in long form.
     ///
     /// Variadic functions (`and`, `or`) accept a variable number of positional
     /// arguments and have no deterministic named-parameter mapping, so they
-    /// reject the `{ action: verb, ... }` shape. Authors must use the positional
-    /// array form (`and: [a, b, c]`).
+    /// reject the `verb: { param: value }` shape. Authors must use the
+    /// positional array form (`and: [a, b, c]`).
     #[error(
-        "lifecycle expression function `{verb}` in `{property}` does not support key/value form; \
+        "lifecycle expression function `{verb}` in `{property}` does not support long form; \
          use the positional array form (`{verb}: [...]`) ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleExpressionFunctionKeyValueUnsupported {
         /// The prompt file whose frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The variadic expression-function verb.
         verb: String,
@@ -1085,7 +1133,7 @@ pub enum CompositionError {
     LifecycleActionPlacement {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The rejected action verb (e.g. `"skip"`, `"retry"`).
         action: String,
@@ -1093,36 +1141,36 @@ pub enum CompositionError {
         event: String,
     },
 
-    /// More than one lifecycle control action appeared in a single stack item.
+    /// One lifecycle dictionary holds more than one flow-control directive.
     ///
-    /// The spec's cardinality rule allows at most one lifecycle control action
-    /// per `when/action` block (and it must be the last action). This variant
-    /// covers the "more than one" half.
+    /// A dictionary bundle expands with its directive last, so it may hold at
+    /// most one.
     #[error(
-        "lifecycle stack item in `{property}` has more than one lifecycle action; \
-         at most one is allowed per item ({source_path})",
+        "lifecycle dictionary `{property}` has more than one flow-control directive; \
+         at most one is allowed per dictionary ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleMultipleLifecycleActions {
-        /// The prompt file whose lifecycle frontmatter held the stack item.
+        /// The prompt file whose lifecycle frontmatter held the dictionary.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the dictionary (e.g. `start[0]`).
         property: String,
     },
 
-    /// A lifecycle control action was not the last action in its stack item.
+    /// An unconditional flow-control directive is followed by another item in
+    /// the same list.
     ///
-    /// The spec's cardinality rule allows at most one lifecycle control action
-    /// per `when/action` block, and it must be the last action (subsequent
-    /// actions would be unreachable).
+    /// A directive ends the whole event, so anything after it in its list
+    /// could never run. The rule is list-local: a guarded (`when`) item never
+    /// counts as unconditional.
     #[error(
-        "lifecycle action in `{property}` must be the last action in its stack item ({source_path})",
+        "flow-control directive `{property}` must be the last item in its list ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleActionOrder {
-        /// The prompt file whose lifecycle frontmatter held the stack item.
+        /// The prompt file whose lifecycle frontmatter held the list.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the directive (e.g. `success[0].stop`).
         property: String,
     },
 
@@ -1139,7 +1187,7 @@ pub enum CompositionError {
     LifecycleInvalidArgs {
         /// The prompt file whose lifecycle frontmatter held the action.
         source_path: PathBuf,
-        /// Owning event name (e.g. `"start"`).
+        /// The authored path of the offending action or node (e.g. `start[1].shell`).
         property: String,
         /// The action verb (e.g. `"retry"`, `"proxy"`).
         action: String,
@@ -1154,7 +1202,7 @@ pub enum CompositionError {
     /// (`blocked`, `failure`, and the optional-error `finalize`). Elsewhere the
     /// lifecycle binding catalog declares it unavailable, and Darkmatter's
     /// passive validation rejects a read in any branch at preparation. The
-    /// `doc.err` escape hatch is exempt — it reads the document.
+    /// `fm.err` escape hatch is exempt — it reads the document.
     #[error(
         "lifecycle property `{property}` references `err` in the `{event}` event, \
          which never carries an error ({source_path})",
@@ -1163,7 +1211,7 @@ pub enum CompositionError {
     LifecycleErrNotAvailable {
         /// The prompt file whose lifecycle frontmatter held the reference.
         source_path: PathBuf,
-        /// Dotted lifecycle key path, e.g. `"start.stack[1].action"`.
+        /// Authored lifecycle path, e.g. `"start[1].shell"`.
         property: String,
         /// The event name the reference appeared in (e.g. `"start"`).
         event: String,
@@ -1177,13 +1225,13 @@ pub enum CompositionError {
     ///
     /// Shell commands live inside the deferred lifecycle subtree, so they are
     /// unresolved after main compose. Pre-flight resolves each one via DM2 in
-    /// the lifecycle shell approval scope (`doc.*`, `ctx.*`, `env.*`, document
+    /// the lifecycle shell approval scope (`fm.*`, `ctx.*`, `env.*`, document
     /// properties, read-side functions) and stamps the resolved bytes back so
     /// the approved command equals the executed command. This variant covers
     /// every failure DM2 surfaces: malformed expressions, unknown functions,
-    /// and late-binding references (`err`/`timing`/`group`/`current`/
-    /// `current_env`), which are rejected because shell commands are approved
-    /// at pre-flight time, before any event fires.
+    /// and late-binding references (`err`/`timing`/`group`/`current`), which
+    /// are rejected because shell commands are approved at pre-flight time,
+    /// before any event fires.
     #[error(
         "lifecycle shell command at `{property}` failed pre-flight resolution: {message} \
          (raw: `{raw}`) ({source_path})",
@@ -1192,7 +1240,7 @@ pub enum CompositionError {
     LifecycleShellResolution {
         /// The prompt file whose lifecycle frontmatter held the command.
         source_path: PathBuf,
-        /// Dotted lifecycle key path, e.g. `"start.stack[0].action.command"`.
+        /// Authored lifecycle path, e.g. `"start[0].shell.command"`.
         property: String,
         /// The raw command string exactly as authored (pre-resolution).
         raw: String,
@@ -1206,6 +1254,43 @@ pub enum CompositionError {
         /// registered Claudine diagnostic, so it never changes the rendering.
         #[source]
         source: Option<Box<MarkdownError>>,
+    },
+
+    /// A lifecycle `shell` command or `set` value approved by its typed shape
+    /// was refused when its action executed, before anything started: a
+    /// placeholder's value was missing or rejected by its declared type, the
+    /// filled command matched a blacklist, or a program needs an interpreter.
+    ///
+    /// An input and authorization error, not a command failure, so `no_error`
+    /// never suppresses it. The message names the placeholder, its type, and
+    /// the authored command, never a value.
+    #[error(
+        "lifecycle shell command `{command}` at `{property}` was refused before it ran: {message} \
+         ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleShellTemplateRefused {
+        /// The prompt file whose lifecycle held the command.
+        source_path: PathBuf,
+        /// Authored lifecycle path, e.g. `"start[0].shell"`.
+        property: String,
+        /// The command as authored, placeholders included.
+        command: String,
+        /// Why it was refused, without any value.
+        message: String,
+        /// Darkmatter's typed `MissingValue`, `TemplateValueRejected`,
+        /// `Blacklisted`, or `TemplateTarget`.
+        #[source]
+        source: Box<MarkdownError>,
+    },
+
+    /// Cancellation cleanup cannot start a new attempt or transfer ownership.
+    #[error("lifecycle `{action}` cannot recover a cancelled primitive ({source_path})", source_path = biscuit_file::to_portable_string(source_path))]
+    LifecycleCancellationRecovery {
+        /// Document whose cleanup requested recovery.
+        source_path: PathBuf,
+        /// Refused recovery directive.
+        action: String,
     },
 
     /// A `failure` stack requested `resume(...)` but the agentic loop did
@@ -1250,7 +1335,7 @@ pub enum CompositionError {
 
     /// A flow-control action is valid in the event (placement is universal),
     /// but its runtime effect — run-loop re-entry (`retry`), hand-off
-    /// (`proxy`), or the deferred-queue (`requeue`) — is not wired for events
+    /// (`proxy`), or deferred re-execution (`defer`) — is not wired for events
     /// outside the provider run loop: `initialize`, a compose pre-flight
     /// `blocked`, and the `loop` gate. The control is surfaced as a clear error
     /// rather than a silent no-op. (`resume` reports `ResumeWithoutSession`
@@ -1287,10 +1372,85 @@ pub enum CompositionError {
         source_path: PathBuf,
     },
 
-    /// A lifecycle stack requested `requeue(...)`, but the runtime could not
-    /// record the prompt in the deferred-execution queue.
+    /// A `break` fired in a page that no loop encloses. Whether a loop
+    /// encloses a `break` is a run-time fact, so the directive fails its
+    /// event when it fires; `no_error` does not suppress it.
     #[error(
-        "lifecycle `requeue` (delay `{delay}`{reason}) could not enqueue the \
+        "lifecycle `break` at `{property}` fired outside any loop ({source_path}); `break` ends \
+         the nearest enclosing loop of a document, group, or sequence",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleBreakWithoutLoop {
+        /// The file whose stack fired the `break`.
+        source_path: PathBuf,
+        /// The authored path of the directive, e.g. `start[1].break`.
+        property: String,
+    },
+
+    /// A `prep` target did not return successfully: it failed, ended with a
+    /// non-zero status (a non-zero root `break` code included), or could not
+    /// be resolved, prepared, or approved. The caller's event fails with the
+    /// target's failure as its cause.
+    #[error(
+        "`prep` of `{target}` failed: {message} (`{property}` in {source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecyclePrepFailed {
+        /// The file whose stack made the call.
+        source_path: PathBuf,
+        /// The authored path of the directive, e.g. `initialize[0].prep`.
+        property: String,
+        /// The target reference as the directive evaluated it.
+        target: String,
+        /// What the target reported.
+        message: String,
+        /// The target failure's own diagnostic identity, when its error chain
+        /// carried one. Boxed to keep `CompositionError` small.
+        snapshot: Option<Box<DiagnosticSnapshot>>,
+    },
+
+    /// A `prep` call would re-enter a document with an active call or handoff
+    /// (a self-call, or A calling B calling A), or exceed the hop limit.
+    #[error(
+        "`prep` of `{target}` would re-enter an active call or exceed the hop limit ({limit}); \
+         active chain: {chain} (`{property}` in {source_path})",
+        chain = chain.join(" -> "),
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecyclePrepCycle {
+        /// The file whose stack made the call.
+        source_path: PathBuf,
+        /// The authored path of the directive.
+        property: String,
+        /// The target that would close the cycle or overflow the limit.
+        target: String,
+        /// The active chain of calls (resolved paths, outermost first).
+        chain: Vec<String>,
+        /// The maximum number of hops permitted.
+        limit: usize,
+    },
+
+    /// A `prep` was reached by a caller that runs no targets: an in-process
+    /// library caller with no installed target runner.
+    #[error(
+        "lifecycle `prep` at `{property}` cannot run here: this caller runs no `prep` targets ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecyclePrepUnavailable {
+        /// The file whose stack made the call.
+        source_path: PathBuf,
+        /// The authored path of the directive.
+        property: String,
+    },
+
+    /// A lifecycle stack requested `defer`, but the runtime could not record
+    /// the prompt in the deferred-execution queue.
+    ///
+    /// **Planned:** nothing raises this yet; `defer` reports
+    /// [`Self::LifecycleDeferNotImplemented`] until the rendezvous scheduler
+    /// can receive prompts.
+    #[error(
+        "lifecycle `defer` (delay `{delay}`{reason}) could not enqueue the \
          prompt via rendezvous: {message} ({source_path})",
         reason = match reason {
             Some(r) => format!(", reason `{r}`"),
@@ -1299,7 +1459,7 @@ pub enum CompositionError {
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleRequeueEnqueueFailed {
-        /// The prompt file whose stack requested requeue.
+        /// The prompt file whose stack requested `defer`.
         source_path: PathBuf,
         /// The requested delay duration string.
         delay: String,
@@ -1348,7 +1508,7 @@ pub enum CompositionError {
     LifecycleTransitionUnownedAtStage {
         /// The document whose stack returned the transition.
         source_path: PathBuf,
-        /// The dotted `"{event}.stack[{i}].action[{j}]"` location.
+        /// The action's authored path, e.g. `failure[0].proxy`.
         property: String,
         /// The control verb, as authored (`retry`, `resume`, `defer`).
         verb: &'static str,
@@ -1380,7 +1540,7 @@ pub enum CompositionError {
     LifecycleProxyWithoutOwningCoordinator {
         /// The document whose stack authored the proxy.
         source_path: PathBuf,
-        /// The dotted `"{event}.stack[{i}].action[{j}]"` location.
+        /// The action's authored path, e.g. `failure[0].proxy`.
         property: String,
         /// The proxy target, as the source authored it.
         target: String,
@@ -1408,7 +1568,7 @@ pub enum CompositionError {
         target_path: PathBuf,
         /// The document whose lifecycle requested the hand-off.
         source_path: PathBuf,
-        /// The dotted `"{event}.stack[{i}].action[{j}]"` location of the
+        /// The authored path, e.g. `failure[0].proxy`, of the
         /// `proxy` action.
         property: String,
         /// What the staged boot could not produce.
@@ -1442,18 +1602,20 @@ pub enum CompositionError {
     /// leaves the composition outcome unchanged (per the action error-
     /// propagation table) and never produces this variant.
     #[error(
-        "lifecycle `loop` gate raised an error: {reason} ({source_path})",
+        "lifecycle `loop` gate raised an error after pass {iteration}: {reason} ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleLoopGateFailed {
-        /// The prompt file whose `loop:` gate stack raised the error.
+        /// The file whose `loop:` gate stack raised the error.
         source_path: PathBuf,
+        /// The 1-based pass the gate followed.
+        iteration: usize,
         /// Evaluated reason (explicit `error(...)` argument).
         reason: String,
     },
 
     /// A late-binding lifecycle expression *raised* at event time — a `when:`
-    /// guard, a top-level communication string, or an action-value
+    /// guard, a communication text, or an action-value
     /// interpolation that threw (an unknown function, a read of an unavailable
     /// lifecycle global, a malformed `{{ … }}` span, or a read-side function
     /// error).
@@ -1480,13 +1642,12 @@ pub enum CompositionError {
         surface: String,
         /// The raised expression's message.
         message: String,
-        /// Source-rooted semantic property that raised (`success.say`,
-        /// `failure.stack[0].when`,
-        /// `start.stack[1].action[0].set.metadata.files[2]`), when the executor
-        /// located it.
+        /// Source-rooted authored path that raised (`success[0].say`,
+        /// `failure[0].when`, `start[1].set.metadata.files[2]`), when the
+        /// executor located it.
         property: Option<String>,
-        /// Why evaluation failed; selects the remediation hint. Zero-sized
-        /// while it has one variant, so it costs `CompositionError` nothing.
+        /// Why evaluation failed; selects the remediation hint. A fieldless
+        /// enum, so it costs `CompositionError` one byte at most.
         reason: LifecycleEvaluationReason,
         /// The typed evaluation failure (the Darkmatter error is its source),
         /// when the expression layer raised one.
@@ -1736,10 +1897,10 @@ pub enum CompositionError {
 
     /// A `prompt:` task referenced a document that itself declares `sequence:`.
     ///
-    /// Nested sequences are out of scope in v1 (spec → *Static Preflight*).
+    /// A sequence document needs an explicit container executable.
     #[error(
-        "nested sequences are not supported: `{path}` declares `sequence:` but is \
-         referenced as a prompt task from `{referenced_from}`"
+        "`{path}` declares `sequence:` but is referenced as a prompt task from \
+         `{referenced_from}`; use `sequence: <file>` instead"
     )]
     SequenceNestedSequence {
         /// The referenced prompt document.
@@ -1851,19 +2012,23 @@ pub enum CompositionError {
         second: String,
     },
 
-    /// A task's shell command references a value that does not exist at
-    /// preflight, so its approved bytes could never equal its executed bytes.
+    /// A task's shell command reads a value no approval can cover: `err`,
+    /// `timing`, or `current`, which exist only once an event fires, or
+    /// `group` outside any group. The late values a sequence produces
+    /// (`outputs`, `loop`, and `group` inside a group) are approved as
+    /// templates instead.
     #[error(
-        "shell command `{command}` in {task} references `{root}`, which is not available at \
-         preflight; shell commands are approved before the sequence starts, so only \
-         early-binding values (`state`, `params`, `doc.*`, `ctx.*`, `env.*`) may be used. \
-         Route work that consumes prior output through a `prompt` or `side_effect` task"
+        "shell command `{command}` in {task} references `{root}`, which is not available to a \
+         sequence shell command; shell commands are approved before the sequence starts, so \
+         they may read early-binding values (step values, a task's `with`, `fm.*`, `ctx.*`, \
+         `env.*`) and \
+         the values earlier steps produce (`outputs`, `loop`, and `group` inside a group)"
     )]
     SequenceShellLateBinding {
         /// The authored command.
         command: String,
-        /// The offending root (`outputs`, `err`, `timing`, `group`, `current`,
-        /// `current_env`).
+        /// The offending root (`err`, `timing`, `current`, or `group` outside
+        /// a group).
         root: String,
         /// A label locating the task.
         task: String,
@@ -1895,8 +2060,9 @@ pub enum CompositionError {
         task: String,
     },
 
-    /// A task's shell command failed early-binding resolution at preflight.
-    #[error("shell command `{command}` in {task} could not be resolved at preflight: {message}")]
+    /// A task's shell command failed approval-time resolution or runtime
+    /// template preparation. A typed lower-layer refusal remains its source.
+    #[error("shell command `{command}` in {task} could not be prepared: {message}")]
     SequenceShellResolution {
         /// The authored command.
         command: String,
@@ -1907,6 +2073,50 @@ pub enum CompositionError {
         /// The typed lower-layer failure, when one was raised.
         #[source]
         source: Option<Box<MarkdownError>>,
+    },
+
+    /// A late value a task's shell command reads was missing or invalid when
+    /// the task was reached, so the task failed before any of its commands
+    /// ran. Earlier steps' effects stand. The value is never shown.
+    #[error("shell command `{command}` in {task} cannot run: {message}")]
+    SequenceShellLateValue {
+        /// The authored command.
+        command: String,
+        /// A label locating the task.
+        task: String,
+        /// Which placeholder failed and why, without its value.
+        message: String,
+        /// Darkmatter's typed `MissingValue` or `TemplateValueRejected`.
+        #[source]
+        source: Box<MarkdownError>,
+    },
+
+    /// A task's preflight-approved shell command resolves to different text
+    /// under the environment its own document captured.
+    ///
+    /// Sequence preflight resolves a command whose values all exist at
+    /// approval under the launch environment, before any later task captures
+    /// its own. A task whose captured environment, or a runtime value an
+    /// earlier loop pass wrote, changes that text is refused before it runs:
+    /// resolved text never authorizes other text.
+    #[error(
+        "shell command `{command}` in {task} was approved at sequence preflight as `{approved}`, \
+         but this task now resolves it to `{resolved}` ({changed}); a preflight \
+         approval covers only the exact text it approved, so the command was refused before it ran"
+    )]
+    SequenceShellApprovalChanged {
+        /// The authored command.
+        command: String,
+        /// A label locating the task.
+        task: String,
+        /// The text sequence preflight approved.
+        approved: String,
+        /// The text the task's environment resolves the command to.
+        resolved: String,
+        /// The environment variables and runtime values the command names
+        /// whose values changed, or a note that the change is not attributable
+        /// to a named one.
+        changed: String,
     },
 
     // -- Atomic task execution (phase 7) ---------------------------------------
@@ -2045,15 +2255,16 @@ pub enum CompositionError {
         problem: String,
     },
 
-    /// A task parameter targets a reserved key.
+    /// A task `with:` key targets a reserved key: a generated step field or
+    /// one of the executor-owned `seq`, `group`, and `loop` views.
     #[error(
-        "parameter `{key}` in {task} targets a reserved key; `state`, `previous`, `next`, \
-         `outputs`, and `sequence_id` are executor-owned views"
+        "`with.{key}` in {task} targets a reserved key; generated step fields and \
+         `seq`, `group`, and `loop` are executor-owned"
     )]
-    SequenceTaskParamReserved {
+    SequenceTaskWithReserved {
         /// A label locating the task.
         task: String,
-        /// The refused parameter name.
+        /// The refused `with` key.
         key: String,
     },
 
@@ -2062,7 +2273,7 @@ pub enum CompositionError {
     SequenceTaskValueResolution {
         /// A label locating the task.
         task: String,
-        /// The task field being evaluated (`params.topic`, `timeout`).
+        /// The task field being evaluated (`timeout`, `variables.topic`).
         field: String,
         /// The underlying evaluation failure.
         message: String,
@@ -2121,24 +2332,154 @@ pub enum CompositionError {
     SequenceInteractiveRejected(PathBuf),
 
     // -- Loop errors -----------------------------------------------------------
-    /// The `loop` frontmatter value is invalid.
-    #[error("invalid loop definition: {0}")]
-    LoopInvalid(String),
+    /// A `loop:` block's configuration is invalid.
+    ///
+    /// Raised before the loop starts, for a document, group, or sequence loop
+    /// alike. `property` is the authored path of the offending key (`loop.max`,
+    /// `tasks[2].loop.until`), or of the block itself when the block is wrong
+    /// as a whole; `message` names keys by the same rooted path.
+    #[error(
+        "invalid loop definition ({source_path}): {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopInvalid {
+        /// The file that holds the `loop:` block.
+        source_path: PathBuf,
+        /// The authored path of the offending key or block.
+        property: String,
+        /// What is wrong, naming the key.
+        message: String,
+    },
+
+    /// A templated `loop.max` failed to parse or evaluate during its one
+    /// resolution before the loop starts.
+    #[error(
+        "invalid loop definition ({source_path}): `{property}` template `{template}` failed \
+         to {stage}: {source}",
+        source_path = biscuit_file::to_portable_string(source_path),
+        stage = source.stage()
+    )]
+    LoopMaxTemplateInvalid {
+        /// The file that holds the `loop:` block.
+        source_path: PathBuf,
+        /// The authored path of the cap (`loop.max`).
+        property: String,
+        /// The template as authored.
+        template: String,
+        /// The typed parse-or-evaluate failure.
+        #[source]
+        source: LoopExpressionCause,
+    },
+
+    /// `on_rate_limit` under a container's `loop:`.
+    ///
+    /// The policy reads the rate-limit signal a provider reports on a
+    /// document iteration; a group or sequence pass has no such signal.
+    #[error(
+        "`{property}` is not accepted on a {owner} loop ({source_path}); `on_rate_limit` \
+         applies only to a document loop, whose provider reports rate limits",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopRateLimitPolicyNotAccepted {
+        /// The file that holds the `loop:` block.
+        source_path: PathBuf,
+        /// The authored path of the key (`tasks[2].loop.on_rate_limit`).
+        property: String,
+        /// The container that owns the loop.
+        owner: LoopOwner,
+    },
+
+    /// `loop` on a task that cannot own one. Only an inline nested sequence's
+    /// task entry carries `loop:`; `hint` names where this loop belongs.
+    #[error(
+        "`{property}` is not accepted here ({source_path}): {hint}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    TaskLoopMisplaced {
+        /// The file that holds the task.
+        source_path: PathBuf,
+        /// The authored path of the misplaced key (`sequence[0].loop`).
+        property: String,
+        /// Where the loop belongs instead.
+        hint: String,
+    },
+
+    /// A task's `when:` guard is not a non-empty string holding a valid
+    /// expression.
+    #[error(
+        "invalid task guard `{property}` ({source_path}): {message}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    TaskWhenInvalid {
+        /// The file that holds the task.
+        source_path: PathBuf,
+        /// The authored path of the guard (`sequence[0].when`).
+        property: String,
+        /// What is wrong.
+        message: String,
+        /// The expression parse failure, when the guard is a string that
+        /// does not parse.
+        #[source]
+        source: Option<ParseError>,
+    },
+
+    /// A task's `when:` guard raised when its task's turn came: the task
+    /// fails rather than reading the guard as false.
+    #[error(
+        "task guard `{property}` could not be evaluated ({source_path}): {cause}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    TaskWhenEvaluationFailed {
+        /// The file that holds the task.
+        source_path: PathBuf,
+        /// The authored path of the guard (`sequence[0].when`).
+        property: String,
+        /// Why the guard raised.
+        #[source]
+        cause: TaskGuardFailure,
+    },
+
+    /// `when:` at a sequence document's root, or on a group object.
+    #[error(
+        "`{property}` is not accepted here ({source_path}): {hint}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    WhenMisplaced {
+        /// The file that holds the key.
+        source_path: PathBuf,
+        /// The authored path of the key (`when`, `sequence[0].group.when`).
+        property: String,
+        /// Why it cannot go there, and where a guard goes instead.
+        hint: String,
+    },
+
+    /// `CLAUDINE_MAX_ITERATIONS` holds something other than a positive
+    /// integer while a loop reads it as its runtime cap override.
+    #[error(
+        "invalid `CLAUDINE_MAX_ITERATIONS` value `{value}` for the loop of {source_path}: \
+         {reason}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopMaxIterationsEnvInvalid {
+        /// The looping document.
+        source_path: PathBuf,
+        /// The variable's value as read.
+        value: String,
+        /// Why it is not a cap.
+        reason: String,
+    },
 
     /// A `loop.while` / `loop.until` condition failed to parse or evaluate.
     ///
-    /// The typed sibling of [`LoopInvalid`], which is a bare newtype with no
-    /// slot for a cause. Unlike the lifecycle shape family, this variant derives
+    /// Raised while the loop runs, so it carries the typed cause rather than a
+    /// location. Unlike the lifecycle shape family, this variant derives
     /// its prose at `Display` time from `kind`, `condition`, and the cause's
     /// stage rather than storing a `message`: it is the only renderer of that
     /// prose, so a second copy would be a field that can drift from the one
-    /// string that reads it. Byte-identical to the `LoopInvalid(format!(…))` it
-    /// replaces.
+    /// string that reads it.
     ///
     /// Staged here for the looping burn-down batch, which owns
     /// `looping/expression.rs`; see `features/2026-07-13-error-propogation/burndown-triage.md`.
-    ///
-    /// [`LoopInvalid`]: CompositionError::LoopInvalid
     #[error(
         "invalid loop definition: failed to {stage} loop.{kind} `{condition}`: {source}",
         stage = source.stage()
@@ -2151,6 +2492,46 @@ pub enum CompositionError {
         /// The typed parse-or-evaluate failure.
         #[source]
         source: LoopExpressionCause,
+    },
+
+    /// A loop's condition or staged action failed after a pass.
+    ///
+    /// Belongs to the loop owner: nothing of the failing action is committed,
+    /// it is never condition completion, and no terminal event or `finalize`
+    /// runs again for the pass that already finished.
+    #[error(
+        "`{property}` failed after pass {iteration} ({source_path}): {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopEvaluationFailed {
+        /// The file that authors the `loop:` block.
+        source_path: PathBuf,
+        /// The authored key that failed (`loop.until`, `sequence[1].loop.action`).
+        property: String,
+        /// The 1-based pass the condition or action followed.
+        iteration: usize,
+        /// The parse, evaluation, or action failure.
+        #[source]
+        source: Box<CompositionError>,
+    },
+
+    /// A container loop's staged action wrote a key the runtime layer
+    /// refuses (a reserved root, or a key that is not a plain property name).
+    /// Nothing of the action is committed.
+    #[error(
+        "`{property}` failed after pass {iteration} ({source_path}): {source}",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LoopActionWriteRefused {
+        /// The file that authors the `loop:` block.
+        source_path: PathBuf,
+        /// The authored action key (`loop.action`).
+        property: String,
+        /// The 1-based pass the action followed.
+        iteration: usize,
+        /// Why the runtime layer refused the write.
+        #[source]
+        source: super::runtime_state::RuntimeMutationError,
     },
 
     /// Loop execution exceeded its configured safety cap.
@@ -2445,9 +2826,13 @@ pub enum CompositionError {
         /// The value the user provided (frontmatter or `key=value`/`--set`),
         /// used as a case-insensitive path substring against the candidates.
         provided: String,
-        /// Glob patterns from the property's `match(...)` constraint. Always
-        /// non-empty for this variant (a bare `file` has no glob to walk).
-        patterns: Vec<String>,
+        /// The property's `match(...)` groups as alternatives: a file
+        /// qualifies when it satisfies **every** group of **some**
+        /// alternative, each group being one `match(...)` list (positives plus
+        /// `!` exclusions). A single schema gives one alternative; an undecided
+        /// root union gives one per contending arm. Never empty for this
+        /// variant (a bare `file` has no glob to walk).
+        alternatives: Vec<Vec<Vec<String>>>,
         /// `true` when the property is declared `file[]`.
         is_array: bool,
         /// The original file-reference failure message (e.g. `no existing file
@@ -2589,7 +2974,7 @@ pub struct FileReferenceContext {
     /// inside a lifecycle stack. `None` for a non-lifecycle surface.
     pub event: Option<String>,
     /// Dotted property path naming the authored value, e.g.
-    /// `"initialize.stack[0].proxy"`.
+    /// `"initialize[0].proxy"`.
     pub property: String,
     /// The reference exactly as authored, before any resolution.
     pub reference: String,
@@ -2648,6 +3033,21 @@ pub enum SequenceLoadCause {
         /// The underlying parse failure.
         #[source]
         source: serde_json::Error,
+    },
+    /// A JSON-family mapping repeats a key. JSON parsers keep the last value,
+    /// which would silently discard authored configuration, so the file is
+    /// rejected instead.
+    #[error(
+        "{}duplicate key `{key}` at `{path}`; each key may appear once per object",
+        line.map(|line| format!("line {line}: ")).unwrap_or_default()
+    )]
+    DuplicateKey {
+        /// The repeated key.
+        key: String,
+        /// The path of the object holding it (`<root>`, `sequence[1].group`).
+        path: String,
+        /// The one-based line of the JSONL/NDJSON record, when line-delimited.
+        line: Option<usize>,
     },
     /// Building or running the step-state schema validator failed.
     ///
@@ -2754,7 +3154,8 @@ pub enum LoopExpressionCause {
 /// Carried as the optional typed `#[source]` of
 /// [`CompositionError::LifecycleActionInvalidLongForm`] so a handler can
 /// recover the concrete Darkmatter [`ParseError`] through
-/// [`std::error::Error::source`] instead of re-parsing the flattened message.
+/// [`std::error::Error::source`] instead of re-parsing the flattened message,
+/// whether the failing expression was a whole value or one span of mixed text.
 /// The [`Invalid`](ActionExprError::Invalid) arm carries the genuinely-prose
 /// rejections (a null, an unsupported number, or object/array scalar data)
 /// that never had a typed lower cause.
@@ -2772,6 +3173,17 @@ pub enum ActionExprError {
     /// payload keeps `CompositionError` under `clippy::result_large_err`.
     #[error("whole-value expression is not valid: {0}")]
     Parse(#[from] Box<ParseError>),
+    /// A `{{ … }}` span inside mixed text (`"status {{ fm. }}"`) did not
+    /// parse. The text stays a literal template; only its spans' syntax is
+    /// checked, so nothing is evaluated.
+    #[error("interpolation span `{{{{ {expression} }}}}` is not valid: {source}")]
+    SpanParse {
+        /// The span's inner expression text, as authored.
+        expression: String,
+        /// The Darkmatter parse failure.
+        #[source]
+        source: Box<ParseError>,
+    },
     /// A scalar shape that cannot become an action expression at all.
     #[error("{0}")]
     Invalid(String),
@@ -2873,9 +3285,11 @@ pub enum InteractiveShape {
     File {
         /// `true` when the property is declared as `file[]`.
         is_array: bool,
-        /// Glob patterns from `match(...)`, empty for a bare `file`/`file[]`
-        /// property (uses the default glob).
-        patterns: Vec<String>,
+        /// The property's `match(...)` groups as alternatives, read as for
+        /// [`CompositionError::UnresolvedFileReference`]; one alternative
+        /// holding every group, or empty for a bare `file`/`file[]` property
+        /// (uses the default glob).
+        alternatives: Vec<Vec<Vec<String>>>,
     },
 }
 
@@ -3184,7 +3598,7 @@ impl CompositionError {
     pub fn lifecycle_cause(&self) -> Option<&super::lifecycle_context::LifecycleCause> {
         match self {
             Self::LifecycleEvaluationError { cause, .. }
-            | Self::LifecycleProxyWithEvaluationFailed { cause, .. } => cause.as_ref(),
+            | Self::LifecycleWithEvaluationFailed { cause, .. } => cause.as_ref(),
             Self::SequenceTaskValueResolution { cause, .. } => Some(cause),
             Self::WithFrontmatter { inner, .. } | Self::LifecycleEvaluationAlreadyEmitted { inner } => {
                 inner.lifecycle_cause()
@@ -3309,7 +3723,6 @@ impl CompositionError {
             | CompositionError::LifecycleActionInvalidShortForm { property, .. }
             | CompositionError::LifecycleActionInvalidLongForm { property, .. }
             | CompositionError::LifecycleUnknownVerb { property, .. }
-            | CompositionError::LifecycleStackAmbiguous { property, .. }
             | CompositionError::LifecycleObjectDataThroughInterpolationPositional { property, .. }
             | CompositionError::LifecycleObjectDataThroughInterpolationParameter { property, .. }
             | CompositionError::LifecycleWrongArity { property, .. }
@@ -3319,7 +3732,7 @@ impl CompositionError {
             | CompositionError::LifecycleActionOrder { property, .. }
             | CompositionError::LifecycleInvalidArgs { property, .. }
             | CompositionError::LifecycleErrNotAvailable { property, .. }
-            | CompositionError::LifecycleProxyOnlyParameter { property, .. }
+            | CompositionError::LifecycleWithUnsupported { property, .. }
             // The target failed, but the `proxy` that named it is the line the
             // user can act on — and the only one in a document they authored.
             | CompositionError::LifecycleProxyTargetBootstrapFailed { property, .. }
@@ -3337,12 +3750,13 @@ impl CompositionError {
             // The `with`-rooted family names the deepest representable path;
             // the excerpt renderer walks back to the most specific line it can
             // locate.
-            CompositionError::LifecycleProxyWithNotMapping { property, path, .. }
-            | CompositionError::LifecycleProxyWithWholeMapping { property, path, .. }
-            | CompositionError::LifecycleProxyWithDynamicKey { property, path, .. }
-            | CompositionError::LifecycleProxyWithEvaluationFailed { property, path, .. }
-            | CompositionError::LifecycleSetPositionalRemoved { property, path, .. }
-            | CompositionError::LifecycleSetLongFormRemoved { property, path, .. }
+            CompositionError::LifecycleWithNotMapping { property, path, .. }
+            | CompositionError::LifecycleWithWholeMapping { property, path, .. }
+            | CompositionError::LifecycleWithDynamicKey { property, path, .. }
+            | CompositionError::LifecycleWithEvaluationFailed { property, path, .. } => {
+                Some(FrontmatterHighlight::Property(with_property_path(property, path)))
+            }
+            CompositionError::LifecycleSetPositionalRemoved { property, path, .. }
             | CompositionError::LifecycleSetNotMapping { property, path, .. }
             | CompositionError::LifecycleSetInvalidKey { property, path, .. } => {
                 Some(FrontmatterHighlight::Property(format!("{property}.{path}")))
@@ -3354,6 +3768,14 @@ impl CompositionError {
             CompositionError::RemovedValidationKey { key, .. } => {
                 Some(FrontmatterHighlight::Property(key.clone()))
             }
+            CompositionError::RemovedGrammar { path, .. } => {
+                Some(FrontmatterHighlight::Property(path.clone()))
+            }
+            CompositionError::LoopInvalid { property, .. }
+            | CompositionError::LoopMaxTemplateInvalid { property, .. }
+            | CompositionError::LoopRateLimitPolicyNotAccepted { property, .. } => {
+                Some(FrontmatterHighlight::Property(property.clone()))
+            }
             CompositionError::PromptPropertyMissing
             | CompositionError::PromptPropertyWrongType(_) => {
                 Some(FrontmatterHighlight::Property("prompt".to_string()))
@@ -3364,6 +3786,9 @@ impl CompositionError {
             }
             CompositionError::ModelHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("model".to_string()))
+            }
+            CompositionError::YoloHintWrongType(_) => {
+                Some(FrontmatterHighlight::Property("yolo".to_string()))
             }
             CompositionError::InteractiveHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("interactive".to_string()))
@@ -3449,6 +3874,9 @@ pub enum LifecycleEvaluationReason {
     /// unavailable global, or a function error.
     #[default]
     Expression,
+    /// A `break` fired outside any loop; see
+    /// [`CompositionError::LifecycleBreakWithoutLoop`].
+    BreakWithoutLoop,
 }
 
 /// What a frontmatter-rooted error's excerpt should focus on.
@@ -3477,3 +3905,75 @@ enum FrontmatterHighlight {
 
 #[cfg(test)]
 mod tests;
+
+/// The directive (`proxy`, `retry`, or `prep`) whose `with` overlay a
+/// `LifecycleWith*` error names — the last segment of the action's authored
+/// path — or `None` when the owner is a prompt task.
+pub(crate) fn overlay_directive(property: &str) -> Option<&str> {
+    property.rsplit('.').next().filter(|verb| matches!(*verb, "proxy" | "retry" | "prep"))
+}
+
+/// The rendered path of a `LifecycleWith*` error: `path` below its owner,
+/// or `path` alone when the owner is the external task file itself.
+pub(crate) fn with_property_path(property: &str, path: &str) -> String {
+    if property.is_empty() { path.to_string() } else { format!("{property}.{path}") }
+}
+
+/// What a `with` was resolved for, in a sentence: "the `proxy` to `x.md`", or
+/// "the task running `x.md`".
+pub(crate) fn with_purpose(property: &str, target: &str) -> String {
+    match overlay_directive(property) {
+        Some(verb) => format!("the `{verb}` to `{target}`"),
+        None => format!("the task running `{target}`"),
+    }
+}
+
+/// Why a sequence task's provider hint selects no provider; see
+/// [`CompositionError::SequenceTaskProviderSelection`].
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum SequenceTaskProviderProblem {
+    /// The canonical non-interactive rule cannot select from the hint: an
+    /// unknown name, a provider that is not installed, or a list with no
+    /// single installed member.
+    #[error("{}", unresolvable_reason(state))]
+    Unresolvable {
+        /// The classified hint.
+        state: super::types::AgentResolutionState,
+        /// The installed providers, for the diagnostic list.
+        installed: Vec<Provider>,
+    },
+    /// The hint is not a string or a list of strings.
+    #[error("`{key}` must be a string or a list of strings, got {found}")]
+    WrongType {
+        /// `agent` or `model`.
+        key: &'static str,
+        /// The JSON type it has (`number`, an array member's `boolean`).
+        found: String,
+    },
+    /// An otherwise static hint failed to evaluate.
+    #[error("it could not be evaluated: {0}")]
+    Evaluation(#[source] super::lifecycle_context::LifecycleCause),
+    /// The hint reads the provider identity it selects.
+    #[error("it reads `{0}`, which is the identity it selects")]
+    Circular(String),
+    /// A document's `agent` is an empty list, which the launch schema rejects.
+    #[error("an `agent` list needs at least one entry")]
+    EmptyAgentList,
+}
+
+fn unresolvable_reason(state: &super::types::AgentResolutionState) -> String {
+    use super::types::AgentResolutionState as State;
+    match state {
+        State::NoAgent => "it names no provider".into(),
+        State::SingleInvalid { hint } => format!("`{hint}` is not a known provider"),
+        State::SingleNotInstalled { provider } => format!("{provider} is not installed"),
+        State::ZeroInstalledList { .. } => "no provider it lists is installed".into(),
+        State::ListMultipleInstalled { installed, .. } => format!(
+            "it lists {} installed providers and nothing chooses between them without a terminal",
+            installed.len()
+        ),
+        State::Selected { provider } | State::ListOneInstalled { selected: provider, .. } => {
+            format!("{provider} was selected")
+        }
+    }
+}

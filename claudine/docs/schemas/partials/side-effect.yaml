@@ -1,28 +1,31 @@
 kind: schema
-description: a schema to model side effects in Lifecycle events
+# a schema to model side effects in Lifecycle events
 types:
     # Lifecycle side-effects in object notation
     side_effect:
-        set: object -> Sets a top-level key in the `doc` namespace; no external mutation
-        set_frontmatter: |-
+        set: object -> Sets a top-level key in the `fm` namespace; no external mutation
+        # Sets a frontmatter property on a local file. Only files in the repo (or
+        # file tree if not in a repo) are accessible. Fallible.
+        set_frontmatter:
             file: file(required)
             prop: string(required)
-            value: any(required)
-            $description: Sets a frontmatter property on a local file. Only files in the repo (or file tree if not in a repo) are accessible
-            $fallible: true
-        merge_frontmatter: |-
+            # a supplied null is stored verbatim, so `value` admits null (and,
+            # being null-admitting, may be omitted)
+            value: [string, number, boolean, object, "unknown[]", null]
+        # Merges an object into a local file's frontmatter. Only files in the repo
+        # (or file tree if not in a repo) are accessible. Fallible.
+        merge_frontmatter:
             file: file(required)
-            prop: string(required)
-            value: any(required)
-            $description: Sets a frontmatter property on a local file. Only files in the repo (or file tree if not in a repo) are accessible
-            $fallible: true
-        delete_frontmatter: null
-        increment_frontmatter: null
-        decrement_frontmatter: null
-        append_frontmatter: null
-        prepend_frontmatter: null
-        ensure_file: null
-        ensure_dir: null
-        append_line: null
-        append_jsonl: null
-        http_post: null
+            obj: object(required)
+        # The shapes below are not yet defined; `unknown` accepts any value
+        # until they are.
+        delete_frontmatter: unknown
+        increment_frontmatter: unknown
+        decrement_frontmatter: unknown
+        append_frontmatter: unknown
+        prepend_frontmatter: unknown
+        ensure_file: unknown
+        ensure_dir: unknown
+        append_line: unknown
+        append_jsonl: unknown
+        http_post: unknown

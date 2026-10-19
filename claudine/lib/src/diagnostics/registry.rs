@@ -354,6 +354,14 @@ pub const CODES: &[CodeSpec] = &[
         detail: &["source_path", "properties"],
     },
     CodeSpec {
+        code: "composition.cancelled",
+        category: Category::Composition,
+        disposition: Disposition::Unrecoverable,
+        origin: Origin::Author,
+        severity_override: Some(Severity::Warning),
+        detail: &["group", "leg", "cause"],
+    },
+    CodeSpec {
         code: "composition.failed",
         category: Category::Composition,
         disposition: Disposition::Correctable,
@@ -688,8 +696,9 @@ mod tests {
         // `composition.completion_schema` (inline-flow-and-validations §D5) → 47,
         // plus the pre-spawn provider-overlay pair
         // `provider.overlay_unsupported` / `provider.overlay_failed`
-        // (shadow-home fix → Fail closed before spawn) → 49.
+        // (shadow-home fix → Fail closed before spawn) → 49, plus structured
+        // sibling cancellation (`composition.cancelled`) → 50.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 49);
+        assert_eq!(CODES.len(), 50);
     }
 }

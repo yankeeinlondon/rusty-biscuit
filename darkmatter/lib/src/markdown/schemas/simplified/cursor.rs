@@ -14,8 +14,9 @@
 //! the grammar's EBNF defines. It never searches decoded text for a delimiter.
 //!
 //! Positions project through the [`super::yaml_scalar`] seam, so plain,
-//! single-quoted, and double-quoted scalars, CRLF input, and multibyte content
-//! all report authored document ranges rather than decoded ones. Nothing here
+//! single-quoted, and double-quoted scalars, text on a plain scalar's
+//! continuation line, CRLF input, and multibyte content all report authored
+//! document ranges rather than decoded ones. Nothing here
 //! reads a file, expands an import, or evaluates anything.
 
 use std::ops::Range;
@@ -30,15 +31,24 @@ use super::yaml_scalar::decode_partial_scalar_at;
 /// The structural role a cursor occupies inside a partially authored value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemaCursorRole {
-    /// A type keyword, import name, or whole-definition scaffold position.
+    /// A type keyword, named-type reference (bare or before `@`), or
+    /// whole-definition scaffold position.
     Type,
     /// A constraint keyword inside a `(…)` constraint list.
     Constraint {
-        /// The type keyword the constraint list attaches to, when one was typed.
+        /// The type keyword or named-type reference the constraint list
+        /// attaches to, when one was typed. A reference's target is unknown
+        /// here, so its name is reported as authored.
         subject: Option<String>,
         /// Whether this is the postfix `[](…)` array-level list, whose accepted
         /// constraints are the array set rather than the item set.
         array_level: bool,
+        /// The list's leading group while no `;` has been typed in it: the
+        /// entries authored before the cursor's own token, in authored order.
+        /// `alphanumeric` options can only be written in this group, so
+        /// `None` (a `;` precedes the cursor) means only constraints may
+        /// follow.
+        leading_group: Option<Vec<String>>,
     },
     /// An argument inside a constraint call's `(…)` argument list.
     Argument {
@@ -262,8 +272,14 @@ fn expression_flow_arm_starts(body: &str) -> Vec<usize> {
 enum Frame {
     /// Inside `{ … }`. `key` is the property being defined once `:` is typed.
     InlineObject { key: Option<String>, in_value: bool },
-    /// Inside a `(…)` constraint list attached to `subject`.
-    ConstraintList { subject: Option<String>, array_level: bool },
+    /// Inside a `(…)` constraint list attached to `subject`. `group` holds
+    /// the entries of the list's leading group with their spans, until a `;`
+    /// ends that group (`None`).
+    ConstraintList {
+        subject: Option<String>,
+        array_level: bool,
+        group: Option<Vec<(String, Range<usize>)>>,
+    },
     /// Inside a constraint call's `(…)` argument list.
     ArgList {
         subject: Option<String>,
@@ -328,6 +344,9 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
                 continue;
             }
             match stack.last_mut() {
+                Some(Frame::ConstraintList { group: Some(group), .. }) => {
+                    group.push((word.clone(), span.clone()));
+                }
                 Some(Frame::ArgList { .. } | Frame::ConstraintList { .. }) => {}
                 Some(Frame::InlineObject { in_value: false, .. }) => {}
                 _ => {
@@ -360,7 +379,7 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
             b'(' => {
                 lex.pos += 1;
                 let frame = match stack.last() {
-                    Some(Frame::ConstraintList { subject, array_level }) => Frame::ArgList {
+                    Some(Frame::ConstraintList { subject, array_level, .. }) => Frame::ArgList {
                         subject: subject.clone(),
                         constraint: last_word.clone().unwrap_or_default(),
                         array_level: *array_level,
@@ -380,6 +399,7 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
                     _ => Frame::ConstraintList {
                         subject: subject.clone(),
                         array_level: saw_array,
+                        group: Some(Vec::new()),
                     },
                 };
                 stack.push(frame);
@@ -407,6 +427,9 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
             }
             b';' => {
                 lex.pos += 1;
+                if let Some(Frame::ConstraintList { group, .. }) = stack.last_mut() {
+                    *group = None;
+                }
                 token = None;
             }
             b':' => {
@@ -472,7 +495,7 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
         Some(found) => found,
         None => (String::new(), src.len()..src.len()),
     };
-    let token_span = scalar.project(decoded_span)?;
+    let token_span = scalar.project(decoded_span.clone())?;
     let mut path = path;
     for frame in &stack {
         if let Frame::InlineObject { key: Some(key), in_value: true } = frame {
@@ -485,10 +508,19 @@ fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<Sc
             constraint: constraint.clone(),
             array_level: *array_level,
         },
-        Some(Frame::ConstraintList { subject, array_level }) => SchemaCursorRole::Constraint {
-            subject: subject.clone(),
-            array_level: *array_level,
-        },
+        Some(Frame::ConstraintList { subject, array_level, group }) => {
+            SchemaCursorRole::Constraint {
+                subject: subject.clone(),
+                array_level: *array_level,
+                leading_group: group.as_ref().map(|group| {
+                    group
+                        .iter()
+                        .filter(|(_, span)| *span != decoded_span)
+                        .map(|(word, _)| word.clone())
+                        .collect()
+                }),
+            }
+        }
         Some(Frame::InlineObject { in_value: false, .. }) => SchemaCursorRole::InlineObjectKey,
         Some(Frame::InlineObject { .. }) | None => match import_name {
             Some(name) => SchemaCursorRole::ImportReference { name },
@@ -556,6 +588,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: false,
+                leading_group: None,
             }
         );
         assert_eq!(state.token_span, 20..22);
@@ -570,6 +603,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("type-definition".into()),
                 array_level: true,
+                leading_group: Some(Vec::new()),
             }
         );
     }
@@ -582,6 +616,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: true,
+                leading_group: Some(Vec::new()),
             }
         );
         let item = at_end("string(mi");
@@ -590,8 +625,34 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: false,
+                leading_group: Some(Vec::new()),
             }
         );
+    }
+
+    /// The leading group is what `alphanumeric` options may be written in:
+    /// it lists the entries before the cursor's own token until a `;` ends
+    /// it, and an argument list's words never enter it.
+    #[test]
+    fn a_constraint_list_reports_its_leading_group_until_the_first_separator() {
+        let group = |value: &str| match at_end(value).role {
+            SchemaCursorRole::Constraint { leading_group, .. } => leading_group,
+            other => panic!("{value:?} -> {other:?}"),
+        };
+        let words = |list: &[&str]| Some(list.iter().map(|word| word.to_string()).collect::<Vec<_>>());
+        assert_eq!(group("alphanumeric("), words(&[]));
+        assert_eq!(group("alphanumeric(allow-da"), words(&[]));
+        assert_eq!(group("alphanumeric(allow-dashes, "), words(&["allow-dashes"]));
+        assert_eq!(
+            group("alphanumeric(allow-dashes, leading-alpha, allow-p"),
+            words(&["allow-dashes", "leading-alpha"])
+        );
+        assert_eq!(group("alphanumeric(allow-dashes; "), None);
+        assert_eq!(group("alphanumeric(allow-dashes; min(1); re"), None);
+        assert_eq!(group("alphanumeric(pattern(a, b), "), words(&["pattern"]));
+        assert_eq!(group("[string, alphanumeric(allow-dashes, "), words(&["allow-dashes"]));
+        // A nested list keeps its own group.
+        assert_eq!(group("{ id: alphanumeric(leading-alpha; max(3)), b: alphanumeric("), words(&[]));
     }
 
     #[test]
@@ -842,7 +903,7 @@ mod tests {
     #[test]
     fn a_hard_parse_failure_still_yields_a_usable_state() {
         // Every one of these is rejected outright by `parse_type_expr`.
-        for value in ["strin", "))(", "string(((", "{ a: [b"] {
+        for value in ["strin(", "))(", "string(((", "{ a: [b"] {
             assert!(super::super::grammar::parse_type_expr("p", value).is_err(), "{value:?}");
             assert!(locate_type_definition_cursor(value, 0, value.len()).is_some(), "{value:?}");
         }
@@ -896,6 +957,7 @@ mod tests {
             SchemaCursorRole::Constraint {
                 subject: Some("string".into()),
                 array_level: false,
+                leading_group: Some(Vec::new()),
             }
         );
     }
@@ -977,7 +1039,11 @@ mod tests {
             (
                 "string(pattern(^[{]@x:y$); re",
                 root.clone(),
-                SchemaCursorRole::Constraint { subject: Some("string".into()), array_level: false },
+                SchemaCursorRole::Constraint {
+                    subject: Some("string".into()),
+                    array_level: false,
+                    leading_group: None,
+                },
                 "re",
             ),
         ];
@@ -1012,5 +1078,68 @@ mod tests {
     #[test]
     fn a_description_is_prose_rather_than_grammar() {
         assert!(locate_type_definition_cursor("string -> a note", 0, 16).is_none());
+    }
+
+    /// The role at `cursor` inside `value`.
+    fn role_at(value: &str, cursor: usize) -> SchemaCursorRole {
+        locate_type_definition_cursor(value, 0, cursor).expect("cursor state").role
+    }
+
+    #[test]
+    fn a_bare_reference_name_is_a_type_position() {
+        let state = at_end("pers");
+        assert_eq!(state.role, SchemaCursorRole::Type);
+        assert_eq!(state.token, "pers");
+
+        let inline = at_end("{ author: pers");
+        assert_eq!(inline.role, SchemaCursorRole::Type);
+        assert_eq!(inline.path, SchemaSourcePath::root().property("author"));
+
+        let arm = at_end("[string, pers");
+        assert_eq!(arm.role, SchemaCursorRole::Type);
+        assert!(is_union_arm_path(&arm.path));
+    }
+
+    #[test]
+    fn bare_reference_constraint_positions_match_explicit_reference_positions() {
+        let constraint = |array_level| SchemaCursorRole::Constraint {
+            subject: Some("person".into()),
+            array_level,
+            leading_group: Some(Vec::new()),
+        };
+        for (bare, explicit, cursor, expected) in [
+            ("person(re)", "person(re)@this", 9, constraint(false)),
+            ("person[](mi)", "person[](mi)@this", 11, constraint(true)),
+            ("person[]", "person[]@./people.yaml", 8, SchemaCursorRole::Type),
+            ("person(ea)[]", "person(ea)[]@./people.yaml", 9, constraint(false)),
+            ("person(eager)[](mi)", "person(eager)[](mi)@this", 18, constraint(true)),
+            (
+                "person(min(1))",
+                "person(min(1))@this",
+                12,
+                SchemaCursorRole::Argument {
+                    subject: Some("person".into()),
+                    constraint: "min".into(),
+                    array_level: false,
+                },
+            ),
+        ] {
+            assert_eq!(role_at(bare, cursor), expected, "{bare}");
+            assert_eq!(role_at(explicit, cursor), expected, "{explicit}");
+        }
+    }
+
+    #[test]
+    fn a_bare_reference_in_an_inline_object_keeps_its_constraint_role() {
+        let state = at_end("{ author: person(requ");
+        assert_eq!(state.path, SchemaSourcePath::root().property("author"));
+        assert_eq!(
+            state.role,
+            SchemaCursorRole::Constraint {
+                subject: Some("person".into()),
+                array_level: false,
+                leading_group: Some(Vec::new()),
+            }
+        );
     }
 }

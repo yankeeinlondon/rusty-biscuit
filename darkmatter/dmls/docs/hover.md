@@ -44,10 +44,76 @@ Hovering a schema-declared frontmatter property renders its type, whether it is 
 | default value                | `Default: _draft_` (italic)             | softer metadata                                 |
 | required flag                | `Required` (plain)                      | a plain word needs no emphasis                  |
 | description                  | plain paragraph                         | the prose the author wrote                      |
+| `alphanumeric` character rules | `Options: …`, `Characters: …`, `First character: …`, `` `..`: … `` | the canonical options and the character sets they allow |
 
 The mental model: **box = the thing being described; bold = its type; italic = its example/enum/default values.** (An earlier idea — blue type, dim default — was dropped because color and dim are not expressible in hover Markdown.)
 
 The body is assembled by the pure `schema_hover_body` function in `src/providers/frontmatter.rs`, kept free of any LSP session state so the rule is unit-testable in isolation.
+
+### Schema definitions
+
+Hovering a definition in a schema (its key or its type text) shows what it
+declares, then the catalog description of each built-in type it uses. A type
+with an alias names it, so `whatever: any` hovers as `unknown`:
+
+```markdown
+**`whatever`**
+
+Type: **type-definition**
+
+Declares: **unknown**
+
+**`unknown`** (alias `any`): Every value, including null, or omission; ...
+```
+
+An `alphanumeric` type adds its canonical options (redundant ones dropped)
+and the effective character sets, as the library computes and renders them.
+`alphanumeric(allow-dashes, block-leading-dash, block-double-periods)`
+shows:
+
+```markdown
+Options: `allow-dashes`, `block-leading-dash`
+
+Characters: `A-Z a-z 0-9 -`
+
+First character: `A-Z a-z 0-9`
+
+`..`: forbidden
+```
+
+A local type named like a built-in, referenced as `shell@this`, hovers and
+goes to its local definition; the bare `shell` is the built-in.
+
+### Union-typed properties and list items
+
+A property typed by a reference to a union-typed named type with a postfix
+(`policy[](min(1))@./content-policy.yaml`, `choice(required)`) has no single
+type, so its hover lists every alternative, one line each, with the
+alternative's own description:
+
+```markdown
+Type: **array**, each item one of:
+- **string** — Never triggers
+- **object** with `rule`, `action`
+```
+
+Hovering one item of such an array names an alternative only when the item
+is valid against exactly that one. A missing (`null`) item, an item no
+alternative accepts, and an item several alternatives accept all show the
+whole list, with the reason first:
+
+| Item                            | Hover shows                                           |
+|---------------------------------|-------------------------------------------------------|
+| `- ValidFor(3mo)`               | `Matches alternative 3 of 9`, then that alternative   |
+| `- Duration(3mo)`               | `matches none of the 9 alternatives:` and the list    |
+| `- null`                        | `no value; one of 9 alternatives:` and the list       |
+
+On a field inside an object item, the field's own hover is followed by a
+line naming the item's alternative (``Item `content_policy[1]` matches
+alternative 9 of 9:``) or, when no single alternative accepts the item, the
+list. Whether an alternative accepts an item is decided by the Darkmatter
+library: the alternative is lowered to JSON Schema and checked with its
+structural validator, which judges a file value by syntax alone.
 
 ## Formatting rule: interpolation `ctx.*` hover
 
@@ -68,6 +134,19 @@ After the block, the interpolation surface appends one interpolation-only line:
 The frontmatter surface does not emit that note — it is DMLS-owned because it describes passive editor behavior (DMLS never captures host context or evaluates the expression to build hover content).
 
 Classification requires an explicit `ctx.` prefix (the D2 rule): a bare `{{ today }}` is a **frontmatter** variable even when `today` is also a known context-variable tail, and an unknown `ctx.<name>` keeps the generic expression hover without borrowing a similarly named bare key's value. The hover range remains the complete `{{ … }}` expression.
+
+## Formatting rule: reserved-root and `fm.<key>` hover
+
+A cursor on a bare reserved root (`fm`, `ctx`, `env`, `current`, and any other
+name in Darkmatter's reserved-root catalog) appends one line, `` **`<root>`** — <description> ``,
+with the catalog description. A reserved root shadows a frontmatter key of the
+same name, so this line wins over any static value.
+
+A cursor on `fm.<key>` hovers the frontmatter key `<key>` exactly as a bare
+`{{ <key> }}` would: its static value, or the schema block for a declared but
+unset property. `doc` and `hook` are ordinary properties: `{{ doc.title }}`
+shows the static value of the nested key `doc.title`, never a root
+description.
 
 ## Formatting rule: function-call hover
 
@@ -94,7 +173,7 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 
 | Provider (in order)  | Hovers on                                            | Content                                                                                                   |
 |----------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| substrate (Markdown) | a link                                               | graph-sourced target preview (no disk read)                                                               |
+| substrate (Markdown) | a link                                               | graph-sourced target preview (an unopened target is read once, then cached)                               |
 | wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview                                                                         |
 | frontmatter          | a frontmatter key or its value                       | schema type/required/enum/default/description; or a `ctx.*` generated-key annotation                      |
 | DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
@@ -103,7 +182,7 @@ Because the chain stops at the first non-empty hover, a schema-defined frontmatt
 
 ## Passivity
 
-Hover is read-only like every DMLS request: it resolves local files and reads the in-memory graph, but never executes a shell command (`$(...)`, `::shell`), fetches a remote URL, or mutates anything. A `$()` or `::shell` hover *explains* what compose would do and whether policy allows it — it never does it.
+Hover is read-only like every DMLS request: it resolves local files and reads the in-memory graph (parsing a link's unopened target the first time a hover needs it), but never executes a shell command (`$(...)`, `::shell`), fetches a remote URL, or mutates anything. A `$()` or `::shell` hover *explains* what compose would do and whether policy allows it — it never does it.
 
 ## Testing
 

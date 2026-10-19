@@ -49,15 +49,12 @@ fn locate_nested_key_under_second_parent() {
 #[test]
 fn locate_nested_sequence_value() {
     let block = capture_frontmatter_block(
-        "---\nsuccess:\n    stack:\n        - action:\n            - set:\n                metadata:\n                    files:\n                        - \"{{unknown_root}}\"\n---\n",
+        "---\nsuccess:\n    - set:\n          metadata:\n              files:\n                  - \"{{unknown_root}}\"\n---\n",
     )
     .unwrap();
     assert_eq!(
-        locate_property_line(
-            &block,
-            "success.stack[0].action[0].set.metadata.files[0]"
-        ),
-        Some(8)
+        locate_property_line(&block, "success[0].set.metadata.files[0]"),
+        Some(6)
     );
 }
 

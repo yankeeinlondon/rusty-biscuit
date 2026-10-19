@@ -23,9 +23,10 @@ use jsonschema::Validator;
 use serde_json::{Map, Value};
 
 use super::format::{
-    DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_DEFINITION_KEYWORD,
-    DARKMATTER_YAML_FORMAT,
+    DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_ANNOTATION,
+    DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
 };
+use super::simplified::SimplifiedType;
 use super::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
 use super::validate::{self, ValidatorCache, error_top_level_key};
 
@@ -88,6 +89,15 @@ pub enum CoercionTarget {
     /// String consts never coerce, so they never reach a `LiteralConst` target
     /// ([`literal_const_target`] yields `None` for them).
     LiteralConst(Value),
+    /// The arms of an array's item union (`items: {"anyOf": [...]}`, the
+    /// lowering of a `U[]` reference to a union-typed named type). Each item is
+    /// coerced by the property-union rule independently: the coerced item is
+    /// committed only when exactly one arm's candidate validates.
+    ///
+    /// Produced only for `items`; a property-level union is handled by
+    /// [`coerce_object`] directly, so [`coercion_target`] still yields `None`
+    /// for a generic `anyOf` outside an array.
+    ItemUnion(Vec<Value>),
 }
 
 /// Result of coercing a whole instance against a schema.
@@ -146,8 +156,9 @@ pub(super) fn unwrap_nullable_arm(schema: &Value) -> Option<&Value> {
 /// Per-arm coercion for property-level unions is handled by
 /// [`coerce_object`], which calls `coerce_property_union` directly when it
 /// encounters an `anyOf` at a property position. The specific boolish /
-/// numberlike shapes (the only `anyOf` forms Darkmatter itself emits at the
-/// property level today) are matched here for the matrix lookup.
+/// numberlike shapes are matched here first. An array whose `items` is any
+/// other `anyOf` yields [`CoercionTarget::ItemUnion`], which applies the same
+/// per-arm rule to each item.
 pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
     // Darkmatter optional properties wrap the typed fragment in a nullable
     // `anyOf`. Look through the wrapper so non-null values are coerced against
@@ -187,6 +198,15 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
         // native value to that format's string form; every other string type
         // (including `file`, `email`, `url` formats) keeps the plain
         // scalar→string coercion.
+        // An `alphanumeric` value must already be a YAML string: a native
+        // number or boolean is a type mismatch, never converted text. The
+        // lowering's type annotation names the type.
+        "string"
+            if obj.get(DARKMATTER_TYPE_ANNOTATION).and_then(Value::as_str)
+                == Some(SimplifiedType::Alphanumeric.as_keyword()) =>
+        {
+            None
+        }
         "string" => match obj.get("format").and_then(Value::as_str) {
             Some(DARKMATTER_YAML_FORMAT) => Some(CoercionTarget::ToYamlString),
             Some(DARKMATTER_JSON_FORMAT) => Some(CoercionTarget::ToJsonString),
@@ -194,13 +214,24 @@ pub fn coercion_target(property_schema: &Value) -> Option<CoercionTarget> {
         },
         "array" => {
             let items = obj.get("items")?;
-            let inner = coercion_target(items)?;
+            // Boolish/numberlike items lower to an `anyOf` too, so the specific
+            // recognizer must win before a generic item union is assumed.
+            let inner = coercion_target(items).or_else(|| item_union_target(items))?;
             Some(CoercionTarget::Array(Box::new(inner)))
         }
         "object" => inline_object_target(obj),
-        // "any" and anything else fall outside the matrix.
+        // `unknown` (`{}`, no `type`) and anything else fall outside the
+        // matrix, so their native values are preserved.
         _ => None,
     }
+}
+
+/// Recognizes a genuine item union (`items: {"anyOf": [...]}` that
+/// [`coercion_target`] did not match as boolish/numberlike) as
+/// [`CoercionTarget::ItemUnion`]. Item unions never carry a `null` arm.
+fn item_union_target(items: &Value) -> Option<CoercionTarget> {
+    let arms = items.get("anyOf").and_then(Value::as_array)?;
+    Some(CoercionTarget::ItemUnion(arms.clone()))
 }
 
 /// Builds an [`CoercionTarget::Object`] from the inline object fragment's
@@ -443,7 +474,8 @@ fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
     }
 }
 
-/// Per-arm coercion for a property-level union schema.
+/// Per-arm coercion for a union schema, at a property position or for one
+/// array item ([`CoercionTarget::ItemUnion`]).
 ///
 /// For each arm:
 /// 1. Compute the arm's [`CoercionTarget`] via [`coercion_target`].
@@ -455,14 +487,22 @@ fn coerce_object(schema: &Value, instance: &Value) -> CoercionOutcome {
 /// validates — preserving the spec's "no guessing" rule for ambiguous
 /// unions (multiple matching arms) and zero-match unions (no arm can
 /// accept the value). An arm whose validator fails to compile is skipped
-/// without affecting the outcome.
+/// without affecting the outcome. Like [`coerce_value`], it returns `None`
+/// when the committed candidate equals `value`, so an already-valid value is
+/// not reported as changed.
 fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
+    let candidates: Vec<(&Value, Option<Value>)> = arms
+        .iter()
+        .map(|arm| (arm, coercion_target(arm).and_then(|target| coerce_value(&target, value))))
+        .collect();
+    // An unchanged candidate is never committed, so when no arm changes the
+    // value there is nothing to decide, and no arm needs validating.
+    if candidates.iter().all(|(_, candidate)| candidate.is_none()) {
+        return None;
+    }
     let mut valid_candidates: Vec<Value> = Vec::new();
-    for arm in arms {
-        let candidate = match coercion_target(arm) {
-            Some(target) => coerce_value(&target, value).unwrap_or_else(|| value.clone()),
-            None => value.clone(),
-        };
+    for (arm, candidate) in candidates {
+        let candidate = candidate.unwrap_or_else(|| value.clone());
         let Some(validator) = coercion_validator(arm) else {
             continue;
         };
@@ -471,7 +511,7 @@ fn coerce_property_union(arms: &[Value], value: &Value) -> Option<Value> {
         }
     }
     if valid_candidates.len() == 1 {
-        valid_candidates.pop()
+        valid_candidates.pop().filter(|candidate| candidate != value)
     } else {
         None
     }
@@ -510,6 +550,7 @@ fn coerce_value(target: &CoercionTarget, value: &Value) -> Option<Value> {
         CoercionTarget::Array(inner) => coerce_array(inner, value),
         CoercionTarget::Object(props) => coerce_inline_object(props, value),
         CoercionTarget::LiteralConst(constant) => coerce_to_literal(constant, value),
+        CoercionTarget::ItemUnion(arms) => coerce_property_union(arms, value),
     }
 }
 
@@ -742,6 +783,25 @@ mod tests {
         assert_eq!(
             coercion_target(&frag),
             Some(CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean)))
+        );
+    }
+
+    #[test]
+    fn boolish_items_stay_boolean_and_other_item_unions_are_item_unions() {
+        let boolish = json!({"type": "array", "items": {"anyOf": [
+            {"type": "boolean"},
+            {"enum": ["true", "false", "True", "False", "TRUE", "FALSE"]}
+        ]}});
+        assert_eq!(
+            coercion_target(&boolish),
+            Some(CoercionTarget::Array(Box::new(CoercionTarget::ToBoolean)))
+        );
+
+        let arms = vec![json!({"type": "number"}), json!({"type": "string"})];
+        let union = json!({"type": "array", "items": {"anyOf": arms.clone()}});
+        assert_eq!(
+            coercion_target(&union),
+            Some(CoercionTarget::Array(Box::new(CoercionTarget::ItemUnion(arms))))
         );
     }
 

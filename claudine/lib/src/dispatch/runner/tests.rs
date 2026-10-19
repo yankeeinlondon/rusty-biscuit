@@ -217,9 +217,10 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
 
     let config = claudine_config_with_tts(TtsValue::Config(
         crate::config::tts::TtsConfigSettings {
-            provider: "espeak".to_string(),
+            provider: Some("espeak".to_string()),
             voice: None,
             gender: crate::config::tts::Gender::Female,
+            prewarm: None,
         },
     ));
     let actions = vec![
@@ -323,9 +324,10 @@ async fn speak_action_warns_once_when_handoff_fails() {
 
     let config = claudine_config_with_tts(TtsValue::Config(
         crate::config::tts::TtsConfigSettings {
-            provider: "espeak".to_string(),
+            provider: Some("espeak".to_string()),
             voice: None,
             gender: crate::config::tts::Gender::Female,
+            prewarm: None,
         },
     ));
     let actions = vec![HookAction::Speak {
@@ -438,6 +440,45 @@ async fn when_condition_false_skips_call_action_and_no_blocking_response() {
         result.is_none(),
         "skipped Call action must not produce a blocking response",
     );
+}
+
+#[tokio::test]
+async fn when_hook_namespace_condition_executes_action() {
+    let config = claudine_config_with_tts(TtsValue::Boolean(false));
+    let messaging = RuntimeMessagingSettings::default();
+    let actions = vec![HookAction::Call {
+        command: "__claudine_missing_when_hook_namespace__".to_string(),
+        args: None,
+        timeout_ms: Some(50),
+        mapper: None,
+        when: Some("hook.tool_name == 'Bash'".to_string()),
+    }];
+
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
+    .await
+    .unwrap()
+    .expect("hook.tool_name == 'Bash' should be truthy and run the call");
+
+    assert_eq!(result.decision, Some(HookDecision::Deny));
+}
+
+#[tokio::test]
+async fn when_old_doc_namespace_condition_skips_action() {
+    let config = claudine_config_with_tts(TtsValue::Boolean(false));
+    let messaging = RuntimeMessagingSettings::default();
+    let actions = vec![HookAction::Call {
+        command: "__claudine_missing_when_doc_namespace__".to_string(),
+        args: None,
+        timeout_ms: Some(50),
+        mapper: None,
+        when: Some("doc.tool_name == 'Bash'".to_string()),
+    }];
+
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
+    .await
+    .unwrap();
+
+    assert!(result.is_none(), "doc.* no longer reads the hook payload");
 }
 
 #[tokio::test]

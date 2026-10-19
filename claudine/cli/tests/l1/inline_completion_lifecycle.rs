@@ -183,8 +183,7 @@ fn a_direct_compose_run_fails_completion_when_a_start_effect_invalidates_a_prope
         "researched_by: initial\n",
         "agent: goose\n",
         "start:\n",
-        "  stack:\n",
-        "    - action: {set: {researched_by: '{{ 42 }}'}}\n",
+        "  - {set: {researched_by: '{{ 42 }}'}}\n",
         "success:\n",
         "  info: 'SUCCESS-SENTINEL'\n",
         "failure:\n",
@@ -464,10 +463,7 @@ const RETRYING_DOC: &str = concat!(
     "prompt: Research VoIP handsets\n",
     "agent: goose\n",
     "failure:\n",
-    "  stack:\n",
-    "    - action:\n",
-    "        - action: retry\n",
-    "          max_attempts: 2\n",
+    "  - retry: { max_attempts: 2 }\n",
     "---\n",
     "original body\n",
 );
@@ -655,25 +651,22 @@ fn a_refused_body_fires_failure_with_the_body_unchanged_code() {
 /// `fail_fast` stops the run before step 3 launches.
 #[test]
 fn a_sequence_applies_the_verdict_per_step_and_fail_fast_stops_at_step_two() {
-    let source = concat!(
-        "---\n",
-        "$schema:\n",
-        "  marker: 'string(required)'\n",
-        "marker: seed\n",
-        "agent: goose\n",
-        "sequence:\n",
-        "  - alpha\n",
-        "  - beta\n",
-        "  - gamma\n",
-        "start:\n",
-        "  stack:\n",
-        // `state` is the per-step object, so the branch reads its id.
-        "    - when: \"state.id == 'beta'\"\n",
-        "      action: {set: {marker: '{{ 42 }}'}}\n",
-        "---\n",
-        "Step {{ state }}.\n",
-    );
-    let fixture = Fixture::new(source);
+    let fixture = Fixture::new(concat!(
+        "---\nagent: goose\nsequence:\n",
+        "  - {name: alpha, prompt: step.md}\n",
+        "  - {name: beta, prompt: step.md}\n",
+        "  - {name: gamma, prompt: step.md}\n---\n",
+    ));
+    fs::write(
+        fixture.document.parent().unwrap().join("step.md"),
+        concat!(
+            "---\n$schema:\n  marker: 'string(required)'\n",
+            "marker: seed\nagent: goose\nstart:\n",
+            "  - when: \"seq.id == 'beta'\"\n",
+            "    then: {set: {marker: '{{ 42 }}'}}\n",
+            "---\nStep {{ seq.name }}.\n",
+        ),
+    ).unwrap();
     let counter = fixture.path().join("calls.txt");
     write_executable(
         &fixture.bin.join("goose"),
@@ -718,9 +711,8 @@ fn a_loop_applies_the_verdict_per_iteration() {
         "  actions:\n",
         "    - \"increment(counter)\"\n",
         "start:\n",
-        "  stack:\n",
-        "    - when: \"counter == 1\"\n",
-        "      action: {set: {marker: '{{ 42 }}'}}\n",
+        "  - when: \"counter == 1\"\n",
+        "    then: {set: {marker: '{{ 42 }}'}}\n",
         "---\n",
         "Iteration {{ counter }}.\n",
     );
@@ -759,8 +751,7 @@ fn a_proxy_out_of_a_failed_verdict_captures_the_targets_own_baseline() {
         "prompt: Research VoIP handsets\n",
         "agent: goose\n",
         "failure:\n",
-        "  stack:\n",
-        "    - action: {action: proxy, target: './target.md'}\n",
+        "  - {proxy: {target: './target.md'}}\n",
         "---\n",
         "original body\n",
     );
@@ -816,8 +807,7 @@ fn a_proxy_with_overlay_satisfies_the_targets_completion_schema() {
         "prompt: Route to the researcher\n",
         "agent: goose\n",
         "initialize:\n",
-        "  stack:\n",
-        "    - action: {action: proxy, target: './target.md', with: {researched_by: from-the-router}}\n",
+        "  - {proxy: {target: './target.md', with: {researched_by: from-the-router}}}\n",
         "---\n",
         "router body\n",
     );
@@ -878,19 +868,19 @@ fn a_proxy_with_overlay_satisfies_the_targets_completion_schema() {
     );
 }
 
-/// AC14: sequence state is the third transient channel. A step's `params`
-/// satisfy the referenced document's completion schema for that step only, and
+/// AC14: sequence state is the third transient channel. A task's `with`
+/// satisfies the referenced document's completion schema for that step only, and
 /// the referenced file never records the value.
 #[test]
-fn sequence_step_params_satisfy_the_referenced_documents_completion_schema() {
+fn sequence_task_with_satisfies_the_referenced_documents_completion_schema() {
     let plan = concat!(
         "---\n",
         "agent: goose\n",
         "sequence:\n",
         "  - name: research\n",
         "    prompt: research.md\n",
-        "    params:\n",
-        "      researched_by: \"{{ state.name }}\"\n",
+        "    with:\n",
+        "      researched_by: \"{{ seq.name }}\"\n",
         "---\n",
         "plan body\n",
     );
@@ -938,7 +928,7 @@ fn sequence_step_params_satisfy_the_referenced_documents_completion_schema() {
         "sequence state must never be persisted to the referenced document:\n{member_after}"
     );
 
-    // The same document run on its own fails completion, so the step's params
+    // The same document run on its own fails completion, so the task's `with`
     // — not a missing check — are what satisfied the schema above.
     fs::write(&member, member_source).unwrap();
     let alone = fixture

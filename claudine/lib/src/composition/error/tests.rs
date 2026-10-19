@@ -105,6 +105,33 @@ fn already_emitted_wraps_once_and_delegates_display() {
 }
 
 #[test]
+fn a_break_outside_a_loop_renders_as_its_own_error_not_as_a_crashed_expression() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::terminal::Terminal;
+    let unowned = CompositionError::LifecycleBreakWithoutLoop {
+        source_path: PathBuf::from("review.md"),
+        property: "start[0].break".to_string(),
+    };
+    let err = CompositionError::LifecycleEvaluationError {
+        source_path: PathBuf::from("review.md"),
+        event: "start".to_string(),
+        surface: "break".to_string(),
+        message: unowned.to_string(),
+        property: Some("start[0].break".to_string()),
+        reason: LifecycleEvaluationReason::BreakWithoutLoop,
+        cause: None,
+    };
+    // A pinned terminal: at `ColorDepth::None` inline code keeps its literal
+    // backticks, so an ambient `Terminal::default()` failed on Windows runners.
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+    let prose = rendered.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(prose.contains("lifecycle break outside a loop"), "{prose}");
+    assert!(prose.contains("fired outside any loop"), "{prose}");
+    assert!(!prose.contains("crashed expression"), "{prose}");
+}
+
+#[test]
 fn enrich_is_idempotent() {
     let source = source_from("---\ntitle: x\nprompt: 42\n---\nbody\n");
     let err = CompositionError::PromptPropertyWrongType("number".to_string())
@@ -424,15 +451,17 @@ fn loop_iteration_failed_falls_back_when_no_exit_reason() {
 }
 
 #[test]
-fn loop_invalid_still_reserved_for_frontmatter_problems() {
-    // Sanity: LoopInvalid is still the right variant for malformed
-    // frontmatter and renders distinctly from the runtime-fault
-    // variants above.
-    let err = CompositionError::LoopInvalid("`loop.max` must be greater than zero".to_string());
-    let rendered = err.to_string();
-    assert!(
-        rendered.starts_with("invalid loop definition:"),
-        "got: {rendered}"
+fn loop_invalid_names_its_file_and_key() {
+    // A loop configuration error names the file and the offending key, and
+    // renders distinctly from the runtime-fault variants above.
+    let err = CompositionError::LoopInvalid {
+        source_path: PathBuf::from("prompts/count.md"),
+        property: "loop.max".to_string(),
+        message: "`loop.max` must be greater than zero".to_string(),
+    };
+    assert_eq!(
+        err.to_string(),
+        "invalid loop definition (prompts/count.md): `loop.max` must be greater than zero"
     );
 }
 
@@ -1020,12 +1049,17 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let mut approved = HashSet::new();
     approved.insert(approved_command);
     let options = PrepareOptions {
+        lifecycle_group: None,
         defer_schema_verdict: false,
         set_overrides: None,
         data_override_keys: Default::default(),
+        sequence_binding: None,
         proxy_overlay: Default::default(),
         caller_input_records: Default::default(),
-        pre_approved_commands: Some(approved),
+        pre_approved_commands: Some(approved.into()),
+        deferred_shell_roots: Default::default(),
+        validate_deferred_shell_values: false,
+        document_shell_values: None,
         env_overrides: BTreeMap::new(),
         perf_enabled: false,
         source_repo_root: None,
@@ -1042,6 +1076,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         allow_empty_body: false,
         invocation_context: None,
         document_epoch: None,
+        loop_values: None,
     };
 
     let err = prepare_direct(&source, options).unwrap_err();
@@ -1181,8 +1216,8 @@ fn phase_1_plain_composition_error_block_snapshots() {
 ┃ \n\
 ┃ Rewrite to positional form: `success: \"x\"`\n\
 ┃ \n\
-┃ Use positional form (`verb: value`) or key/value form (`{ action: verb,\n\
-┃ ... }`). `verb(args)` is no longer accepted."
+┃ Use short form (`verb: value`) or long form (`verb: { param: value }`).\n\
+┃ `verb(args)` is no longer accepted."
     );
     assert_eq!(
         selection,
@@ -1292,15 +1327,22 @@ fn lifecycle_object_data_parameter_display_mentions_param() {
 }
 
 #[test]
-fn lifecycle_stack_ambiguous_display_includes_message() {
-    let err = CompositionError::LifecycleStackAmbiguous {
+fn removed_grammar_names_the_path_spelling_and_replacement() {
+    let err = CompositionError::RemovedGrammar {
         source_path: PathBuf::from("prompts/plan.md"),
-        property: "success".to_string(),
-        message: "did you mean `success: ...` or `{ action: success, ... }`?".to_string(),
+        path: "start.stack".to_string(),
+        removed: "stack".to_string(),
+        replacement: "write the event as an ordered action list".to_string(),
     };
-    let rendered = err.to_string();
-    assert!(rendered.contains("ambiguous lifecycle stack item"), "got: {rendered}");
-    assert!(rendered.contains("did you mean"), "got: {rendered}");
+    assert_eq!(err.code(), "composition.lifecycle_invalid");
+    assert!(matches!(
+        err.frontmatter_block_spec(),
+        Some(FrontmatterHighlight::Property(ref property)) if property == "start.stack"
+    ));
+    let rendered = render(&err);
+    assert!(rendered.contains("start.stack"), "got: {rendered}");
+    assert!(rendered.contains("removed"), "got: {rendered}");
+    assert!(rendered.contains("ordered action list"), "got: {rendered}");
 }
 
 #[test]
@@ -1397,7 +1439,7 @@ fn proxy_without_owning_coordinator_names_the_command_that_can_host_it() {
 
     let err = CompositionError::LifecycleProxyWithoutOwningCoordinator {
         source_path: PathBuf::from("/repo/CLAUDE.md"),
-        property: "failure.stack[0].action[1]".to_string(),
+        property: "failure[0].then[1].proxy".to_string(),
         target: "prompts/next.md".to_string(),
         command: "claudine claude".to_string(),
     };
@@ -1418,7 +1460,7 @@ fn proxy_without_owning_coordinator_names_the_command_that_can_host_it() {
         "a command that can host it is named, got: {rendered}"
     );
     assert!(
-        rendered.contains("failure.stack[0].action[1]"),
+        rendered.contains("failure[0].then[1].proxy"),
         "the authored `proxy` action is located, got: {rendered}"
     );
 }
@@ -1946,7 +1988,7 @@ fn implicit_reference_error(reference: &str, repo: &std::path::Path) -> Composit
         context: Box::new(FileReferenceContext {
             source_path: source,
             event: Some("initialize".to_string()),
-            property: "initialize.stack[0].proxy".to_string(),
+            property: "initialize[0].proxy".to_string(),
             reference: reference.to_string(),
             hint: "A `proxy` target must name an existing Markdown document.".to_string(),
         }),
@@ -2078,14 +2120,14 @@ fn pre_flight_state_build_failed_publishes_its_merge_error() {
 fn lifecycle_shell_resolution_source_is_optional_and_leaves_display_unmoved() {
     let untyped = CompositionError::LifecycleShellResolution {
         source_path: PathBuf::from("run.md"),
-        property: "start.stack[0].action.command".to_string(),
+        property: "start[0].shell.command".to_string(),
         raw: "echo {{ err.msg }}".to_string(),
         message: "late-binding reference `err`".to_string(),
         source: None,
     };
     let typed = CompositionError::LifecycleShellResolution {
         source_path: PathBuf::from("run.md"),
-        property: "start.stack[0].action.command".to_string(),
+        property: "start[0].shell.command".to_string(),
         raw: "echo {{ err.msg }}".to_string(),
         message: "late-binding reference `err`".to_string(),
         source: Some(Box::new(markdown_error())),
@@ -2245,35 +2287,29 @@ fn lifecycle_action_invalid_long_form_source_twins_with_the_sourceless_shape() {
 }
 
 /// `LoopExpressionInvalid` derives its prose from `kind`, `condition`, and the
-/// cause's stage. Both stages must reproduce `LoopInvalid`'s text byte for byte.
+/// cause's stage.
 #[test]
-fn loop_expression_invalid_twins_with_loop_invalid_at_both_stages() {
-    let parse_twin = CompositionError::LoopInvalid(format!(
-        "failed to parse loop.while `1 +`: {}",
-        parse_error()
-    ));
+fn loop_expression_invalid_names_its_stage() {
     let parse_sourced = CompositionError::LoopExpressionInvalid {
         kind: "while".to_string(),
         condition: "1 +".to_string(),
         source: LoopExpressionCause::Parse(parse_error()),
     };
-    assert_eq!(parse_twin.to_string(), parse_sourced.to_string());
-    assert_eq!(parse_twin.code(), parse_sourced.code());
-    assert_eq!(parse_twin.detail(), parse_sourced.detail());
+    assert_eq!(
+        parse_sourced.to_string(),
+        format!("invalid loop definition: failed to parse loop.while `1 +`: {}", parse_error())
+    );
 
     let eval_cause = ExpressionError::UnknownFunction {
         name: "nope".to_string(),
     };
-    let eval_twin = CompositionError::LoopInvalid(format!(
-        "failed to evaluate loop.until `nope()`: {eval_cause}"
-    ));
+    let eval_text = format!("invalid loop definition: failed to evaluate loop.until `nope()`: {eval_cause}");
     let eval_sourced = CompositionError::LoopExpressionInvalid {
         kind: "until".to_string(),
         condition: "nope()".to_string(),
         source: LoopExpressionCause::Evaluate(Box::new(eval_cause)),
     };
-    assert_eq!(eval_twin.to_string(), eval_sourced.to_string());
-    assert_eq!(eval_twin.code(), eval_sourced.code());
+    assert_eq!(eval_sourced.to_string(), eval_text);
 }
 
 /// `LoopActionExpressionInvalid` derives `InvalidAction`'s two template
@@ -2372,7 +2408,7 @@ fn every_batch_3_variant_projects_a_catalog_shaped_detail() {
         },
         CompositionError::LifecycleShellResolution {
             source_path: PathBuf::from("run.md"),
-            property: "start.stack[0].action.command".to_string(),
+            property: "start[0].shell.command".to_string(),
             raw: "echo hi".to_string(),
             message: "boom".to_string(),
             source: Some(Box::new(markdown_error())),
@@ -2570,17 +2606,17 @@ fn render(err: &CompositionError) -> String {
 
 #[test]
 fn proxy_with_not_mapping_renders_and_locates_the_with_line() {
-    let err = CompositionError::LifecycleProxyWithNotMapping {
+    let err = CompositionError::LifecycleWithNotMapping {
         source_path: PathBuf::from("router.md"),
-        property: "initialize.stack[0]".to_string(),
-        path: "action[0].with".to_string(),
+        property: "initialize[0].proxy".to_string(),
+        path: "with".to_string(),
         actual: "array".to_string(),
     };
     assert!(
         matches!(
             err.frontmatter_block_spec(),
             Some(FrontmatterHighlight::Property(ref p))
-                if p == "initialize.stack[0].action[0].with"
+                if p == "initialize[0].proxy.with"
         ),
         "the excerpt must focus the `with` property"
     );
@@ -2588,7 +2624,7 @@ fn proxy_with_not_mapping_renders_and_locates_the_with_line() {
     let rendered = render(&err);
     assert!(rendered.contains("array"), "names the authored type: {rendered}");
     assert!(
-        rendered.contains("initialize.stack[0].action[0].with"),
+        rendered.contains("initialize[0].proxy.with"),
         "names the full property path: {rendered}"
     );
     assert!(
@@ -2602,24 +2638,19 @@ fn runtime_set_shape_diagnostics_share_render_highlight_and_machine_identity() {
     let cases = [
         CompositionError::LifecycleSetPositionalRemoved {
             source_path: PathBuf::from("reported.md"),
-            property: "initialize.stack[0]".to_string(),
-            path: "action[1].set".to_string(),
-        },
-        CompositionError::LifecycleSetLongFormRemoved {
-            source_path: PathBuf::from("reported.md"),
-            property: "initialize.stack[0]".to_string(),
-            path: "action[1].set".to_string(),
+            property: "initialize[1]".to_string(),
+            path: "set".to_string(),
         },
         CompositionError::LifecycleSetNotMapping {
             source_path: PathBuf::from("reported.md"),
-            property: "initialize.stack[0]".to_string(),
-            path: "action[1].set".to_string(),
+            property: "initialize[1]".to_string(),
+            path: "set".to_string(),
             actual: "whole-mapping interpolation".to_string(),
         },
         CompositionError::LifecycleSetInvalidKey {
             source_path: PathBuf::from("reported.md"),
-            property: "initialize.stack[0]".to_string(),
-            path: "action[1].set".to_string(),
+            property: "initialize[1]".to_string(),
+            path: "set".to_string(),
             key: "{{ destination }}".to_string(),
             message: "destination keys must be literal".to_string(),
         },
@@ -2630,19 +2661,19 @@ fn runtime_set_shape_diagnostics_share_render_highlight_and_machine_identity() {
         assert!(matches!(
             error.frontmatter_block_spec(),
             Some(FrontmatterHighlight::Property(ref property))
-                if property == "initialize.stack[0].action[1].set"
+                if property == "initialize[1].set"
         ));
         let detail = error.detail();
         assert_eq!(
             detail["property"],
-            serde_json::json!("initialize.stack[0].action[1].set")
+            serde_json::json!("initialize[1].set")
         );
         assert!(detail["message"].as_str().is_some_and(|message| !message.is_empty()));
 
         let rendered = render(&error);
         assert!(rendered.contains("reported.md"), "{rendered}");
         assert!(
-            rendered.contains("initialize.stack[0].action[1].set"),
+            rendered.contains("initialize[1].set"),
             "{rendered}"
         );
         assert!(rendered.contains("set: {property: value}"), "{rendered}");
@@ -2651,17 +2682,17 @@ fn runtime_set_shape_diagnostics_share_render_highlight_and_machine_identity() {
 
 #[test]
 fn proxy_with_whole_mapping_renders_named_follow_up_and_explicit_key_hint() {
-    let err = CompositionError::LifecycleProxyWithWholeMapping {
+    let err = CompositionError::LifecycleWithWholeMapping {
         source_path: PathBuf::from("router.md"),
-        property: "failure.stack[1]".to_string(),
-        path: "action[0].with".to_string(),
+        property: "failure[1].proxy".to_string(),
+        path: "with".to_string(),
         raw: "{{ payload }}".to_string(),
     };
     assert!(
         matches!(
             err.frontmatter_block_spec(),
             Some(FrontmatterHighlight::Property(ref p))
-                if p == "failure.stack[1].action[0].with"
+                if p == "failure[1].proxy.with"
         ),
         "the excerpt must focus the diagnostic's property path"
     );
@@ -2680,10 +2711,10 @@ fn proxy_with_whole_mapping_renders_named_follow_up_and_explicit_key_hint() {
 
 #[test]
 fn proxy_with_dynamic_key_renders_without_inventing_a_dotted_path() {
-    let err = CompositionError::LifecycleProxyWithDynamicKey {
+    let err = CompositionError::LifecycleWithDynamicKey {
         source_path: PathBuf::from("router.md"),
-        property: "initialize.stack[0]".to_string(),
-        path: "action[0].with".to_string(),
+        property: "initialize[0].proxy".to_string(),
+        path: "with".to_string(),
         key: "{{ dynamic }}".to_string(),
     };
     // The path stops at `with`: appending `.{{ dynamic }}` would name a
@@ -2692,7 +2723,7 @@ fn proxy_with_dynamic_key_renders_without_inventing_a_dotted_path() {
         matches!(
             err.frontmatter_block_spec(),
             Some(FrontmatterHighlight::Property(ref p))
-                if p == "initialize.stack[0].action[0].with"
+                if p == "initialize[0].proxy.with"
         ),
         "the excerpt must focus the diagnostic's property path"
     );
@@ -2710,27 +2741,29 @@ fn proxy_with_dynamic_key_renders_without_inventing_a_dotted_path() {
 }
 
 #[test]
-fn proxy_only_parameter_renders_verb_and_key_value_rewrite() {
-    let err = CompositionError::LifecycleProxyOnlyParameter {
+fn with_unsupported_renders_verb_and_the_two_verbs_that_take_an_overlay() {
+    let err = CompositionError::LifecycleWithUnsupported {
         source_path: PathBuf::from("router.md"),
-        property: "failure.stack[0]".to_string(),
-        verb: "retry".to_string(),
-        param: "with".to_string(),
+        property: "failure[0].resume".to_string(),
+        verb: "resume".to_string(),
     };
     assert!(
         matches!(
             err.frontmatter_block_spec(),
-            Some(FrontmatterHighlight::Property(ref p)) if p == "failure.stack[0]"
+            Some(FrontmatterHighlight::Property(ref p)) if p == "failure[0].resume"
         ),
         "the excerpt must focus the diagnostic's property path"
     );
 
     let rendered = render(&err);
-    assert!(rendered.contains("retry"), "names the receiving verb: {rendered}");
-    assert!(rendered.contains("proxy"), "names the owning verb: {rendered}");
+    assert!(rendered.contains("resume"), "names the receiving verb: {rendered}");
     assert!(
-        rendered.contains("action: proxy"),
-        "the hint must show the key/value rewrite: {rendered}"
+        rendered.contains("proxy: { target"),
+        "the hint must show the proxy overlay form: {rendered}"
+    );
+    assert!(
+        rendered.contains("retry: { with"),
+        "the hint must show the retry overlay form: {rendered}"
     );
 }
 
@@ -2739,29 +2772,28 @@ fn proxy_with_diagnostics_share_the_lifecycle_authoring_code_and_project_facets(
     // The lifecycle family shares one code; the `property`/`message` facets
     // are what distinguish these for finer handlers, so both must project.
     let cases = [
-        CompositionError::LifecycleProxyWithNotMapping {
+        CompositionError::LifecycleWithNotMapping {
             source_path: PathBuf::from("router.md"),
-            property: "initialize.stack[0]".to_string(),
-            path: "action[0].with".to_string(),
+            property: "initialize[0].proxy".to_string(),
+            path: "with".to_string(),
             actual: "array".to_string(),
         },
-        CompositionError::LifecycleProxyWithWholeMapping {
+        CompositionError::LifecycleWithWholeMapping {
             source_path: PathBuf::from("router.md"),
-            property: "initialize.stack[0]".to_string(),
-            path: "action[0].with".to_string(),
+            property: "initialize[0].proxy".to_string(),
+            path: "with".to_string(),
             raw: "{{ payload }}".to_string(),
         },
-        CompositionError::LifecycleProxyWithDynamicKey {
+        CompositionError::LifecycleWithDynamicKey {
             source_path: PathBuf::from("router.md"),
-            property: "initialize.stack[0]".to_string(),
-            path: "action[0].with".to_string(),
+            property: "initialize[0].proxy".to_string(),
+            path: "with".to_string(),
             key: "{{ k }}".to_string(),
         },
-        CompositionError::LifecycleProxyOnlyParameter {
+        CompositionError::LifecycleWithUnsupported {
             source_path: PathBuf::from("router.md"),
-            property: "initialize.stack[0]".to_string(),
-            verb: "retry".to_string(),
-            param: "with".to_string(),
+            property: "initialize[0].resume".to_string(),
+            verb: "resume".to_string(),
         },
     ];
     for err in &cases {
@@ -2818,7 +2850,7 @@ fn caller_input_schema_problem_in_clarify_highlights_the_arm_declaration() {
             source_path: PathBuf::from("prompts/clarify.md"),
             property: "spec".to_string(),
             provided: "fix".to_string(),
-            patterns: vec!["**/*spec*.md".to_string()],
+            alternatives: vec![vec![vec!["**/*spec*.md".to_string()]]],
             is_array: false,
             reason: "no existing file matched reference `fix`".to_string(),
         },
@@ -3039,7 +3071,7 @@ fn lifecycle_diagnostics_show_code_span_values_literally() {
             vec![v("key")],
         ),
         (
-            CompositionError::LifecycleProxyWithWholeMapping {
+            CompositionError::LifecycleWithWholeMapping {
                 source_path: source_path(),
                 property: "start".into(),
                 path: "with".into(),
@@ -3048,7 +3080,7 @@ fn lifecycle_diagnostics_show_code_span_values_literally() {
             vec![v("raw")],
         ),
         (
-            CompositionError::LifecycleProxyWithDynamicKey {
+            CompositionError::LifecycleWithDynamicKey {
                 source_path: source_path(),
                 property: "start".into(),
                 path: "with".into(),
@@ -3057,7 +3089,7 @@ fn lifecycle_diagnostics_show_code_span_values_literally() {
             vec![v("key")],
         ),
         (
-            CompositionError::LifecycleProxyWithEvaluationFailed {
+            CompositionError::LifecycleWithEvaluationFailed {
                 source_path: source_path(),
                 property: "start".into(),
                 path: "with.spec".into(),

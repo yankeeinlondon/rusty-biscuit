@@ -151,8 +151,8 @@ fn run_loop_lifecycle_with_engine_path(
 fn loop_initialize_skip_ends_run_with_zero_iterations() {
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": "skip" }] },
-        "finalize": { "stack": [{ "action": {"append_line": ["never.log", "finalize"]} }] },
+        "initialize": ["skip"],
+        "finalize": [{"append_line": ["never.log", "finalize"]}],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -195,7 +195,7 @@ fn loop_initialize_skip_ends_run_with_zero_iterations() {
 fn loop_initialize_error_routes_to_failure_and_finalize() {
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
+        "initialize": [{"error": "preflight refused"}],
         "failure": { "stderr": "fail" },
         "finalize": { "stderr": "final" },
     }));
@@ -244,7 +244,7 @@ fn loop_initialize_stop_proceeds_into_iterations() {
     let run = |action: serde_json::Value| {
         let config = counter_loop(3);
         let lifecycle = lifecycle_from(json!({
-            "initialize": { "stack": [{ "action": action }] },
+            "initialize": [action],
         }));
         let emitter = SignalRecorder::default();
         let invocations = RefCell::new(0usize);
@@ -289,7 +289,7 @@ fn loop_initialize_proxy_hands_off_without_iterating() {
 
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"proxy": "target.md"} }] },
+        "initialize": [{"proxy": "target.md"}],
         "finalize": { "stderr": "final" },
     }));
     let emitter = SignalRecorder::default();
@@ -352,7 +352,7 @@ fn loop_initialize_proxy_defers_resolution_to_the_coordinator() {
 
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"proxy": "does-not-exist.md"} }] },
+        "initialize": [{"proxy": "does-not-exist.md"}],
         "finalize": { "stderr": "final" },
     }));
     let emitter = SignalRecorder::default();
@@ -407,11 +407,11 @@ fn loop_gate_explicit_error_fails_and_exits_without_mutation() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "action": {"error": "gate rejected final state"} }] },
+        "loop": { "gate": [{"error": "gate rejected final state"}] },
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -464,11 +464,11 @@ fn loop_gate_unintentional_error_does_not_invert_outcome() {
         condition: LoopCondition::Until("counter > 1".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "action": {"shell": "false"} }] },
+        "loop": { "gate": [{"shell": "false"}] },
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -507,13 +507,13 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     // The gate item's `when:` calls an unknown function, so it *raises*
     // at event time rather than evaluating cleanly to false.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
+        "loop": { "gate": [{ "when": "missing_root() == true", "then": [{"stderr": "x"}] }] },
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -557,11 +557,11 @@ fn loop_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() 
     // to `failure`. The `failure.when:` calls an unknown function, so it
     // *raises* at event time rather than evaluating cleanly to false.
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
-        "failure": {
-            "stderr": "fail",
-            "stack": [{ "when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
+        "initialize": [{"error": "preflight refused"}],
+        "failure": [
+            { "stderr": "fail" },
+            { "when": "missing_root() == true", "then": [{"stderr": "never"}] },
+        ],
         "finalize": { "stderr": "final" },
     }));
     let emitter = SignalRecorder::default();
@@ -671,6 +671,7 @@ fn run_loop_lifecycle_emitting_terminal(
                 crate::test_support::process_context(),
                 Some(&timing),
                 None,
+                Some(&ctx.ambient),
             );
             guard.execute_event(LifecycleSignal::Success, &success_ctx);
             Ok(LoopIterationOutput::success("ran"))
@@ -681,7 +682,7 @@ fn run_loop_lifecycle_emitting_terminal(
 
 /// A late-binding **evaluation** error in the `loop:` gate is a
 /// terminal-phase raise (Decision #3): it must fire `finalize` exactly once
-/// carrying the loop error as the `err` global, so a `finalize.stack` can
+/// carrying the loop error as the `err` global, so a `finalize` stack can
 /// react. Proven by a `finalize` stack whose `append_line` is gated on
 /// `err.variant` — the line only lands if `err` reached `finalize`.
 #[test]
@@ -696,7 +697,7 @@ fn loop_gate_evaluation_error_fires_finalize_with_err() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     // The gate `when:` calls an unknown function, so it *raises* at event
@@ -704,14 +705,14 @@ fn loop_gate_evaluation_error_fires_finalize_with_err() {
     // signal) writes the threaded `err` fields to a log, gated on the
     // canonical `when: "err"` truthiness guard.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
-        "finalize": {
-            "stderr": "done",
-            "stack": [{
+        "loop": { "gate": [{ "when": "missing_root() == true", "then": [{"stderr": "x"}] }] },
+        "finalize": [
+            { "stderr": "done" },
+            {
                 "when": "err",
-                "action": {"append_line": ["err.log", "{{ err.variant + '|' + err.msg }}"]}
-            }]
-        },
+                "then": [{"append_line": ["err.log", "{{ err.variant + '|' + err.msg }}"]}]
+            },
+        ],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -761,17 +762,17 @@ fn loop_gate_evaluation_error_with_finalize_raise_surfaces_finalize() {
         condition: LoopCondition::Until("counter > 5".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     };
     // `finalize` top-level `stderr` fires (recorder logs the signal) before
     // its stack `when:` raises on an unknown function.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
-        "finalize": {
-            "stderr": "done",
-            "stack": [{ "when": "also_missing() == true", "action": {"stderr": "never"} }]
-        },
+        "loop": { "gate": [{ "when": "missing_root() == true", "then": [{"stderr": "x"}] }] },
+        "finalize": [
+            { "stderr": "done" },
+            { "when": "also_missing() == true", "then": [{"stderr": "never"}] },
+        ],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -814,15 +815,15 @@ fn loop_gate_evaluation_error_with_finalize_raise_surfaces_finalize() {
 fn loop_initialize_error_with_failure_and_finalize_raise_surfaces_finalize() {
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
-        "failure": {
-            "stderr": "fail",
-            "stack": [{ "when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
-        "finalize": {
-            "stderr": "final",
-            "stack": [{ "when": "also_missing() == true", "action": {"stderr": "never"}}]
-        },
+        "initialize": [{"error": "preflight refused"}],
+        "failure": [
+            { "stderr": "fail" },
+            { "when": "missing_root() == true", "then": [{"stderr": "never"}] },
+        ],
+        "finalize": [
+            { "stderr": "final" },
+            { "when": "also_missing() == true", "then": [{"stderr": "never"}] },
+        ],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -847,4 +848,116 @@ fn loop_initialize_error_with_failure_and_finalize_raise_surfaces_finalize() {
             "expected LifecycleEvaluationError for finalize, got {other:?}"
         ),
     }
+}
+
+
+#[derive(Default)]
+struct CancelInitializeRecorder {
+    token: crate::composition::lifecycle::cancellation::CancellationToken,
+    events: Mutex<Vec<(LifecycleSignal, String)>>,
+    warnings: Mutex<Vec<String>>,
+}
+
+impl LifecycleEmitter for CancelInitializeRecorder {
+    fn emit_stderr(&self, signal: LifecycleSignal, text: &str, _: &biscuit_terminal::terminal::Terminal) {
+        self.events.lock().unwrap().push((signal, text.into()));
+        if signal == LifecycleSignal::Initialize {
+            self.token.cancel(crate::composition::lifecycle::cancellation::CancellationCause::SiblingFailure {
+                group: "atomic".into(), leg: "failed".into(),
+                error: LifecycleErrorInfo::from_action_failure("shell", "original failure"),
+            });
+        }
+    }
+    fn emit_warn(&self, text: &str, _: &biscuit_terminal::terminal::Terminal) {
+        self.warnings.lock().unwrap().push(text.into());
+    }
+    fn emit_message(&self, _: &str, _: &Path, _: Option<&Path>, _: &crate::messaging::RuntimeMessagingSettings) {}
+    fn emit_speech(&self, _: &str, _: biscuit_speaks::TtsConfig) {}
+    fn emit_effect(&self, _: &str) {}
+    fn emit_notification(&self, _: &str) {}
+}
+
+fn assert_cancelled_loop_initialize(control: Value) {
+    let dir = TempDir::new().unwrap();
+    let marker = dir.path().join("forbidden.txt");
+    let path = dir.path().join("loop.md");
+    let lifecycle = lifecycle_from(json!({
+        "initialize": [{"stderr": "initializing"}, control],
+        "failure": [{"stderr": "must not catch"}],
+        "cancelled": [{"stderr": "{{ err.detail.group }}:{{ err.detail.leg }}"}, {"shell": format!("echo forbidden > {}", marker.display())}],
+        "finalize": [{"stderr": "finalized"}, {"retry": 2}],
+        "loop": {"gate": [{"stderr": "must not gate"}]}
+    }));
+    let recorder = CancelInitializeRecorder::default();
+    let _scope = recorder.token.enter();
+    let invocations = RefCell::new(0);
+    let result = run_loop_lifecycle(&path, &counter_loop(3), object(json!({"counter":0})), &lifecycle, &recorder, &invocations);
+    assert_eq!(result.final_exit_code, 130);
+    assert_eq!(result.iteration_count, 0);
+    assert_eq!(*invocations.borrow(), 0);
+    assert!(result.error.is_none());
+    assert!(result.handoff.is_none());
+    assert!(!marker.exists(), "pre-start cancellation cleanup cannot run shells");
+    assert_eq!(*recorder.events.lock().unwrap(), vec![
+        (LifecycleSignal::Initialize, "initializing".into()),
+        (LifecycleSignal::Cancelled, "atomic:failed".into()),
+        (LifecycleSignal::Finalize, "finalized".into()),
+    ]);
+    let warnings = recorder.warnings.lock().unwrap();
+    assert!(warnings.iter().any(|warning| warning.contains("shell")), "{warnings:?}");
+    assert!(warnings.iter().any(|warning| warning.contains("retry")), "{warnings:?}");
+}
+
+#[test]
+fn cancelled_loop_initialize_skip_has_priority_over_routing() {
+    assert_cancelled_loop_initialize(json!("skip"));
+}
+
+#[test]
+fn cancelled_loop_initialize_proxy_has_priority_over_routing() {
+    assert_cancelled_loop_initialize(json!({"proxy": "missing.md"}));
+}
+
+#[test]
+fn cancelled_loop_initialize_error_has_priority_over_routing() {
+    assert_cancelled_loop_initialize(json!({"error": "must not catch"}));
+}
+
+#[test]
+fn cancelled_loop_executor_stops_without_gate_or_mutation() {
+    let dir = TempDir::new().unwrap();
+    let config = counter_loop(3);
+    let mut calls = 0;
+    let result = run_loop(&dir.path().join("loop.md"), &config, object(json!({"counter":0})), LoopExecutionOptions::default(), |_| {
+        calls += 1;
+        Ok(LoopIterationOutput {
+            output: "partial output".into(), exit_code:130,
+            terminal_signal:Some(LifecycleSignal::Cancelled),
+            ..Default::default()
+        })
+    }).unwrap();
+    assert_eq!(calls, 1);
+    assert_eq!(result.final_exit_code, 130);
+    assert_eq!(result.last_output, "partial output");
+    assert_eq!(result.final_frontmatter["counter"], json!(0));
+    assert!(result.handoff.is_none());
+}
+
+#[test]
+fn cancelled_loop_executor_error_stops_with_the_interrupt_status() {
+    let dir = TempDir::new().unwrap();
+    let token = crate::composition::lifecycle::cancellation::CancellationToken::default();
+    let _scope = token.enter();
+    let config = counter_loop(3);
+    let mut calls = 0;
+    let result = run_loop(&dir.path().join("loop.md"), &config, object(json!({"counter":0})), LoopExecutionOptions::default(), |_| {
+        calls += 1;
+        token.cancel(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt);
+        Err(CompositionError::LifecycleInitializeFailed {source_path:dir.path().join("loop.md"), reason:"cancelled preparation".into()})
+    }).unwrap();
+    assert_eq!(calls, 1);
+    assert_eq!(result.iteration_count, 1);
+    assert_eq!(result.final_exit_code, 130);
+    assert_eq!(result.final_frontmatter["counter"], json!(0));
+    assert!(result.error.is_none());
 }

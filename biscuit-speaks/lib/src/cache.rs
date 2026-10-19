@@ -6,7 +6,7 @@
 //! ## Cache Location
 //!
 //! The cache file is stored at `~/.biscuit-speaks-cache.json`, unless
-//! `BISCUIT_SPEAKS_CACHE` names a different file. See [`cache_file_path`].
+//! `BISCUIT_SPEAKS_CACHE` names a different file. See `cache_file_path`.
 //!
 //! ## Atomicity
 //!
@@ -67,7 +67,7 @@ struct CacheEnvelope {
 /// ## Returns
 ///
 /// `None` if no override is set and the home directory cannot be determined.
-fn cache_file_path() -> Option<PathBuf> {
+pub(crate) fn cache_file_path() -> Option<PathBuf> {
     resolve_cache_path(std::env::var_os(CACHE_PATH_ENV))
 }
 

@@ -257,6 +257,40 @@ typed `MissingHomeContext` — not a silent miss.
 Note the difference from magic references: `@` *includes* HOME in its search
 list, but `~` is home-*pinned* with no other candidate.
 
+**User cache directory.** `biscuit_file::user_cache_dir()` (feature
+`file-reference`) returns the per-user cache directory, built on the same
+`home_dir()`. It is not part of reference resolution; it is the one place
+programs in this workspace ask where a persistent cache belongs.
+
+| OS | Result |
+| --- | --- |
+| macOS | `<home>/Library/Caches` (`XDG_CACHE_HOME` is not read) |
+| Linux and other Unix | `$XDG_CACHE_HOME`, otherwise `<home>/.cache` |
+| native Windows | `%LOCALAPPDATA%`, otherwise `None` |
+
+An empty or relative `XDG_CACHE_HOME` or `LOCALAPPDATA` counts as unset, and
+no home (where one is needed) means `None`. Windows has no home-derived
+fallback because a redirected Local AppData folder would make
+`<home>\AppData\Local` wrong. Like the home, the result is neither
+canonicalized nor checked for existence; a caller that gets `None` runs
+without a persistent cache.
+
+```text
+XDG_CACHE_HOME=/var/cache/me    (Linux)    → /var/cache/me
+XDG_CACHE_HOME=rel/cache        (Linux)    → <home>/.cache
+XDG_CACHE_HOME=/var/cache/me    (macOS)    → <home>/Library/Caches
+LOCALAPPDATA unset              (Windows)  → None
+```
+
+`biscuit_file::user_cache_dir_from(env, home)` applies the same rules to an
+environment lookup and home the caller already holds, such as a request
+snapshot's, so a library never reads the process:
+
+```rust,ignore
+let env = snapshot.env();
+let cache = biscuit_file::user_cache_dir_from(|name| env.get(name).map(Into::into), snapshot.home());
+```
+
 ### Magic (`@`)
 
 Magic references search a prioritized list of root directories — the most
@@ -822,7 +856,7 @@ does not exist is `Io`.
 | `add_magic_path_with_tier(path, position, tier)` | Add a magic root with an explicit `MagicPathTier` (`User` forces the user tier) |
 | `add_vault(path)` | Add an authoritative vault root |
 | `with_launch_magic_scope(scope)` | Seed the launch `@` scope on a context rebuilt around an external source |
-| `source_path()`, `cwd()`, `repository_root()`, `package_root()`, `package_area()`, `home_dir()`, `env()` | Inspect captured inputs |
+| `source_path()`, `cwd()`, `repository_root()`, `package_root()`, `package_area()`, `repository_scope_catalog()`, `home_dir()`, `env()` | Inspect captured inputs |
 | `base_dir()`, `base_dir_origin()`, `base_dir_is_boundary()`, `external_relative_allowed()` | Inspect the file tree and the reader opt-in |
 | `launch_magic_scope()`, `magic_path_registrations()` | Inspect the launch `@` scope and configured magic roots with their tiers |
 | `magic_search_roots()` | The ordered, deduplicated `@` roots with provenance |
@@ -1524,8 +1558,8 @@ let ctx = FileResolutionContext::new("/work/repo/apps/web/docs")
 
 // A path input: the strategy picks the form.
 let found = PortablePath::from_path("/work/repo/foo.md").with_ctx(&ctx).file_reference()?;
-assert_eq!(found.reference().raw(), "&foo.md");
-assert_eq!(found.strategy(), &PortabilityPreference::RepoRoot(None));
+assert_eq!(found.reference().raw(), "foo.md");
+assert_eq!(found.strategy(), &PortabilityPreference::TreeRootRelative);
 
 // A reference input: anchors the author chose are kept, positions are cleaned.
 let kept = PortablePath::from_reference(FileReference::new("^/foo.md")?).with_ctx(&ctx).file_reference()?;
@@ -1533,7 +1567,7 @@ assert_eq!(kept.reference().raw(), "^/foo.md");
 let cleaned = PortablePath::from_reference(FileReference::new("../../../foo.md")?)
     .with_ctx(&ctx)
     .file_reference()?;
-assert_eq!(cleaned.reference().raw(), "&foo.md");
+assert_eq!(cleaned.reference().raw(), "foo.md");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
@@ -1570,14 +1604,22 @@ turn; the first whose reference verifies wins. The default:
 | # | Preference | Writes | Applies when |
 | - | ---------- | ------ | ------------ |
 | 1 | `AuthoredIntent(IntentForms::ALL)` | the input, unchanged | a reference input is `~`, `@`, `^`, `&`, `vault:`, a URL, a `%` search, or starts with a portable `{{VAR}}` |
-| 2 | `SameDirRelative` | `./x.md` (`./` for `cwd` itself) | the target's parent is `cwd` |
-| 3 | `ChildDir` | `./a/b/x.md` | the target is below a subdirectory of `cwd` |
-| 4 | `PeerDir` | `../sibling/x.md` | one hop up, then down |
-| 5 | `ImmediateParentDir` | `../x.md` | the target's parent is `cwd`'s parent |
-| 6 | `RepoRoot(None)` | `&path/x.md` | the context has a repository containing the target |
-| 7 | `EnvRootedPath` | `{{NAME}}/x.md` | a [portable variable](#portable-environment-variables) is an absolute prefix |
-| 8 | `HomeDir` | `~/x.md` | the target is under the home directory |
-| 9 | `AbsolutePath` | the absolute path | always; the caller's cue to warn |
+| 2 | `TreeRootRelative` | `docs/topics/x.md` | a bare path from `base_dir` resolves to the intended target |
+| 3 | `SameDirRelative` | `./x.md` (`./` for `cwd` itself) | the target's parent is `cwd` |
+| 4 | `ChildDir` | `./a/b/x.md` | the target is below a subdirectory of `cwd` |
+| 5 | `PeerDir` | `../sibling/x.md` | one hop up, then down |
+| 6 | `ImmediateParentDir` | `../x.md` | the target's parent is `cwd`'s parent |
+| 7 | `RepoRoot(None)` | `&path/x.md` | the context has a repository containing the target |
+| 8 | `EnvRootedPath` | `{{NAME}}/x.md` | a [portable variable](#portable-environment-variables) is an absolute prefix |
+| 9 | `HomeDir` | `~/x.md` | the target is under the home directory |
+| 10 | `AbsolutePath` | the absolute path | always; the caller's cue to warn |
+
+The bare-root preference uses the repository root inside a repository. It does
+not change lookup precedence: bare references still check `cwd` before the
+repository root. If `docs/topics/x.md` finds a different local file first,
+the attempt is recorded as `Shadowed` and the next preference runs. Outside a
+repository, a tree-root spelling is used only when the existing lookup reaches
+the target; the preference does not add a new lookup root.
 
 The relative preferences only write a route that stays inside the file tree
 (`base_dir`). Under a [fallback tree](#the-file-tree-base_dir-and-the-relative-boundary),
@@ -1615,16 +1657,19 @@ then refused with `NormalizationUnsupported`, never rewritten).
 | intent forms (above) | kept exactly as written, with findings for problems |
 | `./`, `../`, bare, absolute, a non-portable `{{VAR}}` | resolved to one target, then run through the strategy |
 
-- A link already in the chosen form is returned as written: `foo.md` and
-  `./foo.md` both stay when the lookup finds `foo.md` next to the document. A
-  bare link that only resolves through the repository-root fallback is not a
-  same-directory link and is rewritten.
+- A verified bare tree-root link keeps that form. For example, an authored
+  `docs/topics/x.md` stays `docs/topics/x.md`; a nearby `./x.md` becomes that
+  root spelling when it reaches the same target. Custom strategies can still
+  prefer nearby relative links.
 - Running the result back through `PortablePath` returns it unchanged.
 - A single-location input that names a missing file still has a target
   (`../../new.md` can become `&new.md`). A search with no match (`missing.md`
   with two candidate roots, `@missing.md` when not kept), a boundary escape, a
   missing anchor, or an I/O failure gives `UnresolvableInput`; keep the link
   as authored and report the finding.
+- Directory links may use bare root spellings too. If no regular file matches,
+  the first existing non-file candidate supplies the directory identity and
+  the result carries `TargetNotFile` as a finding.
 - `PortablePath` takes a path only. A link layer splits `#fragment`, `?query`,
   or `:line` off first and puts it back on the result.
 

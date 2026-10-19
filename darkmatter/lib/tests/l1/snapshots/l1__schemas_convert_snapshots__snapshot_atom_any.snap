@@ -7,14 +7,7 @@ expression: "convert_atom(\"any\")"
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
-    "field": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {}
-      ]
-    }
+    "field": {}
   },
   "type": "object"
 }

@@ -96,7 +96,7 @@ initialize → (schema verdict, shell approval) → start → agent → success 
                                                  blocked fires instead when the run stops before the agent launches
 ```
 
-Each event is a frontmatter key whose value is an ordered list of actions. Put guarded actions under `when` and `then`, with an optional `else` body. A short, unguarded event can instead be a dictionary of verbs; dictionaries run in canonical order, so use a list whenever order matters. The former `stack:` wrapper and `action:` aggregator are removed grammar.
+Each event is a frontmatter key holding an ordered list of actions, run top to bottom. A `when` item guards a `then` list, with an optional `else` list; guards nest up to five levels. The former `stack:` wrapper and `action:` aggregator are removed grammar.
 
 ```yaml
 success:
@@ -110,9 +110,11 @@ success:
     - error: "the agent did not record an outcome in {{ report }}"
 ```
 
+An event with no guard or ordering needs may be one dictionary (`success: { message: "done", say: "done" }`). Its verbs run in a fixed order whatever order they are written in: `set`, then `stdout`, `stderr`, `info`, `warn`, `success`, `message`, `notify`, `effect`, `say`, then `shell`, then other verbs, then one flow-control directive. A `when` item may carry sibling verbs instead of `then`, in the same fixed order. Audio plays in list order, so put `effect` before `say` to hear it first.
+
 - **Where a notification goes.** `info`, `warn`, `success`, and `stderr` print to the terminal. `message` goes to the configured messaging route and prints **nothing** locally. `say` and `effect` are audio. An outcome the caller must see in the terminal needs one of the first group.
 - **Values are literal text.** Only `when`, `while`, and `until` are expressions. Everywhere else a brace span opts in, and it is resolved when the event fires, so a hook reports the state at that moment. A brace span inside a quoted string *inside* an expression is rejected; build the string with `+`.
-- **Two action forms.** Short form is `verb: value`, or `verb: [a, b, c]` for several arguments. Long form is `verb: { parameter: value }`, used for named parameters such as `with`, `on_error`, and `no_error`. A flow-control action ends the whole event, including any enclosing conditional; an unconditional directive must be last in its list. Place `say` and `effect` in the order you want them to run; `say_first` is removed grammar.
+- **Two action forms.** Short form is `verb: value`, or `verb: [a, b, c]` for several arguments. Long form is `verb: { <named parameters> }`, and is required for `with:` and an action's own `no_error:`. A flow-control directive must be the last item in its list, and the first one that fires ends the whole event. Place `say` and `effect` in the order you want them to run; `say_first` is removed grammar.
 - **`err`** exists only in `blocked`, `failure`, and `finalize`. Match on `err.code`, `err.category`, `err.is_transient`, or `err.is_throttled`, never on message text. `err.msg` is safe to speak or post.
 
 Flow control:
@@ -131,7 +133,7 @@ Rules that shape a design:
 
 - **`initialize` is shell-free**, and a document that declares `initialize` may not use a frontmatter `$(…)` at all. Approval cannot lift either rule. Put shell work in `start` or later, or drop `initialize` and gate from `start`.
 - **A lifecycle `shell` action cannot hand back its output or exit status.** A non-zero exit fails the item unless `no_error: true`. To branch on a command's result from `start` or later, assign it with `set` and a whole-value `$(…)`, which takes the same suffixes as the frontmatter form (`set: { clean: "$(git diff --quiet)::ok" }`), then gate the next item on it. The command is approved up front like every other.
-- **Verify in `success`; do not trust the agent's exit.** Have the agent record its outcome in a file, read it with `frontmatter(file, 'key')`, and end the event with an unconditional `error` so that a missing outcome is a failure.
+- **Verify in `success`; do not trust the agent's exit.** Have the agent record its outcome in a file, read it with `frontmatter(file, 'key')`, and end the event's list with an unconditional `error` so that a missing outcome is a failure.
 - **Nudge before giving up.** When the outcome is missing, `resume` the session once and ask for it. Runtime state does not survive re-entry, so record that the nudge happened with `set_frontmatter` on a file.
 - **A bounded retry counts on disk.** `retry: N` has no exhaustion event. Use `increment_frontmatter` in `start`, which fires on every attempt, and gate a "gave up" branch on the count.
 ::end-block
@@ -142,15 +144,20 @@ Rules that shape a design:
 - **A router needs no agent.** A document can do all its routing in `initialize` or `start` and never launch. Give it a short body that tells an agent that reaches it to do nothing and report the fault.
 - **`proxy … with:`** parameterizes the target. Values keep their types, are resolved at the source when the event fires, and are never written to disk. The overlay reaches only the immediate target, so forward what the next hop needs explicitly. It can set any top-level key, including a lifecycle block, which is how a reusable prompt such as `commit.md` can be given a continuation it does not know about.
 - **A proxy chain visits a document once.** Returning to an earlier document is rejected as a cycle, and a chain is limited to 16 hops. A flow that must repeat a stage cannot do it with `proxy`; that is what a sequence is for.
-- **A sequence** is a static list of steps, each composed at its turn: `prompt:`, `shell:`, `side_effect:`, or a group.
+- **A sequence** is an ordered list of steps, each composed at its turn: `prompt:`, `shell:`, `side_effect:`, a nested `sequence:`, or a group.
     - Every command across all steps is approved before step 1 starts.
     - Missing required inputs are collected in one pass up front, so an input that only some paths need must be optional.
     - A step becomes conditional when its prompt calls `skip` from `initialize` after reading the shared report.
     - The same document may appear in more than one step.
     - A step's document may declare `interactive: true` and runs interactively. Only the sequence document itself may not.
     - A step's document may `proxy`; the target runs within the same step, and the step completes once.
-    - `sequence_id` names the run and is the right seed for a per-run file name.
-- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `loop.count`, `loop.is_first`, `loop.is_last`, `loop.last_output`, and `loop.last_exit_code`. A `proxy` from any event of an iteration ends the loop and hands off.
+    - `seq.run_id` names the run and is the right seed for a per-run file name. Use `seq.name`, `seq.index`, `seq.count`, `seq.previous`, `seq.next`, and `seq.outputs` for position and committed results; these bindings are separate from authored frontmatter.
+    - A nested `sequence:` runs its children in order. A group runs named legs concurrently and exposes their outcomes through `group.legs`; a leg may itself be a sequence or group. Groups have no `execution:` selector.
+    - Containers own `initialize`, `start`, `success`, `failure`, `cancelled`, and `finalize` events. Successful containers run `initialize` → `start` → children → `success` → `finalize`; failed children enter the container's `failure` recovery before `finalize`.
+    - Sequences stop on an unhandled child failure. A group alone may declare `fail_fast: false` to retain partial results and continue. Put preparation and cleanup in container events or adjacent tasks; task `setup:` and `teardown:` are removed.
+    - A running group leg opts into sibling-failure cancellation by declaring `cancelled: []` (an empty stack still opts in). Cancellation settles descendants, runs `cancelled` then `finalize`, and never enters failure recovery. Ctrl+C cancels every running leg.
+    - Group isolation covers in-memory state, not files. Failed atomic groups withhold mutations and results; filesystem writes remain real effects. `--dry-run` still runs shell tasks and lifecycle shells.
+- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `loop.count`, `loop.is_first`, `loop.is_last`, `loop.last_output`, and `loop.last_exit_code`; the `loop:` configuration itself reads as `fm.loop`. A `proxy` from any event of an iteration ends the loop and hands off.
 - **In this repository every git commit goes through `prompts/commit.md`.** A stage that produces changes stages them and hands off; it never runs `git commit`.
 ::end-block
 
@@ -212,7 +219,7 @@ Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-ha
 ::end-block
 
 ::block when="!defects_trusted || !contains(defects_fixed, 'F8')"
-- **The `loop:` block's own lifecycle actions cannot read the `loop.*` values**, and referencing one there fails the run. Report loop progress from `start` or `success`, which can.
+- **The `loop:` block's own `info`, `warn`, `message`, and `gate:` list cannot read the `loop.*` values**, and referencing one there fails the run. Report loop progress from `start` or `success`, which can.
 ::end-block
 
 ::block when="!defects_trusted || !contains(defects_fixed, 'D1')"
@@ -220,7 +227,7 @@ Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-ha
 ::end-block
 
 ::block when="!defects_trusted || !contains(defects_fixed, 'D2')"
-- **Claudine's run header can show a `description` wrongly.** Underscores are read as emphasis even inside inline code, so `_pr/open.md` can appear as `pr/open.md`, and a stray `</i>` can appear. The source is right: read names from the file, and do not rename files or variables to suit the header.
+- **Claudine's run header can show a `description` wrongly.** Underscores are read as emphasis even inside inline code, so `_pr/open.md` can appear as `pr/open.md`, and a stray `</i>` can appear. A diagnostic that quotes a name with a leading underscore loses it the same way. The source is right: read names from the file, and do not rename files or variables to suit the header.
 ::end-block
 
 ::end-block

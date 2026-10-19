@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use biscuit_file::{FileReference, YamlValue};
 
 use darkmatter::markdown::schemas::{
-    Constraint, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SimplifiedSchema,
+    EffectiveSchema, PropertyDef, SchemaArm, SimplifiedSchema,
 };
 
 use crate::completion::fuzzy;
@@ -271,13 +271,5 @@ fn collect_property_defs(effective: &EffectiveSchema) -> Vec<(&String, &Property
 }
 
 fn is_required(def: &PropertyDef) -> bool {
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(atom) => vec![atom],
-        PropertyDef::Union(items) => items.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
-        atom.constraints
-            .iter()
-            .any(|c| matches!(c, Constraint::Required))
-    })
+    def.is_required()
 }

@@ -92,8 +92,10 @@ fn spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation
         let diagnostics = fixture.wait_for_diagnostics(uri);
         assert_eq!(has_required(&diagnostics), index < 2, "initial {uri}: {diagnostics:?}");
         let items = completion(&mut fixture, uri);
-        assert_eq!(offers_probe(&items), index == 1, "current trigger-only completion gap: {items:?}");
-        assert_eq!(hover(&mut fixture, uri).contains("SPIKE_OLD_TYPE"), index == 1);
+        // The trigger payload types both payments documents, so both complete
+        // and hover from it; the shipping document matches no trigger.
+        assert_eq!(offers_probe(&items), index < 2, "trigger-typed completion: {items:?}");
+        assert_eq!(hover(&mut fixture, uri).contains("SPIKE_OLD_TYPE"), index < 2);
         if index == 2 {
             independent_codes = diagnostics.iter().filter_map(|d| d["code"].as_str().map(str::to_owned)).collect();
             assert!(!independent_codes.is_empty(), "independent diagnostic positive control");
@@ -111,10 +113,12 @@ fn spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation
         assert_eq!(has_required(&diagnostics), index == 0, "failure route {index}: {diagnostics:?}");
         let codes = diagnostics.iter().filter_map(|d| d["code"].as_str().map(str::to_owned)).collect::<BTreeSet<_>>();
         assert!(independent_codes.is_subset(&codes), "independent checks must survive in affected documents");
+        // The trigger-only document keeps serving its last good payload, and
+        // its completion and hover agree with its diagnostics.
         let items = completion(&mut fixture, uri);
-        assert!(!offers_probe(&items));
+        assert_eq!(offers_probe(&items), index == 0, "failure route {index}");
         assert!(items.iter().any(|item| item["label"] == "title"), "baseline assistance must remain available");
-        assert!(!hover(&mut fixture, uri).contains("SPIKE_OLD_TYPE"));
+        assert_eq!(hover(&mut fixture, uri).contains("SPIKE_OLD_TYPE"), index == 0, "failure route {index}");
     }
     let independent = fixture.wait_for_diagnostics(&uris[2]);
     let codes = independent.iter().filter_map(|d| d["code"].as_str().map(str::to_owned)).collect::<BTreeSet<_>>();
@@ -127,9 +131,9 @@ fn spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation
     for (index, uri) in uris[..2].iter().enumerate() {
         assert!(has_required(&fixture.wait_for_diagnostics(uri)));
         let text = hover(&mut fixture, uri);
-        assert_eq!(text.contains("SPIKE_REPAIRED_TYPE"), index == 1, "{text}");
+        assert!(text.contains("SPIKE_REPAIRED_TYPE"), "{index}: {text}");
         assert!(!text.contains("SPIKE_OLD_TYPE"));
-        assert_eq!(offers_probe(&completion(&mut fixture, uri)), index == 1);
+        assert!(offers_probe(&completion(&mut fixture, uri)), "{index}");
     }
     fixture.flush_server();
     for uri in &uris { while fixture.take_buffered_diagnostics(uri).is_some() {} }
@@ -147,8 +151,8 @@ fn spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation
     changed(&mut fixture, &[(&trigger, 1), (&payload, 1)]);
     for (index, uri) in uris[..2].iter().enumerate() {
         assert!(has_required(&fixture.wait_for_diagnostics(uri)));
-        assert_eq!(offers_probe(&completion(&mut fixture, uri)), index == 1);
-        assert_eq!(hover(&mut fixture, uri).contains("SPIKE_REPAIRED_TYPE"), index == 1);
+        assert!(offers_probe(&completion(&mut fixture, uri)), "{index}");
+        assert!(hover(&mut fixture, uri).contains("SPIKE_REPAIRED_TYPE"), "{index}");
     }
     assert!(!offers_probe(&completion(&mut fixture, &uris[2])));
     fixture.shutdown();

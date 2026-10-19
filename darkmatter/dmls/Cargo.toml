@@ -59,6 +59,11 @@ globset = "0.4"
 # identically on macOS/Windows/Linux. Already in the tree via `url`/`idna`.
 unicode-normalization = "0.1"
 
+# The persistent per-file facts store behind references, rename, and
+# workspace symbols. Bundled SQLite, so every OS builds the same 3.45 with
+# `STRICT` tables; the same version and feature as `claudine/lib`.
+rusqlite = { version = "0.31", features = ["bundled"] }
+
 # Semantic authorities
 darkmatter = { path = "../lib" }
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
@@ -103,12 +108,19 @@ required-features = ["terminal-tests"]
 [package.metadata.ci.tests]
 # The context construction guard includes darkmatter-cli's shared engine by
 # `#[path]` and spells both files in its test; the entry-point parity runner
-# and the formatting parity test do the same with darkmatter's shared matrices.
+# and the formatting parity test do the same with darkmatter's shared matrices,
+# the union-item editor suite with darkmatter's union fixtures, the
+# content-policy baseline suite with darkmatter's content-policy fixtures, and
+# the frontmatter diagnostic position-parity tests with darkmatter's position
+# fixtures.
 source-inputs = [
   "darkmatter/cli/tests/common/context_guard.rs",
   "darkmatter/cli/tests/common/source_scan.rs",
   "darkmatter/lib/tests/common/clean_parity/mod.rs",
   "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+  "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
+  "darkmatter/lib/tests/position_fixtures/mod.rs",
+  "darkmatter/lib/tests/union_fixtures/mod.rs",
 ]
 tiers = ["L1", "L2"]
 features = ["terminal-tests", "effects-instrumentation"]

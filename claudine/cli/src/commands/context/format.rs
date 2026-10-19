@@ -26,7 +26,8 @@ fn context_value_type_markup(ty: &ContextValueType) -> String {
         SimplifiedType::Boolean | SimplifiedType::Boolish => "orange",
         SimplifiedType::Date | SimplifiedType::DateTime | SimplifiedType::Time => "violet",
         SimplifiedType::Object
-        | SimplifiedType::Any
+        | SimplifiedType::Unknown
+        | SimplifiedType::Null
         | SimplifiedType::TypeDefinition
         | SimplifiedType::Schema => "cyan",
         SimplifiedType::String
@@ -37,7 +38,9 @@ fn context_value_type_markup(ty: &ContextValueType) -> String {
         | SimplifiedType::Yaml
         | SimplifiedType::Json
         | SimplifiedType::Expression
-        | SimplifiedType::Literal => "blue",
+        | SimplifiedType::Literal
+        | SimplifiedType::Alphanumeric
+        | SimplifiedType::Shell => "blue",
     };
     format!("<{color}>{ty}</{color}>")
 }

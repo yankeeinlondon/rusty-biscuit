@@ -622,6 +622,10 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
         refreshed_envelope.is_empty(),
         "valid envelope diagnostics after consumer open: {refreshed_envelope:?}"
     );
+    // An open envelope can be published twice for one event; drop any
+    // leftover so the wait below reads a post-save publication.
+    fixture.flush_server();
+    while fixture.take_buffered_diagnostics(envelope_uri.as_str()).is_some() {}
 
     std::fs::remove_file(&payload_path).unwrap();
     fixture.notify(
@@ -805,6 +809,78 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
         repaired["diagnostics"],
         json!([]),
         "repair must clear the open envelope"
+    );
+
+    fixture.shutdown();
+}
+
+/// The diagnostics last published for `uri` once the server is idle.
+fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
+    fixture.flush_server();
+    let mut latest = fixture.wait_for_diagnostics_params(uri);
+    while let Some(params) = fixture.take_buffered_diagnostics(uri) {
+        latest = params;
+    }
+    latest["diagnostics"].as_array().cloned().unwrap_or_default()
+}
+
+fn requires_model(diagnostics: &[Value]) -> bool {
+    diagnostics.iter().any(|diagnostic| {
+        diagnostic["code"] == json!("dm.schema.missing_required")
+            && diagnostic["message"].as_str().is_some_and(|message| message.contains("model"))
+    })
+}
+
+#[test]
+fn saving_an_open_trigger_buffer_updates_consumers_and_unsaved_edits_do_not() {
+    let workspace = LspWorkspace::new();
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+    let envelope_path = schemas.join("prompt.trigger.yaml");
+    let document_path = workspace.path().join("prompt.md");
+    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let retargeted = "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: prompt.yaml\n";
+    let document = "---\nprompt: hello\n---\n\nBody\n";
+    std::fs::write(&envelope_path, envelope).unwrap();
+    std::fs::write(schemas.join("prompt.yaml"), "$schema:\n  model: string(required)\n").unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_initialize_params(workspace.path()));
+    let envelope_uri = url::Url::from_file_path(&envelope_path).unwrap();
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    open(&fixture, document_uri.as_str(), document);
+    assert!(requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": {
+            "uri": envelope_uri.as_str(), "languageId": "yaml", "version": 1, "text": envelope
+        } }),
+    );
+
+    // An unsaved edit of the open envelope does not reach its consumers.
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": envelope_uri.as_str(), "version": 2 },
+            "contentChanges": [{ "text": retargeted }]
+        }),
+    );
+    assert!(
+        requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())),
+        "an unsaved schema edit must not change consuming documents"
+    );
+
+    // Saving it does, with no watched-file event.
+    std::fs::write(&envelope_path, retargeted).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": envelope_uri.as_str() } }),
+    );
+    assert!(
+        !requires_model(&latest_diagnostics(&mut fixture, document_uri.as_str())),
+        "saving the open envelope must refresh its consumers"
     );
 
     fixture.shutdown();
@@ -3915,6 +3991,49 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     fixture.shutdown();
 }
 
+/// A block-sequence `type-definition` value's span starts at its first `-`,
+/// partway into the line. The malformed arm after it is still ranged exactly,
+/// because the locator reads the slice from the start of that line with
+/// every item's authored column intact; read from the `-`, the first item
+/// would seem to continue onto the second.
+#[test]
+fn a_malformed_arm_after_the_first_block_sequence_item_is_ranged_exactly() {
+    let workspace = LspWorkspace::new();
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  definition: type-definition\n",
+        "definition:\n",
+        "  - number\n",
+        "  - boolean(bogus(1))\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("sequence-arm.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let definition_errors: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition"))
+        .collect();
+    assert_eq!(definition_errors.len(), 1, "{diagnostics:#?}");
+    assert_eq!(
+        definition_errors[0]["range"],
+        json!({
+            "start": { "line": 5, "character": 4 },
+            "end": { "line": 5, "character": 21 }
+        }),
+        "{diagnostics:#?}"
+    );
+
+    fixture.shutdown();
+}
+
 #[test]
 fn schema_definition_errors_are_independent_and_property_ranged() {
     let workspace = LspWorkspace::new();
@@ -5019,7 +5138,7 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
 fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
     let workspace = LspWorkspace::new();
     let valid = "$schema:\n  title: string\n";
-    let malformed = "$schema:\n  title: str\n";
+    let malformed = "$schema:\n  title: str(\n";
     let path = workspace.path().join("schema.yaml");
     std::fs::write(&path, valid).unwrap();
 
@@ -5073,7 +5192,9 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
 fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
     let workspace = LspWorkspace::new();
     let valid = "? kind\n: schema\n? types\n:\n  title: string\n";
-    let malformed = "? kind\n: schema\n? types\n:\n  title: nope\n";
+    // An unterminated constraint list. A bare `nope` is a local reference and
+    // parses.
+    let malformed = "? kind\n: schema\n? types\n:\n  title: nope(\n";
     let path = workspace.path().join("explicit-mapping.yaml");
     std::fs::write(&path, valid).unwrap();
 
@@ -5252,7 +5373,7 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
 #[test]
 fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
     let workspace = LspWorkspace::new();
-    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope\n";
+    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope(\n";
     let poison_line_len = malformed.lines().next().unwrap().len();
     let valid = format!(
         "#{}\nkind: schema\ntypes:\n  title: string\n",
@@ -5375,13 +5496,13 @@ fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit(
         (
             "flow-pure.yaml",
             "{\"$schema\": {\"title\": \"string\"}}\n",
-            "{\"$schema\": {\"title\": \"str\"}}\n",
+            "{\"$schema\": {\"title\": \"str(\"}}\n",
             16u32,
         ),
         (
             "flow-tagged.yaml",
             "{kind: schema, types: {title: string}}\n",
-            "{kind: schema, types: {title: str}}\n",
+            "{kind: schema, types: {title: str(}}\n",
             25,
         ),
     ];
@@ -5453,35 +5574,35 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
         (
             "pure.yaml",
             r#"{"$schema": {"title": "string"}}"#,
-            r#"{"$schema": {"title": "str"}}"#,
+            r#"{"$schema": {"title": "str("}}"#,
             26u32,
             "string",
         ),
         (
             "tagged.yaml",
             "{kind: schema, types: {title: string}}",
-            "{kind: schema, types: {title: str}}",
+            "{kind: schema, types: {title: str(}}",
             33,
             "string",
         ),
         (
             "nested.yaml",
             "{$schema: {config: {title: string}}}",
-            "{$schema: {config: {title: str}}}",
+            "{$schema: {config: {title: str(}}}",
             30,
             "string",
         ),
         (
             "outer-array.yaml",
             "{$schema: [{title: string}, {name: number}]}",
-            "{$schema: [{title: string}, {name: num}]}",
+            "{$schema: [{title: string}, {name: num(}]}",
             38,
             "number",
         ),
         (
             "union-item.yaml",
             "{$schema: {title: [string, number]}}",
-            "{$schema: {title: [string, num]}}",
+            "{$schema: {title: [string, num(]}}",
             30,
             "number",
         ),
@@ -5536,14 +5657,28 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
     fixture.shutdown();
 }
 
+/// Writes the shipped baseline three directories below `workspace`, as in
+/// the repository, so its `../../../content-policy/schemas/content-policy.yaml`
+/// import finds `policy`. The baseline's directory is not named `schemas`, so
+/// DMLS does not also read the buffer as a trigger-schema candidate.
+fn write_shipped_baseline_layout(workspace: &LspWorkspace, baseline: &str, policy: &str) -> std::path::PathBuf {
+    let path = workspace.path().join("darkmatter/docs/baseline/darkmatter.yaml");
+    let policy_path = workspace.path().join("content-policy/schemas/content-policy.yaml");
+    for (target, text) in [(&path, baseline), (&policy_path, policy)] {
+        std::fs::create_dir_all(target.parent().expect("parent")).unwrap();
+        std::fs::write(target, text).unwrap();
+    }
+    path
+}
+
 #[test]
 fn meta_schema_phase7_shipped_schema_provider_path() {
     let workspace = LspWorkspace::new();
     let shipped =
         biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
-    let path = workspace.path().join("darkmatter.yaml");
-    std::fs::write(&path, &text).unwrap();
+    let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let path = write_shipped_baseline_layout(&workspace, &text, policy);
 
     let schema_line = text
         .lines()
@@ -5574,8 +5709,8 @@ fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
     let shipped =
         biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
-    let path = workspace.path().join("darkmatter.yaml");
-    std::fs::write(&path, &text).unwrap();
+    let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let path = write_shipped_baseline_layout(&workspace, &text, policy);
 
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
@@ -5950,15 +6085,15 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
         ),
         (
             "pure-invalid-inner.yaml",
-            "$schema:\n  title: str\n",
+            "$schema:\n  title: str(\n",
             "dm.schema.invalid_type_definition",
-            Some("str"),
+            Some("str("),
         ),
         (
             "tagged-invalid-inner.yaml",
-            "kind: schema\ntypes:\n  title: str\n",
+            "kind: schema\ntypes:\n  title: str(\n",
             "dm.schema.invalid_type_definition",
-            Some("str"),
+            Some("str("),
         ),
     ];
     let schema_codes = [
@@ -6695,18 +6830,18 @@ fn standalone_inner_definition_diagnostics_address_punctuated_keys() {
     let cases: [(&str, &str, &str); 3] = [
         (
             "pure-dotted.yaml",
-            "$schema:\n  build:\n    target: number\n  \"build.target\": str\n",
-            "str",
+            "$schema:\n  build:\n    target: number\n  \"build.target\": str(\n",
+            "str(",
         ),
         (
             "pure-slash.yaml",
-            "$schema:\n  a:\n    b: number\n  \"a/b\": str\n",
-            "str",
+            "$schema:\n  a:\n    b: number\n  \"a/b\": str(\n",
+            "str(",
         ),
         (
             "tagged-colon.yaml",
-            "kind: schema\ntypes:\n  \"host: port\": str\n",
-            "str",
+            "kind: schema\ntypes:\n  \"host: port\": str(\n",
+            "str(",
         ),
     ];
 
@@ -6829,7 +6964,7 @@ const OPERAND_DOC: &str = concat!(
     "B4: {{ known || rhs_var }}\n",
     "B5: {{ is_empty(lower(nested)) }}\n",
     "S1: {{ quiet1 || \"d\" }} {{ quiet2 ? quiet2 : \"none\" }} {{ is_null(quiet3) }} {{ isEmpty(quiet4) }}\n",
-    "S2: {{ ok ? known : null }} {{ repo }} {{ doc['typo-key'] }}\n",
+    "S2: {{ ok ? known : null }} {{ repo }} {{ fm['typo-key'] }}\n",
     "D1: {{ foo--bar }}\n",
     "D2: {{ a- b }}\n",
     "D3: {{ iteration - 1 }} {{ c_op - d_op }}\n",
@@ -7150,7 +7285,7 @@ fn an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote() {
     assert_eq!(diagnostic_span(&unknown[0]), (5, 11, 19), "inside the anchored scalar: {}", unknown[0]);
     assert_eq!(
         unknown[0]["data"],
-        json!({ "key": "foo--bar", "replacement": "doc[\"foo--bar\"]" }),
+        json!({ "key": "foo--bar", "replacement": "fm[\"foo--bar\"]" }),
         "{}",
         unknown[0]
     );
@@ -7305,10 +7440,10 @@ fn dash_separated_key_carries_its_replacement_and_quick_fix() {
     };
 
     let cases = [
-        (at("D1:", "foo--bar"), "foo--bar", "doc['foo--bar']"),
+        (at("D1:", "foo--bar"), "foo--bar", "fm['foo--bar']"),
         (at("D2:", "a- b"), "a-b", "a-b"),
         // Single-quoted YAML: the replacement must not use `'`.
-        (at("f6:", "foo--bar"), "foo--bar", "doc[\"foo--bar\"]"),
+        (at("f6:", "foo--bar"), "foo--bar", "fm[\"foo--bar\"]"),
         (at("f7:", "a- b"), "a-b", "a-b"),
     ];
     for (diagnostic, key, replacement) in &cases {
@@ -7379,5 +7514,98 @@ fn a_frontmatter_less_document_never_reports_undeclared_properties() {
         "any name could be a `--set` value: {diagnostics:#?}"
     );
 
+    fixture.shutdown();
+}
+
+/// The 2026-10-17 incident file (`schemas/feature-review.yaml` mid-edit) with
+/// its first comment line replaced by a `kind: trigger-schema` claim and one
+/// character before the line-17 error replaced by a non-BMP character, so the
+/// error stays at character column 93 while its UTF-8 and UTF-16 offsets
+/// differ from each other and from the character count.
+fn claimed_incident_envelope() -> String {
+    let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
+    let mut lines: Vec<String> = incident.split('\n').map(str::to_string).collect();
+    assert!(lines[0].starts_with('#'), "{}", lines[0]);
+    lines[0] = "kind: trigger-schema".to_string();
+    assert!(lines[16].contains("every finding"), "{}", lines[16]);
+    lines[16] = lines[16].replacen("every finding", "😀very finding", 1);
+    lines.join("\n")
+}
+
+/// A claimed envelope that is not valid YAML is diagnosed at the parser's
+/// position, converted into the negotiated encoding (never byte columns).
+#[test]
+fn a_claimed_unparseable_trigger_envelope_is_diagnosed_at_its_yaml_position() {
+    let envelope = claimed_incident_envelope();
+    let line = &envelope.split('\n').nth(16).unwrap();
+    let colon = line.find("): <title>").unwrap() + 1;
+    assert_eq!(line[..colon].chars().count(), 92, "the error stays at character column 93");
+    for (encoding, character) in [
+        ("utf-16", line[..colon].encode_utf16().count()),
+        ("utf-8", colon),
+    ] {
+        let workspace = LspWorkspace::new();
+        init_repository(workspace.path());
+        let schemas = workspace.path().join("schemas");
+        std::fs::create_dir(&schemas).unwrap();
+        let path = schemas.join("broken.yaml");
+        std::fs::write(&path, &envelope).unwrap();
+        let mut params = neovim_like_initialize_params(workspace.path());
+        params["capabilities"]["general"]["positionEncodings"] = json!([encoding]);
+        let mut fixture = LspFixture::start(&workspace);
+        let result = fixture.initialize(params);
+        assert_eq!(result["capabilities"]["positionEncoding"], json!(encoding));
+        let uri = url::Url::from_file_path(&path).unwrap();
+        open(&fixture, uri.as_str(), &envelope);
+
+        // Startup's registry preparation already published the closed
+        // file's diagnostic; the open buffer's publication is versioned.
+        let diagnostics = loop {
+            let params = fixture.wait_for_diagnostics_params(uri.as_str());
+            if !params["version"].is_null() {
+                break params["diagnostics"].as_array().cloned().unwrap_or_default();
+            }
+        };
+        let trigger: Vec<&Value> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+            .collect();
+        assert_eq!(trigger.len(), 1, "{encoding}: {diagnostics:#?}");
+        let message = trigger[0]["message"].as_str().unwrap();
+        assert!(message.contains("is not valid YAML at line 17, column 93"), "{encoding}: {message}");
+        assert!(!message.contains("match expression"), "{encoding}: {message}");
+        assert_eq!(
+            trigger[0]["range"]["start"],
+            json!({ "line": 16, "character": character }),
+            "{encoding}: {diagnostics:#?}"
+        );
+        assert_eq!(trigger[0]["range"]["end"]["line"], json!(16), "{encoding}");
+        fixture.shutdown();
+    }
+}
+
+/// The incident file verbatim: an ordinary schema-root file that is not valid
+/// YAML and does not claim the envelope gets no trigger diagnostic.
+#[test]
+fn an_unclaimed_unparseable_schema_root_file_gets_no_trigger_diagnostic() {
+    let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
+    let workspace = LspWorkspace::new();
+    init_repository(workspace.path());
+    let schemas = workspace.path().join("schemas");
+    std::fs::create_dir(&schemas).unwrap();
+    let path = schemas.join("feature-review.yaml");
+    std::fs::write(&path, incident).unwrap();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(&path).unwrap();
+    open(&fixture, uri.as_str(), incident);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.iter().all(|diagnostic| {
+            !diagnostic["message"].as_str().unwrap_or_default().contains("trigger-schema")
+        }),
+        "{diagnostics:#?}"
+    );
     fixture.shutdown();
 }

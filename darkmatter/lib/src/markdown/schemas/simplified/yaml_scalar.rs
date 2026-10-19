@@ -12,8 +12,10 @@
 //! This module owns only the decoding + mapping; the schema-source scanner
 //! ([`super::source`]), frontmatter composition, and DMLS all build on it.
 //! [`decode_scalar_node`] is the multi-line decoder both composition and DMLS
-//! use for frontmatter values; its folding, chomping, and indentation rules
-//! follow the libyaml scanner behind `serde_yaml_ng`, the frontmatter parser.
+//! use for frontmatter values, and the schema-source locator and suggestion
+//! scanner use for plain scalars continued across lines; its folding,
+//! chomping, and indentation rules follow the libyaml scanner behind
+//! `serde_yaml_ng`, the frontmatter parser.
 
 use std::ops::Range;
 

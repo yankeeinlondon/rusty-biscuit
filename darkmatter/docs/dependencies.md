@@ -22,6 +22,11 @@ same scheme validation and deny-all-by-default host policy.
   shared terminal harness remains available to L1 because `render_invariants`
   uses its pure layout-invariant helpers without opening a terminal.
 - The CLI's separate `terminal-tests` feature enables its terminal harness.
+- The CLI's `test-fixtures` feature enables `test-toolkit` as an optional
+  dependency for one target, the `darkmatter-argv-recorder` fixture binary
+  (`test_toolkit::argv_recorder`), which the shell template tests run as a
+  native program. `just test` and CI enable it; `md`'s install never builds
+  it. It adds no crate: `test-toolkit` is already a dev dependency.
 
 The corresponding integration targets declare `required-features`, so an L1
 filter does not first compile binaries and native/browser dependencies that it
@@ -36,6 +41,19 @@ features their tier requires.
   `[package].build` with a real TOML parser, so every spelling Cargo accepts
   selects the same sources and a malformed manifest fails the guard. Every
   other package that includes the engine already depends on `toml`.
+
+## Content Policy Schema Dependency
+
+- `content-policy` (`darkmatter`, `default-features = false`) — supplies
+  `EDITOR_SCHEMA`, the Content Policy editor schema that the runtime baseline
+  imports to type `content_policy`. The library compiles it in beside the
+  baseline, so an installed binary prepares the baseline without schema files
+  on disk. Tests also run the shared Content Policy declaration cases through
+  `Policy::from_declaration` and the baseline validator, so each case states
+  where the parser and the editor schema agree and where they differ. The
+  dependency runs one way: Content Policy never depends on Darkmatter, and
+  `just deps-check` in `content-policy/` fails if it ever does. The
+  `file-adapter` feature stays off.
 
 ## Execution Identity and Network Context
 
@@ -137,6 +155,10 @@ protocol-focused:
 - `unicode-normalization` — NFC normalization of wiki-link targets and logical
   paths (Phase 5 / R-8), so a vault resolves identically on macOS, Windows, and
   Linux. Already in the tree transitively via `url`/`idna`.
+- `rusqlite` (`bundled`) — the persistent per-file facts store that
+  references, rename, file rename, and workspace symbols narrow their
+  candidates with. Bundled SQLite gives every OS the same 3.45 build, which
+  supports `STRICT` tables; the same version and feature `claudine/lib` uses.
 - `darkmatter` (lib) — the semantic authority (span vocabulary,
   frontmatter block extraction, single-document reference extraction, and the
   later-phase parsing surfaces).

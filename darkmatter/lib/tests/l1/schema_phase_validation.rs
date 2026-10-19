@@ -363,9 +363,14 @@ fn eager_is_universal_in_catalog_and_round_trips() {
         eager.json_schema_effect
     );
 
-    for descriptor in schema_type_descriptors() {
+    // The semantic meta types reject `eager`; the catalog's parity test pins
+    // that, so only the value types are expected to list it here.
+    for descriptor in schema_type_descriptors()
+        .iter()
+        .filter(|descriptor| !matches!(descriptor.keyword, "type-definition" | "schema"))
+    {
         assert!(
-            descriptor.accepted_constraints.contains("eager"),
+            descriptor.accepts_constraint("eager"),
             "{} omits eager",
             descriptor.keyword,
         );
@@ -555,6 +560,7 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
     let root = repo_root();
     let schema_dirs = [
         root.join("darkmatter/docs/schemas"),
+        root.join("claudine/schemas"),
         root.join("claudine/docs/schemas"),
         root.join("schemas"),
     ];
@@ -571,10 +577,11 @@ fn shipped_schema_and_trigger_corpus_parses_passively() {
                 .unwrap_or_else(|error| panic!("{} is not YAML: {error}", path.display()));
             let Some(map) = document.as_mapping() else { continue };
             // An artifact carrying keys Darkmatter's schema loader does not
-            // recognize is design documentation, not a loadable schema.
+            // recognize is design documentation, not a loadable schema. A
+            // trigger's `$schema` payload counts; its `match` is not walked.
             let loadable = map.keys().all(|key| {
                 key.as_str().is_some_and(|key| {
-                    matches!(key, "kind" | "name" | "description" | "$schema" | "types")
+                    matches!(key, "kind" | "name" | "description" | "match" | "$schema" | "types")
                 })
             });
             if !loadable {

@@ -5,27 +5,50 @@ use std::path::Path;
 
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, evaluate,
-    is_reserved_namespace, is_truthy, parse_condition,
+    fm_namespace_path, is_reserved_namespace, is_truthy, parse_condition,
+    resolve_fm_namespace_in_object,
 };
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, LoopExpressionCause};
-use super::super::types::LoopCondition;
+use super::super::lifecycle::bindings::{removed_loop_grammar, removed_loop_read};
+use super::super::types::{AmbientVariable, LoopCondition};
+use super::frame::LoopBreakSlot;
 
-/// Ambient values injected into loop condition and prompt evaluation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The values of the `loop` global for one iteration.
+///
+/// Two ambients are equal when their values are: the [`LoopBreakSlot`] is the
+/// loop's identity, not data.
+#[derive(Debug, Clone)]
 pub struct LoopAmbient {
     /// 1-based iteration index.
     pub iteration: usize,
     /// Whether this is the first iteration.
     pub is_first: bool,
-    /// Whether this iteration is expected to be the last.
+    /// Whether this is the final pass the cap permits (`count == max`).
     pub is_last: bool,
-    /// Captured output from the previous iteration.
-    pub last_output: String,
+    /// The result of the previous pass, or of the pass that just finished
+    /// once it reports: text for a document, an array for a sequence, a
+    /// dictionary for a group.
+    pub last_output: Value,
     /// Exit code from the previous iteration.
     pub last_exit_code: i32,
+    /// Where a `break` that ends this loop is recorded. Every page whose
+    /// innermost loop this is shares it.
+    pub breaks: LoopBreakSlot,
 }
+
+impl PartialEq for LoopAmbient {
+    fn eq(&self, other: &Self) -> bool {
+        self.iteration == other.iteration
+            && self.is_first == other.is_first
+            && self.is_last == other.is_last
+            && self.last_output == other.last_output
+            && self.last_exit_code == other.last_exit_code
+    }
+}
+
+impl Eq for LoopAmbient {}
 
 impl LoopAmbient {
     /// Construct ambient values for an iteration.
@@ -33,7 +56,7 @@ impl LoopAmbient {
         iteration: usize,
         is_first: bool,
         is_last: bool,
-        last_output: impl Into<String>,
+        last_output: impl Into<Value>,
         last_exit_code: i32,
     ) -> Self {
         Self {
@@ -42,21 +65,52 @@ impl LoopAmbient {
             is_last,
             last_output: last_output.into(),
             last_exit_code,
+            breaks: LoopBreakSlot::default(),
+        }
+    }
+
+    /// The same values with a break slot of their own: a concurrent group
+    /// leg records its `break` there, so the group can choose the first
+    /// breaking leg in declaration order once every leg has settled.
+    #[must_use]
+    pub fn with_isolated_breaks(&self) -> Self {
+        Self { breaks: LoopBreakSlot::default(), ..self.clone() }
+    }
+
+    /// The `loop` global's runtime value:
+    /// `{count, is_first, is_last, last_output, last_exit_code}`.
+    pub fn to_value(&self) -> Value {
+        let mut object = Map::new();
+        for member in AmbientVariable::ALL {
+            object.insert(member.as_str().to_string(), self.member(member));
+        }
+        Value::Object(object)
+    }
+
+    fn member(&self, member: AmbientVariable) -> Value {
+        match member {
+            AmbientVariable::Iteration => Value::Number(self.iteration.into()),
+            AmbientVariable::IsFirst => Value::Bool(self.is_first),
+            AmbientVariable::IsLast => Value::Bool(self.is_last),
+            AmbientVariable::LastOutput => self.last_output.clone(),
+            AmbientVariable::LastExitCode => Value::Number(self.last_exit_code.into()),
         }
     }
 }
 
-/// Darkmatter expression lookup for loop frontmatter plus ambient variables.
+/// Darkmatter expression lookup for loop frontmatter plus the `loop` global.
 ///
 /// Resolution order:
 ///
-/// 1. Reserved `doc` namespace (bare `doc` → the whole frontmatter object;
-///    `doc.<path>` → dotted traversal into it). Intercepted first so a missing
-///    `doc.<path>` never collapses into a same-named ambient/env/frontmatter key.
+/// 1. Reserved `fm` namespace (bare `fm` → the whole frontmatter object;
+///    `fm.<path>` → dotted traversal into it). Intercepted first so a missing
+///    `fm.<path>` never collapses into a same-named ambient/env/frontmatter key.
+///    `fm.loop` is therefore the `loop:` configuration block.
 /// 2. Prepared `ctx.NAME` and `env.NAME` from the document epoch, when supplied
 /// 3. Ambient `env.NAME` compatibility lookup
-/// 4. Ambient variables (`_loop_count`, `_loop_is_first`, `_loop_is_last`,
-///    `_loop_last_output`, `_loop_last_exit_code`)
+/// 4. The `loop` global: bare `loop` is [`LoopAmbient::to_value`], and
+///    `loop.<member>` one of its members. A missing member is `null`; it
+///    never falls through to frontmatter.
 /// 5. Frontmatter properties, including nested object paths via `.`
 ///
 /// The lookup resolves file references through the request's
@@ -74,6 +128,7 @@ impl LoopAmbient {
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
+    runtime_state: Option<&'a crate::composition::RuntimeState>,
     ambient: &'a LoopAmbient,
     file_ref_fallback_dir: Option<&'a Path>,
     file_resolution_context: &'a biscuit_file::FileResolutionContext,
@@ -92,12 +147,19 @@ impl<'a> LoopExpressionLookup<'a> {
     ) -> Self {
         Self {
             frontmatter,
+            runtime_state: None,
             ambient,
             file_ref_fallback_dir: None,
             file_resolution_context,
             source_path,
             prepared_context: None,
         }
+    }
+
+    /// Read the invocation's sequence root and committed outputs in conditions.
+    pub fn with_runtime_state(mut self, runtime: Option<&'a crate::composition::RuntimeState>) -> Self {
+        self.runtime_state = runtime;
+        self
     }
 
     /// Retain the captured launch area as `file_ref_fallback_dir` diagnostic
@@ -125,8 +187,18 @@ impl<'a> LoopExpressionLookup<'a> {
 
 impl EvaluationLookup for LoopExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        if path == "doc" || path.starts_with("doc.") {
-            return resolve_doc(self.frontmatter, path);
+        if fm_namespace_path(path).is_some() {
+            return resolve_fm_namespace_in_object(path, self.frontmatter);
+        }
+
+        if path == "seq" || path.starts_with("seq.") {
+            let value = self.runtime_state.map_or_else(||
+                super::super::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value(),
+                crate::composition::RuntimeState::sequence_value);
+            if path == "seq" { return Some(value); }
+            let mut result = &value;
+            for member in path[4..].split('.') { result = result.get(member)?; }
+            return Some(result.clone());
         }
 
         // A reserved namespace is never a document property, so a miss inside
@@ -152,8 +224,11 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
             return None;
         }
 
-        if let Some(value) = resolve_ambient(path, self.ambient) {
-            return Some(value);
+        if let Some(member) = loop_member(path) {
+            return member.map_or_else(
+                || Some(self.ambient.to_value()),
+                |member| self.ambient.to_value().get(member).cloned(),
+            );
         }
 
         if let Some(value) = resolve_boolean_literal(path) {
@@ -190,7 +265,8 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
 /// ## Errors
 ///
 /// Returns `LoopExpressionInvalid` when the condition cannot be parsed or
-/// evaluated, carrying the typed failure as its `#[source]`.
+/// evaluated, carrying the typed failure as its `#[source]`, and
+/// `RemovedGrammar` when it reads a retired `_loop_*` name.
 pub fn evaluate_condition(
     condition: &LoopCondition,
     lookup: &LoopExpressionLookup<'_>,
@@ -207,6 +283,13 @@ pub fn evaluate_condition(
             source: LoopExpressionCause::Parse(error),
         }
     })?;
+    if let Some(retired) = removed_loop_read(&parsed) {
+        return Err(removed_loop_grammar(
+            lookup.source_path,
+            format!("loop.{kind}"),
+            retired,
+        ));
+    }
     let value = evaluate(&parsed, lookup).map_err(|error| {
         CompositionError::LoopExpressionInvalid {
             kind: kind.to_string(),
@@ -220,27 +303,6 @@ pub fn evaluate_condition(
         LoopCondition::While(_) => truthy,
         LoopCondition::Until(_) => !truthy,
     })
-}
-
-/// Resolve the reserved `doc` namespace against the loop frontmatter, which is
-/// the document's root object. Bare `doc` yields the whole object; `doc.<path>`
-/// traverses it. A `doc.<path>` that does not resolve returns `None` and must
-/// not fall back to another namespace.
-fn resolve_doc(frontmatter: &Map<String, Value>, path: &str) -> Option<Value> {
-    match path.strip_prefix("doc.") {
-        Some(rest) => {
-            let mut current = Value::Object(frontmatter.clone());
-            for segment in rest.split('.') {
-                current = match current {
-                    Value::Object(map) => map.get(segment).cloned()?,
-                    _ => return None,
-                };
-            }
-            Some(current)
-        }
-        // path == "doc": the whole frontmatter object.
-        None => Some(Value::Object(frontmatter.clone())),
-    }
 }
 
 fn resolve_env(context: &biscuit_file::FileResolutionContext, name: &str) -> Option<Value> {
@@ -262,14 +324,12 @@ fn env_var<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a Strin
     })
 }
 
-fn resolve_ambient(path: &str, ambient: &LoopAmbient) -> Option<Value> {
-    match path {
-        "_loop_count" => Some(Value::Number(ambient.iteration.into())),
-        "_loop_is_first" => Some(Value::Bool(ambient.is_first)),
-        "_loop_is_last" => Some(Value::Bool(ambient.is_last)),
-        "_loop_last_output" => Some(Value::String(ambient.last_output.clone())),
-        "_loop_last_exit_code" => Some(Value::Number(ambient.last_exit_code.into())),
-        _ => None,
+/// `Some(None)` for bare `loop`, `Some(Some(rest))` for `loop.<rest>`, and
+/// `None` for any other path.
+fn loop_member(path: &str) -> Option<Option<&str>> {
+    match path.strip_prefix(AmbientVariable::ROOT)? {
+        "" => Some(None),
+        rest => rest.strip_prefix('.').map(Some),
     }
 }
 
@@ -303,282 +363,4 @@ fn resolve_frontmatter(frontmatter: &Map<String, Value>, path: &str) -> Option<V
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use darkmatter::markdown::compose::expression::EvaluationLookup;
-    use serde_json::json;
-
-    mod resolution_context;
-
-    fn map(value: Value) -> Map<String, Value> {
-        value.as_object().unwrap().clone()
-    }
-
-    fn ambient() -> LoopAmbient {
-        LoopAmbient::new(1, true, false, "", 0)
-    }
-
-    #[test]
-    fn resolves_ambient_variables() {
-        let fm = map(json!({}));
-        let ambient = LoopAmbient::new(3, false, true, "done", 7);
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-
-        assert_eq!(lookup.get("_loop_count"), Some(json!(3)));
-        assert_eq!(lookup.get("_loop_is_first"), Some(json!(false)));
-        assert_eq!(lookup.get("_loop_is_last"), Some(json!(true)));
-        assert_eq!(lookup.get("_loop_last_output"), Some(json!("done")));
-        assert_eq!(lookup.get("_loop_last_exit_code"), Some(json!(7)));
-    }
-
-    #[test]
-    fn ambient_variables_do_not_shadow_user_frontmatter() {
-        // Loop ambients live under the `_loop_` namespace, so a user-defined
-        // frontmatter property called `iteration` is fully visible and is
-        // not silently overwritten by the loop counter.
-        let fm = map(json!({"iteration": 99, "is_first": false}));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-
-        assert_eq!(lookup.get("iteration"), Some(json!(99)));
-        assert_eq!(lookup.get("is_first"), Some(json!(false)));
-        assert_eq!(lookup.get("_loop_count"), Some(json!(1)));
-        assert_eq!(lookup.get("_loop_is_first"), Some(json!(true)));
-    }
-
-    #[test]
-    fn resolves_top_level_and_nested_frontmatter() {
-        let fm = map(json!({
-            "counter": 4,
-            "stage": "review",
-            "state": {"inner": {"done": true}}
-        }));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-
-        assert_eq!(lookup.get("counter"), Some(json!(4)));
-        assert_eq!(lookup.get("stage"), Some(json!("review")));
-        assert_eq!(lookup.get("state.inner.done"), Some(json!(true)));
-    }
-
-    #[test]
-    fn resolves_environment_variables() {
-        let fm = map(json!({}));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-
-        assert_eq!(
-            lookup.get("env.PATH").is_some(),
-            std::env::var("PATH").is_ok()
-        );
-    }
-
-    #[test]
-    fn evaluates_while_condition() {
-        let ambient = ambient();
-        let fm = map(json!({"counter": 3}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-        assert!(evaluate_condition(&LoopCondition::While("counter < 5".into()), &lookup).unwrap());
-
-        let fm = map(json!({"counter": 5}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-        assert!(!evaluate_condition(&LoopCondition::While("counter < 5".into()), &lookup).unwrap());
-    }
-
-    #[test]
-    fn evaluates_until_condition_as_continue_decision() {
-        let ambient = ambient();
-        let fm = map(json!({"done": false}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-        assert!(evaluate_condition(&LoopCondition::Until("done".into()), &lookup).unwrap());
-
-        let fm = map(json!({"done": true}));
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-        assert!(!evaluate_condition(&LoopCondition::Until("done".into()), &lookup).unwrap());
-    }
-
-    #[test]
-    fn evaluates_ambient_and_env_conditions() {
-        let fm = map(json!({"counter": 1}));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-
-        assert!(
-            evaluate_condition(&LoopCondition::While("_loop_count == 1".into()), &lookup).unwrap()
-        );
-        assert!(
-            evaluate_condition(
-                &LoopCondition::While("_loop_is_first == true".into()),
-                &lookup
-            )
-            .unwrap()
-        );
-        assert_eq!(
-            evaluate_condition(&LoopCondition::While("env.PATH != \"\"".into()), &lookup).unwrap(),
-            std::env::var("PATH").is_ok_and(|value| !value.is_empty())
-        );
-    }
-
-    #[test]
-    fn resolves_doc_namespace_against_frontmatter() {
-        let fm = map(json!({
-            "build": "from-frontmatter",
-            "config": {"retries": 3},
-            "doc": {"child": "literal-doc"},
-        }));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-
-        // doc.<path> traverses the frontmatter object.
-        assert_eq!(lookup.get("doc.build"), Some(json!("from-frontmatter")));
-        assert_eq!(lookup.get("doc.config.retries"), Some(json!(3)));
-
-        // bare doc returns the whole frontmatter object.
-        let obj = lookup.get("doc").expect("bare doc resolves");
-        assert!(obj.is_object());
-        assert_eq!(obj.get("build"), Some(&json!("from-frontmatter")));
-
-        // a literal property named `doc` is reached as doc.doc.
-        assert_eq!(lookup.get("doc.doc.child"), Some(json!("literal-doc")));
-
-        // missing doc.* values do not fall back to env/ambient.
-        assert_eq!(lookup.get("doc.missing"), None);
-    }
-
-    #[test]
-    fn read_side_functions_resolve_against_the_document_directory() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::write(dir.path().join("artifact"), "ready").unwrap();
-        let fm = map(json!({}));
-        let ambient = ambient();
-        let context = crate::test_support::context_at(dir.path());
-        let source_path = dir.path().join("prompt.md");
-
-        // `file_exists` resolves against the directory of the document.
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, &context, &source_path);
-        assert!(lookup.resolution_context().is_some());
-
-        // `until` continues while the expression is falsy. The artifact exists,
-        // so `file_exists` is truthy and the loop should stop (continue=false).
-        assert!(
-            !evaluate_condition(
-                &LoopCondition::Until("file_exists('artifact')".into()),
-                &lookup
-            )
-            .unwrap()
-        );
-        // A missing artifact is falsy, so the `until` loop keeps going.
-        assert!(
-            evaluate_condition(
-                &LoopCondition::Until("file_exists('missing')".into()),
-                &lookup
-            )
-            .unwrap()
-        );
-    }
-
-    /// The launch-area fallback (`file_ref_fallback_dir`) is diagnostic-only: a
-    /// reference authored inside a document resolves against `base_dir`, not the
-    /// launch area (D2). A file present ONLY under the launch area does not
-    /// resolve even when the fallback is set, while a file under `base_dir`
-    /// does — and the fallback is still carried on the resolution context for
-    /// diagnostics.
-    #[test]
-    fn file_ref_fallback_dir_is_diagnostic_only_not_a_resolution_candidate() {
-        let prompt_dir = tempfile::TempDir::new().unwrap();
-        let launch_dir = tempfile::TempDir::new().unwrap();
-
-        // One artifact under the launch area, one under the document dir.
-        std::fs::write(launch_dir.path().join("spec.md"), "# spec\n").unwrap();
-        std::fs::write(prompt_dir.path().join("local.md"), "# local\n").unwrap();
-
-        let fm = map(json!({}));
-        let ambient = ambient();
-
-        let context = crate::test_support::context_at(prompt_dir.path());
-        let source_path = prompt_dir.path().join("prompt.md");
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, &context, &source_path)
-            .with_file_ref_fallback_dir(Some(launch_dir.path()));
-
-        // A file present only under the launch area does NOT resolve, so the
-        // `until` condition keeps going (file_exists is falsy).
-        assert!(
-            evaluate_condition(
-                &LoopCondition::Until("file_exists('spec.md')".into()),
-                &lookup
-            )
-            .unwrap(),
-            "a launch-area-only file must not resolve; the fallback is diagnostic-only"
-        );
-
-        // A file under base_dir resolves as the source-local candidate, so the `until`
-        // condition stops (file_exists is truthy).
-        assert!(
-            !evaluate_condition(
-                &LoopCondition::Until("file_exists('local.md')".into()),
-                &lookup
-            )
-            .unwrap(),
-            "a file under base_dir resolves; `until` stops"
-        );
-
-        // The fallback is still propagated into the resolution context for
-        // diagnostics, even though it is not a resolution candidate.
-        let ctx = lookup
-            .resolution_context()
-            .expect("resolution context is present");
-        assert_eq!(
-            ctx.file_ref_fallback_dir,
-            Some(launch_dir.path().to_path_buf())
-        );
-    }
-
-    /// A condition that cannot be parsed reports the `while`/`until` keyword and
-    /// the authored text, and keeps the Darkmatter `ParseError` recoverable
-    /// through the chain (spec §L1) rather than flattening it into prose.
-    #[test]
-    fn parse_errors_carry_the_typed_parse_cause() {
-        let fm = map(json!({}));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-        let err = evaluate_condition(&LoopCondition::While("counter <".into()), &lookup)
-            .expect_err("condition should fail to parse");
-
-        let CompositionError::LoopExpressionInvalid {
-            kind,
-            condition,
-            source,
-        } = &err
-        else {
-            panic!("expected LoopExpressionInvalid, got {err:?}");
-        };
-        assert_eq!(kind, "while");
-        assert_eq!(condition, "counter <");
-        assert!(matches!(source, LoopExpressionCause::Parse(_)));
-        assert!(err.to_string().contains("failed to parse loop.while"));
-
-        // `LoopExpressionCause` is `#[error(transparent)]`, so it *replaces* the
-        // concrete error rather than adding a hop to it: the stage is recovered
-        // by downcasting to the cause enum, not by walking one level deeper.
-        let cause = std::error::Error::source(&err).expect("the typed cause is on the chain");
-        assert!(cause.downcast_ref::<LoopExpressionCause>().is_some());
-    }
-
-    /// The evaluate stage is discriminated from the parse stage by the cause's
-    /// arm, and both project through the same variant.
-    #[test]
-    fn evaluate_errors_carry_the_typed_evaluate_cause() {
-        let fm = map(json!({}));
-        let ambient = ambient();
-        let lookup = LoopExpressionLookup::new(&fm, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
-        let err = evaluate_condition(&LoopCondition::Until("no_such_function()".into()), &lookup)
-            .expect_err("condition should fail to evaluate");
-
-        let CompositionError::LoopExpressionInvalid { kind, source, .. } = &err else {
-            panic!("expected LoopExpressionInvalid, got {err:?}");
-        };
-        assert_eq!(kind, "until");
-        assert!(matches!(source, LoopExpressionCause::Evaluate(_)));
-        assert!(err.to_string().contains("failed to evaluate loop.until"));
-    }
-}
+mod tests;

@@ -24,7 +24,7 @@ use super::{
 };
 use super::resolve_ctx::{
     ResolutionContext, is_remote_url, normalize_path_arg, resolve_document_file_ref,
-    resolve_document_file_ref_shape,
+    resolve_document_file_ref_shape, resolve_document_file_ref_target,
 };
 use crate::markdown::Markdown;
 use crate::markdown::schemas::DarkmatterSchemas;
@@ -1538,16 +1538,7 @@ fn resolve_arg(
     raw: &str,
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, ExpressionError> {
-    let normalized = normalize_path_arg(raw);
-    let file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
-        file_reference_error(
-            function,
-            raw,
-            ctx,
-            FileRefFailure::classify(&e),
-            Some(e),
-        )
-    })?;
+    let file_ref = parse_file_ref(function, raw, ctx)?;
     // Per D2 there is no launch-area fallback for a nested-document
     // reference — only repository and authoring-document candidates participate.
     resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
@@ -1562,42 +1553,94 @@ fn resolve_arg(
     })
 }
 
-/// `absolute(file) -> file | Error::InvalidFilePath`
+fn parse_file_ref(
+    function: &'static str,
+    raw: &str,
+    ctx: &ResolutionContext,
+) -> Result<biscuit_file::FileReference, ExpressionError> {
+    biscuit_file::FileReference::new(&normalize_path_arg(raw)).map_err(|e| {
+        file_reference_error(function, raw, ctx, FileRefFailure::classify(&e), Some(e))
+    })
+}
+
+fn reject_remote_url(function: &'static str, raw: &str) -> Result<(), ExpressionError> {
+    if is_remote_url(raw) {
+        return Err(expression_other(
+            function,
+            format!("{function}() does not accept HTTP(S) URLs"),
+        ));
+    }
+    Ok(())
+}
+
+/// `absolute(file) -> file` — the absolute path a reference names.
+///
+/// An existing file returns its matched path. A missing local target returns
+/// the resolver's first candidate for it, lexically normalized: the path a
+/// later write to that reference would create. `absolute` therefore does not
+/// prove existence; [`file_exists_fn`] does. The result uses the platform's
+/// native separators.
+///
+/// ## Examples
+///
+/// With the document in `/r/prompts` inside repository `/r`:
+///
+/// - `absolute("notes.md")` → `/r/prompts/notes.md` when that file exists,
+///   else `/r/notes.md` when only the repository copy exists.
+/// - `absolute("./sub/new.md")` with no such file → `/r/prompts/sub/new.md`.
+///
+/// ## Errors
+///
+/// - An HTTP(S) URL is rejected without being fetched.
+/// - A recursive (`%`) reference with no match is a `not_found` file-reference
+///   error: its candidates are search directories, not a file path.
+/// - An invalid reference, a tree escape, a missing home/vault/repository
+///   anchor, or a candidate probe I/O failure is a typed file-reference error.
 pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("absolute", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
     let raw = require_string_expr("absolute", &args[0])?;
-    match resolve_arg("absolute", raw, ctx)? {
-        Some(p) => Ok(Value::String(p.to_string_lossy().to_string())),
-        None => Err(file_reference_error(
-            "absolute",
-            raw,
-            ctx,
-            FileRefFailure::NotFound,
-            None,
-        )),
-    }
+    reject_remote_url("absolute", raw)?;
+    let file_ref = parse_file_ref("absolute", raw, ctx)?;
+    let typed = |e: biscuit_file::FileReferenceError| {
+        file_reference_error("absolute", raw, ctx, FileRefFailure::classify(&e), Some(e))
+    };
+    let path = if file_ref.class().recursive {
+        resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
+            .map_err(typed)?
+            .ok_or_else(|| {
+                file_reference_error("absolute", raw, ctx, FileRefFailure::NotFound, None)
+            })?
+    } else {
+        resolve_document_file_ref_target(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
+            .map_err(typed)?
+    };
+    Ok(Value::String(path.to_string_lossy().to_string()))
 }
 
-/// `file_exists(file) -> bool` — invalid local paths return `false`, never
-/// error. A remote URL argument errors when the resolution context is
-/// local-only (no remote runtime); see the URL branch below.
+/// `file_exists(file: string | null) -> bool` — whether a reference names an
+/// existing file.
+///
+/// A well-formed reference with no matching regular file (including one that
+/// names a directory) is `false`, and so is `null`: an optional reference that
+/// was never supplied names no file.
+///
+/// ## Errors
+///
+/// An argument that is neither a string nor `null` is a type error, never
+/// `false`. A failure to answer is never reported as absence. An invalid reference, a
+/// tree escape, a missing home/vault/repository anchor, and a candidate probe
+/// I/O failure (a permission error, for example) are typed file-reference
+/// errors. An HTTP(S) URL is `true` once fetched; a denied or failed fetch is
+/// an error, and so is any URL in a local-only context (no remote runtime).
 pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("file_exists", args, 1)?;
     if any_null(args) {
         return Ok(Value::Bool(false));
     }
-    let raw = match require_string("file_exists", &args[0]) {
-        Ok(s) => s,
-        Err(_) => return Ok(Value::Bool(false)),
-    };
-    // A remote URL "exists" when it was fetched successfully. With a remote
-    // runtime attached (body/post-shell), a denied or failed fetch reads as
-    // non-existent (never errors). With **no** runtime — the local-only
-    // frontmatter context — a URL is unreadable here, so fail loudly rather
-    // than silently reporting it as absent (Decision B).
+    let raw = require_string_expr("file_exists", &args[0])?;
     if is_remote_url(raw) {
         return match ctx.fetch_remote_text(raw) {
             Ok(Some(_)) => Ok(Value::Bool(true)),
@@ -1605,21 +1648,17 @@ pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
                 "file_exists() cannot read remote URL {raw:?}: this resolution \
                  context is local-only (no remote runtime)"
             ))),
-            Err(_) => Ok(Value::Bool(false)),
+            Err(message) => Err(expression_other("file_exists", message)),
         };
     }
-    let exists = match resolve_arg("file_exists", raw, ctx) {
-        Ok(Some(p)) => p.exists(),
-        _ => false,
-    };
-    Ok(Value::Bool(exists))
+    Ok(Value::Bool(resolve_arg("file_exists", raw, ctx)?.is_some()))
 }
 
 /// `has_command(cmd) -> bool` — pure existence/executability probe for a host
 /// command. Reports whether `cmd` is on `PATH` or is an existing executable
-/// path; it **never executes** the command. Like [`file_exists_fn`], no
-/// argument shape produces an error beyond the arity guard: a null, non-string,
-/// or empty argument reads as `false`.
+/// path; it **never executes** the command. No argument shape produces an
+/// error beyond the arity guard: a null, non-string, or empty argument reads
+/// as `false`.
 ///
 /// Only two input shapes can probe: a bare name (`PATH` search) and an
 /// absolute path (exists + executable, delegated to `which`). Any other
@@ -1692,8 +1731,18 @@ fn resolve_path_arg(
     value: &Value,
     ctx: &ResolutionContext,
 ) -> Result<PathBuf, ExpressionError> {
+    resolve_anchored_path_arg(name, value, ctx).map(|shape| shape.path)
+}
+
+/// [`resolve_path_arg`] plus whether the authored reference was absolute, for
+/// the functions that return a path built from their input.
+fn resolve_anchored_path_arg(
+    name: &'static str,
+    value: &Value,
+    ctx: &ResolutionContext,
+) -> Result<PathShape, ExpressionError> {
     let raw = require_string_expr(name, value)?;
-    resolve_path_shape(name, raw, ctx)
+    resolve_anchored_path_shape(name, raw, ctx)
 }
 
 /// Resolves a raw path string to an absolute path shape.
@@ -1709,21 +1758,45 @@ fn resolve_path_shape(
     raw: &str,
     ctx: &ResolutionContext,
 ) -> Result<PathBuf, ExpressionError> {
-    if is_remote_url(raw) {
-        return Err(expression_other(
-            name,
-            format!("{name}() does not accept HTTP(S) URLs"),
-        ));
-    }
-    let normalized = normalize_path_arg(raw);
-    let file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
-        file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e))
-    })?;
+    resolve_anchored_path_shape(name, raw, ctx).map(|shape| shape.path)
+}
+
+/// A resolved path shape and whether its authored reference was absolute.
+struct PathShape {
+    path: PathBuf,
+    absolute_input: bool,
+}
+
+fn resolve_anchored_path_shape(
+    name: &'static str,
+    raw: &str,
+    ctx: &ResolutionContext,
+) -> Result<PathShape, ExpressionError> {
+    reject_remote_url(name, raw)?;
+    let file_ref = parse_file_ref(name, raw, ctx)?;
     // The shared shaper builds the same candidate plan execution probes
     // (document-first for implicit references), so a missing target's shape
     // is the first shared candidate rather than a source-first join.
-    resolve_document_file_ref_shape(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
-    .map_err(|e| file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e)))
+    let path = resolve_document_file_ref_shape(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
+        .map_err(|e| file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e)))?;
+    Ok(PathShape {
+        path,
+        absolute_input: file_ref.class().kind == biscuit_file::FileReferenceKind::Absolute,
+    })
+}
+
+/// Renders a path a function built from its input.
+///
+/// An absolute input keeps its absolute anchor, in portable spelling. Its
+/// repository- or document-relative display form would be re-resolved
+/// document-directory first by a later reader and could name a different
+/// file. Any other input keeps the display form ([`path_display_components`]).
+fn render_built_path(path: &Path, absolute_input: bool, ctx: &ResolutionContext) -> String {
+    if absolute_input {
+        biscuit_file::to_portable_string(path)
+    } else {
+        make_portable_relative_in_context(path, &ctx.cwd, &ctx.file_resolution_context)
+    }
 }
 
 /// Parses a stem against the indexed grammar, returning the base name, parsed
@@ -1807,12 +1880,18 @@ pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
 
 /// `increment_file_index(file) -> string` — bumps the numeric suffix, starting
 /// at `2` for non-indexed files. Preserves zero-padding width for indexed stems.
+///
+/// The input is resolved first (an existing file, else its first candidate)
+/// and only the filename changes, so the result sits in the resolved parent
+/// directory. An absolute input returns an absolute path; any other input
+/// returns its display form.
 pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("increment_file_index", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let path = resolve_path_arg("increment_file_index", &args[0], ctx)?;
+    let PathShape { path, absolute_input } =
+        resolve_anchored_path_arg("increment_file_index", &args[0], ctx)?;
     let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     let ext = file_extension(&base);
     let stem = file_stem(&base);
@@ -1831,21 +1910,21 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .parent()
         .map(|p| p.join(&new_base))
         .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(make_portable_relative_in_context(
-        &out,
-        &ctx.cwd,
-        &ctx.file_resolution_context,
-    )))
+    Ok(Value::String(render_built_path(&out, absolute_input, ctx)))
 }
 
 /// `decrement_file_index(file) -> string` — decrements the numeric suffix,
 /// clamped at `0`. Non-indexed files start at `0` and preserve no padding.
+///
+/// Resolves its input and renders its result as [`increment_file_index_fn`]
+/// does.
 pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("decrement_file_index", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let path = resolve_path_arg("decrement_file_index", &args[0], ctx)?;
+    let PathShape { path, absolute_input } =
+        resolve_anchored_path_arg("decrement_file_index", &args[0], ctx)?;
     let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     let ext = file_extension(&base);
     let stem = file_stem(&base);
@@ -1864,11 +1943,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .parent()
         .map(|p| p.join(&new_base))
         .unwrap_or_else(|| PathBuf::from(&new_base));
-    Ok(Value::String(make_portable_relative_in_context(
-        &out,
-        &ctx.cwd,
-        &ctx.file_resolution_context,
-    )))
+    Ok(Value::String(render_built_path(&out, absolute_input, ctx)))
 }
 
 #[derive(Clone, Copy)]
@@ -1887,13 +1962,12 @@ fn find_index_endpoint(
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let input = resolve_path_arg(name, &args[0], ctx)?;
+    let PathShape {
+        path: input,
+        absolute_input,
+    } = resolve_anchored_path_arg(name, &args[0], ctx)?;
     let Some(parent) = input.parent() else {
-        return Ok(Value::String(make_portable_relative_in_context(
-            &input,
-            &ctx.cwd,
-            &ctx.file_resolution_context,
-        )));
+        return Ok(Value::String(render_built_path(&input, absolute_input, ctx)));
     };
     let filename = input
         .file_name()
@@ -1908,11 +1982,7 @@ fn find_index_endpoint(
     let entries = match std::fs::read_dir(parent) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Value::String(make_portable_relative_in_context(
-                &input,
-                &ctx.cwd,
-                &ctx.file_resolution_context,
-            )));
+            return Ok(Value::String(render_built_path(&input, absolute_input, ctx)));
         }
         Err(error) => {
             return Err(expression_other(
@@ -1951,14 +2021,13 @@ fn find_index_endpoint(
     let chosen = selected
         .map(|(_, filename)| parent.join(filename))
         .unwrap_or(input);
-    Ok(Value::String(make_portable_relative_in_context(
-        &chosen,
-        &ctx.cwd,
-        &ctx.file_resolution_context,
-    )))
+    Ok(Value::String(render_built_path(&chosen, absolute_input, ctx)))
 }
 
-/// Returns the lowest-indexed existing member of a file's index family.
+/// Returns the lowest-indexed existing member of a file's index family,
+/// scanning the input's resolved parent directory. With no member present the
+/// input itself is returned. An absolute input returns an absolute path; any
+/// other input returns its display form.
 pub fn find_first_index_fn(
     args: &[Value],
     ctx: &ResolutionContext,
@@ -1966,7 +2035,8 @@ pub fn find_first_index_fn(
     find_index_endpoint("find_first_index", args, ctx, IndexEndpoint::First)
 }
 
-/// Returns the highest-indexed existing member of a file's index family.
+/// Returns the highest-indexed existing member of a file's index family,
+/// resolved and rendered as [`find_first_index_fn`] is.
 pub fn find_last_index_fn(
     args: &[Value],
     ctx: &ResolutionContext,
@@ -2008,16 +2078,20 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
     Ok(Value::String(out))
 }
 
-/// `dirname(file) -> string` — the directory portion of the display path.
+/// `dirname(file) -> string` — the directory portion of a path.
 ///
-/// An absolute input retains its absolute anchor so a schema-materialized
-/// caller value can derive a sibling path without adopting the document base.
+/// An absolute input returns its absolute parent (portable spelling), even
+/// inside the repository or the document directory, so a schema-materialized
+/// caller value can derive a sibling path (`dirname(absolute(spec)) +
+/// '/review-1.md'`) that stays beside it instead of being re-resolved against
+/// the document. Any other input returns the directory portion of its display
+/// path (`dirname("sub/x.md")` is `sub`).
 pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("dirname", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let path = resolve_path_arg("dirname", &args[0], ctx)?;
+    let PathShape { path, absolute_input } = resolve_anchored_path_arg("dirname", &args[0], ctx)?;
     // A path outside every projection root (repository, base directory, home)
     // has no relative display form; its absolute parent is the only anchor
     // that still resolves when another file name is appended to it.
@@ -2026,7 +2100,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
         &ctx.cwd,
         &ctx.file_resolution_context,
     );
-    if Path::new(&projected).is_absolute() {
+    if absolute_input || Path::new(&projected).is_absolute() {
         return Ok(Value::String(
             path.parent()
                 .map(biscuit_file::to_portable_string)
@@ -3821,11 +3895,11 @@ mod tests {
                 file_exists_fn(&[json!("missing.md")], &ctx).unwrap(),
                 json!(false)
             );
-            // Invalid path string → file_exists is false (never errors).
-            assert_eq!(
-                file_exists_fn(&[json!("\0bad")], &ctx).unwrap(),
-                json!(false)
-            );
+            // An invalid reference is an error, never a missing file.
+            assert!(matches!(
+                file_exists_fn(&[json!("\0bad")], &ctx),
+                Err(ExpressionError::FileReference(_))
+            ));
         }
 
         #[test]
@@ -5518,13 +5592,15 @@ mod fn_remote_tests {
     }
 
     #[tokio::test]
-    async fn file_exists_false_for_policy_denied_remote() {
+    async fn file_exists_errors_for_policy_denied_remote() {
         let server = MockServer::start().await;
         // No mock mounted and a deny-all policy: the fetch never reaches the
-        // network, so the URL is treated as non-existent.
+        // network. A denial says nothing about existence, so it is an error.
         let url = format!("{}/blocked.md", server.uri());
         let ctx = ready_ctx(&url, false).await;
-        assert_eq!(file_exists_fn(&[json!(url)], &ctx).unwrap(), json!(false));
+        let err = file_exists_fn(&[json!(url)], &ctx)
+            .expect_err("a denied remote read must not read as a missing file");
+        assert!(err.contains("denied"), "unexpected message: {err}");
     }
 
     #[test]
