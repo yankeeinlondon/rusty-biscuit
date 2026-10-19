@@ -933,6 +933,12 @@ retains:
 - `cwd()`, optional `source_path()`, optional `repository_root()`;
 - `candidates()` — the ordered candidates actually probed before the search
   stopped, each a `ProbedCandidate`;
+- `probed_paths()` — those candidates' locations as absolute, lexically
+  normalized paths (the spelling `matched_path()` uses, never canonicalized,
+  so a missing candidate has one too), omitting recursive search roots. A
+  cache that must notice a nearer file appearing records these: for
+  `shared/types.yaml` from `repo/schemas/` it yields
+  `repo/schemas/shared/types.yaml` before `repo/shared/types.yaml`;
 - `error()` — the underlying `FileReferenceError` (present for failures other
   than `NoMatch`; absent on success);
 - `matched_path()` — the winning path.

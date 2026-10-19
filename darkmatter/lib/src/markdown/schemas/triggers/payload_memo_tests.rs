@@ -402,3 +402,31 @@ fn a_nested_tally_excludes_the_interruption_from_the_outer_one() {
 
     assert_eq!(pass.counts(), MISS);
 }
+
+/// A registry reports the locations its payload searched, including an
+/// absent nearer candidate, apart from the files it depends on; a memo hit
+/// reports the same set.
+#[test]
+fn a_registry_reports_searched_locations_apart_from_its_dependencies() {
+    let fixture = Fixture::new();
+    fixture.write("schemas/claudine.yaml", "$schema:\n  fields: Fields@shared/types.yaml\n");
+    fixture.write("shared/types.yaml", "$schema:\n  Fields: string\n");
+    let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+
+    let (registry, counts) = tallied_scan(&document);
+    assert_eq!(counts, MISS);
+
+    let searched: Vec<&Path> = registry.searched_locations().collect();
+    let nearer = fixture.root.join("schemas/shared/types.yaml");
+    for expected in [&fixture.root.join("schemas/claudine.yaml"), &nearer, &fixture.root.join("shared/types.yaml")] {
+        assert!(searched.contains(&expected.as_path()), "{expected:?} missing from {searched:?}");
+    }
+    assert!(
+        registry.dependencies().all(|dependency| dependency != nearer),
+        "an absent candidate is never a dependency file"
+    );
+
+    let (repeat, counts) = tallied_scan(&document);
+    assert_eq!(counts, HIT);
+    assert_eq!(repeat.searched_locations().collect::<Vec<_>>(), searched);
+}

@@ -452,3 +452,71 @@ fn invalid_context_is_a_typed_missing_context_failure() {
         "no candidate is probed when the context is invalid",
     );
 }
+
+#[test]
+fn probed_paths_lists_missing_candidates_through_the_match_lexically() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    git_init(&repo);
+
+    // `pkg/shared/` does not exist, so the source candidate is missing and the
+    // repository candidate wins.
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+    fs::create_dir_all(repo.join("shared")).unwrap();
+    fs::write(repo.join("shared/types.yaml"), b"x").unwrap();
+
+    let ctx = ctx_with_repo(&base, &repo);
+    let detailed = FileReference::new("shared/../shared/types.yaml")
+        .unwrap()
+        .resolve_detailed(&ctx);
+
+    let probed: Vec<_> = detailed.probed_paths().collect();
+    assert_eq!(
+        probed,
+        vec![base.join("shared").join("types.yaml"), repo.join("shared").join("types.yaml")],
+        "dot segments are collapsed without touching the absent folder",
+    );
+    assert_eq!(probed.last().map(|p| p.as_path()), detailed.matched_path());
+}
+
+#[test]
+fn probed_paths_lists_every_candidate_of_a_no_match() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    git_init(&repo);
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+
+    let ctx = ctx_with_repo(&base, &repo);
+    let implicit = FileReference::new("missing.md").unwrap().resolve_detailed(&ctx);
+    assert_eq!(
+        implicit.probed_paths().collect::<Vec<_>>(),
+        vec![base.join("missing.md"), repo.join("missing.md")],
+    );
+
+    let explicit = FileReference::new("./missing.md").unwrap().resolve_detailed(&ctx);
+    assert_eq!(
+        explicit.probed_paths().collect::<Vec<_>>(),
+        vec![base.join("missing.md")],
+        "an explicit relative reference probes its one location",
+    );
+}
+
+#[test]
+fn probed_paths_omits_recursive_search_roots() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    git_init(&repo);
+    fs::create_dir_all(repo.join("a")).unwrap();
+    fs::write(repo.join("a/deep.md"), b"deep").unwrap();
+
+    let ctx = ctx_with_repo(&repo, &repo);
+    let detailed = FileReference::new("%deep.md").unwrap().resolve_detailed(&ctx);
+
+    assert!(detailed.matched_path().is_some());
+    assert!(!detailed.candidates().is_empty());
+    assert_eq!(detailed.probed_paths().count(), 0, "search roots are not file probes");
+}

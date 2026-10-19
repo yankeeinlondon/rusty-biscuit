@@ -215,6 +215,11 @@ pub(crate) struct ResolvedPayload {
     /// Dependency edges: the payload file + its imports + its examples
     /// (sorted, deduplicated). Empty for an embedded trigger.
     pub dependencies: Vec<PathBuf>,
+    /// Every location probed while resolving the payload and its references
+    /// ([`ResolvedSchema::searched`](crate::markdown::schemas::resolve::ResolvedSchema::searched)):
+    /// lexical, sorted, deduplicated, and possibly absent, so it is never read
+    /// or hashed as a dependency file. Empty for an embedded trigger.
+    pub searched: Vec<PathBuf>,
     /// Non-fatal findings produced while resolving payload references.
     pub advisories: Vec<super::super::SchemaAdvisory>,
 }
@@ -298,6 +303,7 @@ fn resolve_file_payload(
         shape: payload_shape(resolved.simplified),
         json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: deps,
+        searched: resolved.searched,
         advisories: resolved.advisories,
     })
 }
@@ -651,6 +657,7 @@ fn resolve_embedded_payload(
         shape: payload_shape(resolved.simplified),
         json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: Vec::new(),
+        searched: Vec::new(),
         advisories: resolved.advisories,
     };
     Ok((payload, reads))
