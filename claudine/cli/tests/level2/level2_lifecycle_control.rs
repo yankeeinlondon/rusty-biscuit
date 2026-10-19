@@ -3437,9 +3437,9 @@ fn stage_proxy_pair_gated(source_doc: &str, target_doc: &str, target_sentinel: &
 
 /// Run `claudine compose --goose <doc>` in a real tmux pane and block until the
 /// `marker` line has been recorded at least `expected` times (a looping run's
-/// terminal marker is not unique, so we settle on a count) or the total line
-/// count goes stable (a run that finished short of `expected` — e.g. a
-/// regression that dropped the target's loop). Bounded under the nextest
+/// terminal marker is not unique, so we settle on a count) or the run exits
+/// (a run that finished short of `expected` — e.g. a regression that dropped
+/// the target's loop). Bounded under the nextest
 /// slow-timeout so a non-producing run never hangs the suite.
 fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
@@ -3455,7 +3455,7 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
     let sentinel = format!("L2_CTL_SETTLE_{seq}");
     let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}:$?",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -3464,24 +3464,14 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
         .expect("send compose command");
 
     let deadline = Instant::now() + Duration::from_secs(30);
-    let mut last_total = 0usize;
-    let mut stable_since: Option<Instant> = None;
     while Instant::now() < deadline {
         let lines = event_lines(staged);
         if lines.iter().filter(|l| l.as_str() == marker).count() >= expected {
             std::thread::sleep(Duration::from_millis(200));
             break;
         }
-        let total = lines.len();
-        if total == last_total {
-            match stable_since {
-                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
-                Some(_) => {}
-                None => stable_since = Some(Instant::now()),
-            }
-        } else {
-            stable_since = None;
-            last_total = total;
+        if pane_shows_exit(&mut harness, &sentinel) {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -4634,7 +4624,7 @@ Body
 }
 
 /// Run a compose in a real tmux pane and settle on either `expected_lines`
-/// side-effect markers or a stable count (the run finished early). Unlike
+/// side-effect markers or the run's exit sentinel (the run finished early). Unlike
 /// [`run_in_tmux_for`], which breaks on the first sighting of one marker, this
 /// cannot stop mid-run on a document whose terminal events fire once **per
 /// iteration** — and it still returns when a buggy run produces fewer markers
@@ -4651,36 +4641,30 @@ fn run_until_settled(staged: &Staged, expected_lines: usize) -> String {
 /// outranks the target's authored `agent:`, which would make the assertion
 /// vacuous.
 fn run_until_settled_with_flags(staged: &Staged, flags: &str, expected_lines: usize) -> String {
-    run_until_settled_with_params(
-        staged,
-        flags,
-        "",
-        expected_lines,
-        SettlePacing::default(),
-        &[],
-    )
+    run_until_settled_with_params(staged, flags, "", expected_lines, &[])
 }
 
-/// How long [`run_until_settled_with_params`] waits overall, and how long a
-/// stalled marker count must hold before it concludes the run finished short.
+/// How long [`run_until_settled_with_params`] waits for a run that neither
+/// reaches its marker count nor exits.
+const SETTLE_DEADLINE: Duration = Duration::from_secs(40);
+
+/// Whether the pane shows the `{sentinel}:<exit status>` line that a settle
+/// helper's command echoes once claudine has exited.
 ///
-/// The defaults suit the synthetic fixtures, whose iterations are a few hundred
-/// milliseconds apart. A document that does substantially more per-iteration
-/// work — schema validation, file-reference resolution, and composing a large
-/// body, as the shipped `implement-plan.md` does — needs a wider stability
-/// window, or the gap *between* two healthy iterations reads as "settled".
-struct SettlePacing {
-    deadline: Duration,
-    stable_for: Duration,
-}
-
-impl Default for SettlePacing {
-    fn default() -> Self {
-        Self {
-            deadline: Duration::from_secs(40),
-            stable_for: Duration::from_millis(1200),
-        }
-    }
+/// A run that ends *below* its expected marker count (e.g. errored after a few
+/// events) is detected this way, never by a pause in the count: pre-flight and
+/// proxy re-preparation can sit silent for seconds on a loaded runner. The
+/// typed command line also contains the sentinel and can wrap it onto a line
+/// of its own, so only the echoed status line counts.
+fn pane_shows_exit(harness: &mut TmuxHarness, sentinel: &str) -> bool {
+    harness.capture().is_ok_and(|frame| {
+        frame.plain.lines().any(|line| {
+            line.trim()
+                .strip_prefix(sentinel)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .is_some_and(|status| status.parse::<i32>().is_ok())
+        })
+    })
 }
 
 /// [`run_until_settled_with_flags`] plus trailing `key=value` composition
@@ -4693,7 +4677,6 @@ fn run_until_settled_with_params(
     flags: &str,
     params: &str,
     expected_lines: usize,
-    pacing: SettlePacing,
     ambient: &[(&str, &str)],
 ) -> String {
     static SEQ: AtomicU32 = AtomicU32::new(0);
@@ -4716,7 +4699,7 @@ fn run_until_settled_with_params(
         .strip_prefix(staged.workspace.path())
         .unwrap_or(&staged.md_file);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose {flags} {md} {params} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {flags} {md} {params} ; echo {sentinel}:$?",
         ws = staged.workspace.path().display(),
         md = invocation_path.display(),
     );
@@ -4724,30 +4707,15 @@ fn run_until_settled_with_params(
         .send_command_with_env(&cmd, &[])
         .expect("send compose command");
 
-    let deadline = Instant::now() + pacing.deadline;
-    let mut last_count = 0usize;
-    let mut stable_since: Option<Instant> = None;
+    let deadline = Instant::now() + SETTLE_DEADLINE;
     while Instant::now() < deadline {
         let count = event_lines(staged).len();
         if count >= expected_lines {
             std::thread::sleep(Duration::from_millis(150));
             break;
         }
-        // The stability break detects a run that settled *below* the expected
-        // marker count (e.g. errored after a few events). Guard it on `count > 0`
-        // so it never fires during startup: a proxied/adopted target does more
-        // pre-launch work (re-prep + staged bootstrap) before its first event
-        // than a direct run, and an unguarded window would false-break with an
-        // empty log while that setup is still in flight.
-        if count == last_count && count > 0 {
-            match stable_since {
-                Some(since) if since.elapsed() >= pacing.stable_for => break,
-                Some(_) => {}
-                None => stable_since = Some(Instant::now()),
-            }
-        } else {
-            stable_since = None;
-            last_count = count;
+        if pane_shows_exit(&mut harness, &sentinel) {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -5239,10 +5207,6 @@ fn run_shipped_optional_commit_message(commit_message: Option<&str>) -> (Vec<Str
         "--goose --yolo",
         &params,
         5,
-        SettlePacing {
-            stable_for: Duration::from_secs(15),
-            ..SettlePacing::default()
-        },
         &[("TTS_PROVIDER", "say")],
     );
     (event_lines(&staged), pane)
@@ -5331,17 +5295,6 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
     // for. The runner `cd`s into the workspace before invoking claudine.
     const PARAMS: &str = "spec=feature/spec.md plan=feature/plan.md";
 
-    // The shipped document re-validates its schema, re-resolves `@`-references,
-    // and re-composes a large body on every iteration, so under parallel L2 load
-    // healthy iterations sit seconds apart — wide enough that the default
-    // 1200ms stability window would read the gap between two good iterations as
-    // "the run settled early". The deadline stays at the default so two arms
-    // still fit inside the tier's 90s termination ceiling.
-    let pacing = || SettlePacing {
-        stable_for: Duration::from_secs(4),
-        ..SettlePacing::default()
-    };
-
     // Direct: `implement-plan.md` IS the invoked document.
     let direct = stage_shipped_implement_route("_implement/implement-plan.md", TOTAL_PHASES);
     let direct_pane = run_until_settled_with_params(
@@ -5349,7 +5302,6 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
         "--goose",
         PARAMS,
         EXPECTED_MARKERS,
-        pacing(),
         &[],
     );
     let direct_lines = event_lines(&direct);
@@ -5361,7 +5313,6 @@ fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
         "--goose",
         PARAMS,
         EXPECTED_MARKERS,
-        pacing(),
         &[],
     );
     let routed_lines = event_lines(&routed);
@@ -6538,7 +6489,7 @@ const SEQ_MODEL_SOURCE: &str = "---\n\
      sequence body\n";
 
 /// Run `claudine sequence --goose <doc>` in tmux and block until `events.log`
-/// holds `expected_lines` markers, or the marker count settles (so a run that
+/// holds `expected_lines` markers, or the run exits (so a run that
 /// produces *fewer* markers than expected surfaces the mismatch instead of
 /// burning the whole deadline). Returns the captured pane.
 fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String {
@@ -6555,7 +6506,7 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
     let sentinel = format!("L2_SEQSET_DONE_{seq}");
     let env_prefix = staged_env_prefix_augmented(staged);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} sequence --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} sequence --goose {md} ; echo {sentinel}:$?",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -6564,27 +6515,14 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
         .expect("send sequence command");
 
     let deadline = Instant::now() + Duration::from_secs(40);
-    let mut last_count = 0usize;
-    let mut stable_since: Option<Instant> = None;
     while Instant::now() < deadline {
         let count = event_lines(staged).len();
         if count >= expected_lines {
             std::thread::sleep(Duration::from_millis(150));
             break;
         }
-        // Guarded on `count > 0` so the settle detection never false-breaks
-        // during startup: a sequence step whose proxied target is re-prepared
-        // and staged does more pre-launch work before its first event than a
-        // direct step. See the note in `run_until_settled`.
-        if count == last_count && count > 0 {
-            match stable_since {
-                Some(since) if since.elapsed() >= Duration::from_millis(1200) => break,
-                Some(_) => {}
-                None => stable_since = Some(Instant::now()),
-            }
-        } else {
-            stable_since = None;
-            last_count = count;
+        if pane_shows_exit(&mut harness, &sentinel) {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }

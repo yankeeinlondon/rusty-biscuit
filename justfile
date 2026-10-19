@@ -485,7 +485,23 @@ check-canonical *args="":
     fi
 
 # Compose the commit prompt with any supplied parameters
+# (under CI: a plain `git commit` with the message passed as the argument)
 commit *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # A runner has no TTY, model credentials, or audio device, so under CI this
+    # is a plain, deterministic commit whose message the caller supplies.
+    if [[ -n "${CI:-}" ]]; then
+        message={{ quote(args) }}
+        if [[ -z "$message" ]]; then
+            echo "just commit: under CI the commit message must be passed as the argument" >&2
+            exit 1
+        fi
+        git commit -m "$message"
+        exit 0
+    fi
+
     claudine compose prompts/commit.md {{ args }}
 
 # stages all files in package area and then commits and pushes

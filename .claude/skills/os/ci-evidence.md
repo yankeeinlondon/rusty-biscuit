@@ -59,6 +59,8 @@ mode. This page covers only what differs per OS.
 - A request not to rerun passed tests is not a ban. Only an explicit
   instruction (for example, an environment down for maintenance) is; never
   infer a blanket WSL2 or Windows prohibition.
+- Bans live in `<home>/.rusty-biscuit/ci-constraints/<repository>/`;
+  `BISCUIT_CI_CONSTRAINTS_DIR` overrides that location.
 - The store's `<home>` is Python's `Path.home()`, which is `USERPROFILE` on
   native Windows. A test that relocates it sets both `HOME` and `USERPROFILE`.
 - If `just ci-local --plan` still schedules a banned cell, explain the gap
