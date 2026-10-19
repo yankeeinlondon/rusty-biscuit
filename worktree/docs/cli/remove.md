@@ -570,13 +570,20 @@ read, the journals are kept and `wt remove` warns.
   `post_move`, `deletion`, or `unregistration`), why (`reason`, tagged by
   `kind` as in [When watching stops](#when-watching-stops)), and, during
   deletion, how many entries `wt` had processed since its previous check
-  (`entries_since_drain`; `null` at other stages). On macOS a
+  (`entries_since_drain`; `null` at other stages). A loss while `wt` stops
+  watching Git's admin directory, just before it removes the worktree's
+  record, is recorded at `unregistration` but does not stop the removal:
+  the final check rereads the index and HEAD directly. On macOS a
   dropped-notification `reason` keeps the system's whole flag mask (`raw`)
   and names every loss flag in it (`kernel_dropped`, `user_dropped`,
   `must_scan_sub_dirs`). A stall or the 5-minute limit records the time
   waited (`waited_ms`) and the silent `watch` (`parent` or `admin` on
   Windows, `null` on macOS). The round trips time markers only, not how long
-  each change took to arrive, and the deletion count is context, not proof
+  each change took to arrive. On macOS a round trip is either about 10 ms or
+  about 1 s, never in between: a marker fseventsd has not processed when
+  `wt` asks for it arrives about a second later. A `longest_round_trip_ms`
+  near 1,000 there means a check missed the fast path, not how far behind
+  the system was, and the deletion count is context, not proof
   that `wt` caused a drop. A report from before `report_version` 5 has no
   `observation`, which reads as unknown.
 - `earlier_attempts` keeps what each earlier run reported when it stopped:

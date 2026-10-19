@@ -42,6 +42,16 @@ deletion engine decides which are the operation's own.
   `ObservationError::NotDelivering(diagnostics)` (still exit 4), not `Setup`.
   The lifecycle's `Attempt::observed_by` copies the snapshot into every saved
   report.
+  Nothing drains after `release_admin`, so it records `Backend::queued_loss()`
+  (the queue's loss, left in place) at `Unregistration`; the release still
+  completes, and `remove_listed_record`'s reread decides.
+- **macOS round trips are bimodal.** A marker round takes about 11 ms or
+  about 1.0 s (1,002–1,016 ms), nothing between, whether the tree is freshly
+  created or settled and whether stream latency is 0.1 s or 0.5 s (probed
+  2026-10-19, 912 rounds). The second is fseventsd, not `wt`: nothing in the
+  wait path waits a second. So `longest_round_trip_ms` is about 1,000 in
+  nearly every large removal, and a round trip is no backlog-depth signal for
+  pacing.
 - **Register before the usage query.** `register_handles(&mut OwnedHandles)`
   must run before `check_usage`. On Linux, Sniff reports each watch inside the
   checkout as `WatchRegistration` with the inotify instance's fd as
