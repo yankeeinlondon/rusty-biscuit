@@ -10,28 +10,6 @@ skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
     - dmls
-human_review: false
-message_to_agent: |-
-    Phase 4 landed R4. Startup is now a third lane on the one registry worker
-    (StartupPhase::Initial, then Discovered only when discovery changed the
-    repository set). PendingRegistries::begin_startup/startup_phase_finished/
-    startup_discovered coordinate it, and Router::finish_startup logs the
-    single `schema registry ready` line. spawn_startup only runs discovery;
-    the file list installs first (FileListInstalled now PRECEDES
-    RegistryReady). For Phase 5: RegistryWorker::run_pass is the single pass
-    loop for both startup phases and workspace passes. It already measures
-    preparation time with the injected clock, excluding interrupting document
-    jobs. Install the thread-scoped payload hit/miss collector around run_pass
-    and swap it out inside run_waiting_documents. run_workspace is where the
-    per-pass debug line belongs. Startup counts as one outstanding job until
-    the ready line, so LspFixture::flush_server waits for startup; a test that
-    holds discovery (file_list_gate) must not flush before releasing it. New
-    seams: StartupHooks::startup_probe_gate (holds after reads, before
-    install), StartupEvent::{StartupProbePreparing,StartupPhaseFinished},
-    LspFixture::{start_with_startup_probe_gate,release_startup_probe,
-    open_startup_probe_gate,startup_events_until,wait_for_startup_events},
-    work_counters::peak_concurrent_registry_scans. darkmatter `just test` is
-    now 10523 passed.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
     - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
@@ -69,6 +47,51 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/dmls.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+documentation:
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - .claude/skills/darkmatter/dmls.md
+completed_phase: 6
+implemented: true
+human_review: false
 ---
 
 # Implementation Log for 2026-10-18-dmls-cache-optimization (6 phases)
@@ -584,4 +607,227 @@ Input Robustness Matrix: not applicable (no parser or loader).
 - Dependents: no workspace package depends on `dmls`. No library (`darkmatter`) code changed.
 - Cross-OS: not run. This is thread, queue, and channel logic with no path, process, or console
   handling; the nightly Windows/WSL2 cells will cover it.
+- Pre-existing failures: none seen.
+
+## Phase 5
+
+### What changed (R5)
+
+**Pass line (`dmls/src/router.rs`, `dmls/src/overlay/`).** `OverlayState::prepare_workspace_probe` now
+returns a `ProbeOutcome` (`Fresh`, `Prepared`, `Failed`). It comes from a private `run_preparation`
+that `prepare_registry_held` also uses, so the existing `bool` ("fresh afterwards") contract is
+unchanged. `Prepared::failed()` (in `overlay/registry.rs`) tells whether the registry loaded. A
+folder whose context cannot be built counts as `Failed`. A probe under no trigger boundary counts as
+`Fresh`, since nothing is read for it. `RegistryWorker::run_pass` now returns a `RegistryPass`: its
+preparation time, the probe count, the per-outcome counts, and the `PayloadMemoCounts` of a
+`PayloadMemoTally` it starts on the worker thread after the first `run_waiting_documents`.
+`run_document` starts its own tally, which takes over counting until the job ends, so a document job
+that interrupts a pass is never counted in it (ruling 2). `run_workspace` logs one `debug`
+`trigger registries prepared probes prepared fresh failed payload_hits payload_misses elapsed_ms
+workspace` line through `log_workspace_pass`. The worker now gets the workspace identifier;
+`workspace_identifier` is computed before the worker is spawned. Startup phases do not log the line.
+The info-level `schema registry ready` and failure/recovery lines are unchanged.
+
+**Wait duration (`dmls/src/request_timing.rs`, `router.rs`).** `RequestTimings` keeps a
+`RegistryWait` (closed-interval total plus the start of an open interval) on the injected clock.
+Three methods use it:
+
+- `begin_registry_wait` records `Wait::TriggerRegistry` and opens an interval. `proceed` calls it
+  instead of `record_wait` when it parks a request.
+- `end_registry_wait` closes the open interval. It runs at the top of `proceed` (resume, including
+  the requeue path, which parks again) and in `answer_waiter` (cancellation, shutdown, index
+  failure).
+- `registry_wait` returns the total, including an interval that is still open.
+
+The completion event gains `trigger_registry_wait_ms`, present only when the request parked. No
+second event was added. Handler work and index waits fall outside every interval.
+
+### Departures and decisions
+
+- The pass line is for **workspace passes only**, as the plan's wording and Phase 4's handoff say.
+  Startup keeps its single info line.
+- `trigger_registry_wait_ms` is **omitted** for a request that never parked, matching how stage
+  fields are omitted. `waited_for_trigger_registry` stays as before.
+- `fresh` includes a probe outside every trigger boundary. `failed` includes a probe whose folder
+  context could not be built. The docs state both, so `prepared + fresh + failed = probes`.
+- No library (`darkmatter/lib`) code changed: Phase 2's `PayloadMemoTally` was enough.
+
+### Requirement-to-test mapping
+
+All tests are L1. The F2 tests are in-process LSP sessions in the new
+`dmls/tests/l1/registry_observability.rs`; the F1 tests are unit tests in `request_timing::tests`.
+
+| Requirement | Test |
+| --- | --- |
+| Pass-local counts exclude an interrupting document job. A payload edit not reported to the server makes the job miss while the pass is held before its second probe, and the request is answered during the hold. The line reads `probes=2 prepared=2 fresh=0 failed=0 payload_hits=2 payload_misses=0` | F2 `the_pass_line_excludes_a_document_job_that_interrupts_it`. Mutation check: with `run_document`'s tally removed, it fails with `payload_misses=1` |
+| A fresh scope records neither a hit nor a miss (`prepared=1 fresh=1 payload_hits=0 payload_misses=1`) | F2 `a_fresh_probe_records_neither_a_hit_nor_a_miss` |
+| Failed probes are counted separately, and a failed resolution is a miss (`prepared=1 failed=1 payload_hits=1 payload_misses=1`) | F2 `a_failed_probe_is_counted_apart_from_prepared_and_fresh` |
+| Log hygiene: the line has exactly the pass fields, every value but `workspace` is numeric, and no payload property, trigger text, or document text appears | the three tests above (`only_pass_counts`, `assert_no_schema_text`) |
+| Resume plus requeue: parked 100 ms, the context changes, the request is parked again for 50 ms, and its one event shows `elapsed_ms=150 trigger_registry_wait_ms=150` | F2 `a_requeued_request_reports_the_sum_of_its_parked_intervals` |
+| Cancellation: `outcome="cancelled" cancelled=true trigger_registry_wait_ms=70`; time after the answer is not counted | F2 `a_cancelled_request_reports_its_parked_time` |
+| Shutdown: answered once with `ServerCancelled`, `trigger_registry_wait_ms=30` | F2 `a_request_parked_at_shutdown_reports_its_parked_time` |
+| A request that never parks has no wait field | F2 `a_request_that_never_parks_has_no_wait_figure`, F1 `a_message_that_never_parked_omits_the_wait_figure` |
+| Summing excludes time between intervals (handler work, index waits); an open interval counts up to now; a repeated begin or end is a no-op | F1 `registry_wait_sums_parked_intervals_and_excludes_the_time_between_them`, `a_second_begin_keeps_the_interval_in_progress_and_an_end_without_one_does_nothing` |
+
+The F2 wait tests run on a `ManualClock` through the new fixture seam
+`LspFixture::start_with_registry_gate_and_clock`. The clock moves only when a test advances it, so
+every figure is exact.
+
+Input Robustness Matrix: not applicable (no parser or loader).
+
+### Docs and skill
+
+- `darkmatter/docs/lsp/indexing.md`: a log-catalog row for `trigger registries prepared`, a new "The
+  workspace pass line" subsection (sample, field table, exclusion rule, hygiene), the
+  `trigger_registry_wait_ms` field row, and an updated hover sample with an explanation of what the
+  wait covers. Without these, the docs would not have mentioned either new behavior.
+- `.claude/skills/darkmatter/dmls.md`: the wait methods, the tally placement, and the new test file
+  and fixture seam.
+- Doc comments: `request_timing` module docs (the new field), `prepare_workspace_probe` (the
+  `Failed` outcome), and `run_pass` (it now returns a `RegistryPass`). No drifted comment was found.
+
+### Gates
+
+- Flakiness: the first run of the interruption test timed out once, because the probe was released
+  before dispatch queued the document job. A `round_trip()` before the release fixed it: the job is
+  now always queued first. After the fix, the new binary passed 6 runs in a row.
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["dmls", "test-toolkit", "darkmatter"]`, `change_class: package`. The gates were run.
+- `just lint` (darkmatter): pass, no warnings.
+- `just test` (darkmatter): **10533 passed, 10 skipped** (61 s). That is 10523 plus 10 new tests:
+  7 L1 and 3 unit. No failures.
+- `just check-tier-coverage darkmatter`: stranded 0.
+- Dependents: no workspace package depends on `dmls`, and no `darkmatter` library code changed.
+- Cross-OS: not run. The change is counters, clock arithmetic, and logging, with no path, process,
+  or console handling.
+- Pre-existing failures: none seen.
+
+## Phase 6
+
+### Starting state
+
+The working tree held Phase 5's changes uncommitted (the last commit is the Phase 4 close),
+so `git status` shows Phase 5's files as well as this phase's. This phase changed no source
+file. It edited `darkmatter/docs/lsp/indexing.md`, `.claude/skills/darkmatter/dmls.md`, and
+this fix's plan, log, and spec.
+
+### Docs and skill (Wave 11)
+
+Phases 3–5 had already documented most of the behavior, so this wave reviewed those pages
+and filled the gaps.
+
+- `darkmatter/docs/lsp/indexing.md`
+    - Already covered: job ordering, workspace-job merging, the file list installed before
+      registry-ready (with its startup Mermaid sequence), when a config reload invalidates
+      (the "When the registry changes" table), and the R5 log and timing fields.
+    - **Added** the Mermaid sequence "a request on a document opened while a workspace pass
+      runs waits only for the scope in progress" under *Preparing registries off the dispatch
+      thread*.
+    - **Added** the subsection *Resolved payloads are shared*: the memo's inputs, an example
+      of two package folders sharing one resolution, what forces a new resolution, the
+      32-entry LRU, failures not kept, and the link to the pass line's
+      `payload_hits`/`payload_misses`. No page described the memo before, so nothing had
+      drifted.
+- `darkmatter/docs/lsp/configuration.md`: reviewed, no change. *Changes apply without a
+  restart* already says that an unchanged effective reload drops only the contexts and
+  re-publishes diagnostics, and that any effective change marks every registry stale.
+- `.claude/skills/darkmatter/dmls.md`: the worker priority rule was already present (Phase 3/4).
+  **Added** a payload-memo bullet: the key fields, the fingerprint, why the requester's context
+  must stay out of the key, and the tests' reliance on nextest's process-per-test model.
+- Doc comments reviewed against the code: `file_payload_memo` (assemble.rs), `update_config` /
+  `reload_config` (whose docs carry the contract), `spawn_startup`, `spawn_registry_worker`,
+  `RegistryPass`, and the `registry_jobs` module docs. All match the code. **No drift found**,
+  so no comment changed.
+- README: not changed. Public behavior (CLI and LSP surface) is the same; the work only makes
+  existing behavior faster.
+
+### Consumers (Wave 12)
+
+`git diff df86e5163 -- darkmatter/lib/src` (the fix's base) adds two public items:
+`PayloadMemoTally` and `PayloadMemoCounts` (start/counts). It removes or changes no public
+item, so no consumer can break. Only `dmls` uses the new items (a repository-wide grep found
+none in `claudine` or `messenger`). No workspace package depends on `dmls`. Phase 2 already ran the
+targeted dependent tests (claudine 318, claudine-cli 57, messenger 59), and this phase changed
+no library code, so no dependent tests were rerun.
+
+### After sample
+
+Same host, same harness (`/tmp/dmls-repro/repro.py`, not committed), same document, binary
+from `cargo build --locked --release -p dmls` at this phase's tree. Load average about 14–20
+(not quiet; the before sample was taken at about 17).
+
+| After `initialized` | Before (run 1 / 2) | After (run 1 / 2) | `slow request` after | `schema registry ready elapsed_ms` before → after |
+| --- | --- | --- | --- | --- |
+| nothing | 207 / 161 ms | 183 / 133 ms | none | 1044 / 998 → 310 / 273 |
+| `didChangeConfiguration {"settings": {}}` | 1260 / 1334 ms | 178 / 192 ms | none | 1151 / 1222 → 322 / 314 |
+
+The incident is fixed. The unchanged notification no longer adds anything (178–192 ms against
+133–183 ms without it), and both variants are under the non-gating ≤ 250 ms target.
+
+**Remaining wait and its cause.** A debug-level run of the configuration variant shows the server's
+own completion event: `elapsed_ms=22 … waited_for_trigger_registry=true
+trigger_registry_wait_ms=20`. The request parks only on its document's own job, 20 ms. The rest
+of the client-measured ~180 ms is spent before the server reads the request. It is
+present in both variants, so the configuration notification does not cause it. It is
+dispatch work queued ahead of the request (the `initialized`/`didOpen` handling and the
+diagnostics publish for the opened document). It is not trigger-registry work, and it is
+out of scope for this fix.
+
+**Criterion 2 (payload misses).** Startup phases do not log the pass line (Phase 5 ruling). To
+count the cold scan, a **temporary, uncommitted** patch made `run_startup` call
+`log_workspace_pass`, the same technique as the spec's original timer. A second script
+(`/tmp/dmls-repro/forced.py`) then sent an effective config change
+(`diagnostics.debounce_ms: 301`), which marks every registry stale and queues one workspace
+pass. Results on this repository:
+
+| Pass | Line |
+| --- | --- |
+| cold startup, initial phase | `probes=111 prepared=111 fresh=0 failed=0 payload_hits=15 payload_misses=3 elapsed_ms=336` |
+| startup, discovered phase | `probes=111 prepared=0 fresh=111 failed=0 payload_hits=0 payload_misses=0 elapsed_ms=5` |
+| forced workspace pass (unchanged inputs) | `probes=111 prepared=111 fresh=0 failed=0 payload_hits=18 payload_misses=0 elapsed_ms=66` |
+
+The cold scan records 3 misses (one per Claudine trigger payload, down from 18–32), and the forced
+second scan records 0. The patch was reverted (`router.rs` restored from a copy, no
+`TEMP-startup` string in the source or the rebuilt binary).
+
+### Done-when: requirement-to-test mapping (all phases)
+
+| Done-when / acceptance | Evidence |
+| --- | --- |
+| 1, 3: unchanged notification adds no pass, no invalidation, zero extra preparations | `registry_preparation::an_unchanged_configuration_notification_prepares_nothing`, `repository_contexts::an_unchanged_configuration_drops_every_context_and_prepares_no_workspace_scope`, `workspace_schema_scopes::an_unchanged_configuration_prepares_an_open_document_whose_context_changed`, `startup_preparation::a_request_overtakes_the_remaining_startup_probes_after_an_unchanged_configuration` (with its control session); after sample above |
+| 2: 3 cold misses, 0 on a forced rescan | this phase's measurement above; library equivalent `payload_memo_tests::eighteen_distinct_keys_fit_and_a_repeat_scan_resolves_nothing` and the sharing/missing rows in Phase 2 |
+| 4: merging, one follow-up (incl. the completion/dispatch boundary), documents before remaining probes | `registry_preparation::a_queued_document_runs_before_a_merged_workspace_pass`, `…::schedules_during_a_running_pass_add_one_follow_up`, `…::a_document_job_runs_between_two_probes_of_a_running_pass`; F1 `registry_jobs::tests::a_schedule_after_a_pass_ends_but_before_its_completion_is_handled_adds_one_pass` |
+| 5: no concurrent preparations; a change during preparation leaves the scope stale | `startup_preparation::startup_and_a_refresh_share_one_worker_and_skip_fresh_probes` (peak = 1), `…::a_change_during_an_in_flight_startup_preparation_leaves_the_scope_stale`; existing overlay change-replay and failure-transition tests unchanged |
+| 6: registries, diagnostics, summaries identical on `darkmatter/tests/fixtures/schema-triggers/` | existing `cli/tests/l1/schema_triggers.rs`, `lib/tests/l1/shipped_schema_corpus.rs`, `schema_phase_validation.rs`, `inline_document_text.rs`, all passing unchanged in this phase's `just test` |
+| R5 observability | `registry_observability.rs` (7 tests) and `request_timing::tests` (3), Phase 5 |
+
+### Key field set (R1, final)
+
+`file_payload_memo::Key` = trigger `source` path, `payload` YAML value, `schema_roots`, the
+requester's tree (`base_dir` + `base_dir_origin`), `for_cwd(trigger folder)`, and
+`for_trusted_external_cwd(root)` for each root. Reuse also requires an unchanged fingerprint
+(dependency bytes plus the entry listing of each root and dependency folder). Capacity 32,
+true LRU, successes only.
+
+### Departures from the spec (all phases)
+
+- The pass line is logged for workspace passes only. Startup keeps its single `schema registry
+  ready` info line (Phase 5). Criterion 2's cold count was therefore measured with a temporary
+  patch, as described above.
+- `trigger_registry_wait_ms` is omitted for a request that never parked (Phase 5).
+- The worker-completion/dispatch-boundary case of criterion 4 is covered at F1 only (Phase 3). The
+  window cannot be held from outside without a seam inside the queue transition.
+
+### Gates
+
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["dmls", "test-toolkit", "darkmatter"]`, `change_class: package`. That includes
+  Phase 5's uncommitted files. The gates were run.
+- `just lint` (darkmatter): pass, no warnings.
+- `just test` (darkmatter): **10533 passed, 10 skipped** (33 s). That is unchanged from Phase 5,
+  since this phase added no tests. No failures, no reruns.
+- `just check-tier-coverage darkmatter`: stranded 0.
+- `cargo clippy -p test-toolkit --all-targets -- -D warnings`: clean.
+- Cross-OS: not run. This phase changed only docs. Earlier phases' cross-OS evidence is in their
+  sections (Phase 2 ran Windows for the memo tests).
 - Pre-existing failures: none seen.

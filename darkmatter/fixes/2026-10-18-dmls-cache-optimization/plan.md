@@ -48,6 +48,50 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/dmls.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/request_timing.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/registry_observability.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+    - darkmatter/dmls/tests/l1/workspace_schema_scopes.rs
+documentation:
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - .claude/skills/darkmatter/dmls.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: DMLS Trigger-Registry Cache Optimization
@@ -71,12 +115,12 @@ fixes plus visibility, spread over two crates:
 **Done when** (spec acceptance criteria 1–6 all hold):
 
 - [x] An unchanged config notification adds no workspace pass and no blanket invalidation
-- [ ] A cold scan of the three-trigger input set records 3 payload misses; a second forced scan records 0
+- [x] A cold scan of the three-trigger input set records 3 payload misses; a second forced scan records 0
 - [x] Multiple workspace schedules merge; schedules during a running pass yield exactly one follow-up (including the worker-completion/dispatch boundary)
 - [x] Document completion releases waiters before the remaining probes
 - [x] No two server preparations run concurrently; relevant changes during preparation leave the scope stale
-- [ ] Resolved registries, diagnostics, and trigger summaries are identical on `darkmatter/tests/fixtures/schema-triggers/`
-- [ ] `just test` and `just lint` pass in `darkmatter/`; docs updated; before/after repro sample recorded in the implementation log
+- [x] Resolved registries, diagnostics, and trigger summaries are identical on `darkmatter/tests/fixtures/schema-triggers/`
+- [x] `just test` and `just lint` pass in `darkmatter/`; docs updated; before/after repro sample recorded in the implementation log
 
 Input Robustness Matrix: **not applicable.** No parser, loader, or
 deserializer is added or changed; the memo key and job scheduling are internal
@@ -332,14 +376,14 @@ Depends on Phases 2 and 4 (counter seam and worker loop).
 
 **Wave 9** (parallel, different files):
 
-- [ ] **Pass log**
+- [x] **Pass log**
     - At `debug`, one line per workspace pass: `trigger registries prepared probes=… prepared=… fresh=… payload_hits=… payload_misses=… elapsed_ms=… workspace=…`.
       Install the thread-scoped collector (ruling 2) for the pass and swap it
       out for interrupting document jobs. Count failed probes separately from
       fresh and prepared. Preserve existing info-level startup summaries and
       failure/recovery transitions. Never log payload contents, environment
       values, or schema text.
-- [ ] **Wait duration**
+- [x] **Wait duration**
     - In `request_timing.rs` add `trigger_registry_wait_ms` to the existing
       `slow request` completion event (no second event), using the injected
       server clock. Sum separate parked intervals, each ending at resume,
@@ -348,9 +392,9 @@ Depends on Phases 2 and 4 (counter seam and worker loop).
 
 **Wave 10** (tests; parallel):
 
-- [ ] Captured `tracing`: pass-local counts exclude interrupting document jobs; failed probes counted separately; a fresh scope records neither hit nor miss
-- [ ] Injected clock: summed waits with resume/requeue, cancellation, and shutdown, all on one completion event
-- [ ] Log-hygiene check: no payload/env/schema text in the new lines
+- [x] Captured `tracing`: pass-local counts exclude interrupting document jobs; failed probes counted separately; a fresh scope records neither hit nor miss
+- [x] Injected clock: summed waits with resume/requeue, cancellation, and shutdown, all on one completion event
+- [x] Log-hygiene check: no payload/env/schema text in the new lines
 
 **Checkpoint 5:** `just test` green.
 
@@ -360,19 +404,19 @@ Depends on Phases 2 and 4 (counter seam and worker loop).
 
 **Wave 11** (parallel docs):
 
-- [ ] `darkmatter/docs/lsp/indexing.md`: job ordering, workspace-job merging, when a config reload invalidates, memo key, file list published before registry-ready; include a Mermaid sequence "request parked on a document job while a workspace pass runs". Audience is a developer new to the repo; lead with what the reader can do, no links to the feature/fix
-- [ ] `darkmatter/docs/lsp/configuration.md`: unchanged effective reload (with unchanged context inputs) does not invalidate; every effective change keeps conservative invalidation
-- [ ] `.claude/skills/darkmatter/dmls.md`: worker priority rule and memo key
-- [ ] Doc comments: `file_payload_memo`, `update_config`, `spawn_startup`, `spawn_registry_worker`, registry-jobs module; delete drifted comments and record the drift in the implementation log
-- [ ] README only if public behavior changed (expected: no)
+- [x] `darkmatter/docs/lsp/indexing.md`: job ordering, workspace-job merging, when a config reload invalidates, memo key, file list published before registry-ready; include a Mermaid sequence "request parked on a document job while a workspace pass runs". Audience is a developer new to the repo; lead with what the reader can do, no links to the feature/fix
+- [x] `darkmatter/docs/lsp/configuration.md`: unchanged effective reload (with unchanged context inputs) does not invalidate; every effective change keeps conservative invalidation
+- [x] `.claude/skills/darkmatter/dmls.md`: worker priority rule and memo key
+- [x] Doc comments: `file_payload_memo`, `update_config`, `spawn_startup`, `spawn_registry_worker`, registry-jobs module; delete drifted comments and record the drift in the implementation log
+- [x] README only if public behavior changed (expected: no)
 
 **Wave 12** (sequential):
 
-- [ ] Find consumers of any changed public lib surface (Claudine) with Sniff/GitNexus; fix breaks
-- [ ] `just lint` and `just test` in `darkmatter/`; no workspace-wide gates
-- [ ] After sample: rerun the stdio repro from Phase 1 on the same host; record before/after, the remaining wait and its cause, against the non-gating ≤ 250 ms target
-- [ ] Write the implementation log: key field set, any departures from the spec, doc/test updates, drift resolved
-- [ ] Set spec status to `implemented` per repo convention. Do not move the fix to `_completed` and do not run `just complete`; the terminal state is "implementation complete, ready for review"
+- [x] Find consumers of any changed public lib surface (Claudine) with Sniff/GitNexus; fix breaks
+- [x] `just lint` and `just test` in `darkmatter/`; no workspace-wide gates
+- [x] After sample: rerun the stdio repro from Phase 1 on the same host; record before/after, the remaining wait and its cause, against the non-gating ≤ 250 ms target
+- [x] Write the implementation log: key field set, any departures from the spec, doc/test updates, drift resolved
+- [x] Set spec status to `implemented` per repo convention. Do not move the fix to `_completed` and do not run `just complete`; the terminal state is "implementation complete, ready for review"
 
 **Checkpoint 6 (final):** every Done-when item above checked, with test names
 recorded in the implementation log.

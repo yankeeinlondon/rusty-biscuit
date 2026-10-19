@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: finalized-spec
+status: implemented
 $schema:
     status: |-
         enum(
@@ -28,7 +28,8 @@ review_iterations: 0
 clarified: true
 clarified_by: claude/opus
 needs_rulings: false
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 created: 2026-10-18
 owner: Ken Snyder <ken@ken.net>
 packages:
