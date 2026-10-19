@@ -12,26 +12,26 @@ packages:
     - dmls
 human_review: false
 message_to_agent: |-
-    Phase 3 landed R2 (unchanged effective config invalidates nothing and
-    schedules nothing) and R3 (two-lane RegistryQueue in registry_jobs.rs with
-    a workspace slot Idle/Queued/Running/RequestedAgain; the worker in
-    router.rs RegistryWorker::run_workspace builds the probe list itself and
-    runs waiting document jobs before each probe). Startup is NOT on the
-    worker yet: spawn_startup still calls OverlayState::prepare_workspace_registries
-    on its own thread, so Phase 4 must move it into the queue (consider a
-    third lane or a startup job kind; the slot machine assumes one workspace
-    pass at a time). New seams: StartupHooks::registry_probe_gate,
-    StartupEvent::WorkspaceProbePreparing, LspFixture::start_with_registry_probe_gate,
-    release_registry_probe, open_registry_probe_gate, and
-    registry_jobs_until_idle (job kinds in handling order). Note the dispatch
-    thread reports RegistryJobsOutstanding(n-1) BEFORE RegistryPrepared for
-    the same job; registry_jobs_until_idle accounts for this. Ruling 8 was
-    satisfied through the existing finish_registry_job -> proceed recheck,
-    not on the worker (untitled buffers use for_untitled); see the log.
-    Phase 1's test-update list (b) still applies to Phase 4; (c) is done.
-    docs/lsp/indexing.md and configuration.md were corrected for R2/R3 drift
-    only; Phase 6 still owes the Mermaid sequence and full write-up.
-    darkmatter `just test` is now 10512 passed.
+    Phase 4 landed R4. Startup is now a third lane on the one registry worker
+    (StartupPhase::Initial, then Discovered only when discovery changed the
+    repository set). PendingRegistries::begin_startup/startup_phase_finished/
+    startup_discovered coordinate it, and Router::finish_startup logs the
+    single `schema registry ready` line. spawn_startup only runs discovery;
+    the file list installs first (FileListInstalled now PRECEDES
+    RegistryReady). For Phase 5: RegistryWorker::run_pass is the single pass
+    loop for both startup phases and workspace passes. It already measures
+    preparation time with the injected clock, excluding interrupting document
+    jobs. Install the thread-scoped payload hit/miss collector around run_pass
+    and swap it out inside run_waiting_documents. run_workspace is where the
+    per-pass debug line belongs. Startup counts as one outstanding job until
+    the ready line, so LspFixture::flush_server waits for startup; a test that
+    holds discovery (file_list_gate) must not flush before releasing it. New
+    seams: StartupHooks::startup_probe_gate (holds after reads, before
+    install), StartupEvent::{StartupProbePreparing,StartupPhaseFinished},
+    LspFixture::{start_with_startup_probe_gate,release_startup_probe,
+    open_startup_probe_gate,startup_events_until,wait_for_startup_events},
+    work_counters::peak_concurrent_registry_scans. darkmatter `just test` is
+    now 10523 passed.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
     - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
@@ -52,6 +52,22 @@ docs_updated_during_phase_3:
     - darkmatter/docs/lsp/configuration.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_4:
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/dmls.md
 ---
 
@@ -438,4 +454,134 @@ Input Robustness Matrix: not applicable (no parser or loader).
 - Cross-OS: not run. The change is thread and queue logic (`Mutex`/`Condvar`) with no path,
   process, or console handling, so there is no notable OS-specific risk. The nightly Windows/WSL2
   cells will cover it.
+- Pre-existing failures: none seen.
+
+## Phase 4
+
+### Recovery note
+
+This run found Phase 4's code, tests, docs, and skill edits already in the working tree from an
+earlier attempt, with every Phase 4 task checked off but no log section written. This run reviewed
+that diff against rulings 5–7 and the plan. It found nothing to change and then ran the gates
+itself (below). This section records that work.
+
+### What changed
+
+**Startup on the worker (R4, `dmls/src/registry_jobs.rs`).** `RegistryQueue` now has three lanes:
+documents, a `startup: VecDeque<StartupPhase>` lane, and the workspace slot. `next()` returns a
+document first, then a startup phase, then a queued workspace pass. `StartupPhase` (public, re-exported
+from `lib.rs`) is `Initial` (folders and the packages and areas inside them) or `Discovered` (the
+repositories the walk found). `PendingRegistries` gained a `StartupProgress` record, used as follows:
+
+- `begin_startup` queues `Initial` and counts startup as **one** outstanding job until it is ready.
+- `startup_phase_finished` and `startup_discovered` record the two halves. `advance_startup` queues
+  `Discovered` only after **both** the initial phase finished and discovery reported a changed
+  repository set. Otherwise it ends startup and returns `StartupReady`: the summary after the last
+  phase, the summed preparation time, and the worker thread.
+- `drain_waiters` became `shut_down`. It closes the queue, drops startup, zeroes `outstanding` (and
+  reports it), and returns the waiters, which are answered once.
+
+**Worker and dispatch (`dmls/src/router.rs`).** `spawn_startup` now runs only discovery and sends
+`Internal::FileList`. It never prepares a registry. `RegistryWorker::run_pass` is shared by
+`run_workspace` and the new `run_startup`. It runs waiting document jobs, builds the probe list on the
+worker, and runs waiting document jobs again before each probe. Its returned preparation time counts
+probe-list building and probe preparation only, so queue waits, interrupting document jobs, and the
+file walk are excluded. `run_startup` sends `Internal::StartupPhase { phase, preparing, summary, thread }`
+(this replaces `Internal::RegistryReady`). Dispatch handles the messages as follows:
+
+- `FileList` installs the list at once (new `ServerState::install_file_list`, which does not queue
+  anything), refreshes diagnostics, sends `FileListInstalled`, starts a waiting index round, and then
+  reports discovery to `PendingRegistries`.
+- `StartupPhase` publishes trigger transitions, sends `StartupPhaseFinished(phase)`, and reports the
+  phase.
+- When startup is ready, `Router::finish_startup` logs the one `schema registry ready` line, refreshes
+  diagnostics, retires the outstanding job, and sends `RegistryReady` and then
+  `RegistryPrepared{Startup}`.
+
+A changed repository set during startup is covered by the `Discovered` phase. Outside startup it
+still schedules a workspace pass.
+
+**Overlay (`dmls/src/overlay/mod.rs`, `overlay/registry.rs`).** `prepare_workspace_registries` was
+removed, since nothing calls it any longer. `prepare_workspace_probe` takes a `hold` callback, and the
+new `prepare_registry_held` calls it after `Preparation::run` (inputs read) and before the install, so
+a test can record a change while a preparation is in flight. Preparation still holds no overlay lock
+across I/O. The existing change/epoch replay in `install` is unchanged. `Preparation::run` keeps a
+`RegistryScan` guard alive for the scan.
+
+**Overlap detector (`dmls/src/work_counters.rs`).** `record_registry_scan` now returns a guard that
+counts in-flight scans. The new public `peak_concurrent_registry_scans()` reports the most scans that
+were ever in progress at once.
+
+**Test seams.** The changes span the server and the fixture:
+
+- In the server: `StartupHooks::startup_probe_gate`, plus `StartupEvent::StartupProbePreparing(phase)`
+  and `StartupEvent::StartupPhaseFinished(phase)`.
+- In the fixture: `LspFixture::start_with_startup_probe_gate`, `release_startup_probe`,
+  `open_startup_probe_gate`, `startup_events_until`, and `wait_for_startup_events`.
+- `spawn_with_all_hooks` now takes a `StartupHooks` instead of positional gates.
+- `initialize` now waits for both `FileListInstalled` and the startup `RegistryPrepared`, in either
+  order.
+
+### Departures and notable decisions
+
+- Startup is a **third lane** rather than a variant of the workspace slot, so a refresh scheduled
+  during startup still merges in the slot and runs after the phase. One worker thread still runs one
+  job at a time, which keeps ruling 6's "no two preparations overlap".
+- The startup gate holds **after reads, before install** (unlike `registry_probe_gate`, which holds
+  before the probe). That position is what makes the "change during the in-flight preparation leaves
+  the scope stale" test meaningful. A probe that is still fresh prepares nothing and does not wait.
+- The `RegistryReady` and `FileListInstalled` order is reversed: the list now installs first. One test
+  had to change: `workspace_file_list::path_diagnostics_wait_for_the_file_list` used `latest` (a
+  flush), which now waits for startup, and startup is outstanding until discovery returns. The test
+  now settles with a `documentSymbol` request instead. This was the remaining item of Phase 1's
+  test-update list (b).
+- Ruling 8 (stale document job) is exercised as the Phase 3 log asked:
+  `a_context_change_while_a_document_job_is_queued_requeues_its_waiter`.
+
+### Requirement-to-test mapping
+
+All tests are L1. They are F2 (in-process LSP sessions) unless marked F1 (unit tests in
+`registry_jobs::tests`). The new L1 tests are in `dmls/tests/l1/startup_preparation.rs`.
+
+| Requirement | Test |
+| --- | --- |
+| Queue order: documents, then startup phases, then the workspace pass | F1 `documents_run_before_a_startup_phase_and_a_startup_phase_before_a_workspace_pass` |
+| The second phase waits for both the initial phase and discovery (both arrival orders); startup stays one outstanding job between phases; elapsed time is the sum of the phases | F1 `the_discovered_phase_waits_for_both_the_initial_phase_and_discovery` |
+| Unchanged repository set: no discovered phase | F1 `discovery_that_changes_no_repository_ends_startup_after_the_initial_phase` |
+| Shutdown releases startup and the worker takes nothing | F1 `shutdown_during_startup_releases_it_and_takes_no_further_phase` |
+| With the initial phase held, the file list is installed and published first; the discovered phase follows both; one ready line counts every startup scope (`roots=2`) | `the_file_list_installs_while_the_initial_phase_is_held_and_the_discovered_phase_follows_both` |
+| Startup and a refresh together: peak concurrent scans = 1, every scan on one non-dispatch thread, fresh probes skipped (scans equal a plain startup's), discovered repositories prepared before ready | `startup_and_a_refresh_share_one_worker_and_skip_fresh_probes` |
+| A change recorded during the in-flight preparation leaves the scope stale (the broken trigger's diagnostic is published by the follow-up) | `a_change_during_an_in_flight_startup_preparation_leaves_the_scope_stale` |
+| The incident repro: unchanged config + open + `semanticTokens/full` during startup; the response arrives while the next startup probe is held; no workspace pass queued | `a_request_overtakes_the_remaining_startup_probes_after_an_unchanged_configuration` |
+| Criterion 3: the unchanged notification costs zero extra preparations (scans = plain startup + the document's own) | same test, compared with a control session |
+| Shutdown during the initial phase: the waiter is answered once (`ServerCancelled`), outstanding drops to 0, never ready | `shutdown_during_the_initial_phase_releases_waiters_and_startup` |
+| Shutdown during the discovered phase | `shutdown_during_the_discovered_phase_releases_startup` |
+| A context change during queued work does not strand the waiter (ruling 8) | `a_context_change_while_a_document_job_is_queued_requeues_its_waiter` |
+| Waiters share a document job; cancelling one still answers the other once | existing `registry_preparation::a_held_preparation_leaves_edits_cancellation_and_other_requests_running` (passes unchanged) |
+| Bounded gates | every wait is bounded by `MESSAGE_BOUND`; dropping the fixture drops the gate senders |
+
+Input Robustness Matrix: not applicable (no parser or loader).
+
+### Docs and skill
+
+- `darkmatter/docs/lsp/indexing.md`: the startup section described the old three-step sequence on one
+  thread, with the file list installed after the registry line. That was drift; it now describes
+  discovery running beside the initial phase, the list installing first, the conditional
+  discovered phase, and shutdown. The flowchart was replaced by a sequence diagram.
+- `.claude/skills/darkmatter/dmls.md`: the startup order, the three-lane queue, the overlap detector,
+  the new seams, and the reversed event order.
+
+### Gates
+
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["dmls", "test-toolkit", "darkmatter"]`, `change_class: package`. The gates were run.
+- `just lint` (darkmatter): pass, no warnings.
+- `just test` (darkmatter): **10523 passed, 10 skipped** (36 s). That is 10512 plus 11 new: 4 unit tests
+  and 7 L1 tests. No failures.
+- Flakiness check: the gate-heavy binaries (`startup_preparation`, `registry_preparation`,
+  `workspace_file_list`, 49 tests) were run 5 more times, and all passed each time.
+- `just check-tier-coverage darkmatter`: stranded 0.
+- Dependents: no workspace package depends on `dmls`. No library (`darkmatter`) code changed.
+- Cross-OS: not run. This is thread, queue, and channel logic with no path, process, or console
+  handling; the nightly Windows/WSL2 cells will cover it.
 - Pre-existing failures: none seen.

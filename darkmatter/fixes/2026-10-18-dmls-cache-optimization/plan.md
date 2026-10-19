@@ -32,6 +32,22 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_4:
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/registry_jobs.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/lsp/indexing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Plan: DMLS Trigger-Registry Cache Optimization
@@ -58,7 +74,7 @@ fixes plus visibility, spread over two crates:
 - [ ] A cold scan of the three-trigger input set records 3 payload misses; a second forced scan records 0
 - [x] Multiple workspace schedules merge; schedules during a running pass yield exactly one follow-up (including the worker-completion/dispatch boundary)
 - [x] Document completion releases waiters before the remaining probes
-- [ ] No two server preparations run concurrently; relevant changes during preparation leave the scope stale
+- [x] No two server preparations run concurrently; relevant changes during preparation leave the scope stale
 - [ ] Resolved registries, diagnostics, and trigger summaries are identical on `darkmatter/tests/fixtures/schema-triggers/`
 - [ ] `just test` and `just lint` pass in `darkmatter/`; docs updated; before/after repro sample recorded in the implementation log
 
@@ -274,11 +290,11 @@ Depends on Phase 3. Single owner of `spawn_startup` / dispatch handling.
 
 **Wave 7** (sequential):
 
-- [ ] **Phase jobs**
+- [x] **Phase jobs**
     - Add startup phase jobs to the worker (initial scopes; newly discovered
       scopes), preparing without holding the overlay lock across I/O, and
       preserving the existing change/epoch replay.
-- [ ] **Discovery concurrency**
+- [x] **Discovery concurrency**
     - `spawn_startup` now only runs discovery (starts at once, concurrent
       with the initial phase) and sends the result; it never calls
       preparation. Dispatch installs and publishes the file list as soon as
@@ -290,7 +306,7 @@ Depends on Phase 3. Single owner of `spawn_startup` / dispatch handling.
       the summary counts every startup scope. Account `outstanding` so
       observers cannot see startup complete between discovery and the final
       phase.
-- [ ] **Lifecycle**
+- [x] **Lifecycle**
     - Cancellation removes only that request's waiter (shared jobs remain for
       other waiters). Shutdown answers all waiters once, stops taking jobs,
       and releases startup coordination without waiting for a completion
@@ -299,12 +315,12 @@ Depends on Phase 3. Single owner of `spawn_startup` / dispatch handling.
 
 **Wave 8** (tests; parallel):
 
-- [ ] Startup and refresh scheduled together: preparations never overlap (instrumented overlap detector); fresh probes skipped; discovered repositories prepared before startup completion
-- [ ] A change recorded during the single in-flight preparation leaves the scope stale
-- [ ] Concurrent discovery: with the initial phase gated, the file list is installed and published before the gate releases; the second phase starts only after both; the ready summary follows and counts every startup scope
-- [ ] Lifecycle: waiters share a document job; cancel one, answer the other once; shutdown during either startup phase releases waiters and coordination; a context change during queued work cannot strand waiters
-- [ ] Hermetic stdio session on `LspFixture` (startup request ordering): gate an unrelated workspace probe, send unchanged configuration, open a document, request semantic tokens; release the current probe and observe the response before the next probe completes (a cold document may report `waited_for_trigger_registry=true`)
-- [ ] Criterion 3: unchanged notification causes zero extra preparations vs. the same startup without it
+- [x] Startup and refresh scheduled together: preparations never overlap (instrumented overlap detector); fresh probes skipped; discovered repositories prepared before startup completion
+- [x] A change recorded during the single in-flight preparation leaves the scope stale
+- [x] Concurrent discovery: with the initial phase gated, the file list is installed and published before the gate releases; the second phase starts only after both; the ready summary follows and counts every startup scope
+- [x] Lifecycle: waiters share a document job; cancel one, answer the other once; shutdown during either startup phase releases waiters and coordination; a context change during queued work cannot strand waiters
+- [x] Hermetic stdio session on `LspFixture` (startup request ordering): gate an unrelated workspace probe, send unchanged configuration, open a document, request semantic tokens; release the current probe and observe the response before the next probe completes (a cold document may report `waited_for_trigger_registry=true`)
+- [x] Criterion 3: unchanged notification causes zero extra preparations vs. the same startup without it
 
 **Checkpoint 4:** all of criteria 1, 3, 4, 5 hold; `just lint` clean.
 
