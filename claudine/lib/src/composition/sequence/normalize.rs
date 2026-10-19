@@ -46,13 +46,11 @@ struct ParsedStep {
 /// `invocation_path` is the resolved path of the document that invoked the
 /// sequence; it seeds the `sequence_id` payload.
 ///
-/// Strictness and empty-list policy are both derived from `source`: a static
-/// authored list that resolves to zero steps is a typo, while a dynamic source
-/// that does so is a legitimate no-op the caller reports and exits `0` on.
+/// Strictness is derived from the source. An empty list is a valid no-op.
 ///
 /// ## Errors
 ///
-/// Returns typed [`CompositionError`] variants for a statically empty list, a
+/// Returns typed [`CompositionError`] variants for a
 /// non-scalar non-object item, a `null` item, an object missing a string `name`
 /// under [`Strictness::Strict`], more than one executable field, a task option
 /// meaningless for the chosen executable, or an authored state key colliding
@@ -63,15 +61,38 @@ pub fn normalize_plan(
     invocation_path: &Path,
     document_fail_fast: bool,
 ) -> Result<SequencePlan, CompositionError> {
-    if items.is_empty() && !source.is_dynamic() {
-        return Err(CompositionError::SequenceEmpty);
-    }
+    normalize_plan_at(items, source, invocation_path, document_fail_fast, "sequence")
+}
 
+/// [`normalize_plan`] for a list authored at `list_property` in the file that
+/// declares it (`sequence`, `sequence[1].sequence`, or empty for a file whose
+/// root is the list), which locates task-grammar diagnostics. That file is
+/// `source`'s path for a referenced source, otherwise `invocation_path`.
+///
+/// ## Errors
+///
+/// As [`normalize_plan`].
+pub fn normalize_plan_at(
+    items: &[Value],
+    source: SequenceSource,
+    invocation_path: &Path,
+    document_fail_fast: bool,
+    list_property: &str,
+) -> Result<SequencePlan, CompositionError> {
     let strictness = source.strictness();
+    // Task grammar names the file that holds the list, which for a
+    // referenced source is not the invoking document.
+    let declaring_path = match &source {
+        SequenceSource::External { path } | SequenceSource::DataFile { path } => path.as_path(),
+        _ => invocation_path,
+    };
     let parsed: Vec<ParsedStep> = items
         .iter()
         .enumerate()
-        .map(|(index, item)| parse_item(index, item, strictness))
+        .map(|(index, item)| {
+            let property = format!("{list_property}[{index}]");
+            parse_item(index, item, strictness, declaring_path, &property)
+        })
         .collect::<Result<_, _>>()?;
 
     let ids = generate_ids(parsed.iter().map(|p| p.name.as_str()));
@@ -119,6 +140,8 @@ fn parse_item(
     index: usize,
     item: &Value,
     strictness: Strictness,
+    origin: &Path,
+    property: &str,
 ) -> Result<ParsedStep, CompositionError> {
     match item {
         Value::String(s) => Ok(ParsedStep {
@@ -127,7 +150,7 @@ fn parse_item(
             extra: Map::new(),
             executable: None,
         }),
-        Value::Object(map) => parse_object_step(index, map, item, strictness),
+        Value::Object(map) => parse_object_step(index, map, item, strictness, origin, property),
         // `null` is a typed error under both contracts: leniency coerces a
         // value that *is* something into a name, it does not invent one.
         Value::Null => Err(CompositionError::SequenceNullItem { index }),
@@ -163,9 +186,12 @@ fn parse_object_step(
     map: &Map<String, Value>,
     raw: &Value,
     strictness: Strictness,
+    origin: &Path,
+    property: &str,
 ) -> Result<ParsedStep, CompositionError> {
+    super::grammar::validate_task_grammar(map, origin, property)?;
     let name = match map.get("name") {
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
         // Foreign data may carry a non-string `name` (a numeric id, say); a
         // list authored for sequences may not.
         Some(other) if strictness == Strictness::Lenient && !other.is_null() => {

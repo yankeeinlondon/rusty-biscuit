@@ -14,7 +14,7 @@ $schema:
       implemented: boolean -> boolean flag indicating whether this review's suggestions has been implemented
       next: string -> the _next_ feature review that was conducted
       previous: string -> the _prior- feature review that was conducted
-      findings: string[] -> findings that the reviewer found and believes needs to be fixed before the feature is deemed production ready
+      findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; only a high finding makes `ready` false"
       observations: string[] -> titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle
       human_in_the_loop: string[] -> only on a first review that stopped for a human, the decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; a non-empty value halts the review loop
       human_resolved: boolean -> set to `true` by the human after recording rulings under `## Human rulings`; the next review will not start while a non-empty `human_in_the_loop` is unresolved
@@ -35,7 +35,7 @@ $schema:
       implemented: boolean
       next: string
       previous: string
-      findings: string[]
+      findings: "string[] -> every finding, high, medium, and low, each as `<ID> (<priority>): <title>`; only a high finding makes `ready` false"
       observations: string[] -> titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle
       human_in_the_loop: string[] -> only on a first review that stopped for a human, the decisions the author must make (plain language, options with pros and cons, a recommendation); `null` when the first review found nothing that needs a human; a non-empty value halts the review loop
       human_resolved: boolean -> set to `true` by the human after recording rulings under `## Human rulings`; the next review will not start while a non-empty `human_in_the_loop` is unresolved

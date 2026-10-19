@@ -187,3 +187,59 @@ fn test_compose_shell_reports_discovered_commands_without_executing() {
         .stdout(predicate::str::contains("root-frontmatter\n").not())
         .stdout(predicate::str::contains("child-frontmatter\n").not());
 }
+
+/// A shell command never runs with a missing value: `md compose` fails
+/// before running anything, naming the command and the value, on each
+/// Darkmatter shell surface. The `git init` marker proves no command ran.
+#[test]
+fn test_compose_refuses_a_missing_shell_value_before_running_anything() {
+    let fixture = CliProcessFixture::named("test_compose_refuses_a_missing_shell_value");
+    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix git\nprefix ls\n");
+    for (name, body, command) in [
+        ("body.md", "---\ntarget: null\n---\n::shell git init --quiet ran\n::shell ls {{ target }}\n", "ls {{ target }}"),
+        ("absent.md", "::shell git init --quiet ran\n::shell ls {{ target }}\n", "ls {{ target }}"),
+        (
+            "frontmatter.md",
+            "---\nlisting: $(ls {{ target }})\n---\n::shell git init --quiet ran\n",
+            "ls {{ target }}",
+        ),
+        (
+            "block.md",
+            "::shell git init --quiet ran\n::shell-block\nls {{ fm.target }}\n::end-block\n",
+            "ls {{ fm.target }}",
+        ),
+    ] {
+        let md_path = fixture.write_file(format!("cwd/{name}"), body);
+        // `git` is the recording executable, so expose the host's.
+        fixture
+            .command_builder()
+            .host_path()
+            .build()
+            .arg("compose")
+            .arg(&md_path)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(command))
+            .stderr(predicate::str::contains("which is missing"));
+        assert!(!fixture.cwd().join("ran").exists(), "{name}: a command ran");
+    }
+}
+
+#[test]
+fn test_compose_runs_a_shell_command_whose_value_is_an_empty_string() {
+    let fixture = CliProcessFixture::named("test_compose_runs_an_empty_string_shell_value");
+    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix git\n");
+    let md_path = fixture.write_file(
+        "cwd/test.md",
+        "---\nsuffix: \"\"\n---\n::shell git init --quiet ran{{ suffix }}\n",
+    );
+    fixture
+        .command_builder()
+        .host_path()
+        .build()
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .success();
+    assert!(fixture.cwd().join("ran").join(".git").exists());
+}

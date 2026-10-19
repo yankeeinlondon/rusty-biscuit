@@ -78,7 +78,7 @@ fn sequence_malformed_root_frontmatter_fence_surfaces_typed_parse_error() {
     let md_file = fixture.cwd().join("malformed-sequence.md");
     fs::write(
         &md_file,
-        "----\nsequence:\n  - alpha\ndescription: near-miss fence\n----\nStep {{state}}\n",
+        "----\nsequence:\n  - alpha\ndescription: near-miss fence\n----\nStep {{seq}}\n",
     )
     .unwrap();
 
@@ -110,7 +110,7 @@ fn sequence_malformed_root_frontmatter_fence_surfaces_typed_parse_error() {
 
 #[cfg(unix)]
 #[test]
-fn sequence_fail_fast_true_stops_on_first_failure() {
+fn sequence_stops_on_first_unhandled_failure() {
     let fixture = CliProcessFixture::named("sequence-cli");
     let count_path = fixture.cwd().join("call-count.txt");
 
@@ -123,7 +123,7 @@ sequence:
   - beta
   - gamma
 ---
-Run step {{state}}
+Run step {{seq}}
 "#,
     )
     .unwrap();
@@ -149,8 +149,6 @@ exit 7
         .args([
             "sequence",
             "--goose",
-            "--fail-fast",
-            "true",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -173,7 +171,7 @@ exit 7
 
 #[cfg(unix)]
 #[test]
-fn sequence_fail_fast_false_continues_and_exits_one_on_any_failure() {
+fn sequence_document_fail_fast_false_is_rejected_before_launch() {
     let fixture = CliProcessFixture::named("sequence-cli");
     let count_path = fixture.cwd().join("call-count.txt");
 
@@ -187,7 +185,7 @@ sequence:
   - gamma
 fail_fast: false
 ---
-Run step {{state}}
+Run step {{seq}}
 "#,
     )
     .unwrap();
@@ -216,19 +214,9 @@ exit 0
         .assert()
         .failure();
 
-    let calls = fs::read_to_string(&count_path).unwrap();
-    assert_eq!(
-        calls.trim(),
-        "3",
-        "fail-fast=false should keep running after a failure"
-    );
-
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    let plain = strip_ansi(&stderr);
-    assert!(
-        plain.contains("2 succeeded") && plain.contains("1 failed"),
-        "summary should record 2 successes and 1 failure; stderr: {plain}"
-    );
+    assert!(!count_path.exists(), "removed policy must fail before launch");
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(plain.contains("fail_fast") && plain.contains("removed"), "{plain}");
 }
 
 #[cfg(unix)]
@@ -244,7 +232,7 @@ fn sequence_opencode_requires_model_when_missing() {
 sequence:
   - only
 ---
-Run step {{state}}
+Run step {{seq}}
 "#,
     )
     .unwrap();
@@ -287,8 +275,8 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn sequence_cli_fail_fast_flag_overrides_document_default() {
-    // Document sets fail_fast: false, but CLI overrides to true.
+fn sequence_cli_fail_fast_flag_is_rejected_before_launch() {
+    // Both removed authoring forms must fail before any provider runs.
     let fixture = CliProcessFixture::named("sequence-cli");
     let count_path = fixture.cwd().join("call-count.txt");
 
@@ -302,7 +290,7 @@ sequence:
   - three
 fail_fast: false
 ---
-Do step {{state}}
+Do step {{seq}}
 "#,
     )
     .unwrap();
@@ -333,12 +321,7 @@ exit 3
         .assert()
         .failure();
 
-    let calls = fs::read_to_string(&count_path).unwrap();
-    assert_eq!(
-        calls.trim(),
-        "1",
-        "CLI --fail-fast=true must override document fail_fast=false"
-    );
+    assert!(!count_path.exists(), "removed CLI policy must fail before launch");
 }
 
 // ============================================================================
@@ -347,21 +330,20 @@ exit 3
 
 #[cfg(unix)]
 #[test]
-fn sequence_propagates_fail_fast_to_child_env_and_prompt() {
+fn sequence_does_not_inject_fail_fast_into_child_env_or_prompt() {
     let fixture = CliProcessFixture::named("sequence-cli");
     let env_path = fixture.cwd().join("child-env.txt");
     let prompt_path = fixture.cwd().join("child-stdin.txt");
 
     let md_file = fixture.cwd().join("seq.md");
-    // The document body interpolates {{env.CLAUDINE_FAIL_FAST}} so we can verify
-    // the composed prompt saw the same value as the child env.
+    // Neither composition nor child launch receives an injected policy value.
     fs::write(
         &md_file,
         r#"---
 sequence:
   - only
 ---
-CLAUDINE_FAIL_FAST={{env.CLAUDINE_FAIL_FAST}} STATE={{state}}
+CLAUDINE_FAIL_FAST={{env.CLAUDINE_FAIL_FAST}} STATE={{seq}}
 "#,
     )
     .unwrap();
@@ -386,13 +368,12 @@ exit 0
 
     fixture
         .command()
+        .env_remove("CLAUDINE_FAIL_FAST")
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env("CLAUDINE_STDIN_FILE", &prompt_path)
         .args([
             "sequence",
             "--goose",
-            "--fail-fast",
-            "false",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -400,18 +381,18 @@ exit 0
 
     let child_env = fs::read_to_string(&env_path).unwrap();
     assert!(
-        child_env.contains("CLAUDINE_FAIL_FAST=false"),
-        "child env should expose CLAUDINE_FAIL_FAST=false; env_file: {child_env}"
+        child_env.trim() == "CLAUDINE_FAIL_FAST=",
+        "child env must not inject CLAUDINE_FAIL_FAST; env_file: {child_env}"
     );
 
     let child_prompt = fs::read_to_string(&prompt_path).unwrap();
     assert!(
-        child_prompt.contains("CLAUDINE_FAIL_FAST=false"),
-        "composed prompt should interpolate {{{{env.CLAUDINE_FAIL_FAST}}}} to false; stdin was: {child_prompt}"
+        child_prompt.contains("CLAUDINE_FAIL_FAST= STATE="),
+        "composed prompt should interpolate {{{{env.CLAUDINE_FAIL_FAST}}}} to empty; stdin was: {child_prompt}"
     );
     assert!(
         child_prompt.contains("STATE=only"),
-        "composed prompt should interpolate {{{{state}}}} per step; stdin was: {child_prompt}"
+        "composed prompt should interpolate {{{{seq}}}} per step; stdin was: {child_prompt}"
     );
 }
 
@@ -428,7 +409,7 @@ fn sequence_shorthand_override_reaches_prompt() {
 sequence:
   - only
 ---
-TOPIC={{topic}} STATE={{state}}
+TOPIC={{topic}} STATE={{seq}}
 "#,
     )
     .unwrap();
@@ -480,7 +461,7 @@ fn sequence_shorthand_wins_over_set_flag() {
 sequence:
   - only
 ---
-MODE={{mode}}
+FLAVOR={{flavor}}
 "#,
     )
     .unwrap();
@@ -506,8 +487,8 @@ exit 0
             "sequence",
             "--goose",
             "--set",
-            r#"{"mode":"slow"}"#,
-            "mode=fast",
+            r#"{"flavor":"slow"}"#,
+            "flavor=fast",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -515,7 +496,7 @@ exit 0
 
     let child_prompt = fs::read_to_string(&prompt_path).unwrap();
     assert!(
-        child_prompt.contains("MODE=fast"),
+        child_prompt.contains("FLAVOR=fast"),
         "shorthand setter should beat --set on overlapping keys; stdin was: {child_prompt}"
     );
 }
@@ -539,7 +520,7 @@ sequence:
   - green
   - blue
 ---
-COLOR={{state}} STEP={{state.index}}/{{state.count}}
+COLOR={{seq}} STEP={{seq.index}}/{{seq.count}}
 "#,
     )
     .unwrap();
@@ -624,7 +605,7 @@ sequence:
   - one
   - two
 ---
-Step {{state}}: ::shell echo approved
+Step {{seq}}: ::shell echo approved
 "#,
     )
     .unwrap();
@@ -655,7 +636,7 @@ fn sequence_summary_emits_final_line() {
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nStep {{state}}\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nStep {{seq}}\n",
     )
     .unwrap();
 
@@ -702,7 +683,7 @@ colors:
         r#"---
 sequence: things.yaml -> colors.data::map(color, name)
 ---
-COLOR={{state}} STEP={{state.index}}/{{state.count}}
+COLOR={{seq}} STEP={{seq.index}}/{{seq.count}}
 "#,
     )
     .unwrap();
@@ -784,7 +765,7 @@ fn sequence_with_an_empty_dynamic_source_is_a_no_op() {
 items: []
 sequence: "{{ items }}"
 ---
-Work on {{state}}.
+Work on {{seq}}.
 "#,
     )
     .unwrap();
@@ -817,15 +798,14 @@ exit 0
     );
 }
 
-/// A statically empty list keeps its authoring error and a non-zero exit —
-/// the graceful no-op is for *dynamic* emptiness only.
+/// An authored empty list is a no-op and launches no provider.
 #[test]
-fn sequence_with_a_static_empty_list_still_fails() {
+fn sequence_with_a_static_empty_list_is_a_no_op() {
     let fixture = CliProcessFixture::named("sequence-cli");
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\nsequence: []\n---\nWork on {{state}}.\n",
+        "---\nsequence: []\n---\nWork on {{seq}}.\n",
     )
     .unwrap();
 
@@ -833,8 +813,8 @@ fn sequence_with_a_static_empty_list_still_fails() {
         .command()
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
-        .failure()
-        .stderr(contains("empty"));
+        .success()
+        .stderr(contains("0 steps"));
 }
 
 /// The retired `list:` document shape is rejected with a message that names
@@ -851,7 +831,7 @@ fn sequence_rejects_the_retired_list_shape() {
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\nsequence: legacy.yaml\n---\nWork on {{state}}.\n",
+        "---\nsequence: legacy.yaml\n---\nWork on {{seq}}.\n",
     )
     .unwrap();
 
@@ -975,7 +955,7 @@ fn sequence_rejects_direct_group_execution() {
 }
 
 /// A `prompt:` task pointing at a document that itself declares `sequence:` is
-/// a nested sequence, which v1 rejects during preflight.
+/// an executable mismatch; the author must use `sequence: <file>`.
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_a_nested_sequence_prompt_document() {
@@ -994,7 +974,7 @@ fn sequence_rejects_a_nested_sequence_prompt_document() {
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "stderr: {stderr}"
     );
     assert!(!launched, "preflight must abort before any launch");
@@ -1035,40 +1015,25 @@ fn sequence_rejects_a_reference_cycle_with_the_full_chain() {
     assert!(!launched);
 }
 
-/// Group `loop` commit semantics are unratified, so a group carrying `loop`
-/// is blocked with an actionable error instead of invented semantics.
+/// A shell task that depends on `outputs` has no bytes up front, so it is
+/// approved only as a template; with no rule and no terminal to ask, preflight
+/// fails naming the authored command, before any step runs.
 #[test]
 #[cfg(unix)]
-fn sequence_rejects_group_loop() {
+fn sequence_requires_a_template_approval_for_a_command_depending_on_outputs() {
     let fixture = CliProcessFixture::named("sequence-cli");
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\nsequence:\n    - name: one\n      group:\n          name: looper\n          loop:\n              while: \"true\"\n          tasks:\n              - shell: echo x\n---\nBody.\n",
+        "---\nsequence:\n    - name: one\n      shell: \"echo {{ last(seq.outputs) }}\"\n---\nBody.\n",
     )
     .unwrap();
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
-    assert!(stderr.contains("group `loop`"), "stderr: {stderr}");
-    assert!(!launched);
-}
-
-/// A shell task that depends on `outputs` could never be approved byte-for-byte
-/// up front, so preflight rejects it and points at the alternative.
-#[test]
-#[cfg(unix)]
-fn sequence_rejects_a_shell_command_depending_on_outputs() {
-    let fixture = CliProcessFixture::named("sequence-cli");
-    let md_file = fixture.cwd().join("seq.md");
-    fs::write(
-        &md_file,
-        "---\nsequence:\n    - name: one\n      shell: \"echo {{ last(outputs) }}\"\n---\nBody.\n",
-    )
-    .unwrap();
-
-    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
+    // The diagnostic wraps with a box gutter wherever the path length puts it.
+    let flat: String = stderr.replace('┃', " ").split_whitespace().collect();
     assert!(
-        stderr.contains("outputs") && stderr.contains("preflight"),
+        flat.contains("echo{{last(seq.outputs)}}") && flat.contains("approval"),
         "stderr: {stderr}"
     );
     assert!(!launched);
@@ -1088,7 +1053,7 @@ fn sequence_rejects_a_parallel_write_back_collision() {
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\nsequence:\n    - name: one\n      group:\n          name: racers\n          execution: parallel\n          tasks:\n              - prompt: target.md\n                name: first\n              - prompt: target.md\n                name: second\n---\nBody.\n",
+        "---\nsequence:\n    - name: one\n      group:\n          name: racers\n          tasks:\n              - prompt: target.md\n                name: first\n              - prompt: target.md\n                name: second\n---\nBody.\n",
     )
     .unwrap();
 
@@ -1110,12 +1075,12 @@ fn sequence_rejects_a_parallel_write_back_collision() {
     assert!(!launched);
 }
 
-/// Preflight failures are abort-all: `fail_fast: false` governs *execution*
+/// Preflight failures are abort-all and precede execution.
 /// outcomes and cannot degrade preparation to best-effort. The later, valid
 /// step must never run.
 #[test]
 #[cfg(unix)]
-fn preflight_failure_aborts_even_with_fail_fast_false() {
+fn preflight_failure_aborts_before_any_valid_step() {
     let fixture = CliProcessFixture::named("sequence-cli");
     fs::write(
         fixture.cwd().join("inner.md"),
@@ -1125,18 +1090,18 @@ fn preflight_failure_aborts_even_with_fail_fast_false() {
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\nfail_fast: false\nsequence:\n    - name: bad\n      prompt: inner.md\n    - name: good\n---\nBody.\n",
+        "---\nsequence:\n    - name: bad\n      prompt: inner.md\n    - name: good\n---\nBody.\n",
     )
     .unwrap();
 
-    let (stderr, launched) = run_preflight(&fixture, &md_file, &["--fail-fast", "false"]);
+    let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "stderr: {stderr}"
     );
     assert!(
         !launched,
-        "`fail_fast: false` must not let the valid step run past a preflight failure"
+        "a valid step cannot run past a preflight failure"
     );
 }
 
@@ -1160,7 +1125,7 @@ fn dry_run_performs_the_same_preflight() {
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &["--dry-run"]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "--dry-run must run the same preflight; stderr: {stderr}"
     );
     assert!(!launched);
@@ -1185,7 +1150,7 @@ fn well_formed_graph_passes_preflight() {
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\nsequence:\n    - name: one\n      task: task.yaml\n    - name: two\n      group:\n          name: bundle\n          tasks:\n              - shell: echo grouped\n---\nBody.\n",
+        "---\nsequence:\n    - name: one\n      task: task.yaml\n    - name: two\n      group:\n          name: bundle\n          tasks:\n              - name: member\n                shell: echo grouped\n---\nBody.\n",
     )
     .unwrap();
 

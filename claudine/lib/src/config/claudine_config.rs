@@ -184,10 +184,8 @@ impl ProviderModelOverride {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClaudineConfig {
-    /// Text-to-speech configuration.
-    ///
-    /// `true` enables TTS with auto-detection; `false` disables it.
-    /// An object enables TTS with explicit provider/voice settings.
+    /// Text-to-speech configuration; see [`TtsValue`] for what each shape
+    /// means for hook speech, lifecycle playback, and pre-warm.
     #[serde(default)]
     pub tts: TtsValue,
 

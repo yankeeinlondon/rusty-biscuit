@@ -1121,3 +1121,23 @@ fn a_file_two_arms_admit_through_different_roots_is_offered_once() {
     assert_eq!(chooser_paths(&effective, "spec", &ctx).len(), 1);
 }
 
+
+#[test]
+fn shipped_container_schema_resolves_for_authored_parameter_completion() {
+    let tmp = TempDir::new().unwrap();
+    seed_repo(tmp.path());
+    for (name, text) in [
+        ("action.yaml", include_str!("../../../../schemas/action.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../schemas/lifecycle.yaml")),
+        ("sequence-types.yaml", include_str!("../../../../schemas/sequence-types.yaml")),
+    ] {
+        write(&tmp.path().join(name), text);
+    }
+    write(&tmp.path().join("nested.md"), "---\n$schema:\n  nested: task@./sequence-types.yaml\n---\n");
+    let ctx = ScopeContext::discover_from(tmp.path());
+    let effective = load_effective_schema("./nested.md", &ctx).expect("shipped task schema loads");
+    let names = property_names(&effective, "", &HashSet::new(), &[]);
+    assert_eq!(names, ["nested="]);
+    assert!(effective.validate_raw(&serde_json::json!({"nested": {"name": "child", "sequence": [], "cancelled": []}})).valid);
+    assert!(!effective.validate_raw(&serde_json::json!({"nested": {"sequence": [], "cancelled": 123}})).valid);
+}

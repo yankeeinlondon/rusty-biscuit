@@ -30,16 +30,20 @@ const SCHEMA: &str = concat!(
 fn write_provider_stub(bin_dir: &Path) {
     common::write_executable(
         &bin_dir.join("goose"),
-        "#!/bin/sh\n: > \"$PRESENCE_PARITY_MARKER\"\nprintf 'done\\n'\nexit 0\n",
+        "#!/bin/sh\n: > \"$PROVIDER_MARKER\"\nprintf 'done\\n'\nexit 0\n",
     );
 }
 
+// A built binary, not a `.cmd` shim: Rust refuses to pass the multi-line
+// prompt argument to a batch file ("batch file arguments are invalid"). Its
+// marker mode honors `PROVIDER_MARKER` as the Unix stub does.
 #[cfg(windows)]
 fn write_provider_stub(bin_dir: &Path) {
-    write(
-        &bin_dir.join("goose.cmd"),
-        "@echo off\r\ntype nul > \"%PRESENCE_PARITY_MARKER%\"\r\necho done\r\nexit /b 0\r\n",
-    );
+    std::fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+        bin_dir.join("goose.exe"),
+    )
+    .unwrap();
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -61,7 +65,7 @@ fn compose(values: &str) -> (Outcome, String) {
 
     let output = fixture
         .command()
-        .env("PRESENCE_PARITY_MARKER", &marker)
+        .env("PROVIDER_MARKER", &marker)
         .args(["compose", "--goose"])
         .arg(&document)
         .output()

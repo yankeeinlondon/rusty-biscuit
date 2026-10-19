@@ -217,9 +217,10 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
 
     let config = claudine_config_with_tts(TtsValue::Config(
         crate::config::tts::TtsConfigSettings {
-            provider: "espeak".to_string(),
+            provider: Some("espeak".to_string()),
             voice: None,
             gender: crate::config::tts::Gender::Female,
+            prewarm: None,
         },
     ));
     let actions = vec![
@@ -323,9 +324,10 @@ async fn speak_action_warns_once_when_handoff_fails() {
 
     let config = claudine_config_with_tts(TtsValue::Config(
         crate::config::tts::TtsConfigSettings {
-            provider: "espeak".to_string(),
+            provider: Some("espeak".to_string()),
             voice: None,
             gender: crate::config::tts::Gender::Female,
+            prewarm: None,
         },
     ));
     let actions = vec![HookAction::Speak {

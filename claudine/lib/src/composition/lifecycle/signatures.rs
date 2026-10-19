@@ -241,12 +241,16 @@ pub fn is_known_lifecycle_verb(verb: &str) -> bool {
     is_known_expression_function_verb(verb)
 }
 
+/// The flow-control directive verbs, one per [`LifecycleControlAction`]
+/// variant. The parser, the bundle ranking, and the source map all read this
+/// one list.
+const LIFECYCLE_CONTROL_VERBS: &[&str] = &[
+    "stop", "skip", "error", "proxy", "retry", "resume", "defer", "break", "prep",
+];
+
 /// Returns `true` when `verb` names a lifecycle control action.
-fn is_lifecycle_control_verb(verb: &str) -> bool {
-    matches!(
-        verb,
-        "stop" | "skip" | "error" | "proxy" | "retry" | "resume" | "defer"
-    )
+pub(crate) fn is_lifecycle_control_verb(verb: &str) -> bool {
+    LIFECYCLE_CONTROL_VERBS.contains(&verb)
 }
 
 /// Returns `true` when `verb` names a known Darkmatter expression function.
@@ -306,9 +310,7 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
         verbs.push(channel.verb());
     }
     verbs.push("shell");
-    verbs.extend([
-        "stop", "skip", "error", "proxy", "retry", "resume", "defer",
-    ]);
+    verbs.extend(LIFECYCLE_CONTROL_VERBS);
     for desc in EFFECT_DESCRIPTORS {
         if let Some(verb) = parsed_verb_of(desc.signature) {
             verbs.push(verb);

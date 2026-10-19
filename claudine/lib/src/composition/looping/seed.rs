@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleConfig;
 use super::super::runtime_state::LayeredOverrides;
-use super::super::prepare::{BootstrapPreparation, PrepareOptions, prepare_direct, prepare_inline};
+use super::super::prepare::{BootstrapPreparation, PrepareOptions, prepare_loop_seed};
 use super::super::types::{CompositionMode, LoopConfig, ResolvedCompositionSource};
 use super::config::extract_control_variables;
 
@@ -81,6 +81,10 @@ pub struct LoopSeed {
 /// parse to an empty lifecycle config because the control-variable lift drops
 /// every event block.
 ///
+/// The pass does not run the body's `::shell` or `::shell-block` commands
+/// ([`prepare_loop_seed`]): before the first iteration the `loop` global has
+/// no value, and every iteration runs the body with its own.
+///
 /// ## Errors
 ///
 /// Returns `CompositionError` when the compose pass fails.
@@ -90,12 +94,7 @@ pub fn build_loop_seed_with_lifecycle(
     prepare_options: PrepareOptions,
     mode: CompositionMode,
 ) -> Result<LoopSeed, CompositionError> {
-    let prepared = match mode {
-        CompositionMode::ChainedDocument => prepare_direct(source, prepare_options.clone())?,
-        CompositionMode::InlineFrontmatterPrompt => {
-            prepare_inline(source, prepare_options.clone())?
-        }
-    };
+    let prepared = prepare_loop_seed(source, prepare_options.clone(), mode)?;
     Ok(LoopSeed {
         seed: lift_seed(
             config,

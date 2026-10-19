@@ -182,6 +182,7 @@ fn an_iterations_lifecycle_events_read_its_loop_values() {
 counter: 0
 loop:
     until: "loop.count >= 2"
+    max: 2
     action: increment(counter)
 start:
     - when: "loop.is_first"
@@ -237,7 +238,7 @@ fn an_iterations_body_frontmatter_and_gate_read_its_loop_values() {
 pass_icon: "{{ loop.is_last ? 'last' : 'more' }}"
 pass_label: "pass {{ loop['count'] }}"
 loop:
-    max: 5
+    max: 2
     until: "loop.count >= 2"
     gate:
         - info: "gate {{ loop.count }} saw [{{ loop.last_output }}]"
@@ -264,14 +265,14 @@ icon={{ pass_icon }} label={{ pass_label }} max={{ fm.loop.max }} object={{ is_o
     assert_eq!(prompts.len(), 2, "two iterations\n{stderr}");
     assert!(
         prompts[0].contains(
-            "count=1 first=true last=false exit=0 prev=[]\nicon=more label=pass 1 max=5 object=true"
+            "count=1 first=true last=false exit=0 prev=[]\nicon=more label=pass 1 max=2 object=true"
         ),
         "iteration 1 prompt:\n{}",
         prompts[0]
     );
     assert!(
         prompts[1].contains(
-            "count=2 first=false last=true exit=0 prev=[answer 0]\nicon=last label=pass 2 max=5 object=true"
+            "count=2 first=false last=true exit=0 prev=[answer 0]\nicon=last label=pass 2 max=2 object=true"
         ),
         "iteration 2 prompt:\n{}",
         prompts[1]

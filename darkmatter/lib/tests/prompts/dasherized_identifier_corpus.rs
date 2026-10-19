@@ -87,15 +87,15 @@ impl fmt::Display for CorpusExpression {
 }
 
 /// Frontmatter keys Claudine evaluates as Darkmatter conditions at lifecycle
-/// time, per `darkmatter/docs/schemas/claudine-types.yaml`
-/// (`lifecycle-stack-item.when`, `lifecycle-branch-item.when`,
-/// `loop-event.while`, `loop-event.until`).
+/// time, per `claudine/schemas/lifecycle.yaml` (`conditional-1.when` and its
+/// deeper levels, `loop.while`, `loop.until`) and `claudine/schemas/action.yaml`
+/// (`bundle.when`).
 ///
-/// This is not schema-typed discovery: that schema declares these keys as
-/// `string`, so [`frontmatter_expression_values`] cannot see them, and
-/// Claudine applies them wherever they nest. The list protects that separate
-/// lifecycle semantics; `condition_keys_match_the_shipped_claudine_schema`
-/// pins it.
+/// This is not schema-typed discovery: those schemas apply by trigger, which
+/// this corpus walk does not enable, so [`frontmatter_expression_values`]
+/// cannot see these keys, and Claudine applies them wherever they nest. The
+/// list protects that separate lifecycle semantics;
+/// `condition_keys_match_the_shipped_claudine_schema` pins it.
 const CONDITION_KEYS: [&str; 3] = ["when", "while", "until"];
 
 fn repo_root() -> PathBuf {
@@ -380,22 +380,26 @@ fn corpus_walk_reaches_every_present_surface() {
 
 #[test]
 fn condition_keys_match_the_shipped_claudine_schema() {
-    let path = repo_root().join("darkmatter/docs/schemas/claudine-types.yaml");
-    let source = fs::read_to_string(&path).expect("claudine-types.yaml is readable");
-    let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).expect("claudine-types.yaml is YAML");
-    let types = &document["$schema"];
-    for (type_name, key) in [
-        ("lifecycle-stack-item", "when"),
-        ("lifecycle-branch-item", "when"),
-        ("loop-event", "while"),
-        ("loop-event", "until"),
+    let read = |path: PathBuf| -> serde_yaml_ng::Value {
+        let source = fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        serde_yaml_ng::from_str(&source).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    };
+    let lifecycle = read(repo_root().join("claudine/schemas/lifecycle.yaml"));
+    let action = read(repo_root().join("claudine/schemas/action.yaml"));
+    for (file, types, type_name, key) in [
+        ("lifecycle.yaml", &lifecycle, "conditional-1", "when"),
+        ("lifecycle.yaml", &lifecycle, "conditional-2", "when"),
+        ("lifecycle.yaml", &lifecycle, "conditional-3", "when"),
+        ("lifecycle.yaml", &lifecycle, "loop", "while"),
+        ("lifecycle.yaml", &lifecycle, "loop", "until"),
+        ("action.yaml", &action, "bundle", "when"),
     ] {
-        let description = types[type_name][key]
+        let definition = types["types"][type_name][key]
             .as_str()
-            .unwrap_or_else(|| panic!("claudine-types.yaml no longer declares `{type_name}.{key}`"));
+            .unwrap_or_else(|| panic!("{file} no longer declares `{type_name}.{key}`"));
         assert!(
-            description.contains("expression"),
-            "`{type_name}.{key}` is no longer described as an expression: {description}"
+            definition.starts_with("expression"),
+            "`{type_name}.{key}` in {file} is no longer typed as an expression: {definition}"
         );
     }
 }

@@ -1,8 +1,8 @@
 //! The entry-point parity matrix's DMLS runner: published diagnostics,
 //! document links, go-to-definition, and code actions, each through one
 //! in-memory LSP session whose request snapshot carries the fixture `HOME`
-//! and the configured extra `@` root, and the workspace link graph, indexed
-//! through the public `index_workspace` pipeline with the same snapshot.
+//! and the configured extra `@` root, and the workspace link graph, built
+//! over every listed file by the test-only oracle with the same snapshot.
 //!
 //! Every editor surface runs every consumer: `::file`, `::code`,
 //! `::toc-linking`, a `file(eager)` value, and a Markdown link. Code actions
@@ -31,14 +31,11 @@ mod matrix;
 use crate::common;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use biscuit_file::{PathPosition, ResolutionFailure};
 use darkmatter::markdown::compose::RequestSnapshot;
-use dmls::config::WorkspaceConfig;
-use dmls::context::RepositoryContexts;
 use dmls::graph::{EdgeKind, EdgeTarget, NodeId, NodeKind, WorkspaceGraph};
-use dmls::workspace::{SilentProgress, index_workspace};
+use crate::common::oracle::Oracle;
 use common::{LspFixture, LspWorkspace};
 use matrix::{
     ChainCase, ChainOutcome, Consumer, DocumentCell, GlobConsumer, GlobDocumentCell, HASH_CONSUMERS, EntryPoint, Observed,
@@ -55,8 +52,8 @@ const CLASSES: [ResolutionFailure; 5] = [
 ];
 
 /// A client that watches files, with work-done progress so the test can wait
-/// for the startup index, and resource operations so create-file actions are
-/// offered.
+/// for the workspace file list, and resource operations so create-file
+/// actions are offered.
 fn client_params(folder: &Path) -> Value {
     json!({
         "processId": null,
@@ -345,7 +342,7 @@ fn open_document(session: &mut LspFixture<'_>, document: &Path) -> DocumentState
     }
 }
 
-/// One LSP session per part: a session's startup index and the cells' opens
+/// One LSP session per part: a session's startup and the cells' opens
 /// dominate the matrix's cost, so it is split across tests nextest runs in
 /// parallel. Documents share a part with every entry point on them; `match()`
 /// validation cells open one document per candidate, so they are spread
@@ -370,8 +367,8 @@ fn run_matrix_part(part: usize) {
     let fixture = ParityFixture::create(workspace.path());
 
     // Entry points sharing a consumer share one document. Every document is
-    // written before startup, so the startup index holds every target and
-    // every cell document, whichever part opens it.
+    // written before startup, so the workspace file list holds every target
+    // and every cell document, whichever part opens it.
     let mut documents: Vec<(PathBuf, Vec<(Row, DocumentCell)>)> = Vec::new();
     let mut glob_cells: Vec<(Row, GlobDocumentCell)> = Vec::new();
     for row in rows_for(Owner::Dmls) {
@@ -405,13 +402,8 @@ fn run_matrix_part(part: usize) {
         .collect();
 
     let snapshot = fixture_snapshot(&workspace, &fixture);
-    let graph = index_workspace(
-        &[fixture.root().to_path_buf()],
-        &WorkspaceConfig::default(),
-        &SilentProgress,
-        Arc::new(RepositoryContexts::new(snapshot.clone())),
-    )
-    .snapshot();
+    let oracle = Oracle::build(&[fixture.root().to_path_buf()], snapshot.clone());
+    let graph = oracle.graph();
     let mut session = LspFixture::start_with_snapshot(&workspace, snapshot);
     session.initialize(client_params(fixture.root()));
     session.wait_for_startup_complete();
@@ -425,7 +417,7 @@ fn run_matrix_part(part: usize) {
             let observed = match cell.entry {
                 EntryPoint::DmlsDiagnostics => diagnostics(&state),
                 EntryPoint::DmlsDocumentLinks => document_links(&state),
-                EntryPoint::DmlsLinkGraph => link_graph(&graph, document, cell.consumer, &state),
+                EntryPoint::DmlsLinkGraph => link_graph(graph, document, cell.consumer, &state),
                 EntryPoint::DmlsDefinition => definition(&mut session, cell.consumer, &state),
                 EntryPoint::DmlsCodeActions => code_actions(&mut session, cell.consumer, &state),
                 EntryPoint::ComposePipeline
@@ -611,11 +603,11 @@ fn markdown_links_resolve_existing_targets_above_a_narrower_workspace_folder() {
     std::fs::write(repo.join("target.md"), "# Target\n").unwrap();
     std::fs::write(home.join("target.md"), "# Target\n").unwrap();
 
-    // The narrower folder indexes only `docs/`, so a fragment on a target is
-    // unknown, never missing. The whole repository is the positive control:
-    // its targets are indexed and their anchors checked.
+    // The narrower folder lists only `docs/`, but a target above it is parsed
+    // on demand, so its anchors are checked exactly as in the whole
+    // repository, the positive control.
     let mut mismatches =
-        above_the_folder_mismatches(&repo.join("docs"), "anywhere", &workspace, &repo, &home, &magic);
+        above_the_folder_mismatches(&repo.join("docs"), "target", &workspace, &repo, &home, &magic);
     mismatches.extend(above_the_folder_mismatches(&repo, "target", &workspace, &repo, &home, &magic));
     assert!(mismatches.is_empty(), "{} mismatches:\n{}", mismatches.len(), mismatches.join("\n"));
 }

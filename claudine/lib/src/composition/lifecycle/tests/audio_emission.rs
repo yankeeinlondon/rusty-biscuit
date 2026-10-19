@@ -193,6 +193,7 @@ fn execute_with(
         .build();
     let fm = serde_json::Map::new();
     let context = executor::StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter: &fm,
@@ -729,4 +730,38 @@ async fn default_lifecycle_emitter_emit_notification_does_not_panic() {
     );
     // Give the spawned tasks a moment to start
     tokio::task::yield_now().await;
+}
+
+/// An event that fires while its phrase is still being pre-warmed publishes
+/// through the ordinary speech path at once: it neither waits for the
+/// preparation nor cancels it.
+#[tokio::test]
+async fn speech_fired_during_a_blocked_prewarm_publishes_without_joining_it() {
+    use super::super::prewarm::fakes::FakePreparer;
+    use super::super::prewarm::{DocumentContext, PrewarmInputs, PrewarmWorker, lifecycle_phrases};
+
+    let frontmatter = json!({ "success": [{ "say": "done" }] });
+    let fake = FakePreparer::blocking();
+    let worker = PrewarmWorker::start_with(std::sync::Arc::new(fake.clone()));
+    let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
+    let inputs = PrewarmInputs {
+        frontmatter: frontmatter.as_object().unwrap().clone(),
+        context: DocumentContext::Pending(darkmatter::markdown::compose::ComposeContext::capture_minimal()),
+        sequence_injected_keys: Default::default(),
+    };
+    assert_eq!(worker.handle().submit_phrases(&biscuit_speaks::TtsConfig::new(), lifecycle_phrases(&config), &inputs), 1);
+    fake.wait_for_calls(1).await;
+
+    let (actions, outcome) = execute(frontmatter, LifecycleSignal::Success);
+
+    assert_eq!(actions, [speech("done")]);
+    assert_eq!(outcome, executor::LifecycleEventOutcome::default());
+    assert!(fake.completed().is_empty(), "the event did not wait for the preparation");
+    // The preparation was not cancelled: released, it still completes.
+    fake.release(1);
+    while fake.completed().is_empty() {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(fake.completed(), ["done".to_string()]);
+    assert_eq!(fake.texts(), ["done".to_string()], "nothing was prepared twice");
 }

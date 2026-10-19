@@ -222,7 +222,7 @@ impl ShellApprovalHandler for CountingHandler {
 fn approval_options(
     policy_root: &Path,
     handler: Option<Arc<dyn ShellApprovalHandler>>,
-    cache: &Arc<Mutex<HashMap<String, crate::harness::shell::CachedApprovalDecision>>>,
+    cache: &Arc<Mutex<HashMap<darkmatter::markdown::compose::shell_expansion::template::ApprovalKey, crate::harness::shell::CachedApprovalDecision>>>,
 ) -> ShellApprovalOptions {
     ShellApprovalOptions {
         policy_root: Some(policy_root.to_path_buf()),
@@ -244,7 +244,7 @@ fn bootstrap_rejects_shell_actions_even_with_cached_approval() {
             action,
         ));
         let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
-            pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+            pre_approved_commands: Some(HashSet::from(["echo ready".to_string()]).into()),
             ..PrepareOptions::new(crate::test_support::context())
         }).unwrap_err();
         assert!(matches!(error, CompositionError::LifecycleActionPlacement { ref action, ref event, .. }
@@ -260,10 +260,10 @@ fn bootstrap_frontmatter_shells_ignore_approval_handlers_and_cached_commands() {
     let handler = Arc::new(CountingHandler(Mutex::new(Vec::new())));
     let cache = Arc::new(Mutex::new(HashMap::new()));
     fs::write(policy.path().join(".darkmatter-shell-whitelist"), "prefix echo\n").unwrap();
-    cache.lock().unwrap().insert("echo ready".to_string(), crate::harness::shell::CachedApprovalDecision::Allowed);
+    cache.lock().unwrap().insert(darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact(Some(policy.path()), "echo ready"), crate::harness::shell::CachedApprovalDecision::Allowed);
     let gate = approval_options(policy.path(), Some(handler.clone()), &cache);
     let options = PrepareOptions {
-        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()]).into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let error = preflight_bootstrap_shell(
@@ -444,7 +444,7 @@ fn bootstrap_overrides_cannot_enable_shell_expansion() {
     let source = source_at(dir.path(), "---\ninitialize: {}\n---\n::file ./missing.md\n");
     let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
         set_overrides: Some(serde_json::json!({"stamp": "$(echo ready)"})),
-        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()]).into()),
         ..PrepareOptions::new(crate::test_support::context())
     }).unwrap_err();
     assert!(matches!(error, CompositionError::ShellExpansionFailed { .. }), "{error:?}");

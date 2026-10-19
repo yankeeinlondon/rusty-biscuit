@@ -35,8 +35,9 @@ pub struct PreparedRun {
     pub run_dir: String,
     /// Stages the sequence document runs, in order.
     pub stages: Vec<Stage>,
-    /// Commands to run from the repository root, as argument vectors. A
-    /// resumption omits `budget init`: it keeps the ledger and its consumption.
+    /// The commands to run from the repository root, as argument vectors: the
+    /// Messenger-owned runner, which holds the fleet lock for the whole
+    /// execution. A resumption prints the same command.
     pub commands: Vec<Vec<String>>,
 }
 
@@ -114,7 +115,11 @@ fn create_run(
         baseline: published.map(|bytes| BaselineRef { xxh64: text_fingerprint(&String::from_utf8_lossy(bytes)) }),
         researched_under: select::current_contract(workspace)?,
         recovery_attempts: 0,
+        // Ledger-era compatibility field: read, never written.
         ledger_runs: 0,
+        invocations: 0,
+        launched: false,
+        runner: None,
         stages: Stage::ALL.iter().map(|stage| pending(*stage)).collect(),
         stop_reason: None,
         decision: None,
@@ -123,20 +128,18 @@ fn create_run(
     write_inputs(loader, &dir, &run_dir(&record), platform, roster.curated_source_cap, previous.as_deref())?;
     let stages = Stage::ALL.to_vec();
     write_sequence(&dir, &record, &stages)?;
-    Ok(prepared(&record, stages, true))
+    Ok(prepared(&record, stages))
 }
 
 /// Re-prepares a failed, interrupted, or exhausted run from its first
-/// incomplete stage (rerunning reconciliation when validation failed). The
-/// same ledger keeps charging; a resumption never adds budget, and at most
-/// [`MAX_RECOVERY_ATTEMPTS`] are allowed. A platform keeps at most one open
-/// run: a resumption is refused while another run for it is open or
+/// incomplete stage (rerunning reconciliation when validation failed). At
+/// most [`MAX_RECOVERY_ATTEMPTS`] are allowed. A platform keeps at most one
+/// open run: a resumption is refused while another run for it is open or
 /// unreadable.
 ///
 /// ## Errors
 ///
 /// [`RefreshError::WrongStatus`], [`RefreshError::RecoveryLimit`],
-/// [`RefreshError::Ledger`] for an exhausted ledger without a recorded grant,
 /// [`RefreshError::OtherRunBlocks`] when the platform has another open run or
 /// an unreadable run record, [`RefreshError::PrepareBusy`] while another
 /// preparation runs, [`RefreshError::NotRepositoryTopLevel`] as for
@@ -146,8 +149,6 @@ pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError
     let state = StateArea::new(loader.workspace());
     let _lock = lock(&state)?;
     let mut record = state.load(run_id)?;
-    let ledger = state.ledger(&record)?;
-    super::state::apply_ledger(&mut record, ledger.as_ref());
     if !matches!(record.status, RunStatus::Failed | RunStatus::Interrupted | RunStatus::Exhausted) {
         return Err(RefreshError::WrongStatus {
             run_id: record.run_id.to_string(),
@@ -169,18 +170,6 @@ pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError
         };
         return Err(RefreshError::OtherRunBlocks { run_id: record.run_id.to_string(), path, blocker });
     }
-    if let Some(ledger) = &ledger {
-        let guidance = match ledger.state.as_str() {
-            "exhausted" => Some("an operator must record a grant with `claudine budget grant` first"),
-            "interrupted" | "suspended" => Some("an operator must run `claudine budget resume` first"),
-            "active" => Some("a runner still holds it"),
-            _ => None,
-        };
-        if let Some(guidance) = guidance {
-            state.save(&record)?;
-            return Err(RefreshError::Ledger { run_id: record.run_id.to_string(), state: ledger.state.clone(), guidance });
-        }
-    }
     let first = record.next_stage().unwrap_or(Stage::Review);
     let first = if first == Stage::Validation { Stage::Reconcile } else { first };
     let stages: Vec<Stage> = Stage::ALL.iter().copied().filter(|stage| *stage >= first).collect();
@@ -190,13 +179,14 @@ pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError
         }
     }
     record.recovery_attempts += 1;
-    record.ledger_runs = ledger.as_ref().map_or(0, |ledger| ledger.runs);
     record.status = RunStatus::Active;
     record.stop_reason = None;
+    record.launched = false;
+    record.runner = None;
     state.save(&record)?;
     let dir = state.run_dir(record.platform_id, &record.run_id);
     write_sequence(&dir, &record, &stages)?;
-    Ok(prepared(&record, stages, false))
+    Ok(prepared(&record, stages))
 }
 
 /// Refuses a `root` inside a Git work tree that is not its top level. A
@@ -204,7 +194,7 @@ pub fn resume(loader: &Loader, run_id: &str) -> Result<PreparedRun, RefreshError
 /// from the Git top level of the launch directory (where it starts agents),
 /// so the two must be the same directory. A root outside any Git repository
 /// is allowed: Claudine then stays in the launch directory.
-fn require_top_level(root: &Path) -> Result<(), RefreshError> {
+pub(super) fn require_top_level(root: &Path) -> Result<(), RefreshError> {
     let discovered = sniff::filesystem::git::api::repo_root(root)
         .map_err(|error| StateError::Io { context: "discover the Git work tree".to_string(), source: std::io::Error::other(error) })?;
     let Some(top_level) = discovered else { return Ok(()) };
@@ -224,7 +214,7 @@ fn require_top_level(root: &Path) -> Result<(), RefreshError> {
 
 /// Selection reads the state area and run creation writes it; without one
 /// lock across both, two concurrent preparations could each find a platform
-/// without an open run and each create one with a fresh budget. The loser is
+/// without an open run and each create one. The loser is
 /// refused rather than queued. This is an OS lock, not the file's existence:
 /// it is released when the holder exits, even by crashing, so the file left
 /// behind never blocks a later preparation.
@@ -247,25 +237,11 @@ fn run_dir(record: &RunRecord) -> String {
     format!("{}/{}/{}", super::state::RUNS, record.platform_id, record.run_id)
 }
 
-fn prepared(record: &RunRecord, stages: Vec<Stage>, init: bool) -> PreparedRun {
+fn prepared(record: &RunRecord, stages: Vec<Stage>) -> PreparedRun {
     let run_dir = run_dir(record);
-    let ledger = format!("{run_dir}/budget.json");
-    let mut commands = Vec::new();
-    if init {
-        commands.push(
-            [
-                "claudine", "budget", "init", &ledger, "--run-id", record.run_id.as_str(), "--platform", record.platform_id.as_str(),
-                "--max-seconds", &record.limits.max_seconds.to_string(), "--max-invocations", &record.limits.max_invocations.to_string(),
-                "--exclusive-lock", "../../fleet.lock",
-            ]
-            .map(str::to_string)
-            .to_vec(),
-        );
-    }
-    // `--yolo` approves the `shell:` check steps without a terminal.
-    commands.push(
-        ["claudine", "sequence", "--yolo", "--budget-ledger", &ledger, &format!("{run_dir}/run.md")].map(str::to_string).to_vec(),
-    );
+    // One command: the runner takes the fleet lock, runs the sequence, and
+    // records its outcome in the run record.
+    let commands = vec![["messenger", "research", "run", record.run_id.as_str()].map(str::to_string).to_vec()];
     PreparedRun { run_id: record.run_id.clone(), platform_id: record.platform_id, run_dir, stages, commands }
 }
 
@@ -412,6 +388,22 @@ fn write_inputs(
             output = show("outputs/evidence-review.json"),
         ),
     )?;
+    // Admission lives on each prompt so a denied launch cannot be bypassed
+    // by the sequence continuing to a later step after a failure.
+    let run_id = run.rsplit('/').next().expect("run directory contains an ID");
+    ensure_admission_hooks(dir, run_id)
+}
+
+/// Also upgrades ledger-era prepared prompts before their first runner launch.
+pub(super) fn ensure_admission_hooks(dir: &Path, run_id: &str) -> Result<(), RefreshError> {
+    let header = format!("---\nstart:\n  - shell: messenger research admit-agent {run_id} --root .\n---\n");
+    for pass in ["discovery", "reconcile", "sources", "review"] {
+        let path = dir.join("inputs").join(pass).join("prompt.md");
+        let body = fs::read_to_string(&path).map_err(io_err("read prepared prompt"))?;
+        if !body.starts_with(&header) {
+            write(&path, &format!("{header}{body}"))?;
+        }
+    }
     Ok(())
 }
 
@@ -443,7 +435,8 @@ fn curated(platform: &RosterPlatform, cap: u32) -> String {
 }
 
 /// The sequence document for `stages`. Validation and the review check are
-/// `shell:` steps so their time is charged to the run's ledger.
+/// `shell:` steps, so the runner's elapsed-time limit covers them along with
+/// the agent passes.
 fn write_sequence(dir: &Path, record: &RunRecord, stages: &[Stage]) -> Result<(), RefreshError> {
     // Claudine hands a `shell:` string verbatim to `sh -c` or `cmd /D /C` and
     // has no argument-vector form, so the command carries no path: `--root .`

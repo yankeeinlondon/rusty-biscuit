@@ -76,7 +76,6 @@ pub(super) fn spawn_retained(
     let mut child = command.spawn()?;
     let pid = child.id();
     *child_spawned = true;
-    crate::budget::record_child(pid);
     Span::current().record("child_pid", tracing::field::display(pid));
 
     let stdin = child.stdin.take().expect("child stdin is piped");

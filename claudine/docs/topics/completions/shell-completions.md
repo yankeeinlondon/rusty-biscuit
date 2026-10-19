@@ -761,8 +761,8 @@ The rules:
   never prompts (an interactive run asks which agent the arguments are for;
   completion does not) and never reports an error. This holds for every
   cursor shape: a setter, a bare word, a flag, or a Claudine option's value
-  (`--provider`, `--exclude`, `--on-rate-limit`, `--debug`,
-  `sequence --budget-ledger`, and every other value-taking option or alias).
+  (`--provider`, `--exclude`, `--on-rate-limit`, `--debug`, and every other
+  value-taking option or alias).
 - **A flag is judged by the words before it.** A partial flag such as
   `--mod` may become a Claudine option, so it is not itself read as a
   forwarded switch; the words before it must read cleanly for any flag to

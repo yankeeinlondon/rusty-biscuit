@@ -244,6 +244,17 @@ pub enum SchemaError {
     #[error("invalid trigger-schema match expression: {message}")]
     TriggerMatch { message: String },
 
+    /// A file claims `kind: trigger-schema` but is not valid YAML, so it never
+    /// reached the match grammar. `message` is the YAML parser's reason without
+    /// its location; `line` and `column` are one-based (the column counts
+    /// characters, not bytes) and present when the parser reported them.
+    #[error("trigger-schema envelope is not valid YAML{}: {message}", yaml_location(*.line, *.column))]
+    TriggerEnvelopeYaml {
+        message: String,
+        line: Option<usize>,
+        column: Option<usize>,
+    },
+
     /// A trigger-schema match condition used a constraint outside the
     /// match-safe subset (constraints that resolve files, import types, load
     /// examples, provide defaults, mark generated values, or eager-existence-
@@ -291,14 +302,33 @@ pub enum SchemaError {
     },
 
     /// A trigger-schema envelope file claimed `kind: trigger-schema` but could
-    /// not be parsed. The underlying grammar/envelope error is on `source`;
-    /// `path` is the offending file.
-    #[error("trigger-schema file `{}` is malformed: {source}", path.display())]
+    /// not be parsed. The underlying YAML, grammar, or envelope error is on
+    /// `source`; `path` is the offending file.
+    #[error("trigger-schema file `{}` {}", path.display(), load_failure(source))]
     TriggerLoad {
         path: PathBuf,
         #[source]
         source: Box<SchemaError>,
     },
+
+    /// A trigger in a host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle)
+    /// claimed `kind: trigger-schema` but could not be loaded: a malformed
+    /// envelope, or a payload that failed to resolve inside its bundle.
+    /// `bundle` and `name` identify the embedded document; it has no host
+    /// path, so this is never a [`SchemaError::TriggerLoad`].
+    #[error("embedded trigger-schema `{bundle}/{name}` {}", load_failure(source))]
+    EmbeddedTriggerLoad {
+        bundle: String,
+        name: String,
+        #[source]
+        source: Box<SchemaError>,
+    },
+
+    /// A host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle) has an
+    /// unusable name or file list (see
+    /// [`EmbeddedSchemaBundle::new`](super::EmbeddedSchemaBundle::new)).
+    #[error("embedded schema bundle `{bundle}` is invalid: {message}")]
+    EmbeddedBundle { bundle: String, message: String },
 
     /// A bare-name schema reference (no path component) was not found in any
     /// schema root, but a file of that name exists in the document's own
@@ -357,6 +387,48 @@ pub enum SchemaError {
         reference: String,
         suggestion: String,
     },
+}
+
+/// The ` at line L, column C` suffix of a YAML failure, empty without a
+/// complete location.
+fn yaml_location(line: Option<usize>, column: Option<usize>) -> String {
+    match (line, column) {
+        (Some(line), Some(column)) => format!(" at line {line}, column {column}"),
+        (Some(line), None) => format!(" at line {line}"),
+        _ => String::new(),
+    }
+}
+
+/// The predicate of a trigger load failure: a YAML failure says so directly
+/// rather than calling the file "malformed" with a nested envelope message.
+fn load_failure(source: &SchemaError) -> String {
+    match source {
+        SchemaError::TriggerEnvelopeYaml { message, line, column } => {
+            format!("is not valid YAML{}: {message}", yaml_location(*line, *column))
+        }
+        other => format!("is malformed: {other}"),
+    }
+}
+
+/// Hint for a claimed trigger envelope that is not valid YAML.
+const TRIGGER_YAML_HINT: &str = "Fix the YAML syntax at the reported position. A plain value \
+     that contains <cyan>: </cyan> or <cyan> #</cyan>, or starts with an indicator such as \
+     <cyan>@</cyan> or <cyan>*</cyan>, must be quoted, for example \
+     <cyan>title: \"Note: quoted\"</cyan>.";
+
+impl SchemaError {
+    /// The hint a wrapping error (a compose-time schema preparation failure)
+    /// shows in place of its generic one: today only a claimed trigger
+    /// envelope that is not valid YAML, directly or inside a trigger load.
+    pub(crate) fn preparation_hint(&self) -> Option<&'static str> {
+        match self {
+            SchemaError::TriggerEnvelopeYaml { .. } => Some(TRIGGER_YAML_HINT),
+            SchemaError::TriggerLoad { source, .. } | SchemaError::EmbeddedTriggerLoad { source, .. } => {
+                source.preparation_hint()
+            }
+            _ => None,
+        }
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for SchemaError {
@@ -746,6 +818,20 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      <cyan>$path</cyan> predicate.",
                 ),
 
+            SchemaError::TriggerEnvelopeYaml { message, line, column } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "SchemaError",
+                        "trigger-schema envelope is not valid YAML",
+                    ))
+                    .body(Prose::new(format!(
+                        "<dim>Reason:</dim> {}{}",
+                        Prose::escape_text_outside_code_spans(message),
+                        Prose::escape_text(&yaml_location(*line, *column))
+                    )))
+                    .hint(TRIGGER_YAML_HINT)
+            }
+
             SchemaError::TriggerForbiddenConstraint { property, constraint } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
@@ -824,8 +910,12 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             }
 
             SchemaError::TriggerLoad { path, source } => {
+                let yaml = matches!(**source, SchemaError::TriggerEnvelopeYaml { .. });
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("SchemaError", "trigger-schema file malformed"))
+                    .error_header(ErrorHeader::new(
+                        "SchemaError",
+                        if yaml { "trigger-schema file is not valid YAML" } else { "trigger-schema file malformed" },
+                    ))
                     .body(vec![
                         Prose::new(format!(
                             "Trigger file <cyan>{}</cyan> could not be parsed:",
@@ -836,13 +926,42 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                             Prose::escape_text_outside_code_spans(&source.to_string())
                         )),
                     ])
-                    .hint(
+                    .hint(if yaml {
+                        TRIGGER_YAML_HINT
+                    } else {
                         "Fix the match grammar or envelope shape. See the trigger grammar: \
                          combinators (<cyan>all</cyan>/<cyan>any</cyan>/<cyan>none</cyan>/\
                          <cyan>min-match</cyan>), property conditions, and the \
-                         <cyan>$path</cyan> predicate.",
+                         <cyan>$path</cyan> predicate."
+                    })
+            }
+
+            SchemaError::EmbeddedTriggerLoad { bundle, name, source } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "embedded trigger-schema malformed"))
+                    .body(vec![
+                        Prose::new(format!(
+                            "Embedded trigger <cyan>{}</cyan> could not be loaded:",
+                            Prose::escape_text(&format!("{bundle}/{name}"))
+                        )),
+                        Prose::new(format!(
+                            "<dim>Reason:</dim> {}",
+                            Prose::escape_text_outside_code_spans(&source.to_string())
+                        )),
+                    ])
+                    .hint(
+                        "The trigger ships inside the host binary; a schema file of the same \
+                         name in a schema root replaces it.",
                     )
             }
+
+            SchemaError::EmbeddedBundle { bundle, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "embedded schema bundle invalid"))
+                .body(vec![Prose::new(format!(
+                    "Embedded schema bundle <cyan>{}</cyan>: {}",
+                    Prose::escape_text(bundle),
+                    Prose::escape_text_outside_code_spans(message)
+                ))]),
 
             SchemaError::BareNameSiblingExists {
                 reference,

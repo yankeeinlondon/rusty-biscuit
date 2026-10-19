@@ -12,11 +12,12 @@
 //! already-parsed frontmatter, performs no I/O, and never executes an
 //! expression.
 //!
-//! Only literal properties are consulted. Pattern-dictionary keys and trigger
-//! payloads (which layer into the compiled JSON Schema, not into a
-//! [`SimplifiedSchema`]) contribute no property definitions here.
+//! Only literal properties are consulted; pattern-dictionary keys contribute
+//! no property definitions here. Matching trigger payloads contribute through
+//! [`EffectiveSchema::property_shape`](super::EffectiveSchema::property_shape).
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use serde_json::Value;
 
@@ -39,8 +40,22 @@ use super::{
 /// `frontmatter` is the authored frontmatter mapping as JSON; pass
 /// [`Value::Null`] when none is available, which disables discriminant
 /// narrowing.
+///
+/// No trigger layer is applied; for a resolved document, use
+/// [`EffectiveSchema::property_shape`](super::EffectiveSchema::property_shape).
 pub fn effective_property_shape(
     extension_shapes: &[SchemaShape],
+    document: Option<&SimplifiedSchema>,
+    frontmatter: &Value,
+) -> SchemaShape {
+    layered_property_shape(extension_shapes, &[], document, frontmatter)
+}
+
+/// [`effective_property_shape`] with the matching trigger payload shapes
+/// layered between the extensions and the document.
+pub(super) fn layered_property_shape(
+    extension_shapes: &[SchemaShape],
+    trigger_shapes: &[Arc<SchemaShape>],
     document: Option<&SimplifiedSchema>,
     frontmatter: &Value,
 ) -> SchemaShape {
@@ -48,8 +63,9 @@ pub fn effective_property_shape(
         SimplifiedSchema::Single(shape) => shape.clone(),
         SimplifiedSchema::Union(_) => SchemaShape::default(),
     };
-    for extension in extension_shapes {
-        for (name, def) in &extension.properties {
+    let lower_layers = extension_shapes.iter().chain(trigger_shapes.iter().map(Arc::as_ref));
+    for layer in lower_layers {
+        for (name, def) in &layer.properties {
             shape.properties.insert(name.clone(), def.clone());
         }
     }

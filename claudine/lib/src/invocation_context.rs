@@ -23,6 +23,7 @@ use darkmatter::markdown::compose::{
     build_resolution_context_with_catalog,
 };
 
+use crate::composition::lifecycle::prewarm::PrewarmHandle;
 use crate::composition::lifecycle_executor::DocumentShellRunner;
 use crate::composition::{
     LaunchWorkspaceContext, with_prompt_magic_roots,
@@ -844,6 +845,9 @@ pub struct InvocationContext {
     inner: Arc<InvocationInner>,
     document: Arc<DocumentScope>,
     environment_source: EnvironmentSource,
+    /// Where this view's documents submit TTS pre-warm candidates. Shared by
+    /// every view of the invocation; a sequence scopes it per step.
+    prewarm: PrewarmHandle,
 }
 
 /// The [`CurrentProvider`] an invocation installs for the lazy `current` root.
@@ -906,6 +910,12 @@ impl DocumentEpoch {
     /// The composition run this epoch observes volatile evidence from.
     pub fn run_evidence(&self) -> &RunEvidence {
         &self.run
+    }
+
+    /// Where this epoch's document submits TTS pre-warm candidates; see
+    /// [`InvocationContext::prewarm`].
+    pub fn prewarm(&self) -> &PrewarmHandle {
+        self.invocation.prewarm()
     }
 
     /// The environment of the document this epoch prepares: the map its
@@ -1006,7 +1016,8 @@ impl InvocationContext {
     /// file-resolution context's map (and the `VAULT`-selected tree root it
     /// decides), and the child-process baseline. Home, launch directory,
     /// repository and host evidence, the launch `@` scope, source anchors,
-    /// caches, and work accounting stay the invocation's.
+    /// caches, work accounting, and the TTS pre-warm submitter stay the
+    /// invocation's.
     #[must_use]
     pub fn enter_document(&self, environment: DocumentEnvironment) -> Self {
         let launch = &self.inner.launch_document;
@@ -1030,6 +1041,7 @@ impl InvocationContext {
             inner: Arc::clone(&self.inner),
             document: Arc::new(document),
             environment_source: self.environment_source.clone(),
+            prewarm: self.prewarm.clone(),
         }
     }
 
@@ -1047,6 +1059,29 @@ impl InvocationContext {
     pub fn with_environment_source(mut self, source: EnvironmentSource) -> Self {
         self.environment_source = source;
         self
+    }
+
+    /// Install the command's TTS pre-warm submitter on this view and every
+    /// view derived from it.
+    ///
+    /// Without one, documents submit nothing.
+    #[must_use]
+    pub fn with_prewarm(mut self, handle: PrewarmHandle) -> Self {
+        self.prewarm = handle;
+        self
+    }
+
+    /// This view, with `keys` treated as sequence-injected by every pre-warm
+    /// submission from it and from the views it derives.
+    #[must_use]
+    pub fn with_prewarm_injected_keys(mut self, keys: impl IntoIterator<Item = String>) -> Self {
+        self.prewarm = self.prewarm.with_injected_keys(keys);
+        self
+    }
+
+    /// Where this view's documents submit TTS pre-warm candidates.
+    pub fn prewarm(&self) -> &PrewarmHandle {
+        &self.prewarm
     }
 
     /// The environment of the document this view belongs to.
@@ -1206,6 +1241,7 @@ impl InvocationContext {
         });
         Ok(Self {
             environment_source: EnvironmentSource::fixed(launch_document.environment.clone()),
+            prewarm: PrewarmHandle::default(),
             document: Arc::clone(&launch_document),
             inner: Arc::new(InvocationInner {
                 launch_cwd: cwd,

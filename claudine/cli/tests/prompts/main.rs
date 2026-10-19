@@ -14,6 +14,9 @@ mod common;
 #[cfg(feature = "test-fixtures")]
 mod pr_flow_rehearsal;
 mod prompt_guide_defects;
+// The recipe under test is a bash script.
+#[cfg(unix)]
+mod review_fix_rehearsal;
 mod shipped_implement_router;
 mod shipped_prompt_contract;
 mod shipped_prompt_route_drift;

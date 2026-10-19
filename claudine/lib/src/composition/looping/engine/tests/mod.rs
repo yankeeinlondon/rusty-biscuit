@@ -42,7 +42,7 @@ fn counter_loop(max: usize) -> LoopConfig {
         condition: LoopCondition::While(format!("counter < {max}")),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: None,
+        max_template: None,
         on_rate_limit: None,
     }
 }
@@ -145,6 +145,7 @@ mod gate_ambient;
 mod iteration_actions;
 mod iteration_bindings;
 mod lifecycle_control;
+mod pass_order;
 mod post_checked_timing;
 mod rate_limits;
 mod removed_loop_reads;

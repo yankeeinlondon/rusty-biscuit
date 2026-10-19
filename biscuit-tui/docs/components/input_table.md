@@ -186,12 +186,35 @@ Each cell in a row is a `RowCell { column_id, value }`. The `column_id` must mat
 
 | Variant | Source Column | Description |
 | :--- | :--- | :--- |
-| `CellValue::StaticText(String)` | `StaticText` | Display-only text. |
+| `CellValue::StaticText(String)` | `StaticText`, or any column | Display-only text. In a column of another type it pins that one cell read-only (see below). |
 | `CellValue::Boolean(bool)` | `BooleanSwitch` | Toggle state. |
 | `CellValue::Text(String)` | `TextInput` | Single-line text. |
 | `CellValue::TextArea(Vec<String>)` | `TextAreaInput` | Multi-line text (one string per line). |
 | `CellValue::ChosenOne(Option<String>)` | `ChooseOne` | Selected option value, or `None`. |
 | `CellValue::ChosenMany(Vec<String>)` | `ChooseMany` | Selected option values in option order. |
+
+#### Read-only cells in editable columns
+
+A row can lock one cell of an editable column by supplying
+`CellValue::StaticText` for it. The cell renders as plain text, focus skips
+it, and `rows_typed` returns the same text, while the other rows of the column
+stay editable. A review screen uses this for rows whose value is already
+decided:
+
+```rust
+let rows = vec![
+    // Editable: the user picks a provider.
+    Row::new(vec![
+        RowCell::new("task", CellValue::StaticText("draft".into())),
+        RowCell::new("provider", CellValue::ChosenOne(Some("claude".into()))),
+    ]),
+    // Read-only: shown, never edited.
+    Row::new(vec![
+        RowCell::new("task", CellValue::StaticText("review".into())),
+        RowCell::new("provider", CellValue::StaticText("Codex".into())),
+    ]),
+];
+```
 
 ### Standalone Runner
 ```rust

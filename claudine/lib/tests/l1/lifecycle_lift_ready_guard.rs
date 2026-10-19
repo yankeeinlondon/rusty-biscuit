@@ -15,6 +15,9 @@ const FORBIDDEN: &[&str] = &[
     "crate::events",
     "crate::provider",
     "crate::messaging",
+    "GlobalSettings",
+    "TtsSettings",
+    "TtsConfig",
     "biscuit_speaks",
     "playa",
 ];
@@ -96,4 +99,12 @@ fn the_scan_detects_every_forbidden_name() {
         let source = format!("fn ok() {{}}\nuse {name}::Thing;\n");
         assert_eq!(forbidden_references(&source), vec![(2, *name)]);
     }
+}
+
+#[test]
+fn criterion_14_deliberate_runtime_import_fails_the_guard() {
+    let rejected = std::panic::catch_unwind(|| {
+        assert_lift_ready("parse.rs", "use crate::config::GlobalSettings;");
+    });
+    assert!(rejected.is_err(), "a runtime import must make the guard fail");
 }

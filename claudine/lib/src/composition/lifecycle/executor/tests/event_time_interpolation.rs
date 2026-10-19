@@ -627,6 +627,7 @@ fn current_resolves_in_every_lifecycle_event() {
             LifecycleSignal::Failure => "failure",
             LifecycleSignal::Finalize => "finalize",
             LifecycleSignal::Loop => "loop",
+            LifecycleSignal::Cancelled => "cancelled",
         };
         let stack = json!([{ "info": { "text": "on {{ current.branch }}" } }]);
         let frontmatter = if signal == LifecycleSignal::Loop {

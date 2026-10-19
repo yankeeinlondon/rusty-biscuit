@@ -20,7 +20,7 @@ use common::{CliProcessFixture, strip_ansi, write_executable};
 fn sequence_with_prompt_property_runs_each_step_inline() {
     // When the source document declares a `prompt` frontmatter property,
     // every sequence step must run as an inline composition: the agent
-    // prompt is the composed `prompt` (with per-step `{{state}}`
+    // prompt is the composed `prompt` (with per-step `{{seq}}`
     // interpolation), NOT the document body, and the provider's output
     // replaces the body on disk. Regression target: the sequence
     // orchestrator previously hardcoded compose mode and sent the body.
@@ -33,7 +33,7 @@ fn sequence_with_prompt_property_runs_each_step_inline() {
         &md_file,
         r#"---
 prompt: |-
-  Work on state {{state}}.
+  Work on state {{seq}}.
 sequence:
   - alpha
   - beta
@@ -138,7 +138,7 @@ fn sequence_rejects_interactive_true_frontmatter_via_cli() {
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
-        "---\ninteractive: true\nsequence:\n  - alpha\n  - beta\n---\nStep {{state}}.\n",
+        "---\ninteractive: true\nsequence:\n  - alpha\n  - beta\n---\nStep {{seq}}.\n",
     )
     .unwrap();
 

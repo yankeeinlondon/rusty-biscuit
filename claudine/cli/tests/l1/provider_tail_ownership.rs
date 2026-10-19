@@ -521,8 +521,6 @@ fn help_needs_no_required_argument_on_any_command() {
 
     for root_form in [
         &["--help", "completions"][..],
-        &["--help", "budget"],
-        &["--help", "budget", "grant"],
         &["-h", "mcp", "alias"],
         &["--help", "handle"],
         &["--help", "hooks"],
@@ -538,9 +536,6 @@ fn help_needs_no_required_argument_on_any_command() {
         (&["providers", "--help"], "Usage: claudine providers"),
         (&["actions", "--help"], "Usage: claudine actions"),
         (&["completions", "--help"], "Usage: claudine completions"),
-        (&["budget", "--help"], "Usage: claudine budget"),
-        (&["budget", "grant", "--help"], "Usage: claudine budget grant"),
-        (&["budget", "init", "-h"], "Usage: claudine budget init"),
         (&["mcp", "alias", "--help"], "Usage: claudine mcp alias"),
         (&["logs", "sessions", "-h"], "Usage: claudine logs sessions"),
     ] {

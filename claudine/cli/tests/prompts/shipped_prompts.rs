@@ -27,8 +27,7 @@ fn collect_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) {
 
 #[test]
 fn shipped_prompts_use_mapping_only_set() {
-    let (witnesses, defects) = mapping_only_set_findings(&[workspace_root().join("prompts")]);
-    assert!(witnesses > 0, "the prompt corpus must contain a lifecycle `set` mapping witness");
+    let (_, defects) = mapping_only_set_findings(&[workspace_root().join("prompts")]);
     assert!(
         defects.is_empty(),
         "prompts with removed or invalid lifecycle `set` syntax:\n{}",
@@ -47,8 +46,8 @@ fn shipped_prompt_corpus_parses_frontmatter() {
     let implement_plan = std::fs::read_to_string(prompts.join("_implement/implement-plan.md"))
         .expect("shipped implementation prompt");
     assert!(
-        implement_plan.contains("epilog: null"),
-        "the passive corpus must include the mapping-only lifecycle set artifact"
+        implement_plan.contains("frontmatter(log, 'message_to_agent')"),
+        "the passive corpus must include the shipped handoff reader"
     );
     assert!(
         !implement_plan.contains("set: ["),
@@ -102,6 +101,7 @@ fn internal_lifecycle_corpus_parses_under_current_grammar() {
     files.sort();
 
     let mut parsed = 0;
+    let mut sequences = 0;
     let mut failures = Vec::new();
     for path in &files {
         let text = std::fs::read_to_string(path)
@@ -115,7 +115,42 @@ fn internal_lifecycle_corpus_parses_under_current_grammar() {
         }
         match Markdown::try_from(path.as_path()) {
             Ok(markdown) => match parse_lifecycle_config(&frontmatter_value(&markdown), path) {
-                Ok(_) => parsed += 1,
+                Ok(lifecycle) => {
+                    parsed += 1;
+                    let frontmatter = frontmatter_value(&markdown);
+                    // Schema-declared optional caller inputs are ordinary
+                    // properties even when the passive read has no caller.
+                    let declared_inputs = frontmatter.get("$schema").and_then(serde_json::Value::as_object)
+                        .map(|schema| serde_json::Value::Object(schema.keys()
+                            .map(|key| (key.clone(), serde_json::Value::Null)).collect()));
+                    if let Err(error) = claudine::composition::lifecycle::bindings::reject_removed_sequence_reads(
+                        path,
+                        claudine::composition::lifecycle::bindings::AuthoredDocument {
+                            frontmatter: &frontmatter,
+                            body: markdown.content(),
+                            body_line_offset: 0,
+                        },
+                        declared_inputs.as_ref(),
+                        Some(&lifecycle),
+                    ) {
+                        failures.push(format!("{relative}: {error}"));
+                    }
+                    if markdown.frontmatter().as_map().contains_key("sequence") {
+                        let resolution = biscuit_file::FileResolutionContext::new(path.parent().unwrap())
+                            .with_repository_root(&root).with_source_path(path);
+                        let source = claudine::composition::ResolvedCompositionSource {
+                            original_ref: path.display().to_string(),
+                            resolved_path: path.clone(),
+                            original_text: text.clone(),
+                            markdown,
+                        };
+                        match claudine::composition::resolve_sequence_plan(&source, &resolution) {
+                            Ok(Some(_)) => sequences += 1,
+                            Ok(None) => failures.push(format!("{relative}: sequence was not recognized")),
+                            Err(error) => failures.push(format!("{relative}: {error}")),
+                        }
+                    }
+                },
                 Err(error) => failures.push(format!("{relative}: {error}")),
             },
             Err(error) => failures.push(format!("{relative}: frontmatter does not parse: {error}")),
@@ -123,6 +158,7 @@ fn internal_lifecycle_corpus_parses_under_current_grammar() {
     }
 
     assert!(parsed > 0, "the internal lifecycle corpus must not be empty");
+    assert!(sequences > 0, "the internal corpus must exercise sequence grammar");
     assert!(
         failures.is_empty(),
         "internal documents whose lifecycle does not parse:\n{}",
@@ -132,8 +168,8 @@ fn internal_lifecycle_corpus_parses_under_current_grammar() {
 
 #[cfg(unix)]
 #[test]
-fn shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch() {
-    let fixture = CliProcessFixture::named("shipped-implement-mapping-set");
+fn shipped_implement_plan_reads_persisted_handoff_before_provider_launch() {
+    let fixture = CliProcessFixture::named("shipped-implement-handoff");
     fixture.initialize_repository();
     fixture.seed_user_config();
 
@@ -173,9 +209,8 @@ exit 17
     );
     let original_prompt = std::fs::read_to_string(&target).unwrap();
     assert!(
-        original_prompt.contains("epilog: \"{{message_to_agent}}\"")
-            && original_prompt.contains("message_to_agent: null"),
-        "the regression must execute the reported multi-key mapping"
+        original_prompt.contains("frontmatter(log, 'message_to_agent')"),
+        "the regression must execute the shipped persisted handoff reader"
     );
 
     let output = fixture
@@ -185,7 +220,6 @@ exit 17
         .arg(&target)
         .arg(format!("plan={}", plan.display()))
         .arg("phase=2")
-        .arg("message_to_agent=PRIOR-HANDOFF")
         .args(["--goose", "-y"])
         .output()
         .unwrap();
@@ -199,7 +233,7 @@ exit 17
     let delivered = std::fs::read_to_string(&capture)
         .unwrap_or_else(|_| panic!("the provider must launch after initialize:\n{rendered}"));
     assert!(delivered.contains("# Implement Phase 2 of 2"), "{delivered}");
-    assert!(rendered.contains("PRIOR-HANDOFF"), "{rendered}");
+    assert!(delivered.contains("PRIOR-HANDOFF"), "{delivered}");
     for rejected in [
         "object value not allowed here",
         "set: {property: value}",
@@ -207,7 +241,7 @@ exit 17
     ] {
         assert!(
             !rendered.contains(rejected),
-            "the shipped mapping failed before provider launch ({rejected}):\n{rendered}"
+            "the shipped handoff failed before provider launch ({rejected}):\n{rendered}"
         );
     }
     assert_eq!(std::fs::read_to_string(&target).unwrap(), original_prompt);

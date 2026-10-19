@@ -637,7 +637,7 @@ $schema:
   topic: 'string(required)'
 loop:
   max: 2
-  condition: '{{ loop.count < 1 }}'
+  while: 'loop.count < 1'
 ---
 Plan for {{topic}}.
 "#,
@@ -1243,12 +1243,20 @@ mod compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area 
             .assert()
             .success();
         let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        // `dirname` of the absolute eager spec keeps its absolute anchor, so
+        // the plan is named absolutely, beside the spec.
+        let spec_dir = biscuit_file::canonicalize_simplified(
+            &fixture.cwd().join("claudine/cli/tests/fixtures/shipped_plan_route"),
+        )
+        .unwrap();
+        let expected = format!(
+            "Save the plan as \"{}/plan.md\"",
+            biscuit_file::to_portable_string(&spec_dir)
+        );
         assert!(
-            stdout.contains(
-                "Save the plan as \"claudine/cli/tests/fixtures/shipped_plan_route/plan.md\""
-            ),
-            "the complete target instruction must be launch-directory invariant; \
-             launch_dir={}\nstdout:\n{stdout}",
+            stdout.contains(&expected),
+            "the complete target instruction must be launch-directory invariant \
+             ({expected}); launch_dir={}\nstdout:\n{stdout}",
             launch_dir.display()
         );
         assert!(

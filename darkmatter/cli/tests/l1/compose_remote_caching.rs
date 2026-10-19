@@ -112,11 +112,12 @@ fn test_compose_remote_expression_function_reads_url() {
 }
 
 #[test]
-fn test_compose_remote_expression_function_denied_host_reads_false() {
+fn test_compose_remote_expression_function_denied_host_fails() {
     let fixture =
-        CliProcessFixture::named("test_compose_remote_expression_function_denied_host_reads_false");
-    // `file_exists` against a host that is not allowed must read as `false`
-    // (the fetch is policy-denied, never issued) rather than failing compose.
+        CliProcessFixture::named("test_compose_remote_expression_function_denied_host_fails");
+    // `file_exists` against a host that is not allowed fails compose: the
+    // fetch is policy-denied and never issued, which says nothing about
+    // whether the file exists, so it must not read as `false`.
     let server = mock_http_server(vec![MockHttpResponse {
         status: 200,
         body: "should not be fetched\n",
@@ -129,8 +130,9 @@ fn test_compose_remote_expression_function_denied_host_reads_false() {
         .args(["compose", "-"])
         .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Exists: false"));
+        .failure()
+        .stdout(predicate::str::contains("Exists: false").not())
+        .stderr(predicate::str::contains("remote read denied"));
 
     assert_eq!(server.request_count(), 0);
     assert!(server.requests().is_empty());
@@ -693,8 +695,9 @@ fn test_compose_denied_host_never_reads_a_seeded_cache_entry() {
             .args(flags)
             .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
             .assert()
-            .success()
-            .stdout(predicate::str::contains("Exists: false"));
+            .failure()
+            .stdout(predicate::str::contains("Exists:").not())
+            .stderr(predicate::str::contains("remote read denied"));
 
         assert_eq!(server.request_count(), 1, "{flags:?}: a denied host reached the network");
         assert_eq!(snapshot_tree(cache_dir.path()), seeded, "{flags:?}: the seeded cache changed");

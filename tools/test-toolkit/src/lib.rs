@@ -51,6 +51,13 @@
 //! do not survive relocation. `tests/archive_path_guard.rs` drives it against
 //! the real checkout.
 //!
+//! ## Native argv recording
+//!
+//! [`argv_recorder`] is the body of a native executable that records the
+//! argument vector it was started with; a consuming package wraps it in a thin
+//! `[[bin]]` and reads the records back with
+//! [`argv_recorder::read_argv_records`].
+//!
 //! ## Consolidated test layout
 //!
 //! [`test_layout`] is the layout gate for a package that declares its test
@@ -59,6 +66,7 @@
 //! test inside its own Level 1 binary.
 
 pub mod archive_guard;
+pub mod argv_recorder;
 pub mod backend;
 pub mod evidence;
 pub mod spool;

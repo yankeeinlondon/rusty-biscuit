@@ -234,9 +234,13 @@ Scans all shell command sources in the document before execution begins.
 #### Step 4b: Schema Validation (compose)
 
 After `prepare_direct` produces the effective frontmatter, the schema-aware
-wrapper translates Darkmatter's structural failures into typed claudine errors:
+wrapper judges it against the document's effective schema — Claudine's trigger
+schemas and any other matching trigger, under the authored `$schema` (see
+[Claudine's trigger schemas in the launch verdict](composition.md#claudines-trigger-schemas-in-the-launch-verdict))
+— and translates Darkmatter's structural failures into typed claudine errors:
 
-1. **No `$schema`** — pass through unchanged.
+1. **No schema applies** (no authored `$schema` and no matching trigger) —
+   pass through unchanged.
 2. **Required value missing** — return `CompositionError::MissingProperties`
    carrying the prompt path, the missing names in declaration order, their
    type labels and descriptions, and the frontmatter `description` for context.
@@ -245,11 +249,15 @@ wrapper translates Darkmatter's structural failures into typed claudine errors:
    prompt loop and re-runs preparation with the collected overrides.
 3. **Required value present but invalid** — return
    `CompositionError::SchemaValidation` as a hard abort; no prompting.
-4. **Optional value present but invalid** — drop the key from a clone of the
+4. **Optional value present but invalid** — for an optional, non-eager
+   property of the authored `$schema`, drop the key from a clone of the
    markdown, emit a `tracing::warn!`, and retry preparation once. Residual
-   problems (typically a missing required) surface after the retry.
-5. **`$schema` itself unresolvable / uncompilable** — return
-   `CompositionError::SchemaLoad`.
+   problems (typically a missing required) surface after the retry. A
+   *Claudine control* (a property whose winning declaration is a Claudine
+   trigger) is never dropped: an invalid one is a hard `SchemaValidation`
+   abort, like a required value.
+5. **`$schema` or a discovered trigger schema unresolvable / uncompilable** —
+   return `CompositionError::SchemaLoad`.
 
 This stage runs before provider/model selection so a schema failure aborts
 without launching anything.
@@ -259,6 +267,7 @@ without launching anything.
 | Input                              | Impact                                                                                                  |
 |------------------------------------|---------------------------------------------------------------------------------------------------------|
 | Frontmatter `$schema`              | Activates schema validation; controls required vs optional classification and Interactive Mode mapping  |
+| Claudine controls (lifecycle events, `loop`, `agent`, `model`, …) | Select Claudine's trigger schemas, which type them even without a `$schema`; an invalid one aborts |
 | `--set` / `key=value` setters      | Applied before validation so users can satisfy required values without entering the interactive prompt  |
 | Config `prompt_for_missing`        | Required (along with TTY/silent checks) to enable Interactive Mode for missing-required collection      |
 | `--silent`                         | Forces Interactive Mode off; missing required values surface as `MissingProperties` instead of prompts  |
@@ -516,8 +525,11 @@ Schema validation runs **after** the `prompt` property check so a missing or
 non-string `prompt` still surfaces as `PromptPropertyMissing` /
 `PromptPropertyWrongType` instead of a generic schema error. After that
 guard, the same typed translation as direct compose applies — `SchemaLoad`,
-`SchemaValidation`, `MissingProperties`, automatic drop-and-retry for invalid
-optionals. The original `$schema` declaration is preserved byte-for-byte by
+`SchemaValidation`, `MissingProperties`, and automatic drop-and-retry for
+invalid optional values of the authored `$schema`, against the same effective
+schema (Claudine's trigger schemas under the authored `$schema`). An invalid
+Claudine control fails the launch instead of being dropped. The original
+`$schema` declaration is preserved byte-for-byte by
 the inline rewrite, and interactive values collected during the run are never
 persisted to the source file.
 
@@ -571,7 +583,7 @@ well as `inline-compose`. See
 ##### 9d. Summary Emission
 
 The agent's final response is the run summary shown to the caller and stored as
-the run output for `{{ last(outputs) }}`. It is never written to the document.
+the run output for `{{ last(seq.outputs) }}`. It is never written to the document.
 It is emitted after the closure's validation messages (unlike compose, which
 emits immediately), so the section separator does not split the validation
 block.
@@ -590,60 +602,40 @@ block.
 
 ### `claudine sequence` — Full Execution Flow
 
-Sequence composition runs a single source document multiple times, once per step in a defined list, with step-specific state injected into the composition context on each run.
+Sequence composition executes ordered tasks, including document bodies, prompt
+references, shell work, side effects, groups, and nested sequences. Every
+container owns a lifecycle and publishes its result only after successful
+finalization. See [Sequences](flow-control/sequences.md) for runnable examples.
 
 ```sh
 claudine sequence @deploy.md
-claudine sequence --fail-fast false @batch.md
+claudine sequence --dry-run @batch.md
 ```
 
-#### Step 3: Sequence Plan Resolution (sequence — unique)
+#### Step 3: Sequence Plan Resolution
 
-`composition::resolve_sequence_plan(&source)` parses the sequence definition:
-
-1. Reads `sequence` frontmatter key
-2. Parses `fail_fast` frontmatter (defaults to `true`)
-3. If `sequence` is an array: normalizes via `normalize_inline_list()` → `SequenceStep` array (scalar strings or objects with required `name`)
-4. If `sequence` is a string: resolves as external YAML file reference via `resolve_sequence_reference()`:
-
-    - Supports `@`, `&`, `^`, `vault:`, `%`, `{{ENV}}`, `~`, absolute, and relative paths
-    - External file form 1: `{ sequence: [...] }`
-    - External file form 2: `{ kind: "sequence", list: [...], template?: {...} }` with `{{key}}` template rendering
-
-**Returns:** `SequencePlan { source, steps, document_fail_fast }`
-
-**Affected by:**
-
-| Input                   | Impact                                                        |
-|-------------------------|---------------------------------------------------------------|
-| Frontmatter `sequence`  | Required; array of steps or string path to external YAML file |
-| Frontmatter `fail_fast` | Document-level default; `true` when absent                    |
-| `--fail-fast`           | CLI override for document default                             |
+`composition::resolve_sequence_plan` reads an inline step list or resolves a
+sequence file reference. External files accept `{ sequence: [...] }` or
+`{ kind: sequence, sequence: [...], template: {...} }`. A task's `sequence:` accepts
+an inline list or a reference using the same source grammar. Groups execute
+concurrently; ordered work belongs in a sequence. Document-level `fail_fast`
+and the CLI `--fail-fast` option are rejected.
 
 #### Step 4: Execute Sequence
 
-`execute_sequence()` runs the full orchestration in three phases:
+##### Phase 1a: Discover the task graph and close shell approval
 
-##### Phase 1a: Build Overlays and Prepare Each Step
+The root enters `initialize`, then static preflight walks all nested tasks,
+validates container events, checks transitive write-back collisions, and
+collects shell commands before executable work begins. Discovered membership
+is frozen for this invocation. A reread or proxy cannot introduce an
+unapproved command, even with `--yolo`; concurrent descendants never prompt.
 
-For each step (0..total_steps):
-
-1. **Build step overlay** via `build_step_overlay(&plan, step_index)` — computes `state`, `previous_state`, `next_state`, `is_first`, `is_last`, `step`, `total_steps`
-2. **Build set overrides**: overlay keys (reserved per-step variables) merged with user overrides; reserved keys always win
-3. **Inject `FAIL_FAST` env var** into env overrides
-4. **Template pre-flight**: `resolve_shell_approvals()` for `::shell` directives using step-specific overrides
-5. **Prepare composition**: `composition::prepare_direct(source, prepare_options)` with step-specific overrides and cumulative approved commands
-6. **Harness pre-flight** (if applicable): parse harness plan and resolve shell approvals for harness commands
-7. **Accumulate approved commands** in `cumulative_approved` set (shared across steps)
-8. Store in `StepContext { env_overrides, prepared }`
-
-**Affected by:**
-
-| Input                                          | Impact                                                                           |
-|------------------------------------------------|----------------------------------------------------------------------------------|
-| Step overlay variables (`state`, `step`, etc.) | Injected as set overrides; cannot be overridden by `--set` or `key=value`        |
-| `FAIL_FAST` env var                            | Injected per step so `{{env.FAIL_FAST}}` and `::shell` directives see the policy |
-| `--set` / `key=value` setters                  | Override template variables but lose to reserved overlay keys                    |
+`seq`, `group`, and `loop` are separate read-only runtime roots, not setter
+overrides. Authored frontmatter remains available through `fm`. Only tasks
+along an all-first ancestry qualify for resolved-value shell approval: all
+legs of a first group, but only the first child of a first nested sequence.
+Container terminal-event placeholders and `group.*` reads require templates.
 
 ##### Phase 1a.5: Aggregate Schema Validation Across Steps
 
@@ -656,46 +648,34 @@ or more steps have invalid required values, claudine returns a single
 aggregated `CompositionError::SequenceMissingProperties` listing every
 failing step so the user can fix the entire sequence in one edit pass.
 
-##### Phase 1b: Resolve Provider/Model for Every Step
+##### Phase 1b: Decide Every Task's Provider
 
-1. Detects installed providers and builds snapshot
-2. Loads selection config and model catalog
-3. For each step: resolves provider (explicit flag or non-TTY chain), resolves model
-4. Builds a `SequenceStepDraft` for every step, including shell and side-effect steps, carrying the step's index in the whole sequence
+1. Detects installed providers and builds the snapshot; loads the selection config and model catalog
+2. Collects one site per provider-launching task from the preflight graph (`prompt:` tasks at any depth, and body steps), keyed by its graph identity (`tasks[2].group.tasks[1]`). `shell` and `side_effect` tasks have none, so a graph of only those needs no provider
+3. Classifies each site from preflight's read-only prediction of its own `agent` (prompt frontmatter < `with` < caller setters):
+    - **predicted** — resolved now by the canonical non-interactive rule; an unknown, uninstalled, wrong-typed, self-referential (`env.AGENT`; irrelevant under a provider flag, and a self-referential `model` under `--model`, a provider-specific model variable, or `MODEL`), or failing-expression hint (including one that reads a failing `with` entry), or an `agent: []` in prompt frontmatter or `with` (the launch schema needs at least one entry), is `SequenceTaskProviderSelection`, naming the task, the property, and the enclosing containers, before any task starts (a false `when:` included). A body step composing a referenced sequence file whose `agent` is `[]` fails the same way unless a caller setter replaces it
+    - **decided at launch** — the hint reads a later value; it is resolved at the task's turn, before its body renders (see below)
+    - **missing a provider** — no hint of its own (absent, or `null` in the deciding layer, or a caller setter's `[]`); the nearest enclosing sequence document's `agent` (nested file first, then outward) is its fallback
+4. Resolves each target's model with the shared resolver, without refreshing any catalog
 
-**Phase 1c: Review or validate:**
+**Phase 1c: Gate and review:**
 
-- **If failures exist**: returns `SequenceSelectionFailed` aggregate error
-- **Every path** first converts each draft to a baseline `ResolvedExecutionTarget` (the provider and model reasons included), one per step in step order
-- **Explicit provider, or an auto-selected agent**: the baseline is the result; no review screen
-- **Non-TTY and a provider choice is required**: the run aborts before any step starts, even if no step would have a review row
-- **TTY and a provider choice is required**: only review-eligible drafts go to the review screen (`biscuit-tui::InputTable`). Eligibility comes from the step's outer executable alone:
+- **Explicit provider**: every site uses it; no review screen
+- **No site left without a provider**: the run starts; no review screen
+- **Non-TTY and a site is left without one**: the run fails with `AgentResolutionFailed` for the sequence document (or, for a task's own ambiguous list, `SequenceTaskProviderSelection`) before any task starts
+- **TTY and a site is left without one**: the review screen (`biscuit-tui::InputTable`) shows a row per site, labeled with its root step's position and name. Only sites without a provider are editable; a task naming its own provider is a read-only row showing it, and a task decided at launch shows `decided at launch`
+    - `Ctrl+S` returns one target per editable row; each is stored by the site's identity as its fallback, never by row number or name
+    - A review that returns a different number of targets than editable rows is an error, not a cancellation, and nothing is applied
+    - `Esc` or Ctrl+C exits `130` before any task starts
 
-    | Outer executable | Review row |
-    |------------------|------------|
-    | `prompt`, `task`, `group`, none (body step) | Yes |
-    | `shell`, `side_effect` | No |
-
-    - Rows are labeled with the original one-based step position and name (`3 review`), so hidden steps leave gaps
-    - `Ctrl+S` returns one target per row; each is written back into the baseline at its draft's step index, never by row number or name. Hidden steps keep their baseline target and reasons
-    - A review that returns a different number of targets than rows is an error, not a cancellation, and nothing is merged
-    - `Esc` or Ctrl+C exits `130` before any step starts
-    - When no draft is eligible, the screen does not open, the state's pre-prompt message (`Invalid Agent:` etc.) is not printed, and the baseline is used
-
-For example, a `prompt`, `shell`, `prompt` sequence shows rows `1` and `3`;
-a choice on row `3` changes the third target and leaves the second target and
-its reasons untouched.
-
-Each step's target is the plan its launch falls back to. When the step's
-launch identity is rebuilt from the document it runs (every attempt, retry,
-resume, and proxy adoption), the provider is the explicit flag, then the
-document's `agent`, then the planned provider; the model is `--model`, then
-the document's `model` (behind the environment's model variables, as in
-[Model Resolution](#model-resolution)), then the planned model, used only
-while the rebuild keeps the planned provider. Outside a sequence the planned
-model is the invocation's own, except that a model the launched document's
-frontmatter chose is re-read from each refreshed document, so a retry after
-`model:` is removed launches without it.
+Each task's target is what its document is prepared under: `AGENT`/`MODEL`
+in its composition environment name it. The launch identity is still rebuilt
+from the document it runs (every attempt, retry, resume, and proxy adoption):
+the explicit flag, then the composed `agent`, then the target. The model is
+`--model`, then the environment's model variables, then the document's
+`model`, then the target's model, used only while the rebuild keeps the
+target's provider. Every spawned attempt records its provider, and the step
+status line reports the final one (with the chain when they differ).
 
 **Affected by:**
 
@@ -703,8 +683,8 @@ frontmatter chose is re-read from each refreshed document, so a retry after
 |--------------------------------|------------------------------------------------------------|
 | `--provider` / `--claude` etc. | Bypasses the review screen; every step uses the flag's provider |
 | `--model`                      | Locks the model cell for every row in the review table     |
-| Per-step frontmatter `agent`   | Influences default provider for that step                  |
-| Per-step frontmatter `model`   | Influences default model for that step                     |
+| A task's own `agent`           | Decides that task's provider; a static one is checked before any task starts |
+| A task's own `model`           | Decides that task's model, below `--model` and the environment |
 
 ##### Phase 1d: Shell Pre-flight Completion
 
@@ -712,57 +692,72 @@ Emits preflight-complete status for all steps. Shell approvals were already coll
 
 ##### Phase 2: Execute Each Step
 
-For each step in `step_contexts`:
+Each child is prepared when reached: Claudine captures its environment,
+rereads its live source, layers runtime mutations and the current lexical
+roots, composes, validates, and executes it. The task graph stays frozen, but
+later children can observe earlier file edits. Group legs use private
+in-memory branches and merge in declaration order; the filesystem is shared.
 
-1. **Check interrupt flag** — if SIGINT observed, break
-2. **Print step start status**: `[1/N] starting step-name`
-3. Clone prepared composition from step context
-4. Get pre-resolved target from Phase 1b
-5. Build `CompositionExecutionRequest` with:
+A `prompt:` task chooses its launch identity before its body renders:
 
-    - `mode: ChainedDocument`
-    - `resolved_target`: pre-resolved (avoids re-resolution)
-    - `sequence: true` (suppresses per-step preflight messaging)
-    - `env_overrides`: includes `FAIL_FAST`
-    - `shared_approval_cache`: shared across all steps
+```mermaid
+flowchart LR
+    A["evaluate the prompt's frontmatter<br/>(no shell, no body)"] --> B["choose provider and model<br/>from its agent / model"]
+    B --> C["compose: resolve the frontmatter<br/>with AGENT / MODEL set to that choice,<br/>running its $( … ) commands"]
+    C --> E["choose again from the<br/>resolved agent / model"]
+    E --> F["render the body with<br/>AGENT / MODEL set to that choice"]
+    F --> D["spawn: the child gets the same AGENT / MODEL"]
+```
 
-6. Execute step via `execute_composition_request_inner()` — the same full pipeline as compose Steps 6a–6l
-7. Handle result:
+The choice keeps the planned provider while the document names none, or
+still names it; otherwise the document's `agent` decides, by the same rule the
+launch applies. So a hint decided at launch, and a prompt an earlier task
+rewrote to name another provider, both launch on what the document says, and
+`{{ env.AGENT }}` in the body agrees. An `agent` or `model` produced by a
+frontmatter `$( … )` is known only once the compose has run that command, so
+the second choice, made inside the same compose before the body renders,
+decides it; nothing is composed twice. A retry or resume of the task rereads
+the document under that choice.
 
-    - **Success (exit 0)**: increment succeeded, record `SequenceStepResult`
-    - **Interrupted (exit 130)**: record failure, set interrupt flag, break
-    - **Failure (non-zero)**: increment failed, record result; if `effective_fail_fast`, break
-    - **Error from executor**: record failure; if `effective_fail_fast`, break
+A completed child publishes one native result after successful `finalize`.
+Nested sequences return arrays and groups return dictionaries keyed by leg
+name. An unhandled child failure stops its sequence and propagates outward;
+only groups accept `fail_fast` (default `true`). A failed atomic group
+publishes neither results nor leg mutations. File edits are never rolled back.
+Container `retry` restarts children with empty accumulators and retained
+runtime writes; `proxy` hands off without finalizing the source container.
+
+Ctrl-C stops admission and interrupts every active descendant. Cleanup finishes
+from children to parents (`cancelled`, then `finalize`) before exit `130`.
+Ordinary task timeouts follow `failure`, not `cancelled`.
 
 ##### Final Summary
 
-1. Prints "Sequence finished: X succeeded, Y failed"
-2. Emits perf report if `--perf` (aggregated across all steps)
-3. Returns exit code: 0 if all succeeded, 130 if interrupted, 1 if any failed
+The command reports task outcomes and returns `0` on success, `1` on an
+unhandled failure, or `130` on interruption. `--perf` adds aggregated timing;
+`--silent` suppresses per-step status messages.
 
-**Affected by:**
+`--dry-run` performs preflight and composes against initial state without
+provider launches, lifecycle dispatch, or inline write-back. `shell:` and
+`side_effect:` tasks are rendered, not run (`--dry-run-shell` runs the
+`shell:` tasks once); composition shell expansions still run with real
+effects.
 
-| Input                   | Impact                                                   |
-|-------------------------|----------------------------------------------------------|
-| `--fail-fast`           | CLI override; stops on first failure when true (default) |
-| Frontmatter `fail_fast` | Document default when `--fail-fast` not specified        |
-| SIGINT                  | Tracked across all phases; aborts between steps          |
-| `--perf`                | Aggregated report covering all steps                     |
-| `--silent`              | Suppresses per-step status messages                      |
+### Per-step runtime bindings
 
-### Per-step Template Variables
+| Binding | Meaning |
+| --- | --- |
+| `seq.name`, `seq.id` | Current step's name and stable step identifier |
+| `seq.run_id` | Invocation token shared by nested sequences |
+| `seq.index`, `seq.count` | One-based step position and number of steps |
+| `seq.is_first`, `seq.is_last` | Step boundary flags |
+| `seq.previous`, `seq.next` | Adjacent step objects, or null at the boundaries |
+| `seq.outputs` | Completed results in the innermost sequence |
+| `group.legs`, `group.succeeded`, `group.failed`, `group.cancelled` | Innermost group's settled outcomes and name lists |
 
-Each step runs the source document through Darkmatter with these reserved variables injected as overrides:
-
-| Variable         | Type                    | Description                                           |
-|------------------|-------------------------|-------------------------------------------------------|
-| `state`          | string or object        | The current step value                                |
-| `previous_state` | string, object, or null | The previous step's value, or null for the first step |
-| `next_state`     | string, object, or null | The next step's value, or null for the last step      |
-| `is_first`       | boolean                 | `true` when this is the first step                    |
-| `is_last`        | boolean                 | `true` when this is the last step                     |
-| `step`           | integer                 | One-based index of the current step                   |
-| `total_steps`    | integer                 | Total number of steps                                 |
+`{{ seq }}` renders the step name in text; a whole-value expression retains
+the object. Nested containers restore the enclosing roots on return, and an
+empty inner accumulator never falls back to outer results.
 
 ## Provider Selection
 
@@ -1017,13 +1012,11 @@ For `sequence`, the report is aggregated across all steps: launches and total ex
 
 Sequence Phase 1a calls `prepare_direct()` for every step, which means Darkmatter's full composition pipeline (transclusion, interpolation, shell expansion) runs N times during pre-flight even though the source document is the same. A hash-keyed cache of the base composition (keyed on source file + overrides) could avoid redundant work when steps differ only in overlay variables that are injected late in the pipeline.
 
-### 2. Parallel Sequence Execution
+### Concurrent work
 
-The sequence orchestrator runs steps strictly serially. For workloads where steps are independent (no `previous_state`/`next_state` dependency), an opt-in `parallel: N` frontmatter property could execute steps concurrently with a configurable concurrency limit, dramatically reducing wall-clock time for large batches.
-
-### 3. Lazy Shell Approval for Sequence
-
-Shell approval currently runs during Phase 1a for every step, which means the user must approve all commands before any step starts. A lazy approval model that prompts only when a step is about to run (and caches approvals across steps) would reduce upfront latency for long sequences with diverse shell commands.
+Use a group for independent tasks, with `max_parallel` to cap concurrency.
+Sequence children stay ordered. Shell approval closes before execution;
+concurrent legs never prompt for new approvals.
 
 ### 4. Inline Closure Diff Preview
 
@@ -1045,9 +1038,9 @@ The inline write grant adds the document's *parent directory* as the provider's 
 
 When a sequence step fails in non-fail-fast mode, the only information preserved is the exit code and error message. Capturing structured failure metadata (which harness check failed, what the agent's partial response was, etc.) would enable more intelligent retry or skip decisions in downstream tooling.
 
-### 9. Frontmatter Schema Validation During Prepare
+### 9. Deeper Schema Coverage for Claudine Controls
 
-Agent and model hints are validated during preparation (unknown providers error immediately), but other frontmatter properties (lifecycle config, harness checks, sequence definitions) are parsed without schema validation beyond basic type checks. A schema-driven validation pass during preparation would surface configuration errors earlier and with better error messages.
+Claudine's trigger schemas now type its frontmatter in the launch verdict, but event stacks other than `cancelled` only within three conditional levels (`cancelled` is typed at every depth the parser accepts), with untyped values for the generated verbs and untyped sequence tasks; the parser alone judges the rest (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is also reported as an `anyOf` mismatch that echoes the value rather than naming the key. Recursive lifecycle types, typed generated-verb arguments, and narrower union diagnostics would surface these errors earlier and with better messages.
 
 ### 10. Unified Telemetry Span Across All Three Commands
 

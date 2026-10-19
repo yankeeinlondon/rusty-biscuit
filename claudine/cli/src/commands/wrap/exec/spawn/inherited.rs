@@ -149,7 +149,6 @@ pub(super) fn run_child_on(
     let mut child = command.spawn()?;
     let captured_pid = child.id();
     *child_spawned = true;
-    crate::budget::record_child(captured_pid);
     Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Shared first-response trackers. Each channel stamps the first

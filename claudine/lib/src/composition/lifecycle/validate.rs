@@ -195,6 +195,17 @@ fn walk_action<'a>(
                     operand(prefix.field("reason"), reason);
                 }
             }
+            LifecycleControlAction::Break { reason, .. } => {
+                if let Some(reason) = reason {
+                    operand(prefix.field("reason"), reason);
+                }
+            }
+            LifecycleControlAction::Prep { target, with } => {
+                operand(prefix.field("target"), target);
+                for (key, value) in with.iter() {
+                    walk_with_value(value, &prefix.field("with").map_key(key.as_str()), &mut operand);
+                }
+            }
             LifecycleControlAction::Stop | LifecycleControlAction::Skip => {}
         },
         LifecycleActionKind::Communication(comm) => operand(prefix.field("text"), &comm.text),
@@ -362,10 +373,12 @@ pub fn validate_no_err_in_no_error_events(
 /// commands with statically known text are collected; an expression-driven
 /// command depends on runtime state preflight cannot see.
 ///
-/// `on_error` commands are also collected because they execute on non-zero
-/// exit, and so are the preflight-resolved commands of every `set` shell
-/// value. Each property path names the authored location (e.g.
-/// `start[1].shell.command`).
+/// `on_error` warning text retains its existing audit behavior; it is not an
+/// executed command. Also collected are the preflight-resolved commands of every `set` shell
+/// value. A command whose resolved bytes no longer read as a command (a value
+/// inserted command syntax) is not collected: it may run only as its template,
+/// which approval sees as a site. Each property path names the authored
+/// location (e.g. `start[1].shell.command`).
 pub fn collect_lifecycle_shell_commands(lifecycle: &LifecycleConfig) -> Vec<(String, String)> {
     collect_lifecycle_shell_commands_for(lifecycle, &LifecycleSignal::ALL)
 }
@@ -379,7 +392,10 @@ pub fn collect_lifecycle_shell_commands_for(
     for signal in LifecycleSignal::ALL.into_iter().filter(|signal| signals.contains(signal)) {
         for_each_action(lifecycle.stack(signal), &mut |action| match &action.kind {
             LifecycleActionKind::Shell(shell) => {
-                let fields = std::iter::once(("command", &shell.command))
+                let template_only = shell.template.as_ref().is_some_and(|site| site.resolved().is_none());
+                let fields = (!template_only)
+                    .then_some(("command", &shell.command))
+                    .into_iter()
                     .chain(shell.on_error.as_ref().map(|on_error| ("on_error", on_error)));
                 for (field, expr) in fields {
                     if let Some(literal) = expr_as_string_literal(expr) {

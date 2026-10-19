@@ -8,38 +8,23 @@
 //! lifecycle global or a document property. Claudine never walks an expression
 //! to enforce it.
 //!
-//! | Scope | `err` | `timing` | `group` | `loop` | `outputs` |
-//! | --- | --- | --- | --- | --- | --- |
-//! | `initialize`, `start`, `success`, `loop`, task setup | unavailable: event-has-no-error | available | lexical | lexical | document |
-//! | `blocked`, `failure`, `finalize`, task teardown | available (`null` when no error) | available | lexical | lexical | document |
-//! | lifecycle shell approval | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | lexical (`null` before a loop document's first iteration) | document |
-//! | sequence shell approval | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable |
+//! `seq`, `group`, and `loop` are lexical whole roots. Explicit `fm.*`
+//! always reads document properties. `seq` is available in every event,
+//! including cancellation, and standalone documents expose only its outputs.
+//! `group` and `loop` retain typed outside-scope errors. Approval scopes keep
+//! late roots unavailable; sequence discovery separately permits typed
+//! templates for `seq`, `group`, and `loop`.
 //!
-//! "Lexical" is the group rule: an established group supplies its variables
-//! (an empty object included); known absence is unavailable with
-//! `claudine.outside-group`; unknown membership is execution-dependent during
-//! passive checks. `loop` follows the same rule with `claudine.outside-loop`:
-//! inside a loop (its gate, and the events and shell bytes of one iteration)
-//! it is the object `{count, is_first, is_last, last_output, last_exit_code}`
-//! ([`LoopAmbient::to_value`]). A lifecycle shell's bytes are fixed per
-//! iteration, so the iteration's values are known there; a sequence fixes
-//! every shell before any step runs, so they are not. `fm.<name>` always reads
-//! the document, so `fm.loop` is the `loop:` configuration block.
-//!
-//! A document's composition (its body and compose-time frontmatter values)
-//! declares `loop` to Darkmatter as a host global ([`composition_host_globals`]):
-//! the iteration's values, `null` for a loop document before its first
-//! iteration ([`EnclosingLoop::Pending`]), and unavailable outside any loop.
-//!
-//! The retired `_loop_*` names are not lifecycle globals: a read of one is
-//! removed grammar, found before launch ([`reject_removed_loop_reads_in_document`],
-//! [`reject_removed_loop_reads_in_lifecycle`]), or, when a later render
-//! introduces it, when composition evaluates it
-//! ([`removed_loop_read_in_composition`]).
-//!
-//! `current` is a Darkmatter reserved namespace, not a lifecycle global, so a
-//! view cannot declare it. The approval scopes refuse it separately
-//! ([`approval_diagnostics`]).
+//! `err` is unavailable in initialize/start/success/loop and available in
+//! blocked/failure/cancelled/finalize. `timing` is available in every event.
+//! Both are unavailable during shell approval. Retired loop and sequence
+//! reads are checked on parsed expressions before effects.
+
+mod containers;
+mod rename;
+
+pub use containers::{GroupBinding, GroupLegResult, LegOutcome, SequenceBinding};
+pub use rename::{reject_removed_sequence_reads, RETIRED_SEQUENCE_NAMES};
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -71,6 +56,8 @@ pub const OUTSIDE_LOOP: &str = "claudine.outside-loop";
 
 /// A retired `_loop_*` name read by an expression that composition evaluated.
 pub const REMOVED_LOOP_NAME: &str = "claudine.removed-loop-name";
+/// An undeclared retired sequence root introduced by a later render.
+pub const REMOVED_SEQUENCE_NAME: &str = "claudine.removed-sequence-name";
 
 /// The scope of a document's composition (body and compose-time frontmatter).
 const COMPOSITION_SCOPE: &str = "claudine.composition";
@@ -95,7 +82,7 @@ pub enum LifecycleScope {
 
 impl LifecycleScope {
     /// Every scope, events in [`LifecycleSignal::ALL`] order first.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Event(LifecycleSignal::Initialize),
         Self::Event(LifecycleSignal::Start),
         Self::Event(LifecycleSignal::Success),
@@ -103,6 +90,7 @@ impl LifecycleScope {
         Self::Event(LifecycleSignal::Failure),
         Self::Event(LifecycleSignal::Finalize),
         Self::Event(LifecycleSignal::Loop),
+        Self::Event(LifecycleSignal::Cancelled),
         Self::TaskSetup,
         Self::TaskTeardown,
         Self::LifecycleShellApproval,
@@ -119,6 +107,7 @@ impl LifecycleScope {
             Self::Event(LifecycleSignal::Failure) => "claudine.lifecycle.failure",
             Self::Event(LifecycleSignal::Finalize) => "claudine.lifecycle.finalize",
             Self::Event(LifecycleSignal::Loop) => "claudine.lifecycle.loop",
+            Self::Event(LifecycleSignal::Cancelled) => "claudine.lifecycle.cancelled",
             Self::TaskSetup => "claudine.task.setup",
             Self::TaskTeardown => "claudine.task.teardown",
             Self::LifecycleShellApproval => "claudine.approval.lifecycle-shell",
@@ -177,7 +166,11 @@ pub fn binding_view_in(
     group: GroupMembership,
     in_loop: LoopMembership,
 ) -> Arc<BindingView> {
-    let builder = BindingView::builder(ScopeId::new(scope.id()));
+    let builder = BindingView::builder(ScopeId::new(scope.id())).declare(
+        "seq", "The innermost sequence's values.",
+        if scope.is_approval() { Availability::Unavailable(reason(PREFLIGHT_UNAVAILABLE)) }
+        else { Availability::Available },
+    );
     let loop_availability = if scope == LifecycleScope::SequenceShellApproval {
         Availability::Unavailable(reason(PREFLIGHT_UNAVAILABLE))
     } else {
@@ -190,15 +183,10 @@ pub fn binding_view_in(
     let builder = builder.declare(LOOP_ROOT, "The enclosing loop's values.", loop_availability);
     let builder = if scope.is_approval() {
         let preflight = || Availability::Unavailable(reason(PREFLIGHT_UNAVAILABLE));
-        let builder = builder
+        builder
             .declare("err", "The active failure.", preflight())
             .declare("timing", "Observed durations.", preflight())
-            .declare("group", "The enclosing group's variables.", preflight());
-        if scope == LifecycleScope::SequenceShellApproval {
-            builder.declare("outputs", "Earlier steps' outputs.", preflight())
-        } else {
-            builder
-        }
+            .declare("group", "The enclosing group's variables.", preflight())
     } else {
         let err = if scope.carries_error() {
             Availability::Available
@@ -231,6 +219,8 @@ pub struct LifecycleValues<'a> {
     pub timing: Option<&'a LifecycleTiming>,
     /// The enclosing group's variables; `None` outside any group.
     pub group: Option<&'a Map<String, Value>>,
+    /// The complete innermost sequence root; absent means standalone outputs.
+    pub seq: Option<&'a Value>,
 }
 
 /// The scope's view and one runtime entry per declared global, outside any
@@ -321,6 +311,7 @@ pub fn runtime_bindings_enclosed(
                 Availability::Unavailable(reason) => RuntimeBinding::unavailable(reason.clone()),
                 Availability::Available | Availability::ExecutionDependent => {
                     RuntimeBinding::eager(match global.root() {
+                        "seq" => values.seq.cloned().unwrap_or_else(|| SequenceBinding::standalone(Vec::new()).to_value()),
                         "err" => values.err.map_or(Value::Null, LifecycleErrorInfo::to_value),
                         "timing" => values.timing.map_or(Value::Null, LifecycleTiming::to_value),
                         "group" => values
@@ -337,8 +328,7 @@ pub fn runtime_bindings_enclosed(
     (view, entries)
 }
 
-/// The globals a document's composition declares to Darkmatter: `loop`, and
-/// each retired `_loop_*` name as unavailable.
+/// Composition's lexical roots and unavailable retired loop names.
 ///
 /// `loop` follows `enclosing`: the iteration's values, `null` for a loop
 /// document before its first iteration ([`EnclosingLoop::Pending`]), and
@@ -350,7 +340,9 @@ pub fn runtime_bindings_enclosed(
 /// transcluded document) is rejected when it is evaluated; the authored
 /// document's own reads were rejected before it composed
 /// ([`reject_removed_loop_reads_in_document`]).
-pub(crate) fn composition_host_globals(enclosing: EnclosingLoop<'_>) -> HostGlobals {
+pub(crate) fn composition_host_globals(
+    enclosing: EnclosingLoop<'_>, seq: Value, group: Option<&Map<String, Value>>,
+) -> HostGlobals {
     let (availability, entry) = match enclosing {
         EnclosingLoop::Outside => (
             Availability::Unavailable(reason(OUTSIDE_LOOP)),
@@ -377,18 +369,35 @@ pub(crate) fn composition_host_globals(enclosing: EnclosingLoop<'_>) -> HostGlob
             )
         },
     );
+    let builder = builder.declare("seq", "The innermost sequence's values.", Availability::Available)
+        .declare("group", "The innermost group's values.", if group.is_some() {
+            Availability::Available
+        } else { Availability::Unavailable(reason(OUTSIDE_GROUP)) });
+    let builder = RETIRED_SEQUENCE_NAMES.iter().fold(builder, |builder, (removed, _)| {
+        builder.declare(*removed, "A retired sequence name unless the document declares it.", Availability::ExecutionDependent)
+    });
     let view = Arc::new(
         builder
             .build()
             .expect("the composition catalog declares single, unreserved roots once each"),
     );
-    let entries = std::iter::once((LOOP_ROOT.to_string(), entry)).chain(
+    let entries = [
+        (LOOP_ROOT.to_string(), entry),
+        ("seq".to_string(), RuntimeBinding::eager(seq)),
+        ("group".to_string(), group.map_or_else(|| RuntimeBinding::unavailable(reason(OUTSIDE_GROUP)),
+            |value| RuntimeBinding::eager(Value::Object(value.clone())))),
+    ].into_iter().chain(
         RETIRED_LOOP_NAMES.iter().map(|(removed, member)| {
             (removed.to_string(), RuntimeBinding::unavailable(retired_reason(member)))
         }),
     );
+    let entries = entries.chain(RETIRED_SEQUENCE_NAMES.iter().map(|(removed, replacement)| (
+        removed.to_string(), RuntimeBinding::unavailable(reason(REMOVED_SEQUENCE_NAME)
+            .with_parameter("replacement", Value::String(replacement.to_string()))),
+    )));
     HostGlobals::associate(view, entries)
         .expect("every declared composition global has an agreeing entry")
+        .with_document_fallbacks(RETIRED_SEQUENCE_NAMES.iter().map(|(name, _)| *name))
 }
 
 /// The removed-grammar error for a composition failure that read a retired
@@ -401,6 +410,16 @@ pub(crate) fn removed_loop_read_in_composition(
     error: &darkmatter::markdown::MarkdownError,
 ) -> Option<CompositionError> {
     let read = error.unavailable_binding()?;
+    if read.reason.code() == REMOVED_SEQUENCE_NAME {
+        let (_, replacement) = RETIRED_SEQUENCE_NAMES.iter().find(|(name, _)| *name == read.root)?;
+        let suffix = read.path.strip_prefix(&read.root).unwrap_or("");
+        let replacement = if read.path == "state.sequence_id" { "seq.run_id".to_string() }
+            else { format!("{replacement}{suffix}") };
+        return Some(CompositionError::RemovedGrammar {
+            source_path: source_path.to_path_buf(), path: "render".into(),
+            removed: read.path.clone(), replacement: format!("use `{replacement}`"),
+        });
+    }
     if read.reason.code() != REMOVED_LOOP_NAME {
         return None;
     }

@@ -79,7 +79,7 @@ fn source_doc(workspace: &CliProcessFixture, name: &str, source: &str) -> std::p
     write(
         workspace,
         name,
-        &format!("---\nsequence: {source}\n---\nStep {{{{ state.name }}}}.\n"),
+        &format!("---\nsequence: {source}\n---\nStep {{{{ seq.name }}}}.\n"),
     )
 }
 
@@ -167,14 +167,14 @@ fn map_removes_the_source_key_while_name_retains_it() {
     let mapped = write(
         &workspace,
         "map.md",
-        "---\nsequence: \"d.yaml -> items::map(color, name)\"\n---\nStep [{{ state.color }}].\n",
+        "---\nsequence: \"d.yaml -> items::map(color, name)\"\n---\nStep [{{ seq.color }}].\n",
     );
     assert_eq!(composed_steps(&workspace, &mapped, &[]), ["[]"], "map renames");
 
     let named = write(
         &workspace,
         "name.md",
-        "---\nsequence: \"d.yaml -> items::name(color)\"\n---\nStep [{{ state.color }}].\n",
+        "---\nsequence: \"d.yaml -> items::name(color)\"\n---\nStep [{{ seq.color }}].\n",
     );
     assert_eq!(composed_steps(&workspace, &named, &[]), ["[blue]"], "name copies");
 }
@@ -201,7 +201,7 @@ fn every_string_list_form_classifies_through_the_real_invocation_path() {
         let doc = write(
             &workspace,
             &format!("{name}.md"),
-            &format!("---\nraw: {raw}\nsequence: \"{{{{ raw }}}}\"\n---\nStep {{{{ state.name }}}}.\n"),
+            &format!("---\nraw: {raw}\nsequence: \"{{{{ raw }}}}\"\n---\nStep {{{{ seq.name }}}}.\n"),
         );
         assert_eq!(
             composed_steps(&workspace, &doc, &[]),
@@ -219,14 +219,14 @@ fn markdown_list_markers_win_over_line_splitting() {
     let unordered = write(
         &workspace,
         "ul.md",
-        "---\nraw: |\n  - alpha\n  - beta\nsequence: \"{{ raw }}\"\n---\nStep {{ state.name }}.\n",
+        "---\nraw: |\n  - alpha\n  - beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
     );
     assert_eq!(composed_steps(&workspace, &unordered, &[]), ["alpha", "beta"]);
 
     let ordered = write(
         &workspace,
         "ol.md",
-        "---\nraw: |\n  1. alpha\n  2. beta\nsequence: \"{{ raw }}\"\n---\nStep {{ state.name }}.\n",
+        "---\nraw: |\n  1. alpha\n  2. beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
     );
     assert_eq!(composed_steps(&workspace, &ordered, &[]), ["alpha", "beta"]);
 }
@@ -239,7 +239,7 @@ fn quoted_csv_delimiters_and_crlf_survive_classification() {
     let doc = write(
         &workspace,
         "quoted.md",
-        "---\nraw: \"\\\"alpha, with comma\\\", beta\"\nsequence: \"{{ raw }}\"\n---\nStep {{ state.name }}.\n",
+        "---\nraw: \"\\\"alpha, with comma\\\", beta\"\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
     );
     assert_eq!(
         composed_steps(&workspace, &doc, &[]),
@@ -249,7 +249,7 @@ fn quoted_csv_delimiters_and_crlf_survive_classification() {
     let crlf = write(
         &workspace,
         "crlf.md",
-        "---\nraw: \"alpha\\r\\nbeta\"\nsequence: \"{{ raw }}\"\n---\nStep [{{ state.name }}].\n",
+        "---\nraw: \"alpha\\r\\nbeta\"\nsequence: \"{{ raw }}\"\n---\nStep [{{ seq.name }}].\n",
     );
     assert_eq!(composed_steps(&workspace, &crlf, &[]), ["[alpha]", "[beta]"]);
 }
@@ -267,14 +267,14 @@ fn a_foreign_source_coerces_scalars_and_names_nameless_objects() {
     let scalars = write(
         &workspace,
         "scalars.md",
-        "---\nraw:\n  - 1\n  - 2.5\n  - true\nsequence: \"{{ raw }}\"\n---\nStep {{ state.name }}.\n",
+        "---\nraw:\n  - 1\n  - 2.5\n  - true\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
     );
     assert_eq!(composed_steps(&workspace, &scalars, &[]), ["1", "2.5", "true"]);
 
     let objects = write(
         &workspace,
         "objects.md",
-        "---\nraw:\n  - name: alpha\n  - topic: parsing\nsequence: \"{{ raw }}\"\n---\nStep {{ state.name }}.\n",
+        "---\nraw:\n  - name: alpha\n  - topic: parsing\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
     );
     assert_eq!(
         composed_steps(&workspace, &objects, &[]),
@@ -398,7 +398,7 @@ fn a_referenced_formal_document_applies_template_before_generated_fields() {
     let doc = write(
         &workspace,
         "ref.md",
-        "---\nsequence: formal.yaml\n---\nStep {{ state.desc }}/{{ state.index }}.\n",
+        "---\nsequence: formal.yaml\n---\nStep {{ seq.desc }}/{{ seq.index }}.\n",
     );
 
     // A templated key is ordinary authored state by the time `index` is
@@ -439,7 +439,7 @@ fn a_referenced_formal_documents_schema_validates_the_step_state() {
 /// the referencing document supplies as its body instead. Both strings are
 /// therefore identical, and so are both results.
 fn write_parity_fixture(workspace: &CliProcessFixture) -> (std::path::PathBuf, std::path::PathBuf) {
-    const STEP_BODY: &str = "Step {{ state.name }}/{{ state.desc }}/{{ state.rank }}.";
+    const STEP_BODY: &str = "Step {{ seq.name }}/{{ seq.desc }}/{{ seq.rank }}.";
 
     let direct = write(
         workspace,
@@ -488,7 +488,7 @@ fn a_directly_invoked_documents_schema_validates_the_step_state() {
     let doc = write(
         &workspace,
         "formal.yaml",
-        "kind: sequence\nprompt: \"Handle {{ state.name }}\"\nsequence:\n  - name: blue\n    rank: not-a-number\n$schema:\n  rank: number(required)\n",
+        "kind: sequence\nprompt: \"Handle {{ seq.name }}\"\nsequence:\n  - name: blue\n    rank: not-a-number\n$schema:\n  rank: number(required)\n",
     );
 
     let (_, stderr) = dry_run(&workspace, &doc, &[], false);
@@ -510,7 +510,7 @@ fn a_directly_invoked_documents_schema_validates_the_step_state() {
 #[test]
 fn a_directly_invoked_yaml_runs_executable_steps_without_a_body() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, "p.md", "---\ntitle: p\n---\nStep {{ state.name }}.\n");
+    write(&workspace, "p.md", "---\ntitle: p\n---\nStep {{ seq.name }}.\n");
     let doc = write(
         &workspace,
         "headless.yaml",
@@ -529,7 +529,7 @@ fn a_directly_invoked_yaml_keeps_its_frontmatter_across_step_boundaries() {
     let doc = write(
         &workspace,
         "headless.yaml",
-        "kind: sequence\ntopic: from-document\nprompt: \"Step {{ state.name }}/{{ topic }}.\"\nsequence:\n  - alpha\n  - beta\n",
+        "kind: sequence\ntopic: from-document\nprompt: \"Step {{ seq.name }}/{{ topic }}.\"\nsequence:\n  - alpha\n  - beta\n",
     );
 
     assert_eq!(
@@ -566,7 +566,7 @@ fn document_level_prompt_is_prose_while_task_level_prompt_is_a_file_reference() 
     let document_level = write(
         &workspace,
         "doc-level.md",
-        "---\nprompt: \"Step {{ state.name }}.\"\nsequence:\n  - alpha\n---\nOriginal body\n",
+        "---\nprompt: \"Step {{ seq.name }}.\"\nsequence:\n  - alpha\n---\nOriginal body\n",
     );
     let (stdout, _) = dry_run(&workspace, &document_level, &[], true);
     assert!(
@@ -578,7 +578,7 @@ fn document_level_prompt_is_prose_while_task_level_prompt_is_a_file_reference() 
         "the body is replaced, not sent; stdout:\n{stdout}"
     );
 
-    write(&workspace, "referenced.md", "---\ntitle: r\n---\nStep {{ state.name }}.\n");
+    write(&workspace, "referenced.md", "---\ntitle: r\n---\nStep {{ seq.name }}.\n");
     let task_level = write(
         &workspace,
         "task-level.md",
@@ -599,7 +599,7 @@ fn document_level_prompt_is_prose_while_task_level_prompt_is_a_file_reference() 
 fn a_dry_run_leaves_an_inline_compose_source_untouched() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
     let original =
-        "---\nprompt: \"Step {{ state.name }}.\"\nsequence:\n  - alpha\n---\nOriginal body\n";
+        "---\nprompt: \"Step {{ seq.name }}.\"\nsequence:\n  - alpha\n---\nOriginal body\n";
     let doc = write(&workspace, "inline.md", original);
 
     dry_run(&workspace, &doc, &[], true);
@@ -620,13 +620,13 @@ fn a_dry_run_leaves_an_inline_compose_source_untouched() {
 #[test]
 fn external_task_group_and_catalog_references_all_load_and_run() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, "p.md", "---\ntitle: p\n---\nStep {{ state.name }}.\n");
+    write(&workspace, "p.md", "---\ntitle: p\n---\nStep {{ seq.name }}.\n");
     write(&workspace, "task.yaml", "kind: task\nprompt: p.md\n");
-    write(&workspace, "group.yaml", "kind: group\nname: G\ntasks:\n  - prompt: p.md\n");
+    write(&workspace, "group.yaml", "kind: group\nname: G\ntasks:\n  - name: render\n    prompt: p.md\n");
     write(
         &workspace,
         "catalog.yaml",
-        "kind: group-catalog\ngroups:\n  - name: build\n    tasks:\n      - prompt: p.md\n",
+        "kind: group-catalog\ngroups:\n  - name: build\n    tasks:\n      - name: render\n        prompt: p.md\n",
     );
 
     let doc = write(
@@ -647,7 +647,7 @@ fn a_reference_inside_an_external_task_resolves_from_that_tasks_directory() {
     let workspace = CliProcessFixture::named("sequence-sources-cli");
     // The prompt sits beside the *task* file, not beside the sequence. Only
     // resolving from the task's own directory finds it.
-    write(&workspace, "tasks/p.md", "---\ntitle: p\n---\nStep {{ state.name }}.\n");
+    write(&workspace, "tasks/p.md", "---\ntitle: p\n---\nStep {{ seq.name }}.\n");
     write(&workspace, "tasks/task.yaml", "kind: task\nprompt: p.md\n");
     let doc = write(
         &workspace,
@@ -656,4 +656,19 @@ fn a_reference_inside_an_external_task_resolves_from_that_tasks_directory() {
     );
 
     assert_eq!(composed_steps(&workspace, &doc, &[]), ["alpha"]);
+}
+
+#[test]
+fn shipped_runner_sequence_renders_lexical_rows_through_the_cli() {
+    let fixture = CliProcessFixture::named("shipped-sequence-bindings");
+    write(&fixture, "runners.yaml", include_str!("../../../docs/local-runners.yaml"));
+    let source = write(&fixture, "seq.md", "---\nsequence: runners.yaml\n---\nStep {{ seq.index }}:{{ seq.name }}:{{ seq.run_id }}.\n");
+    let rows = composed_steps(&fixture, &source, &[]);
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert!(rows[0].starts_with("1:Ollama:"), "{rows:?}");
+    assert!(rows[1].starts_with("2:LM Studio:"), "{rows:?}");
+    let run_ids: std::collections::BTreeSet<_> = rows.iter().map(|row| row.rsplit(':').next().unwrap()).collect();
+    assert_eq!(run_ids.len(), 1);
+    assert_eq!(run_ids.first().unwrap().len(), 16);
+    assert!(!fixture.audio_spool().exists());
 }

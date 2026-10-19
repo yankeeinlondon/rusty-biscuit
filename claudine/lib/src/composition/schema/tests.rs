@@ -5,6 +5,7 @@ use crate::composition::CompositionMode;
 use crate::composition::resolve::resolve_composition_source;
 #[cfg(feature = "prompt-tests")]
 use crate::composition::resolve::resolve_composition_source_in_context;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 #[cfg(feature = "prompt-tests")]
@@ -1777,7 +1778,7 @@ fn post_shell_valid_value_passes() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();
@@ -1811,7 +1812,7 @@ fn post_shell_invalid_required_returns_schema_validation_error() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let err = prepare_direct_with_schema(&source, opts).unwrap_err();
@@ -1842,7 +1843,7 @@ fn post_shell_invalid_optional_is_dropped_with_diagnostic() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();
@@ -1940,6 +1941,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
     // Fallback points at a dir WITHOUT schema.yaml.
     let effective = load_effective_schema(
         &source,
+        None,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
@@ -1969,6 +1971,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
 
     let effective = load_effective_schema(
         &source,
+        None,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
@@ -2543,4 +2546,96 @@ fn null_admitting_whole_values_are_not_required() {
     for required in ["nulls", "concrete"] {
         assert!(classify::is_required(Some(shape), required), "{required}");
     }
+}
+
+/// The identity selector sees the hints a frontmatter `$( … )` produced, and
+/// the body, the retained context, and the retained caller layers all carry
+/// the overrides it returned; the frontmatter command and the body render
+/// once.
+#[test]
+fn selecting_preparation_renders_the_body_with_the_selected_identity() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, "---\nagent: '$(echo goose)'\n---\nBODY_AGENT={{ env.AGENT }}\n");
+    let mut options = PrepareOptions::new(crate::test_support::context());
+    options.env_overrides = BTreeMap::from([("AGENT".to_string(), "claude".to_string())]);
+    options.pre_approved_commands = Some(std::collections::HashSet::from(["echo goose".to_string()]).into());
+    let seen = std::cell::RefCell::new(Vec::new());
+    let select = |hints: &crate::composition::EffectiveSelectionHints| {
+        seen.borrow_mut().push(hints.agent.clone());
+        Ok(BTreeMap::from([("AGENT".to_string(), "goose".to_string())]))
+    };
+
+    let prepared = prepare_direct_with_schema_selecting(&source, options, &select).unwrap();
+
+    assert_eq!(
+        *seen.borrow(),
+        [Some(crate::composition::AgentHint::Single(crate::provider_id::Provider::Goose))],
+        "called once, with the command's answer"
+    );
+    assert!(prepared.prompt.contains("BODY_AGENT=goose"), "{}", prepared.prompt);
+    assert_eq!(prepared.compose_context.env().get("AGENT").map(String::as_str), Some("goose"));
+    assert_eq!(prepared.input_layers.env_overrides.get("AGENT").map(String::as_str), Some("goose"));
+}
+
+/// A resolved caller value that looks like a command is data: the selector
+/// receives it as written.
+#[test]
+fn selecting_preparation_passes_a_command_looking_caller_model_as_data() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, "---\ntitle: t\n---\nBODY_MODEL={{ env.MODEL }}\n");
+    // A task's `with` values reach the document as a data layer.
+    let options = PrepareOptions::new(crate::test_support::context()).with_layered_overrides(
+        crate::composition::LayeredOverrides::from_parts(
+            Some(&serde_json::json!({ "model": "$(echo x)" })),
+            &std::collections::BTreeSet::from(["model".to_string()]),
+        ),
+    );
+    let select = |hints: &crate::composition::EffectiveSelectionHints| {
+        let model = hints.model.as_ref().map(|model| format!("{model:?}")).unwrap_or_default();
+        assert!(model.contains("$(echo x)"), "{model}");
+        Ok(BTreeMap::from([("MODEL".to_string(), "$(echo x)".to_string())]))
+    };
+
+    let prepared = prepare_direct_with_schema_selecting(&source, options, &select).unwrap();
+
+    assert!(prepared.prompt.contains("BODY_MODEL=$(echo x)"), "{}", prepared.prompt);
+}
+
+/// A selector error ends the preparation with that error, before the body
+/// renders.
+#[test]
+fn selecting_preparation_returns_the_selectors_error() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, "---\nagent: goose\n---\nbody\n");
+    let select = |_: &crate::composition::EffectiveSelectionHints| {
+        Err(CompositionError::AgentHintInvalid("no provider".to_string()))
+    };
+
+    let error = prepare_direct_with_schema_selecting(&source, PrepareOptions::new(crate::test_support::context()), &select)
+        .unwrap_err();
+
+    assert!(matches!(error, CompositionError::AgentHintInvalid(ref message) if message == "no provider"), "{error:?}");
+}
+
+/// A key only the installed overrides set returns to its captured value, or
+/// is unset.
+#[test]
+fn replacing_env_overrides_restores_or_unsets_dropped_keys() {
+    let mut env = std::collections::HashMap::from([
+        ("AGENT".to_string(), "claude".to_string()),
+        ("MODEL".to_string(), "old".to_string()),
+    ]);
+    let installed = BTreeMap::from([
+        ("AGENT".to_string(), "claude".to_string()),
+        ("MODEL".to_string(), "old".to_string()),
+    ]);
+
+    crate::composition::replace_env_overrides(
+        &mut env,
+        &installed,
+        &BTreeMap::from([("AGENT".to_string(), "goose".to_string())]),
+        None,
+    );
+
+    assert_eq!(env, std::collections::HashMap::from([("AGENT".to_string(), "goose".to_string())]));
 }

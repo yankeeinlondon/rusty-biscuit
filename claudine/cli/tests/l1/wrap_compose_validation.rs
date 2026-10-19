@@ -797,7 +797,7 @@ fn sequence_document_with_a_nested_span_starts_no_step() {
     fs::write(
         &sequence,
         format!(
-            "---\nagent: goose\n{DEFECT_LIFECYCLE}sequence:\n    - one\n    - two\n---\nStep {{{{ state }}}}\n"
+            "---\nagent: goose\n{DEFECT_LIFECYCLE}sequence:\n    - one\n    - two\n---\nStep {{{{ seq }}}}\n"
         ),
     )
     .unwrap();
@@ -830,7 +830,7 @@ fn predicates_operands_and_proxy_with_values_are_rejected_before_launch() {
             "failure.proxy.with.note",
         ),
         (
-            "loop:\n    while: \"status != 'at {{step}}'\"\n    max: 2\n",
+            "loop:\n    while: \"status != 'at {{seq.index}}'\"\n    max: 2\n",
             "loop.while",
         ),
     ];

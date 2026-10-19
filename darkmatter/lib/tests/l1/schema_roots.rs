@@ -493,7 +493,7 @@ fn path_field_input_matrix() {
         ("control", "  $path: \"^docs/**\"", Outcome::Applies),
         // No `$path` leaves an arm with no condition at all: the existing
         // vacuous-arm error, not "matches nothing".
-        ("absent", "  {}", Outcome::LoadError(&["vacuous"])),
+        ("absent", "  {}", Outcome::LoadError(&["at least one key"])),
         ("explicit null", "  $path: null", Outcome::LoadError(&["$path must be", "got null"])),
         ("empty value", "  $path:", Outcome::LoadError(&["$path must be", "got null"])),
         ("wrong type, whole field", "  $path: 123", Outcome::LoadError(&["$path must be", "got number"])),
@@ -1016,4 +1016,50 @@ fn no_doc_or_skill_names_the_singular_schema_variable() {
         .map(|file| file.strip_prefix(&root).unwrap_or(file).display().to_string())
         .collect();
     assert!(offenders.is_empty(), "rename `SCHEMA_DIR` to `SCHEMAS_DIR` in: {offenders:?}");
+}
+
+// ── An unparseable schema-root file decides the scan only when it claims ──
+
+/// The 2026-10-17 incident: an ordinary, mid-edit schema file beside a
+/// trigger in the same root leaves the trigger loaded and applied.
+#[test]
+fn an_unparseable_unclaimed_schema_root_file_does_not_fail_discovery() {
+    let fixture = Fixture::new();
+    let schemas = fixture.repo().join("schemas");
+    write(&schemas.join("feature-review.yaml"), include_str!("../fixtures/triggers/feature-review-incident.yaml"));
+    write(&schemas.join("docs.trigger.yaml"), &trigger("^docs/**", "payload.yaml"));
+    write(&schemas.join("payload.yaml"), "$schema:\n  from_trigger: string\n");
+    let document = fixture.repo().join("docs/note.md");
+    write(&document, "---\ntitle: x\n---\n");
+    let context = fixture.context(&document, &[]);
+
+    let registry = darkmatter::markdown::schemas::scan(&context).expect("the scan succeeds");
+    assert_eq!(registry.triggers.len(), 1);
+    assert_eq!(effective_properties(&context, &document), ["from_trigger"]);
+}
+
+/// A claimed envelope that is not valid YAML fails the scan as a trigger
+/// load error naming the file, carrying the YAML location.
+#[test]
+fn an_unparseable_claimed_schema_root_file_fails_discovery_with_its_yaml_location() {
+    let fixture = Fixture::new();
+    let schemas = fixture.repo().join("schemas");
+    let broken = schemas.join("broken.yaml");
+    write(&broken, "kind: trigger-schema\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
+    write(&schemas.join("docs.trigger.yaml"), &trigger("^docs/**", "payload.yaml"));
+    write(&schemas.join("payload.yaml"), "$schema:\n  from_trigger: string\n");
+    let document = fixture.repo().join("docs/note.md");
+    write(&document, "---\ntitle: x\n---\n");
+    let context = fixture.context(&document, &[]);
+
+    let error = darkmatter::markdown::schemas::scan(&context).expect_err("a claimed file is fatal");
+    let SchemaError::TriggerLoad { path, source } = &error else {
+        panic!("expected a trigger load error, got {error:?}");
+    };
+    assert_eq!(canonical(path), canonical(&broken));
+    assert!(
+        matches!(**source, SchemaError::TriggerEnvelopeYaml { line: Some(4), column: Some(9), .. }),
+        "{source:?}"
+    );
+    assert!(error.to_string().contains("is not valid YAML at line 4, column 9"), "{error}");
 }

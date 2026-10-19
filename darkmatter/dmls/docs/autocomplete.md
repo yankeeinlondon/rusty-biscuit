@@ -206,7 +206,8 @@ Wiki completion never inserts a `.md` extension regardless of style.
 ## Passivity
 
 Answering a completion is read-only: it reads open buffers and the in-memory
-workspace graph and resolves local paths, but never executes a shell command,
+workspace graph (parsing an unopened link target the first time heading
+completion needs its headings) and resolves local paths, but never executes a shell command,
 evaluates an expression, fetches a remote URL, or mutates a file. Offering a
 `ctx.*` variable or a function does **not** compute its value.
 

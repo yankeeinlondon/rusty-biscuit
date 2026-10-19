@@ -1,6 +1,6 @@
 //! `dm.expression.nested_span_in_literal` end to end through the frontmatter
-//! producer and the `Rewrite with + concatenation` quick fix, with the shipped
-//! Claudine extension active.
+//! producer and the `Rewrite with + concatenation` quick fix, with Claudine's
+//! catalog (from `claudine/schemas/`) active as a schema extension.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -24,19 +24,25 @@ const INCIDENT: &str = include_str!(
     "../../../../../claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md"
 );
 
-fn schemas_dir() -> PathBuf {
-    biscuit_test_harness::manifest_dir!().join("../docs/schemas")
-}
 
 /// Runs `f` with a context for `text` at client document `version`.
 fn with_ctx<R>(text: &str, version: i32, f: impl FnOnce(&DocumentContext) -> R) -> R {
     let path = Path::new("/w/prompts/doc.md");
     let uri: Uri = "file:///w/prompts/doc.md".parse().unwrap();
+    let schemas = tempfile::tempdir().expect("temp dir");
     let mut config = DmlsConfig::default();
     config.schema.extensions.insert(
         "claudine".to_string(),
         SchemaExtensionConfig {
-            path: schemas_dir().join("claudine.yaml"),
+            path: crate::context::test_support::claudine_payload_extension(
+                schemas.path(),
+                &[
+                    ("claudine.yaml", CLAUDINE_TRIGGER),
+                    ("lifecycle.yaml", CLAUDINE_LIFECYCLE),
+                    ("action.yaml", CLAUDINE_ACTION),
+                    ("linking.yaml", CLAUDINE_LINKING),
+                ],
+            ),
             globs: vec!["**/*.md".to_string()],
         },
     );
@@ -150,22 +156,34 @@ fn the_same_defect_in_a_body_produces_no_diagnostic() {
 
 #[test]
 fn diagnostics_use_decoded_escape_parity_for_literal_openers() {
-    for (authored_backslashes, expected_diagnostics) in
-        [(1, 0), (2, 0), (3, 1), (4, 1), (5, 0), (6, 0)]
-    {
+    // One document, one stack item per case: item `k`'s expression is on
+    // line `3 + 2k`.
+    let cases = [(1, 0), (2, 0), (3, 1), (4, 1), (5, 0), (6, 0)];
+    let mut text = String::from("---\nsuccess:\n");
+    let mut expressions = Vec::new();
+    for (authored_backslashes, _) in cases {
         let expression = format!(
             "{{{{ '{}{{{{ name }}}}' }}}}",
             "\\".repeat(authored_backslashes)
         );
-        let text = format!("---\nsuccess:\n    say: |-\n        {expression}\n---\n\nbody\n");
-        with_ctx(&text, 1, |ctx| {
-            let found = nested(ctx);
-            assert_eq!(found.len(), expected_diagnostics, "{expression}: {found:#?}");
-            for diagnostic in found {
-                assert_eq!(ranged(ctx, &diagnostic), "{{ name }}", "{expression}");
-            }
-        });
+        text.push_str(&format!("    - say: |-\n        {expression}\n"));
+        expressions.push(expression);
     }
+    text.push_str("---\n\nbody\n");
+    with_ctx(&text, 1, |ctx| {
+        let found = nested(ctx);
+        for (k, ((_, expected_diagnostics), expression)) in cases.iter().zip(&expressions).enumerate() {
+            let line = 3 + 2 * k as u32;
+            let on_line: Vec<&Diagnostic> =
+                found.iter().filter(|diagnostic| diagnostic.range.start.line == line).collect();
+            assert_eq!(on_line.len(), *expected_diagnostics, "{expression}: {found:#?}");
+            for diagnostic in on_line {
+                assert_eq!(ranged(ctx, diagnostic), "{{ name }}", "{expression}");
+            }
+        }
+        let expected_total: usize = cases.iter().map(|(_, expected)| expected).sum();
+        assert_eq!(found.len(), expected_total, "{found:#?}");
+    });
 }
 
 #[test]
@@ -313,81 +331,118 @@ fn ranges_are_inner_for_exact_styles_and_whole_for_folded_and_tagged() {
 
 // ── Lifecycle inventory ─────────────────────────────────────────────────────
 
-fn schema_mapping(file: &str) -> serde_yaml_ng::Mapping {
-    let text = std::fs::read_to_string(schemas_dir().join(file)).expect("read schema");
-    let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).expect("schema YAML");
-    document.get("$schema").and_then(|schema| schema.as_mapping()).expect("$schema").clone()
+// Claudine's authoritative schemas; DMLS has no Claudine dependency, so the
+// static inventory is held against the YAML itself.
+const CLAUDINE_TRIGGER: &str = include_str!("../../../../../claudine/schemas/claudine.yaml");
+const CLAUDINE_LIFECYCLE: &str = include_str!("../../../../../claudine/schemas/lifecycle.yaml");
+const CLAUDINE_ACTION: &str = include_str!("../../../../../claudine/schemas/action.yaml");
+const CLAUDINE_LINKING: &str = include_str!("../../../../../claudine/schemas/linking.yaml");
+
+/// The mapping under `section` (`$schema` of a trigger, `types` of a library).
+fn schema_section(text: &str, section: &str) -> serde_yaml_ng::Mapping {
+    let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).expect("schema YAML");
+    document.get(section).and_then(|value| value.as_mapping()).expect(section).clone()
 }
 
+/// Literal property names of an object type, without `$constraints`.
 fn keys_of(mapping: &serde_yaml_ng::Mapping) -> BTreeSet<String> {
-    mapping.keys().filter_map(|key| key.as_str()).map(str::to_string).collect()
+    mapping
+        .keys()
+        .filter_map(|key| key.as_str())
+        .filter(|key| !key.starts_with(['<', '$']))
+        .map(str::to_string)
+        .collect()
 }
 
 #[test]
 fn lifecycle_inventory_matches_the_authored_claudine_schema() {
-    let root = schema_mapping("claudine.yaml");
-    let events: BTreeSet<String> = root
+    let payload = schema_section(CLAUDINE_TRIGGER, "$schema");
+    let events: BTreeSet<String> = payload
         .iter()
         .filter(|(_, value)| {
             value.as_str().is_some_and(|definition| {
-                definition.starts_with("lifecycle-event@") || definition.starts_with("loop-event@")
+                ["stack@", "initialize-stack@", "loop@"].iter().any(|prefix| definition.starts_with(prefix))
             })
         })
         .filter_map(|(key, _)| key.as_str().map(str::to_string))
         .collect();
     assert_eq!(events, EVENT_KEYS.iter().map(|key| key.to_string()).collect());
 
-    let types = schema_mapping("claudine-types.yaml");
-    let object = |name: &str| types.get(name).and_then(|value| value.as_mapping()).unwrap().clone();
-    let arms = |name: &str| -> Vec<String> {
-        types
-            .get(name)
-            .and_then(|value| value.as_sequence())
-            .unwrap_or_else(|| panic!("{name} is a union"))
-            .iter()
-            .filter_map(|arm| arm.as_str().map(str::to_string))
-            .collect()
+    let actions = schema_section(CLAUDINE_ACTION, "types");
+    let lifecycle = schema_section(CLAUDINE_LIFECYCLE, "types");
+    let object = |types: &serde_yaml_ng::Mapping, name: &str| -> serde_yaml_ng::Mapping {
+        types.get(name).and_then(|value| value.as_mapping()).unwrap_or_else(|| panic!("{name} is an object")).clone()
     };
-    // An event, and each `then`/`else` body, is a list of entries or a
-    // dictionary of verbs; an entry is a bare verb or an item.
-    for (union, list, dictionary) in [
-        ("lifecycle-event", "lifecycle-entry[]@this", "lifecycle-bundle@this"),
-        ("lifecycle-branch", "lifecycle-branch-entry[](min(1))@this", "lifecycle-branch-bundle@this"),
-    ] {
-        let arms = arms(union);
-        assert_eq!(arms.len(), 2, "{union}: {arms:?}");
-        assert!(arms[0].starts_with(list), "{union}: {arms:?}");
-        assert!(arms[1].starts_with(dictionary), "{union}: {arms:?}");
-    }
-    for (entry, item) in
-        [("lifecycle-entry", "lifecycle-stack-item@this"), ("lifecycle-branch-entry", "lifecycle-branch-item@this")]
-    {
-        let arms = arms(entry);
-        assert!(arms[0].starts_with("string "), "{entry}: {arms:?}");
-        assert_eq!(arms[1], item, "{entry}: {arms:?}");
-    }
+    let definition = |types: &serde_yaml_ng::Mapping, name: &str, key: &str| -> String {
+        object(types, name).get(key).and_then(|value| value.as_str()).unwrap_or_else(|| panic!("{name}.{key}")).to_string()
+    };
+    let verbs: BTreeSet<String> = ["communicate", "flow", "shell", "expression"]
+        .into_iter()
+        .flat_map(|category| keys_of(&object(&actions, category)))
+        .collect();
 
-    let literal_keys = |name: &str| -> BTreeSet<String> {
-        keys_of(&object(name)).into_iter().filter(|key| !key.starts_with(['<', '$'])).collect()
-    };
+    // A conditional item contributes `when`/`then`/`else`; a dictionary bundle
+    // contributes `when` and `no_error` beside its verbs.
     let structural: BTreeSet<String> = STRUCTURAL_ITEM_KEYS.iter().map(|key| key.to_string()).collect();
-    for item in ["lifecycle-stack-item", "lifecycle-branch-item"] {
-        assert_eq!(literal_keys(item), structural, "{item}");
-        assert!(object(item).contains_key("<string>"), "{item} accepts any verb");
+    let mut authored_structural = BTreeSet::new();
+    for level in 1..=3 {
+        for conditional in [format!("conditional-{level}"), format!("initialize-conditional-{level}")] {
+            let keys = keys_of(&object(&lifecycle, &conditional));
+            assert!(keys.is_subset(&structural), "{conditional}: {keys:?}");
+            assert!(definition(&lifecycle, &conditional, "when").starts_with("expression"), "{conditional}");
+            authored_structural.extend(keys);
+        }
     }
-    let mut loop_keys: BTreeSet<String> = LOOP_ITERATION_KEYS.iter().map(|key| key.to_string()).collect();
-    loop_keys.insert("gate".to_string());
-    assert_eq!(literal_keys("loop-event"), loop_keys);
-    assert!(object("loop-event").contains_key("<string>"), "loop accepts loose verbs");
-    assert!(object("loop-event").get("gate").and_then(|v| v.as_str()).unwrap().starts_with("lifecycle-entry[]@this"));
+    for bundle in ["bundle", "initialize-bundle"] {
+        let keys = keys_of(&object(&actions, bundle));
+        let grammar: BTreeSet<String> = keys.difference(&verbs).cloned().collect();
+        assert!(grammar.is_subset(&structural), "{bundle}: {grammar:?}");
+        assert!(definition(&actions, bundle, "when").starts_with("expression"), "{bundle}");
+        authored_structural.extend(grammar);
+    }
+    assert_eq!(authored_structural, structural);
 
-    let is_expression = |name: &str, key: &str| {
-        object(name).get(key).and_then(|value| value.as_str()).is_some_and(|d| d.starts_with("expression"))
-    };
-    assert!(is_expression("lifecycle-stack-item", "when"));
-    assert!(is_expression("lifecycle-branch-item", "when"));
-    assert!(is_expression("loop-event", "while"));
-    assert!(is_expression("loop-event", "until"));
+    let loop_keys = keys_of(&object(&lifecycle, "loop"));
+    // `fail_fast` is removed grammar: the parser still owns it so it can reject
+    // it, so the schema must not offer it.
+    let removed = "fail_fast";
+    assert!(LOOP_ITERATION_KEYS.contains(&removed) && !loop_keys.contains(removed), "{loop_keys:?}");
+    let mut loop_grammar: BTreeSet<String> =
+        LOOP_ITERATION_KEYS.iter().filter(|key| **key != removed).map(|key| key.to_string()).collect();
+    loop_grammar.extend(["gate".to_string(), "no_error".to_string()]);
+    // `max` is both an iteration key and an expression-function verb name, so
+    // the grammar is checked in both directions rather than as a difference.
+    assert!(loop_grammar.is_subset(&loop_keys), "{loop_keys:?}");
+    let loose: BTreeSet<String> = loop_keys.difference(&loop_grammar).cloned().collect();
+    assert!(loose.is_subset(&verbs), "loop keys that are neither grammar nor verbs: {:?}", loose.difference(&verbs));
+    assert!(definition(&lifecycle, "loop", "gate").starts_with("stack "), "loop.gate is a lifecycle stack");
+    assert!(definition(&lifecycle, "loop", "while").starts_with("expression"));
+    assert!(definition(&lifecycle, "loop", "until").starts_with("expression"));
+
+    // Every communication verb is a single-pass surface wherever an event can
+    // hold it: short form, long-form `text`, dictionary bundle, branch body,
+    // and loose loop verb. Its long-form `no_error` flag is not text.
+    let communicate = keys_of(&object(&actions, "communicate"));
+    assert!(communicate.contains("say") && communicate.len() >= 10, "{communicate:?}");
+    for verb in &communicate {
+        let verb = verb.as_str();
+        assert!(loop_keys.contains(verb), "loop accepts {verb}");
+        for event in EVENT_KEYS.iter().copied().filter(|event| *event != "loop") {
+            for path in [
+                vec![Key(event), Index(0), Key(verb)],
+                vec![Key(event), Index(0), Key(verb), Key("text")],
+                vec![Key(event), Key(verb)],
+                vec![Key(event), Index(0), Key("then"), Index(0), Key(verb)],
+                vec![Key(event), Index(0), Key("else"), Key(verb)],
+            ] {
+                assert!(lifecycle::is_single_pass_value(&path), "{path:?}");
+            }
+            let flag = [Key(event), Index(0), Key(verb), Key("no_error")];
+            assert!(!lifecycle::is_single_pass_value(&flag), "{flag:?}");
+        }
+        assert!(lifecycle::is_single_pass_value(&[Key("loop"), Key(verb)]), "loop.{verb}");
+        assert!(lifecycle::is_single_pass_value(&[Key("loop"), Key("gate"), Index(0), Key(verb)]), "loop.gate.{verb}");
+    }
 }
 
 #[test]

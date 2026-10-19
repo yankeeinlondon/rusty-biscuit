@@ -113,9 +113,12 @@ add repo/pkg/Cargo.toml as a member of the repository's workspace → resolves
 ```
 
 Editors without a reliable file watcher (Neovim on Linux, for example) get
-the same result when you save: DMLS rescans the workspace and treats each
-changed document or package manifest it finds as a watched change. The
-rescan does not read `.git/config`.
+the same result when you save: DMLS lists the workspace again, re-reads the
+documents it has already parsed, and treats each changed document or package
+manifest it finds as a watched change. The same save marks every trigger
+registry stale, so a schema file changed outside the editor is picked up. The
+rescan does not read `.git/config`. [DMLS Indexing](../lsp/indexing.md)
+describes the file list and the registries.
 
 ## When the context cannot be built
 
@@ -154,9 +157,12 @@ a document you have open but not yet saved also resolves, unless a place
 searched before it could not be checked (for example a symlink loop); that
 link is reported broken with the `Io` failure class, as `md compose` would fail.
 
-DMLS checks a link's `#fragment` only in documents it has indexed. A
-fragment on a file outside the opened folder (or on a non-Markdown file) is
-not checked, so it is never reported as a missing anchor. Transclusion targets
+DMLS checks a link's `#fragment` only in workspace documents: Markdown files
+in the workspace file list, and open buffers. It reads an unopened target the
+first time a link to it needs checking, and reports no missing anchor until
+the file list is ready. A fragment on a file outside the opened folder (or on
+a non-Markdown file) is not checked, so it is never reported as a missing
+anchor. Transclusion targets
 and frontmatter file values are checked on disk, the way composition reads
 them.
 

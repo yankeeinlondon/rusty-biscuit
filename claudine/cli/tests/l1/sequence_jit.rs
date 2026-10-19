@@ -11,17 +11,14 @@
 
 use std::fs;
 use crate::common;
-use common::{CliProcessFixture, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi};
 
 /// Install a fake `goose` that runs `script` as its body.
 ///
 /// `$HOME` is the workspace, so a script can leave state behind for a later
 /// step to observe — which is how "this ran at its turn" becomes assertable.
 fn fake_goose(fixture: &CliProcessFixture, script: &str) {
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        &format!("#!/bin/sh\n{script}\n"),
-    );
+    common::launch_recorder::install(fixture, "goose", script);
 }
 
 /// A fake provider that echoes an incrementing counter, so each launch's output
@@ -38,6 +35,16 @@ printf '%s' "$count" > "$HOME/n.txt"
 printf 'run-%s\n' "$count"
 exit 0"#,
     )
+}
+
+fn recorded_prompts(fixture: &CliProcessFixture) -> Vec<String> {
+    common::launch_recorder::launches(&fixture.home().join("launches"))
+        .into_iter()
+        .map(|argv| {
+            let at = argv.iter().position(|arg| arg == "-t").expect("goose run -t <prompt>");
+            argv[at + 1].clone()
+        })
+        .collect()
 }
 
 fn run(fixture: &CliProcessFixture, args: &[&str]) -> (String, String, i32) {
@@ -75,7 +82,7 @@ fn a_later_step_composes_against_the_edit_an_earlier_step_made() {
         &format!(
             r#"if [ ! -f "$HOME/done" ]; then
   : > "$HOME/done"
-  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{{{ fm.marker }}}}"\n---\nBody {{{{state}}}}.\n' > "{md}"
+  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{{{ fm.marker }}}}"\n---\nBody {{{{seq}}}} marker is {{{{ fm.marker }}}}.\n' > "{md}"
 fi
 printf 'ok\n'
 exit 0"#,
@@ -84,7 +91,7 @@ exit 0"#,
     );
     fs::write(
         &md,
-        "---\nmarker: original\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'marker is {{ fm.marker }}'\n---\nBody {{state}}.\n",
+        "---\nmarker: original\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'marker is {{ fm.marker }}'\n---\nBody {{seq}} marker is {{ fm.marker }}.\n",
     )
     .unwrap();
 
@@ -94,12 +101,14 @@ exit 0"#,
     );
 
     assert_eq!(code, 0, "sequence should succeed; stderr:\n{stderr}");
+    let prompts = recorded_prompts(&fixture);
+    assert_eq!(prompts.len(), 2);
     assert!(
-        stderr.contains("marker is original"),
+        prompts[0].contains("marker is original"),
         "step 1 composes the pre-run document; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("marker is rewritten"),
+        prompts[1].contains("marker is rewritten"),
         "step 2 must re-read the live file and see step 1's edit; stderr:\n{stderr}"
     );
 }
@@ -117,14 +126,14 @@ fn a_mid_run_edit_to_the_sequence_list_does_not_change_the_plan() {
         &fixture,
         r#"if [ ! -f "$HOME/done" ]; then
   : > "$HOME/done"
-  printf -- '---\nsequence:\n  - alpha\n  - beta\n  - gamma\n---\nBody {{state}}.\n' > "$HOME/seq.md"
+  printf -- '---\nsequence:\n  - alpha\n  - beta\n  - gamma\n---\nBody {{seq}}.\n' > "$HOME/seq.md"
 fi
 printf 'ok\n'
 exit 0"#,
     );
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -192,7 +201,7 @@ fn a_body_shell_expansion_reads_the_filesystem_at_its_turn() {
 // ============================================================================
 
 /// A `set` in step 1's lifecycle is visible to step 2's *composition*, not just
-/// to step 2's lifecycle: the mutation layer sits under the reserved overlay and
+/// to step 2's lifecycle: the mutation layer sits under the sequence binding and
 /// above the live document, so the body interpolates the mutated value.
 #[test]
 fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
@@ -201,9 +210,11 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  - {set: {phase: advanced}}\nstart:\n  info: 'phase={{ fm.phase }}'\n---\nBody for {{state}} in {{ fm.phase }}.\n",
+        "---\nphase: initial\nsequence:\n  - name: alpha\n    prompt: child.md\n  - name: beta\n    prompt: child.md\n---\n",
     )
     .unwrap();
+
+    fs::write(fixture.cwd().join("child.md"), "---\nphase: initial\nsuccess:\n  - {set: {phase: advanced}}\nstart:\n  info: 'phase={{ fm.phase }}'\n---\nBody for {{seq}} in {{ fm.phase }}.\n").unwrap();
 
     let (_, stderr, code) = run(
         &fixture,
@@ -219,6 +230,10 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
         stderr.contains("phase=advanced"),
         "step 2 must compose against the accumulated mutation; stderr:\n{stderr}"
     );
+    let prompts = recorded_prompts(&fixture);
+    assert_eq!(prompts.len(), 2);
+    assert!(prompts[0].contains("in initial."), "{prompts:?}");
+    assert!(prompts[1].contains("in advanced."), "{prompts:?}");
     // The mutation is in-memory only: the document on disk is untouched.
     let on_disk = fs::read_to_string(&md).unwrap();
     assert!(
@@ -227,39 +242,38 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
     );
 }
 
-/// The reserved overlay outranks every lower layer: a `set` targeting a
-/// reserved key is refused, and `state` keeps naming the step.
-///
-/// The assertion reads `state.name` rather than `{{state}}`: string-context
-/// name coercion is a compose-time option, and a lifecycle `info:` resolves
-/// after composition, where the typed object is what is in scope.
+/// A mutation of authored `state` cannot overwrite the separate `seq` binding.
+/// Referenced prompt lifecycle events continue to observe their lexical step.
 #[test]
-fn the_reserved_overlay_outranks_a_runtime_mutation() {
+fn an_authored_state_mutation_does_not_override_the_sequence_binding() {
     let fixture = CliProcessFixture::named("sequence-jit");
     counting_goose(&fixture);
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nsuccess:\n  - {set: {state: hijacked}}\nstart:\n  info: 'state={{ state.name }}'\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - name: alpha\n    prompt: child.md\n  - name: beta\n    prompt: child.md\n---\n",
     )
     .unwrap();
 
-    let (_, stderr, _) = run(
+    fs::write(fixture.cwd().join("child.md"), "---\nsuccess:\n  - {set: {state: hijacked}}\nstart:\n  info: 'state={{ seq.name }}'\n---\nBody {{seq}}.\n").unwrap();
+
+    let (_, stderr, code) = run(
         &fixture,
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
+    assert_eq!(code, 0, "{stderr}");
     assert!(
         stderr.contains("state=alpha") && stderr.contains("state=beta"),
         "the overlay must keep naming each step; stderr:\n{stderr}"
     );
     assert!(
         !stderr.contains("state=hijacked"),
-        "a reserved key must not be writable by `set`; stderr:\n{stderr}"
+        "authored state mutations must not replace seq; stderr:\n{stderr}"
     );
 }
 
-/// A later step composes `{{ last(outputs) }}` against the entry the previous
+/// A later step composes `{{ last(seq.outputs) }}` against the entry the previous
 /// step committed — the accumulator is a live runtime layer, not a preflight
 /// snapshot.
 #[test]
@@ -269,7 +283,7 @@ fn a_later_step_composes_the_previous_steps_output() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'prior=[{{ last(outputs) }}]'\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}} prior=[{{ last(seq.outputs) }}].\n",
     )
     .unwrap();
 
@@ -279,12 +293,14 @@ fn a_later_step_composes_the_previous_steps_output() {
     );
 
     assert_eq!(code, 0, "sequence should succeed; stderr:\n{stderr}");
+    let prompts = recorded_prompts(&fixture);
+    assert_eq!(prompts.len(), 2);
     assert!(
-        stderr.contains("prior=[]"),
+        prompts[0].contains("prior=[]"),
         "step 1 sees an empty accumulator; stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("prior=[run-1]"),
+        prompts[1].contains("prior=[run-1]"),
         "step 2 must see step 1's committed entry; stderr:\n{stderr}"
     );
 }
@@ -293,10 +309,9 @@ fn a_later_step_composes_the_previous_steps_output() {
 // Failure policy
 // ============================================================================
 
-/// A mid-run composition failure is a failure of *that step*: under
-/// `fail_fast: false` the remaining steps still run.
+/// The removed continuation flag is rejected before any provider starts.
 #[test]
-fn a_step_failure_lets_later_steps_run_when_fail_fast_is_false() {
+fn removed_continuation_flag_never_starts_the_first_step() {
     let fixture = CliProcessFixture::named("sequence-jit");
     // Fail the first launch, succeed afterwards.
     fake_goose(
@@ -312,7 +327,7 @@ exit 0"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -327,11 +342,9 @@ exit 0"#,
         ],
     );
 
-    assert_ne!(code, 0, "a failed step must fail the run; stderr:\n{stderr}");
-    assert!(
-        stderr.contains("1/2") && stderr.contains("2/2"),
-        "both steps must be attempted; stderr:\n{stderr}"
-    );
+    assert_ne!(code, 0, "{stderr}");
+    assert!(stderr.contains("removed") && stderr.contains("--fail-fast"), "{stderr}");
+    assert!(!fixture.home().join("first").exists());
 }
 
 /// The same fixture under `fail_fast: true` stops at the first failure and
@@ -348,7 +361,7 @@ exit 3"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -357,8 +370,6 @@ exit 3"#,
         &[
             "sequence",
             "--goose",
-            "--fail-fast",
-            "true",
             md.to_str().unwrap(),
         ],
     );
@@ -395,7 +406,7 @@ exit 0"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - name: work\n    shell: \"echo from-shell\"\n  - name: report\nstart:\n  info: 'prior=[{{ last(outputs) }}]'\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - name: work\n    shell: \"echo from-shell\"\n  - name: report\n---\nBody {{seq}} prior=[{{ last(seq.outputs) }}].\n",
     )
     .unwrap();
     fs::write(
@@ -416,8 +427,10 @@ exit 0"#,
         1,
         "only the bodyless step launches a provider; launches:\n{launches}"
     );
+    let prompts = recorded_prompts(&fixture);
+    assert_eq!(prompts.len(), 1);
     assert!(
-        stderr.contains("prior=[from-shell]"),
+        prompts[0].contains("prior=[from-shell]"),
         "the shell task's stdout must be the accumulator entry; stderr:\n{stderr}"
     );
 }
@@ -431,7 +444,7 @@ fn a_failing_shell_task_fails_its_step() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - name: work\n    shell: \"false\"\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - name: work\n    shell: \"false\"\n---\nBody {{seq}}.\n",
     )
     .unwrap();
     fs::write(
@@ -467,7 +480,7 @@ fn dry_run_composes_every_step_and_launches_nothing() {
 exit 0"#,
     );
     let md = fixture.cwd().join("seq.md");
-    let original = "---\nprompt: 'Do {{state}}'\nsequence:\n  - alpha\n  - beta\n---\nBody.\n";
+    let original = "---\nprompt: 'Do {{seq}}'\nsequence:\n  - alpha\n  - beta\n---\nBody.\n";
     fs::write(&md, original).unwrap();
 
     let (_, stderr, code) = run(
@@ -500,7 +513,7 @@ fn dry_run_composes_every_step_against_the_initial_state() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nPrior was [{{ last(outputs) }}].\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nPrior was [{{ last(seq.outputs) }}].\n",
     )
     .unwrap();
 
@@ -541,7 +554,7 @@ exit 0"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 

@@ -240,6 +240,13 @@ is to *type it*, not to code the prose.
 
 ## Catalog additions
 
+`composition.cancelled` describes a running group leg stopped by a sibling's
+failure. Its detail contains `group`, `leg`, and the original structured failure
+under `cause`. It is unrecoverable within that run and has warning severity;
+the originating failure remains the group's primary error. Ctrl-C retains
+`provider.interrupted`. Cancellation cleanup exposes this cause through `err`,
+and cleanup failures do not replace it.
+
 The `composition.invalid_file_reference` payload was extended additively. The
 original five fields keep their names, order, and values:
 

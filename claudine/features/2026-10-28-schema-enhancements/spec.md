@@ -34,6 +34,7 @@ pipeline_step: 18
 formerly: 2026-09-21-schema-enhancements
 depends-on:
     - 2026-10-16-core-schema-types
+    - 2026-10-16-type-narrowing
 related:
     - 2026-10-14-union-type-constraints
     - 2026-10-29-recursive-schema-types
@@ -145,7 +146,8 @@ This spec is careful to separate what is known while a document is being _writte
 | The `unknown`, `null`, `alphanumeric`, and `shell` types | `2026-10-16-core-schema-types` (this spec depends on it) |
 | How `[]`, constraints, and `required` apply to a reference to a union type, and the list-of-union representation (`items: { anyOf }`) | `2026-10-14-union-type-constraints`; this spec's `(A \| B)[]` lowers onto that representation |
 | Recursive named types | `2026-10-29-recursive-schema-types` |
-| Extending the variable-type projection (root unions, imported and merged layers, raw JSON Schema, nested paths, host globals), function return types in argument checks, and flow-sensitive narrowing (worked-example rows f–i) | `2026-10-31-type-aware-evaluation` |
+| Extending the variable-type projection (root unions, imported and merged layers, raw JSON Schema, nested paths, host globals), and function return types and operator typing in argument checks (worked-example rows f and i) | `2026-10-31-type-aware-evaluation` |
+| Flow-sensitive narrowing (`TypeScope`) and the single subtype relation (`is_subtype`) | `2026-10-16-type-narrowing` |
 | `is_file_type`, guarded file arguments, `file_exists`'s structural rejection of malformed strings and its always-false warning for provably malformed literals, and the host function-extension contract | `2026-10-31-type-aware-evaluation` |
 | Retiring the interim absence-predicate suppression of `dm.expression.undeclared_property`, shared CLI/DMLS diagnostic codes, the CLI policy flags, and the report output format | `2026-10-31-type-aware-evaluation` |
 | Positional CLI arguments converted through this engine | `2026-09-30-positional-args`, a later, separate spec that is not part of this pipeline |
@@ -155,7 +157,7 @@ This spec is careful to separate what is known while a document is being _writte
 Four function facts are deliberately **not** part of the `function(...)` grammar. They are recorded in Darkmatter's Rust function registration instead, and every consumer (runtime binding, the compatibility API, DMLS) reads the same registration:
 
 - **Lazy evaluation.** `and` and `or` stop evaluating their arguments as soon as the answer is known. A signature cannot say this.
-- **Type-predicate narrowing.** When `is_number(x)` returns `true`, `x` is known to be a number inside the guarded branch. A `returns(boolean)` alone does not express this. This spec records the facts; `2026-10-31-type-aware-evaluation` uses them for narrowing.
+- **Type-predicate narrowing.** When `is_number(x)` returns `true`, `x` is known to be a number inside the guarded branch. A `returns(boolean)` alone does not express this. `2026-10-16-type-narrowing` creates the fact registry that `TypeScope` reads and registers the predicates that exist today; the one-pass migration keeps every predicate's fact in that registry, declares each as true-iff or true-implies, and defines no second fact store.
 - **Conversion recovery.** `number()` and `round()` select a supplied fallback when their first argument fails to bind (see [Function Contracts Carried from the Charter](#function-contracts-carried-from-the-charter)).
 - **Source-type exclusion.** `length` rejects a boolean argument before the boolean → text conversion could reach its `string` option. The parameter union alone cannot say this.
 
@@ -844,6 +846,8 @@ _Decided 2026-10-10._ The categories need the design-time type of each argument.
 
 One Darkmatter library function derives, from a document's `EffectiveSchema`, a map from each top-level variable name to its design-time type. Composition and DMLS call the same function; neither walks schema syntax itself, and Claudine does not reproduce it.
 
+That function is the declared-type layer of `TypeScope`, which `2026-10-16-type-narrowing` lands first; this spec completes it to the table below. The categories read each argument's type from the `TypeScope` at the call site, never from the projection directly, so every guard's narrowing (including literal narrowing from `==`) reaches classification.
+
 | What the argument is | Design-time type in this spec |
 |---|---|
 | A top-level property declared `A(required)` in the document's typed projection (`EffectiveSchema.simplified`, single shape) | `A`, constraints included |
@@ -862,7 +866,7 @@ Rules:
 - Frontmatter namespace access follows `2026-10-18-fm-namespace`: `fm.size` and `fm["size"]` are static aliases of the document property, not host globals. A bare reserved name still resolves to its registered root, so a document property named `env` is typed through `fm.env`, never by assigning its type to the bare `env` root. This prevents a namespace spelling from bypassing a proven type error without adding nested-path inference.
 - Use the same resolved presence calculation as schema lowering and validation, including inherited and hoisted markers, rather than requiring every union arm to carry `required`. An optional `A` includes `| null`; a concrete required whole value does not. An explicitly null-admitting whole value stays optional even with `required`, as Phase A specifies. `unknown(required)` remains `unknown`. This corrects accidental disagreement with the prerequisite specs; it is not a new presence policy.
 
-Under this projection rows a–e of the worked example below are exact, and row d (`min(flag, 5)`) is rejected at composition. Rows f–i need return types, operator typing, and narrowing, which `2026-10-31-type-aware-evaluation` adds.
+Under this projection rows a–e of the worked example below are exact, and row d (`min(flag, 5)`) is rejected at composition. Rows g and h are exact through `TypeScope`'s predicate narrowing. Rows f and i need return types and operator typing, which `2026-10-31-type-aware-evaluation` adds.
 
 #### Argument-Type Categories
 
@@ -883,6 +887,7 @@ Classification notes:
 - **Unions.** A union argument whose non-null options all fit (exactly or by an always-safe conversion) is category 1, or category 2 if it also admits `null` that the target rejects. If every option is known to be wrong, it is category 5. Anything in between is category 3.
 - **Conversions.** Typed text to a `number` or `boolean` parameter is category 3. A typed number or boolean to a text parameter is category 1. A native non-null object, list, number, or boolean to `json`/`yaml` is category 1; arbitrary text is category 3 because it must parse as the target content format. Null is accepted only by a null-admitting target, and `unknown` follows category 4. For example, literal `"{a"` to `json` is category 5, while typed `string` to `json` is category 3.
 - **`numberlike` and `boolish`.** A `numberlike` argument to a `number` parameter is category 1 (its text always converts), and so is a `numberlike` argument to a `string` parameter, or a `number` argument to a `numberlike` parameter. Typed text to a `numberlike` parameter is category 3. `boolish` follows the same pattern against `boolean`.
+- **An exact fit is `is_subtype`.** Whether an argument type fits a parameter type without conversion is decided by `is_subtype` (`schemas/simplified/subtype.rs`), the single type-acceptance relation `2026-10-16-type-narrowing` establishes; a narrowed `literal('release')` therefore fits `string` and an `enum` with that member, and `literal(4)` fits `number`. The conversion rules in these notes apply only where `is_subtype` does not, and no second acceptance relation is built.
 - **Constraints and refinements do not warn.** Categories are judged on types; constraints are enforced at runtime. A typed `string` to `string(min(3); max(3))`, a typed `number` to the same parameter, and a typed `number` to `number(integer)` are all category 1. Refinements (`file`, `date`, `url`, `email`, `enum`) are judged the same way: a typed `string` or `number` to a `file` or `enum` parameter is category 1, and the refinement is checked on the value at runtime.
 - **Literals** are the only arguments judged by their actual value, constraints and refinements included: a literal certain to bind (`"4"` to `number`, `2026` to `string`) is category 1; one that cannot (`"pear"` to `number`, `0` to `number(min(1))`, `"purple"` to `enum("red","green")`, `min("pear", 5)`) is category 5.
 - **Wrong argument count**, and a definite overload ambiguity, are always category 5.
@@ -927,7 +932,7 @@ is_string(val: any): boolean
 | h | `is_string(foo) ? 0 : min(foo, 5)` | 1 — `foo` is narrowed to `number` in the false branch. | — | — |
 | i | `min(maybe \|\| 0, 5)` | 1 — `\|\| 0` removes `null`, leaving `number`. | — | — |
 
-Darkmatter rejects row d at composition. Rows f–i depend on function return types, operator typing, and flow-sensitive narrowing, delivered by `2026-10-31-type-aware-evaluation`, and are required test cases there. Under this spec alone, the outer argument in rows f and i is `unknown` (category 4) and rows g and h see `foo` as `string | number` (category 3); the composition verdict for each is "not rejected". An earlier example, `max(foo || 0, 100)` with `foo: string | number`, was withdrawn: `foo || 0` keeps the `string` arm, so it is category 3.
+Darkmatter rejects row d at composition. Rows g and h are exact in this spec: `TypeScope` (`2026-10-16-type-narrowing`) narrows `foo` in each guarded branch, and they are required test cases here. Rows f and i depend on function return types and operator typing, delivered by `2026-10-31-type-aware-evaluation`, and are required test cases there; under this spec the outer argument in each is `unknown` (category 4) and the composition verdict is "not rejected". An earlier example, `max(foo || 0, 100)` with `foo: string | number`, was withdrawn: `foo || 0` keeps the `string` arm, so it is category 3.
 
 #### Worked Example: `three_letter_acronym`
 
@@ -967,7 +972,7 @@ For comparison, the other ways `lookup` might be typed:
 
 #### Narrowing and Tightening
 
-Type-predicate functions such as `is_number(val: any): boolean` accept any value and, when they return `true`, prove the variable's type inside the guarded branch (rows g and h). That narrowing fact comes from Darkmatter's Rust registration (see [Not expressed in the catalog grammar](#not-expressed-in-the-catalog-grammar)).
+Type-predicate functions such as `is_number(val: any): boolean` accept any value and prove the variable's type on both sides of a guard (rows g and h): a true-iff predicate narrows its true side to the tested family and removes that family on its false side. That narrowing fact comes from Darkmatter's Rust registration (see [Not expressed in the catalog grammar](#not-expressed-in-the-catalog-grammar)) and is applied by `TypeScope` (`2026-10-16-type-narrowing`), not by the call check.
 
 Many Darkmatter functions are lenient today and declare `any` parameters. The one-pass migration tightens them all; afterwards a function given the wrong type (a type error from binding) and a function whose own work failed (a fallible function's domain error) are clearly distinct.
 
@@ -1142,6 +1147,7 @@ Decisions 1–15 were confirmed by the human on 2026-09-25 in a clarification pa
 78. **Inline review: call checks honor registration metadata.** Valid conversion fallbacks are not rejected at composition, lazy calls keep short-circuit behavior, and literal refinements remain passive. The passive document check precedes frontmatter evaluation.
 79. **Inline review: raw schemas keep their original assertions.** Conversion candidates must pass the complete applicable schema; `oneOf`, reference siblings, and overlapping key declarations cannot be reduced to permissive unions or first-match traversal.
 80. **Inline review: numeric wording distinguishes fractions from whole values.** Exact binary preservation cannot be required for `0.1`. Settled 2026-10-11: whole numbers must be exact in every spelling, decimals take the nearest `f64`, and a non-zero value that underflows to zero is an error.
+81. **2026-10-16: one type scope and one subtype relation.** Decided with the owner while writing `2026-10-16-type-narrowing`. The variable projection is `TypeScope`'s declared-type layer; argument types are read from the scope at the call site; predicate facts live in the scope's fact registry; exact fit is `is_subtype`. Rows g and h move into this spec.
 
 ## Acceptance Criteria
 

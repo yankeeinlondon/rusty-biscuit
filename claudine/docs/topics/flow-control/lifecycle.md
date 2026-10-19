@@ -31,19 +31,47 @@ can read. [Flow Control](flow-control.md) explains the directives (`retry`,
 
 ## Lifecycle Properties
 
-Six frontmatter properties are lifecycle events. A seventh, `loop`, is the
+Seven frontmatter properties are lifecycle events. An eighth, `loop`, is the
 loop's configuration, and can carry lifecycle actions of its own (see
 [Loop Gate Concerns](#loop-gate-concerns)).
 
-| Property | Emitted when |
-|----------|-------------|
-| `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and the schema verdict for live staged documents |
-| `start` | Pre-flight checks have passed; immediately before provider invocation |
-| `success` | The provider session completed without error **and** the composition satisfied its completion verdict |
-| `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, launch schema validation failure) |
-| `failure` | The provider session exited with an error, or the completion verdict failed |
-| `finalize` | Once per iteration, immediately after `success`/`blocked`/`failure` |
-| `loop` | The loop's configuration. Its lifecycle actions run at the loop gate, after `finalize`, when the `while`/`until` condition is checked |
+| Property | Document | Sequence or group container |
+|----------|----------|-----------------------------|
+| `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and schema validation | When reached, before preparation; the root sequence initializes before static preflight. Shell-free. |
+| `start` | Pre-flight checks passed; immediately before provider invocation | Preparation passed; immediately before children start. |
+| `success` | The provider completed and the completion verdict passed | Children settled with a successful container outcome. |
+| `blocked` | Preparation failed before the provider spawned | Container preparation failed before children started. |
+| `failure` | Provider or completion verdict failed | An unhandled child failure reached this container. |
+| `cancelled` | Cleanup after sibling-failure cancellation or Ctrl-C | Descendants settled after cancellation, before owner cleanup. |
+| `finalize` | Once after the terminal event, unless skipped or transferred by recovery | Once after the final attempt; successful results publish afterward. |
+| `loop` | Loop configuration and lifecycle gate after `finalize` | A group's or sequence's loop gate runs after each pass's `finalize`, as a document's does. |
+
+`cancelled` accepts communications (`say`/`speak`, `effect`, `message`,
+`notify`, `stdout`, `stderr`, `info`, `warn`, `success`), expression side
+effects, `set`, `shell`, and `stop`, including conditional branches. It rejects
+`skip`, `error`, `retry`, `resume`, `proxy`, `prep`, `break`, and `defer`,
+even in unreachable
+branches: cancellation cleanup cannot recover or redirect the run. Its `err`
+binding describes the structured cancellation cause. Declaring `cancelled: []`
+or `cancelled: {}` opts a running leg into sibling-failure cancellation even
+without cleanup actions; omitting the event does not. Ctrl-C interrupts every
+running primitive. Cleanup waits for descendants, then runs `cancelled` and
+`finalize` before restoring the enclosing scope. Shells remain disabled when
+the primitive has not reached `start`.
+
+Cancellation bypasses `failure` recovery. In any looping primitive, it also
+skips the loop gate and mutations and prevents another pass, even with a true
+continuation condition. A recovery directive in the following
+`finalize` raises a typed cancellation-recovery error and starts no new work.
+Cleanup errors are secondary diagnostics: cancellation remains terminal and
+Ctrl-C still exits `130`. A timeout during ordinary execution remains a failure;
+a timeout in cleanup is a cleanup error. See
+[Sequences — Cancellation](sequences.md#cancellation) for examples and exit values.
+
+Sequence task `setup:` and `teardown:` are removed grammar. Use a preceding
+sequence task for setup and a group `finalize:` handler for shared cleanup.
+Container lifecycle handlers execute on inline `sequence:` containers and
+referenced sequence documents. See [Sequences](sequences.md).
 
 Live staged preparation runs initialization before reading body dependencies.
 An `ensure_file` action can create a file that the stabilized body then includes;
@@ -82,7 +110,8 @@ initialize → launch validation → start → provider → inline closure → v
 ```
 
 The verdict asks two questions — did the body change meaningfully (inline only),
-and does the document satisfy the `$schema` that was resolved at launch? A
+and does the document satisfy the schema that was resolved at launch (its
+`$schema` plus Claudine's [trigger schemas](../schemas.md))? A
 failed verdict fires `failure` with a typed `err`
 (`composition.body_unchanged` or `composition.completion_schema`, the latter
 carrying `err.detail.properties[]`), so `success` cannot have fired first. It
@@ -101,7 +130,10 @@ it always was. See
 ## Writing an Event
 
 An event's value is either a **list** of items or a single **dictionary** of
-verbs. Omitting the event, writing `null`, `[]`, or `{}` all mean "do nothing".
+verbs. For events other than `cancelled`, omitting the event, writing `null`,
+`[]`, or `{}` all mean "do nothing". For `cancelled`, omission does not opt into
+sibling cancellation, an empty list or dictionary opts in without actions,
+and null is invalid.
 
 **A list** runs its items in the order written. Each item is one verb, a
 dictionary of several verbs (a *bundle*), or a guarded `when` item:
@@ -128,8 +160,8 @@ This runs `message`, then `say`, then `shell`. A root dictionary never carries
 `when`, `then`, or `else`; a guarded action needs the list form.
 
 The same grammar is accepted everywhere Claudine reads lifecycle actions: the
-six events, a `loop:` block's lifecycle concerns, and a sequence task's
-`setup:` and `teardown:`.
+seven events and a `loop:` block's lifecycle concerns. Inline sequence
+containers also execute lifecycle handlers.
 
 ### Guarded items: `when`, `then`, `else`
 
@@ -205,7 +237,7 @@ flowchart TD
     E -- "true" --> F["run the then body, by these same rules"]
     E -- "false" --> G["run the else body, if there is one"]
     E -- "the expression fails" --> X["the event fails; else is never chosen"]
-    D --> H{"was it a flow-control directive?"}
+    D --> H{"was it a flow-control directive other than prep?"}
     F --> H
     G --> H
     H -- "yes" --> Z["the whole event ends: nothing after it runs, in this list or any enclosing one"]
@@ -226,6 +258,10 @@ flowchart TD
   follows the usual failure routing.
 - The first flow-control directive that fires **ends the whole event**,
   wherever it sits: at the root, inside `then`, or inside a nested `else`.
+  `prep` is the exception: after its target returns, the next item runs.
+- An action failure in `initialize` or `start` that nothing tolerates fails
+  the run with the action's own message, for example
+  `lifecycle start failed: <message>` (or `lifecycle initialize failed: <message>`).
 - An event is complete when its synchronous work has finished, its messages
   are registered for delivery, and its audio has been published.
 
@@ -290,7 +326,15 @@ A directive ends the whole event, so an action written after an unconditional
 directive could never run. Within any one list (the event's list, a `then`
 body, or an `else` body) an item that always fires a directive must be the
 **last** item; otherwise parsing fails with `LifecycleActionOrder`, naming the
-directive.
+directive. `prep` is the exception: it returns to the next item, so anything
+may follow it.
+
+```yaml
+start:
+  - prep: "@prompts/_git/stage-all.md"   # returns
+  - info: "staged"                       # legal after prep
+  - break                                # an ending directive: last
+```
 
 A `when` item never counts as unconditional, even when both of its bodies end
 in a directive, so an item after it is legal:
@@ -339,20 +383,32 @@ that do not exist at compose time. So `- message: "❌️  {{err.code}}"` in
 The variables a lifecycle `{{ … }}` span can read fall into two groups:
 
 - **Early-binding** (resolvable before the run): `fm.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …). `env.*` reads the environment the document captured when it started; every event, loop iteration, `retry`, `resume`, and `finalize` of that document reads the same map, and a `proxy` target captures its own (see [Composition — One Environment per Document](../composition.md#one-environment-per-document)).
-- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `group` (inside a sequence group), `loop` (inside a loop), `current`.
+- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/`cancelled`/optional-error `finalize`), `timing`, `group` (inside a sequence group), `loop` (inside a loop), `current`.
 
-`err`, `timing`, `group`, and `loop` are Claudine's lifecycle globals. Which of
-them an event can read is fixed per event (and per sequence task `setup:`/`teardown:`), and
+`seq`, `err`, `timing`, `group`, and `loop` are Claudine's lifecycle globals. Which of
+them an event can read is fixed per event, and
 both the prepare-time check and event-time evaluation consult that one
 declaration:
 
-| Where the expression runs | `err` | `timing` | `group` | `loop` |
-| --- | --- | --- | --- | --- |
-| `initialize`, `start`, `success`, `loop`, task `setup:` | unavailable | available | inside a group only | inside a loop only |
-| `blocked`, `failure` | the failure | available | inside a group only | inside a loop only |
-| `finalize`, task `teardown:` | the failure, or `null` when there is none | available | inside a group only | inside a loop only |
-| a `shell` command (approved before any event fires) | unavailable | unavailable | unavailable | the iteration's values inside a loop |
-| a sequence task's commands at sequence-wide approval (primary, `setup:`, `teardown:`, group members) | unavailable | unavailable | unavailable | unavailable |
+| Where the expression runs | `err` | `timing` | `seq` | `group` | `loop` |
+| --- | --- | --- | --- | --- | --- |
+| `initialize`, `start`, `success`, `loop` | unavailable | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
+| `blocked`, `failure` | the failure | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
+| `cancelled` | the cancellation cause | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
+| `finalize` | the failure, or `null` | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
+| a sequence's own events (implemented) | follows the event above | available | own outputs/run ID; null child position | enclosing group only | enclosing loop only |
+| a group's own events (implemented) | follows the event above | available | enclosing sequence | own variables and event-timed results | enclosing loop only |
+| a lifecycle shell command at approval | unavailable | unavailable | unavailable | unavailable | the iteration's values inside a loop |
+| a sequence task's commands at sequence-wide approval | unavailable | unavailable | unavailable | unavailable | unavailable |
+
+`seq` is available in every lifecycle event, including `cancelled` and
+container events. Standalone documents see only `seq.outputs`; a sequence
+child sees its row, neighbors, outputs, and run ID. During shell approval its
+runtime value is unavailable, so sequence commands reading it use typed
+templates. `seq`, `group`, and `loop` replace whole roots at lexical boundaries
+and cannot be assigned by `set` or persisted into a document. Explicit
+`fm.seq`, `fm.group`, and `fm.loop` always read frontmatter. See
+[Sequences](sequences.md#the-seq-runtime-root) for the field and rename tables.
 
 Reading an unavailable global is an error that names the global and the
 reason (`claudine.event-has-no-error`, `claudine.outside-group`,
@@ -360,13 +416,13 @@ reason (`claudine.event-has-no-error`, `claudine.outside-group`,
 to a document property of the same name; write `fm.err`, `fm.group`, or
 `fm.loop` to read one of those.
 
-Three consequences are worth calling out. In `finalize` and a task's
-`teardown:`, `err` is always readable: it is an explicit `null` when the run
+Three consequences are worth calling out. In `finalize`, `err` is always
+readable: it is an explicit `null` when the run
 did not fail, so `when: "err"` is simply false. At sequence-wide approval no
 group has been entered yet, so `group` is unavailable there even for a command
 that will run inside a group; a group member reads `group` at event time
-instead. Sequence approval also refuses `outputs`, because no step has
-produced one yet when the whole graph is approved. And a lifecycle event that
+instead. Sequence shell approval treats `seq`, `group`, and `loop` reads as
+late placeholders approved by template shape and filled at the task’s turn. And a lifecycle event that
 reads `loop` in a document that is not looping fails with
 `claudine.outside-loop` when that event fires, not before launch, because the
 document cannot know at preparation time whether it will run inside a loop.
@@ -385,7 +441,7 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 ### The `shell` exception
 
-`shell` commands (short form `shell: "…"` and long-form `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`fm.*`, `ctx.*`, `env.*`, document properties, read-side functions, and inside a loop the iteration's `loop` values). The approved command is byte-identical to the executed command, including a sequence task's `setup:`/`teardown:` commands, which run the bytes sequence approval fixed. Sequence approval resolves those under the launch environment; a task whose own captured environment would change the text is refused before it runs (see [Sequences — Phase 1](sequences.md#phase-1--static-preflight)). A `shell` action's child process starts from the document's environment, so `$X` in the command reads the value `{{ env.X }}` resolved. A late-binding reference (`err`, `timing`, `group`, `current`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `fm.group` still reads the document.
+`shell` commands (short form `shell: "…"` and long-form `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`fm.*`, `ctx.*`, `env.*`, document properties, read-side functions, and inside a loop the iteration's `loop` values). A command approved as its bytes is byte-identical to the executed command, including sequence task commands, which run the bytes sequence approval fixed. Sequence approval resolves those under the launch environment; a task whose own captured environment would change the text is refused before it runs (see [Sequences — Phase 1](sequences.md#phase-1--static-preflight)). A `shell` action's child process starts from the document's environment, so `$X` in the command reads the value `{{ env.X }}` resolved. A late-binding reference (`err`, `timing`, `group`, `current`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `fm.group` still reads the document. A command approved by its shape instead keeps its placeholders and reads them when it runs; see [Shell actions approved by their shape](#shell-actions-approved-by-their-shape).
 
 Lifecycle YAML accepts only `set: {property: value}`; the positional
 `set(key, value)` spelling belongs to the separate capability and loop-control
@@ -418,7 +474,7 @@ These verbs report progress. Each takes one text value.
 | `warn` | Status line rendered with a warning style. |
 | `success` | Status line rendered with a success style. |
 
-The `stdout`, `stderr`, `info`, `warn`, and `success` channels keep the lines of their text: each newline, whether written in the YAML (a `|` block) or carried by an interpolated value such as a captured output, starts a new line. For example, `info: 'captured=[{{ last(outputs) }}]'` after a step printed `line one` and `  line two` shows:
+The `stdout`, `stderr`, `info`, `warn`, and `success` channels keep the lines of their text: each newline, whether written in the YAML (a `|` block) or carried by an interpolated value such as a captured output, starts a new line. For example, `info: 'captured=[{{ last(seq.outputs) }}]'` after a step printed `line one` and `  line two` shows:
 
 ```text
 ℹ captured=[line one
@@ -447,6 +503,167 @@ the canonical order applies, and it places `effect` before `say`.
 Audio already published keeps playing across a flow-control transition: when
 `retry`, `resume`, or `proxy` fires, the queued audio plays out and the next
 attempt's audio queues behind it. There is no way to cancel it.
+
+### Speech is prepared ahead of time (pre-warm)
+
+Synthesizing a phrase takes time: roughly 0.2–0.8 s for macOS `say`, 0.5–3 s
+for Kokoro on a CPU, and 1–3 s for gTTS, Echogarden, and cloud providers. A
+`say` in `success` that fires at the end of a twenty-minute run does not need
+to wait for that, because its text was usually known before the agent started.
+So Claudine **pre-warms** it: while it prepares the document, it hands every
+phrase it can already resolve to a background worker that synthesizes it into
+the TTS audio cache. When the event fires, `say` resolves the same text with
+the same voice settings, finds the cached audio, and publishes it at once.
+
+```yaml
+success:
+  - effect: "chime"
+  - say: "{{ fm.title }} is done"      # known now: pre-warmed
+failure:
+  - say: "failed: {{ err.msg }}"       # needs err: synthesized when failure fires
+```
+
+Pre-warm is an optimization only. It never changes what is spoken, the order
+audio plays in, the run's outcome, or its exit code, and an event never waits
+for it. If the event fires before its phrase is ready, `say` takes its ordinary
+uncached path, exactly as it would without pre-warm.
+
+#### Which phrases are pre-warmed
+
+Pre-warm walks the parsed lifecycle actions, never arbitrary frontmatter. It
+collects every `say`/`speak` in `start`, `blocked`, `success`, `failure`,
+`finalize`, `cancelled`, and the `loop:` block (loose verbs or `gate:`). It
+looks inside dictionary bundles, named arguments
+(`say: { text: … }`), and both the `then` and `else` bodies of every `when`,
+at any depth. It does not evaluate a `when` guard: the guard decides whether a
+phrase plays, not what it says. Phrases in `initialize` are skipped, since
+`initialize` fires moments after preparation and a warm cache gains nothing
+there.
+
+A collected phrase is pre-warmed only when it is **ready early**, which is
+stricter than the general [early-binding](#binding-time-early-vs-late) rule:
+
+| The phrase | Pre-warmed? | Example |
+| --- | --- | --- |
+| literal text | yes | `say: "all done"` |
+| reads only frontmatter (`fm.x`, `fm['x']`, or a bare document property) | yes | `say: "{{ title }} is done"` |
+| reads `ctx` or `env` | yes, from the values the document captured | `say: "done on {{ ctx.branch }}"` |
+| combines those with operators, indexing, `\|\|` fallbacks, or `? :` | yes | `say: "{{ fm.name \|\| 'the job' }} finished"` |
+| reads `err`, `timing`, `current`, `loop`, or `group` (or any global added later) | no | `say: "took {{ timing.total_ms }} ms"` |
+| contains **any** function call, even in a branch that would not run | no | `say: "done at {{ date() }}"` |
+| contains a shell expansion (`$( … )` or a backtick) | no | ``say: "on $(hostname)"`` |
+| resolves to empty or whitespace-only text | no | `say: "{{ fm.missing }}"` |
+
+`fm.err` reads a document property, so it can be pre-warmed even though `err`
+cannot. Function calls are excluded wholesale because some read-only functions
+probe a shell, the filesystem, or the network, and pre-warm never runs
+anything on speculation. A phrase that is skipped still plays normally: it is
+synthesized when its event fires. A phrase whose speculative resolution fails
+is skipped silently and reports nothing; the event resolves it again and
+reports its own errors as usual.
+
+The resolved text is produced by the same interpolation `say` uses at event
+time. Text an expression returns is data: braces or `$( … )` inside a
+frontmatter value are spoken as written, never evaluated a second time.
+
+#### When it runs
+
+One worker belongs to the whole command: a `compose`, `inline-compose`,
+`sequence`, or provider-wrapper invocation. It starts on the first phrase
+submitted, works through phrases one at a time, and is cancelled when the
+command finishes or is interrupted. Cancellation does not wait for unfinished
+synthesis; anything already cached stays cached for the next run.
+
+```mermaid
+flowchart LR
+    B["bootstrap read<br/>(before initialize)"] --> S[submit early phrases]
+    R["stabilized reread<br/>(after initialize)"] --> S
+    P["sequence preflight<br/>(before step one)"] --> S
+    E["retry, resume, loop iteration,<br/>proxy target"] --> S
+    S --> Q{already queued?}
+    Q -- yes --> X[skip]
+    Q -- no --> W[background worker]
+    W --> C[(TTS audio cache)]
+    C -. cache hit .-> V["say fires at its event"]
+```
+
+Phrases are submitted at each point where Claudine reads a document:
+
+- the **bootstrap** read, before `initialize` fires;
+- the **stabilized reread** after initialization, and every later read that
+  produces a new document state: each loop iteration, a `retry` or `resume`,
+  and a `proxy` target (after its `with:` overlay is applied, so the target's
+  phrases use the overlaid values; the caller never collects them);
+- in a sequence, **preflight**, which submits the early phrases of every
+  prompt document the sequence reaches before step one launches, without
+  composing a body, resolving a new reference, or fetching remote content.
+  Each prompt is submitted again when it is actually prepared.
+
+Submission never waits for synthesis, so none of these delays `initialize`,
+preflight, or the provider launch.
+
+Each distinct pair of resolved text and voice configuration is prepared at
+most once per command, across every task, iteration, retry, and handoff. A
+phrase whose text changes (for example because `initialize` rewrote the
+document with `set_frontmatter`) is a new pair and is prepared again; an
+unchanged phrase is not. A failed preparation is not retried by pre-warm; the
+event still synthesizes the phrase normally. Failures never print anything:
+the first one in a command is logged as a single tracing warning that omits
+the phrase text.
+
+#### Sequence values are left for their step
+
+Inside a sequence, values that a step receives from the sequence are treated as
+late: the lexical `seq`, `group`, and `loop` roots, keys set by the
+caller with `--set`, and a prompt task's `with`. A phrase reading a lexical
+root, or reading a late property by bare name, `fm.key`, or `fm['key']`, is not
+pre-warmed; nor is a phrase
+whose computed index (`fm[name]`) or whole-`fm` read could reach one. During
+preflight, Claudine also leaves late any frontmatter value that still holds
+`{{`, `$(`, or a backtick (resolving it would mean evaluating it) and any read
+of `ctx` or `env`, because the step has not captured its own yet. Those
+phrases are reconsidered when their document is prepared. For example,
+`say: "{{ env.NAME }}"` is skipped by preflight and prepared from the prompt's
+captured `NAME` when the prompt is prepared. Lexical runtime roots,
+`--set` keys, and runtime writes stay late there too.
+
+#### Configuration and when it is off
+
+Document lifecycle phrases use the `tts` setting in
+`~/.claudine/config.json`, including prompt documents reached by a sequence.
+Under `{ "tts": { "provider": "kokoro", "voice": "af_heart" } }`, a
+prompt's `say: done` is prepared with Kokoro and `af_heart`.
+
+The on/off switch always comes from the user's `tts` setting, whichever phrase
+is submitted first. Pre-warm is on unless that setting is an object with
+`"prewarm": false`; see
+[Configuring Actions → Text-to-speech settings](../configuring-actions.md#text-to-speech-settings-tts).
+The switch is decided once per command, when the first phrase is submitted.
+
+Pre-warm also does nothing under `--dry-run` or when `PLAYA_DRY_RUN` is `1`,
+`true`, `TRUE`, or `yes`. These checks come before any phrase is resolved.
+
+#### Limits
+
+- A phrase that reads a late root (`err`, `timing`, `current`, `loop`,
+  `group`) is never pre-warmed.
+- A lifecycle `set` (in `initialize` or any later event) changes the run's
+  state, not the document Claudine re-reads. A phrase that reads a key `set`
+  writes is pre-warmed with the text it had before the `set`, and at event time
+  it misses the cache and synthesizes the correct text. You hear the right
+  words, a little later. A document rewritten with `set_frontmatter` is re-read
+  and warmed with its new text.
+- Phrases for events that never fire are synthesized anyway. With a cloud
+  provider that can mean a billed request for each unfired phrase, and any
+  provider spends CPU or network time on them.
+- An event that fires while its phrase is still being prepared does not wait
+  for or cancel the preparation, so the phrase may be synthesized twice.
+- `proxy … with:` cannot switch the TTS provider or voice; neither is
+  frontmatter.
+- Providers that write no audio file (eSpeak, SAPI), or whose default voice
+  cannot be resolved safely ahead of time, gain nothing; preparing for them
+  succeeds without doing any work.
+- The audio cache has no eviction or expiry.
 
 ### Messages and notifications are delivered before exit
 
@@ -560,7 +777,7 @@ success:
       obj: "{{ payload }}"
 ```
 
-A literal nested map used as an argument value (`merge_frontmatter: { file: "state.md", obj: { owner: ken } }`) is a typed object-data-through-interpolation error. The one mapping-valued parameter is `with`, on `proxy` and `retry`.
+A literal nested map used as an argument value (`merge_frontmatter: { file: "state.md", obj: { owner: ken } }`) is a typed object-data-through-interpolation error. The one mapping-valued parameter is `with`, on `proxy`, `retry`, and `prep`.
 
 #### The removed `verb(args)` spelling
 
@@ -568,9 +785,9 @@ The `verb(args)` spelling (`say(All done)`, `shell(git push)`, `set_frontmatter(
 
 ### Flow Control Actions
 
-Seven directives change what the run does next instead of producing a side effect: `stop`, `skip`, `error`, `retry`, `resume`, `proxy`, and `defer` (`defer` is **planned**: it parses, and fails with `LifecycleDeferNotImplemented` when it fires). The first one that fires ends the whole event, and an unconditional directive must be the last item in its list (see [Flow-control placement](#flow-control-placement)). Every directive is valid in every event except `skip`, which is valid only in `initialize`.
+Nine directives change what the run does next instead of producing a side effect: `stop`, `skip`, `error`, `retry`, `resume`, `proxy`, `defer`, `break`, and `prep`. Only `defer` is **planned**: it parses, and fails with `LifecycleDeferNotImplemented` when it fires. `break` ends the nearest enclosing loop, and `prep` runs another document or sequence to completion and then returns to the next item. The first directive that fires ends the whole event, except `prep`, which returns; an unconditional directive other than `prep` must be the last item in its list (see [Flow-control placement](#flow-control-placement)). `skip` is valid only in `initialize`; `cancelled` permits only `stop` from this directive set.
 
-See [Flow Control](flow-control.md) for what each directive does and when to use it, and the [Flow Control Reference](flow-control-reference.md) for runtime limits, retry and resume re-entry, and `proxy` handoffs, including the `with:` overlays on `proxy` and `retry`.
+See [Flow Control](flow-control.md) for what each directive does and when to use it, and the [Flow Control Reference](flow-control-reference.md) for runtime limits, retry and resume re-entry, and `proxy` handoffs, including the `with:` overlays on `proxy`, `retry`, and `prep`.
 
 ### Shell Actions
 
@@ -586,6 +803,73 @@ start:
 A non-zero exit code is an action error unless `no_error: true` is set. A
 `shell` action returns nothing; to branch on a command, read its result with
 `set`.
+
+A `shell` command uses Claudine's own terminal, so it can be interactive:
+`shell: just commit` may launch another `claudine compose` that prompts or
+drives an agent's TUI. When cancellation stops a running command, the command
+and everything it started end together, with one exception on macOS and Linux:
+while Claudine is the terminal's foreground job, the command runs in
+Claudine's own process group so the terminal does not stop it. Ctrl-C still
+reaches everything it started, but a sibling-failure cancellation ends only
+the command itself, not background processes it left running.
+
+#### Shell actions approved by their shape
+
+A `shell` command, or a `set` value's `$( … )` command, with a placeholder can
+be approved two ways (see
+[Pre-Flight Checks — Phase 2](../pre-flight-checks.md#phase-2-lifecycle-shell-commands)),
+and the approval decides how it runs:
+
+- **Approved as its bytes** (an `exact` or `prefix` rule, or the exact,
+  prefix, or once choice): pre-flight's resolved bytes run through the system
+  shell, and a later change to a value does not change them.
+- **Approved by its shape** (a `template` rule, the "command shape"
+  choice, or allow-once for a template-only site): the command runs as a template. Each placeholder is read when the
+  action executes and passed as exactly one argument.
+
+```yaml
+---
+note: draft
+start:
+  - set: { note: "ready to ship; tag it" }
+  - shell: "record-note {{ note }}"
+---
+```
+
+With `template record-note {{ string }}` approved, `record-note` receives one
+argument, `ready to ship; tag it`: the value the earlier `set` wrote, with its
+space and `;` passed as data. A template-mode command:
+
+- **reads the state current when it runs**, including what an earlier action
+  in the same event wrote, and available `loop` or sequence `group` values.
+  Shell commands reading `err`, `timing`, or `current` remain refused during
+  preparation. A `set` value's command reads the snapshot taken before that
+  `set` writes anything, as every value of the `set` does. `ctx.*` and `env.*`
+  read the snapshot captured when the document was prepared.
+- **checks each value against its declared type** (constraints included)
+  before anything starts. `null` is missing; an array or object, a string
+  holding a NUL character, or a value the declaration refuses is rejected.
+- **meets the blacklists again** once every argument is filled: a `template
+  git {{ string }}` approval cannot run `git reset`, and a user `exact`
+  blacklist rule blocks the fill it names.
+- **starts its program directly**, never through a shell, from the same working
+  directory and environment as a byte-approved command, with its output on the
+  terminal. A program an interpreter would re-parse the arguments for (a
+  `.cmd`/`.bat` file on Windows, a script without `#!` on Unix) is refused. Only
+  the curated redirections (`> /dev/null`, `2> /dev/null`, `2>&1`, `>&2`) and
+  `&&`/`||` chains are available; a refused segment anywhere in the chain keeps
+  every segment from starting.
+
+A missing or rejected value, a blacklisted fill, and a refused program are
+input errors, not command failures: the event halts with
+`LifecycleShellTemplateRefused`, whatever `no_error` says, and the message names
+the placeholder, its declared type, and the authored command, never the value.
+A command that starts and exits non-zero is still an ordinary action error,
+which `no_error` can suppress. `initialize` and the early catch handlers stay
+shell-free under every approval.
+
+Runtime template validation errors omit the refused value; earlier document
+schema validation may display it in its separate diagnostics.
 
 ### Reading a Command's Result
 
@@ -622,7 +906,9 @@ flowchart LR
 - **The command bytes are fixed at pre-flight.** Arguments resolve once from
   early-binding values, pre-flight approves exactly those bytes, and the action
   runs them. A later `set` of a value the command interpolated does not change
-  what runs.
+  what runs. A value approved by its shape is the exception: it reads its
+  placeholders when it executes (see
+  [Shell actions approved by their shape](#shell-actions-approved-by-their-shape)).
 - **The result is produced each time the action executes.** Each executed
   `set` gets its own result cache: two values naming the same command share one
   run, but a command read in `start` and again in `success` runs twice, because
@@ -644,9 +930,8 @@ flowchart LR
   working directory. It is refused in `initialize`, in every branch including
   one that can never be selected, and cannot run in an early catch handler
   before pre-flight reaches `start`. A `set` in `start` is legal in a document
-  that also has `initialize`. A sequence task's `set` (`setup:`, `teardown:`, or
-  a `side_effect:` task) cannot run a command and refuses a whole-value
-  `$( … )`.
+  that also has `initialize`. A sequence `side_effect:` task's `set` cannot
+  run a command and refuses a whole-value `$( … )`.
 
 A `capture:` option on the `shell` action is not available; `set` is the one
 way a lifecycle step reads a command's result.
@@ -710,7 +995,9 @@ It is rejected:
 
 `no_error` never suppresses an expression-layer error: a crashed `when:`, a
 `{{ … }}` that raised, a `with` overlay that failed to evaluate, or a shell
-prohibition always halts.
+prohibition always halts. On a `prep` it tolerates a failed call
+(`LifecyclePrepFailed`) like a failed `shell` action; it never suppresses a
+`break` fired outside any loop (`LifecycleBreakWithoutLoop`).
 
 ## Lifecycle Context
 
@@ -718,7 +1005,7 @@ Lifecycle expressions have access to late-binding roots in addition to frontmatt
 
 | Root | Available in | Fields |
 |------|--------------|--------|
-| `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
+| `err` | `blocked`, `failure`, `finalize`, `cancelled` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
 | `loop` | inside a loop: the loop gate and the events of an iteration | `count`, `is_first`, `is_last`, `last_output`, `last_exit_code`; see [Looping — Loop values](looping.md#loop-values) |
 | `current` | every event | `current.<key>` for every `ctx.<key>`, observed once per event: every read in one event's actions agrees |
@@ -825,7 +1112,7 @@ failure:
 ```
 
 Printing the answer will not repair the failed transaction. Existing recovery
-directives and sequence/loop `fail_fast` policy will govern subsequent work.
+directives and enclosing container failure policy will govern subsequent work.
 A confirmed successful provider result with delayed presentation will remain
 success and will not fire this failure handler. See
 [planned completion behavior](../timeouts.md#planned-delayed-claudine-completion).
@@ -837,11 +1124,11 @@ answer and inspect the resulting state before choosing `retry`, which repeats
 the transaction. Retained provider text is data; do not execute it as a shell
 command or treat it as authored lifecycle instructions.
 
-Sequence continuation uses `fail_fast: false` on the sequence document, with
-no overriding `--fail-fast` flag. The failed step stays failed and the overall
-sequence returns failure even though later steps run. The default is
-`fail_fast: true`, which stops later steps. Loop continuation uses the loop's
-own `fail_fast: false`. `no_error` only covers lifecycle side-effect failures;
+A sequence stops on an unhandled failure. To continue, wrap optional work in
+a one-leg group with `fail_fast: false`; that group handles its leg failure
+and publishes its result, allowing later sequence steps to run. The group can
+report the failed leg through `group.failed`. A loop has no `fail_fast`: a
+failed iteration is an unhandled failure unless a `failure` event handles it. `no_error` only covers lifecycle side-effect failures;
 it does not repair an unconfirmed provider transaction. The diagnostic-specific
 sequence example and recovery checks remain planned until populated detail
 reaches both `failure` and `finalize`.
@@ -869,7 +1156,7 @@ start:
 
 ## Loop Gate Concerns
 
-The `loop` property carries both iteration controls (`while`/`until`, `action`/`actions`, `max`, `fail_fast`, `on_rate_limit`) and lifecycle concerns. The lifecycle concerns fire on every gate pass, the point at which the loop condition is checked, including the final pass that exits the loop.
+The `loop` property carries both iteration controls (`while`/`until`, `action`/`actions`, `max`, and, on a document, `on_rate_limit`) and lifecycle concerns. The lifecycle concerns fire on every gate pass, the point at which the loop condition is checked, including the final pass that exits the loop.
 
 A `loop:` block spells its lifecycle concerns in one of two ways, never both:
 
@@ -903,6 +1190,8 @@ A `loop:` block spells its lifecycle concerns in one of two ways, never both:
 
 Mixing loose verb keys with `gate:` in one `loop:` block, and `when` at the
 loop root, are both `LifecycleStackInvalidShape`; a guard belongs in `gate:`.
+Unlike an event, `gate:` is never `null` or `{}`: both are
+`LifecycleStackInvalidShape`, and `gate: []` is the explicit empty gate.
 `action`/`actions` at the loop root are the iteration mutations, not lifecycle
 grammar.
 
@@ -910,7 +1199,7 @@ Loop execution runs `initialize` once at the start, then re-enters each iteratio
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](looping.md#iteration-semantics) for the full counting table.
 
-The `loop:` block's lifecycle concerns read ordinary frontmatter and the `loop` values. Inside the gate these describe the iteration that just finished, the same values the `while`/`until` condition reads, so on the pass that ends the loop `loop.count` is the number of iterations that ran. `retry`, `resume`, and `proxy` in the gate fail with `LifecycleSetupPhaseRecoveryUnsupported`.
+The `loop:` block's lifecycle concerns read ordinary frontmatter and the `loop` values. Inside the gate these describe the iteration that just finished, the same values the `while`/`until` condition reads, so on the pass that ends the loop `loop.count` is the number of iterations that ran. `retry`, `resume`, and `proxy` in the gate fail with `LifecycleSetupPhaseRecoveryUnsupported`. A `break` in the gate ends the loop without evaluating the condition or applying the action, and a `prep` in the gate runs its target and returns to the next gate item; see [Looping — Breaking out of a loop](looping.md#breaking-out-of-a-loop).
 
 ## Examples
 
@@ -1088,7 +1377,7 @@ failure:
 
 `err.category == 'timeout'` matches both kinds; to distinguish them, match `err.code == 'timeout.wall_clock'` or `err.code == 'timeout.step_silence'`.
 
-`failure` is the natural home for this recovery, but it is not the only legal one: `resume` is valid in **every** event, and needs only a live provider session (pre-launch it surfaces `ResumeWithoutSession`). A `success` event can resume the agent just as well when the run finished cleanly but left something undone. `resume` defaults to a single attempt (`max_attempts: 1`), and its short-form value binds to the required `message` parameter.
+`failure` is the natural home for this recovery, but it is not the only legal one: `resume` is valid in every event except `cancelled`, and needs only a live provider session (pre-launch it surfaces `ResumeWithoutSession`). A `success` event can resume the agent just as well when the run finished cleanly but left something undone. `resume` defaults to a single attempt (`max_attempts: 1`), and its short-form value binds to the required `message` parameter.
 
 ## Sound Effects
 
@@ -1141,7 +1430,11 @@ Code using the guard can:
 
 Claudine validates lifecycle frontmatter when the document is prepared, before
 any event fires. Every error names the authored path of the offending node,
-for example `failure[0].else[1].shell.command`. The most common errors:
+for example `failure[0].else[1].shell.command`. Claudine's
+[schemas](../schemas.md) catch many of the same mistakes earlier, in the editor
+and in the launch verdict. They type `cancelled` at every conditional depth,
+but other stacks only within three conditional levels; the parser below is
+the authority. The most common errors:
 
 | Error | Cause |
 |-------|-------|
@@ -1153,8 +1446,8 @@ for example `failure[0].else[1].shell.command`. The most common errors:
 | `LifecycleMultipleLifecycleActions` | Two directives in one bundle |
 | `LifecycleSayConflict` | `say` and `speak` in one dictionary |
 | `LifecycleUnknownEffect` | A literal `effect` name not in the compiled catalog |
-| `LifecycleActionPlacement` | `skip` outside `initialize`, or a shell in `initialize` (any branch) |
-| `LifecycleWithUnsupported` | `with` on a verb other than `proxy` and `retry` |
+| `LifecycleActionPlacement` | `skip` outside `initialize`, a shell in `initialize`, or a forbidden flow directive in `cancelled` (any branch) |
+| `LifecycleWithUnsupported` | `with` on a verb other than `proxy`, `retry`, and `prep` |
 | `LifecycleNestedSpanInLiteral`, `LifecycleErrNotAvailable` | Described below |
 
 ```yaml
@@ -1265,3 +1558,54 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 - [Composition](../composition.md) — the composition pipeline and loop behavior
 - [Configuring Actions](../configuring-actions.md) — messaging routes and action configuration
 - [Non-Interactive Sessions](../non-interactive-sessions.md) — stderr rendering and terminal output
+
+
+## Sequence and group containers
+
+Sequences and groups use the same event order as documents: initialize,
+preparation, start, a terminal event, then finalize. The root sequence
+initializes before static preflight. Nested sources are reread before start for
+their events and group `variables`; the children preflight discovered run
+unchanged ([Sequences](sequences.md#phase-2--just-in-time-composition)).
+Preparation errors run blocked and finalize with shell execution disabled.
+A body-only sequence step composes its source body without running the source
+lifecycle again.
+
+A container's events read the same frontmatter its children do. A referenced
+sequence document's events read that document's own properties, under the
+invocation's `--set` values and runtime writes, exactly as when it runs
+directly; inline containers and groups read the frontmatter of the document
+that authored them ([Sequences](sequences.md#what-a-referenced-sequence-reads)).
+
+```mermaid
+stateDiagram-v2
+    [*] --> initialize
+    initialize --> skipped: skip
+    initialize --> preparation
+    preparation --> blocked: fails
+    preparation --> start: passes
+    start --> children
+    children --> success: successful outcome
+    children --> failure: unhandled failure
+    children --> cancelled: descendants settle after cancellation
+    failure --> preparation: accepted retry; no finalize
+    success --> finalize
+    blocked --> finalize
+    failure --> finalize: no recovery
+    cancelled --> finalize
+    finalize --> [*]: publish only on success
+    skipped --> [*]: no finalize
+```
+
+A `proxy` transfers the container's place to a target without any remaining
+source events. A `retry` in `finalize` does not re-enter that finalization;
+it starts a new attempt. Recovery is prohibited after cancellation.
+
+
+Container retry starts another attempt without repeating initialize or running
+the abandoned attempt's finalize. It clears child results while retaining
+runtime writes, including evaluated `retry.with` values. A container has no
+provider session, so resume raises the no-session error. Proxy transfers its
+place to the target without finalizing the source. Results publish after
+finalize succeeds. See [Sequences](sequences.md#container-lifecycle-and-recovery)
+for examples, result shapes, and failure propagation.

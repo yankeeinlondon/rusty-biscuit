@@ -281,7 +281,7 @@ fn decrement_sets_missing_and_accepts_numeric_strings() {
 
 #[test]
 fn set_rejects_reserved_properties() {
-    for prop in ["loop", "replace", "_loop_count", "_loop_is_first"] {
+    for prop in ["seq", "group", "loop", "replace", "_loop_count", "_loop_is_first"] {
         let mut fm = Map::new();
         let err = apply_action(
             &mut fm,

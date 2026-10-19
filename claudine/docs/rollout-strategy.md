@@ -53,8 +53,8 @@ the pipeline.
 | 16 | `2026-10-26-task-inputs-and-providers` | Task `params:` becomes `with:`, each task's agent is chosen by one precedence order, and the sequence schema is written. | 11, 15 |
 | 17 | `2026-10-27-darkmatter-lifecycle-ownership` | Darkmatter takes ownership of lifecycle events, hosts can define and rename events, one file declares every global, and the trigger kind is renamed. No other behavior change. | 16 |
 | 18 | `2026-10-28-schema-enhancements` | `tuple`, `function`, and the `\|` union operator; one conversion engine for frontmatter and function arguments; the function catalog rewritten in that grammar. | 6 |
-| 19 | `2026-10-29-recursive-schema-types` | A named type can reference itself without the resolved schema growing with every level. | 4, 18 |
-| 20 | `2026-10-30-claudine-recursive-schemas` | Claudine's lifecycle schemas drop their hand-unrolled nesting and use recursive types. | 11, 19 |
+| 19 | `2026-10-29-recursive-schema-types` | Part A: validation stage timings, a slow-validation DMLS log, a Claudine-shaped benchmark, and removal of measured validation waste. Part B: a named type can reference itself without the resolved schema growing with every level. | A: —; B: 4, 18 |
+| 20 | `2026-10-30-claudine-recursive-schemas` | Claudine's lifecycle schemas drop their hand-unrolled nesting and use recursive types; sequence and group containers, and every container event, are typed at every depth. | 11, 19 |
 | 21 | `2026-10-31-type-aware-evaluation` | Type-aware evaluation, narrowing inside guards, diagnostics, and the consolidated `--allow`/`--deny`/`--disable` flags. | 18 |
 
 ```mermaid
@@ -84,6 +84,10 @@ flowchart TD
   sequence work so the move happens against the final grammar.
 - **Type system last (18–21).** Phase B is the largest spec and nothing in the
   lifecycle or sequence work waits on it.
+- **Measure early (19, Part A).** Validation is already slow enough to hurt
+  the editor, and the measurements guide Part B. Part A needs neither
+  recursion nor step 18, so it runs alongside 15–16, before ownership moves
+  in 17.
 - **Not in this pipeline:** `2026-09-30-positional-args` stays in
   `darkmatter/features/` and follows once this pipeline is done.
 

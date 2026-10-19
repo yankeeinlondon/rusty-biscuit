@@ -42,7 +42,6 @@ Administration:
   uninstall         Remove Claudine hooks from all agents
   providers         Show provider capability matrix
   logs              Query and sync Claudine JSONL logs
-  budget            Create and operate the shared budget ledger a sequence run enforces
   dashboard         Show the mesh NOW view: live sessions across rendezvous hosts
   completions       Generate shell completions
   context           Show Darkmatter runtime context, expression engine, and side effects

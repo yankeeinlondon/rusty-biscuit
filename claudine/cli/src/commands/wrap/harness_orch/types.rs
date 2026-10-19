@@ -38,7 +38,8 @@ pub(crate) struct HarnessPromptState {
     pub(crate) original_ref: String,
     pub(crate) base_prompt: Option<String>,
     /// The evaluated `proxy.with` mapping for this document — immutable,
-    /// pre-schema, and never written to disk.
+    /// pre-schema, and never written to disk — anchored at the source document
+    /// that authored it.
     ///
     /// Merged into the target's *authored* frontmatter at every read of it, so
     /// it participates in frontmatter interpolation, selection hints,
@@ -51,7 +52,7 @@ pub(crate) struct HarnessPromptState {
     ///
     /// Empty for a directly invoked document. Replaced wholesale — never merged
     /// — when this document proxies on.
-    pub(crate) overlay: indexmap::IndexMap<String, serde_json::Value>,
+    pub(crate) overlay: claudine::composition::AnchoredOverlay,
     /// The evaluated `retry.with` mapping of the retry that is re-entering this
     /// document — in memory only, never written to disk.
     ///
@@ -83,6 +84,10 @@ pub(crate) struct HarnessPromptState {
     /// Recorded whether or not the commit was suppressed, so a caller that
     /// withheld the commit can still read what the run produced.
     pub(crate) last_final_output: Option<String>,
+    /// The provider each attempt of this document spawned, in order. A retry
+    /// or resume whose refreshed `agent:` moved the provider records the new
+    /// one; an attempt that never spawned records nothing.
+    pub(crate) launched_providers: Vec<claudine::provider::Provider>,
     pub(crate) input_layers: claudine::composition::CallerInputLayers,
     /// Why the next preparation of this document is happening — stamped by the
     /// control dispatch that decided the re-entry, so preparation reads the

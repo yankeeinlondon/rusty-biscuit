@@ -22,6 +22,11 @@ same scheme validation and deny-all-by-default host policy.
   shared terminal harness remains available to L1 because `render_invariants`
   uses its pure layout-invariant helpers without opening a terminal.
 - The CLI's separate `terminal-tests` feature enables its terminal harness.
+- The CLI's `test-fixtures` feature enables `test-toolkit` as an optional
+  dependency for one target, the `darkmatter-argv-recorder` fixture binary
+  (`test_toolkit::argv_recorder`), which the shell template tests run as a
+  native program. `just test` and CI enable it; `md`'s install never builds
+  it. It adds no crate: `test-toolkit` is already a dev dependency.
 
 The corresponding integration targets declare `required-features`, so an L1
 filter does not first compile binaries and native/browser dependencies that it
@@ -150,6 +155,10 @@ protocol-focused:
 - `unicode-normalization` — NFC normalization of wiki-link targets and logical
   paths (Phase 5 / R-8), so a vault resolves identically on macOS, Windows, and
   Linux. Already in the tree transitively via `url`/`idna`.
+- `rusqlite` (`bundled`) — the persistent per-file facts store that
+  references, rename, file rename, and workspace symbols narrow their
+  candidates with. Bundled SQLite gives every OS the same 3.45 build, which
+  supports `STRICT` tables; the same version and feature `claudine/lib` uses.
 - `darkmatter` (lib) — the semantic authority (span vocabulary,
   frontmatter block extraction, single-document reference extraction, and the
   later-phase parsing surfaces).

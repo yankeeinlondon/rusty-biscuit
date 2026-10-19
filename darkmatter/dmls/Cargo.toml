@@ -59,6 +59,11 @@ globset = "0.4"
 # identically on macOS/Windows/Linux. Already in the tree via `url`/`idna`.
 unicode-normalization = "0.1"
 
+# The persistent per-file facts store behind references, rename, and
+# workspace symbols. Bundled SQLite, so every OS builds the same 3.45 with
+# `STRICT` tables; the same version and feature as `claudine/lib`.
+rusqlite = { version = "0.31", features = ["bundled"] }
+
 # Semantic authorities
 darkmatter = { path = "../lib" }
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }

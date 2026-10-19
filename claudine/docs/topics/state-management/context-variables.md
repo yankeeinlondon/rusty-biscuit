@@ -97,7 +97,7 @@ each key is evaluated.
 | `current.<key>` | Lazy — the same key as `ctx.<key>`, observed once per lifecycle event (in a document body, once per expression) |
 | `env.<key>` | Eager — the map the document captured when it started; it does not change during that document's lifecycle |
 
-**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.
+**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (a concurrent group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.
 
 A later run therefore sees what an earlier run changed: a `proxy` target, a
 later sequence step, a later loop iteration, and a retried attempt each observe

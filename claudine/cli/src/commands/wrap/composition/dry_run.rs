@@ -80,7 +80,7 @@ impl DryRunRender {
     /// - `frontmatter` ← `prepared.effective_frontmatter`
     /// - `name` / `description` ← frontmatter string fields
     /// - `agent` / `model` ← `resolved_target` (None ⇒ interactive / default)
-    /// - `yolo` ← `request.yolo`
+    /// - `yolo` ← CLI/environment intent or the document default
     /// - `session_interactive` / `session_source` ← `request.session_interactive` /
     ///   `request.session_interactive_source`
     /// - `area` ← `prep_launch_workspace.package_context.package_area`
@@ -129,7 +129,7 @@ impl DryRunRender {
             description,
             agent,
             model,
-            yolo: request.yolo,
+            yolo: request.provider_yolo(),
             session_interactive: request.session_interactive,
             session_source: request.session_interactive_source,
             area,
@@ -158,6 +158,16 @@ pub(crate) fn render_hr(term: &Terminal) -> String {
         .alignment(RuleAlignment::Full)
         .weight(RuleWeight::Medium)
         .render(term)
+}
+
+/// Render one `prep` target the document names, which a dry run lists but
+/// does not run.
+pub(crate) fn render_prep_target(target: &str, term: &Terminal) -> String {
+    Prose::new(format!(
+        "<b>prep</b> target <cyan>{}</cyan> (<i>not run in a dry run</i>)",
+        claudine::harness::report::prose_escape(target)
+    ))
+    .render(term)
 }
 
 /// Render the `Frontmatter (resolved):` heading.

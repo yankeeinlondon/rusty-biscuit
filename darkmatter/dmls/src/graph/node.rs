@@ -222,7 +222,7 @@ pub struct LinkPayload {
 ///
 /// Emitted by the Layer-3 overlay for `::file`/`::code` directives whose target
 /// is a workspace-local path. A `transcludes` edge links this node to the
-/// resolved target document root when the path matches an indexed document; a
+/// resolved target document root when the path matches a graph document; a
 /// non-`.md` target (e.g. `::code ./mod.rs`) or a broken path carries no edge
 /// and is diagnosed at request time.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,8 +265,13 @@ pub enum WikiResolution {
     /// The file resolved but the `#heading` fragment matched no heading; the
     /// node is the resolved file's root so navigation still works.
     HeadingMissing(NodeId),
-    /// Multiple file candidates (document roots), in stable display order.
+    /// More than one file in the wiki universe matched. Lists the candidates
+    /// that are documents of this snapshot (their roots), in stable display
+    /// order; a snapshot over part of the universe may list fewer than two.
     Ambiguous(Vec<NodeId>),
+    /// Exactly one file in the wiki universe matched, and it is not a
+    /// document of this snapshot (a request-scoped graph over a few files).
+    OutsideGraph,
     /// No file candidate matched.
     Unresolved,
     /// `[[]]` / `[[|alias]]` — an empty target.

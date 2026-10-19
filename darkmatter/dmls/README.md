@@ -31,7 +31,7 @@ criterion 7).
 |-------|--------------|
 | **0 — Markdown baseline** | go-to-definition, references/backlinks, document + workspace symbols, document links, folding, hover, path/anchor/fence-language completion, broken-link/anchor and duplicate-heading diagnostics. Every path, including `&`/`^`/`@`, resolves through one context per repository, as `md compose` from the repository root resolves it ([file references](docs/file-references.md)). |
 | **1 — Wiki links** | `[[target]]` / `[[target#heading]]` / `[[target\|alias]]` completion, definition, references, hover, and the full `wiki.*` diagnostic taxonomy (case-sensitive matching, basename/path-suffix/root-relative resolution, ambiguity + portability collisions). |
-| **2 — Frontmatter intelligence** | effective-schema (base + configured extensions + repository-scoped trigger schemas + document `$schema`) diagnostics with precise key/value ranges, key/enum/`file(...)`/`style.*`/`suggest(...)` completion, type/constraint/`->`-description hover, `$schema`/`file(...)` navigation, frontmatter folding + symbols. Claudine activates as **pure config** (globs → baseline schema), no server-side special cases. |
+| **2 — Frontmatter intelligence** | effective-schema (base + configured extensions + repository-scoped trigger schemas + document `$schema`) diagnostics with precise key/value ranges, key/enum/`file(...)`/`style.*`/`suggest(...)` completion, type/constraint/`->`-description hover, `$schema`/`file(...)` navigation, frontmatter folding + symbols. Claudine activates as **pure data** (its trigger schemas on disk), no server-side special cases. |
 | **3 — Darkmatter DSL** | directive (`::file`/`::code`/`::shell`/`::block`/disclosure …) name/option completion, hover, folding, and diagnostics; transclusion links + definition + cycle detection + broken-path; interpolation (`{{ }}`) completion/hover/definition + malformed/unknown diagnostics; read-only shell-policy hover + `darkmatter.security.*`; fenced-language diagnostics. |
 | **Editing** | file + heading rename with workspace-wide reference updates (refusing ambiguous/unsafe edits atomically), the v1 code-action set, and formatting that runs the same clean transaction as `md clean` (frontmatter repair and `style.markdown` rules; declines with a warning rather than change meaning). |
 | **Semantic tokens** | LSP semantic tokens classifying interpolations (`macro.interpolation`, `+inert` literals), directive keywords/closers (`macro.directive`, `+closer`), targets/options (`string`/`property.directive`), and wiki frames/segments (`macro.wiki` / `string.wiki`) for theme-driven de-emphasis. `full` + `range`, non-overlapping in UTF-8/UTF-16, fence-excluded, capability-gated, `[semantic_tokens] enable` master switch. |
@@ -92,9 +92,12 @@ covered in the [editor-setup troubleshooting section](docs/editors/README.md#tro
 - **Provider registry** (`dmls::providers`): each capability is an ordered
   provider chain (substrate Markdown first, overlay providers appending) with a
   per-provider `catch_unwind` boundary and deterministic merge policies.
-- **Concurrency** (AD-3): a main protocol thread plus a crossbeam worker pool
-  for indexing/diagnostics, with immutable generation-stamped snapshot swaps —
-  no async runtime.
+- **Concurrency** (AD-3): one dispatch thread handles every message and owns
+  every index mutation. Startup work (the trigger registries, then the
+  workspace file list) runs on a background thread, and the index store's
+  revalidation reads on a crossbeam worker pool; both report back to the
+  dispatch thread.
+  Readers load immutable generation-stamped snapshots — no async runtime.
 - **Extension model**: baseline schema extensions activate by config + globs
   (the generic mechanism Claudine is the first consumer of).
 
@@ -103,11 +106,13 @@ covered in the [editor-setup troubleshooting section](docs/editors/README.md#tro
 ```
 dmls [--stdio] [--config <path>] [--log-level <level>] [--log-file <path>]
 dmls --version
-dmls --bench-index <dir> [--json]        # R-6 stage timings, graph counts, peak RSS
+dmls --bench-index <dir> [--bench-target <file>] [--json]  # index store cold fill, warm restart, peak RSS
 dmls --gen-corpus <tier> <dir>           # deterministic synthetic corpus
 ```
 
 Logs go to stderr or `--log-file` only; stdout is reserved for LSP framing.
+The startup, index, schema-registry, and slow-request log lines are described
+in [DMLS Indexing](../docs/lsp/indexing.md).
 
 ## Configuration
 
@@ -115,8 +120,9 @@ Logs go to stderr or `--log-file` only; stdout is reserved for LSP framing.
 LSP `workspace/configuration` and reloadable without restart. Keys cover wiki
 behavior, baseline schema extensions, strict schema/style modes, shell policy
 discovery, code-action categories, formatting, semantic tokens
-(`[semantic_tokens] enable`), and diagnostics debounce. See
-[spec.md](../features/2026-07-04-dmls/spec.md) § Configuration.
+(`[semantic_tokens] enable`), diagnostics debounce, and workspace discovery
+(`[workspace]`). See [DMLS Configuration](../docs/lsp/configuration.md) for
+every key and its default.
 
 ## Editor setup
 

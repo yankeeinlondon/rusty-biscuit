@@ -1663,3 +1663,18 @@ fn planned_fallback_model_carries_what_the_document_cannot_re_derive() {
     );
     assert_eq!(planned_fallback_model(&none, true), None);
 }
+
+#[test]
+fn refreshed_document_yolo_moves_the_provider_permission_mode() {
+    let intent = LaunchRebuildIntent {
+        fallback_provider: Provider::Codex,
+        ..intent()
+    };
+    for enabled in [true, false] {
+        let rebuilt = rebuild_launch_identity(&intent, None, None, &with_hints(
+            EffectiveSelectionHints { yolo: Some(enabled), ..EffectiveSelectionHints::default() },
+        ), None).unwrap();
+        assert_eq!(rebuilt.args.iter().any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"), enabled);
+        assert_eq!(rebuilt.env_overrides.iter().find(|(key, _)| key == "YOLO").unwrap().1, enabled.to_string());
+    }
+}

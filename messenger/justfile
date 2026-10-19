@@ -165,14 +165,14 @@ research-refresh max_seconds max_invocations *args:
     done
     command -v jq >/dev/null || { echo "research-refresh: jq is required" >&2; exit 2; }
     # The sequence's `shell:` steps call `messenger research check-run`, and an
-    # older installed `claudine` has no `budget` command: put this worktree's
-    # binaries first on PATH.
+    # older installed `claudine` may lack current sequence behavior: put this
+    # worktree's binaries first on PATH.
     cargo build -q -p messenger-cli -p claudine-cli
     target_dir="$(cargo metadata --no-deps --format-version 1 | jq -r .target_directory)"
     # Git Bash on Windows: a `C:\...` entry would split PATH at the colon.
     if command -v cygpath >/dev/null; then target_dir="$(cygpath -u "${target_dir}")"; fi
     export PATH="${target_dir}/debug:${PATH}"
-    # The printed commands name paths relative to the repository root.
+    # The runner and the run's paths are relative to the repository root.
     cd "$(git rev-parse --show-toplevel)"
     plan="$(messenger research prepare --max-seconds "{{ max_seconds }}" --max-invocations "{{ max_invocations }}" --json ${prepare_args[@]+"${prepare_args[@]}"})"
     runs="$(jq -r '.runs | length' <<<"${plan}")"
@@ -183,19 +183,17 @@ research-refresh max_seconds max_invocations *args:
     # A failed platform keeps its previous accepted research and does not stop
     # the others; the recipe fails at the end if any run did.
     failed=()
-    while IFS=$'\t' read -r run_id init_json sequence_json; do
-        eval "init=($(jq -r '@sh' <<<"${init_json}"))"
-        eval "sequence=($(jq -r '@sh' <<<"${sequence_json}"))"
+    while IFS=$'\t' read -r run_id; do
         echo -e "{{ BOLD }}${run_id}{{ RESET }}"
-        if ! "${init[@]}" || ! "${sequence[@]:0:2}" ${sequence_args[@]+"${sequence_args[@]}"} "${sequence[@]:2}"; then
+        if ! messenger research run "${run_id}" -- ${sequence_args[@]+"${sequence_args[@]}"}; then
             failed+=("${run_id}")
         fi
-    done < <(jq -r '.runs[] | [.run_id, (.commands[0] | tojson), (.commands[1] | tojson)] | @tsv' <<<"${plan}")
+    done < <(jq -r '.runs[].run_id' <<<"${plan}")
     messenger research runs
     if [[ ${#failed[@]} -gt 0 ]]; then
         echo -e "{{ RED }}Runs that did not finish:{{ RESET }} ${failed[*]}" >&2
         echo "Inspect with 'just research-runs'. Resume a failed run with 'messenger research prepare --resume <run_id>'" >&2
-        echo "or reject it; a run whose sequence never started stays active until its printed 'claudine sequence' command runs." >&2
+        echo "or reject it; a prepared run stays active until 'messenger research run <run_id>' executes it." >&2
         exit 1
     fi
 
