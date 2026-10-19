@@ -296,8 +296,11 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   Rescan mode diffs `scan_manifests` fingerprints; config reload clears all.
   The workspace registration also watches `**/*.yaml|yml` and the discovery
   inputs (`.gitignore`, `.ignore`, `.dmls.toml`: re-list). Schema-location
-  watches (`schema_watch_registration`, one `<parent>` + `<folder>/*` per
-  folder in `OverlayState::trigger_watch_folders`) are re-synced after every
+  watches (`schema_watch_registration` over `watch::WatchedFolder`s from
+  `OverlayState::trigger_watch_folders`: `<parent>` + `<folder>/*` for a
+  present folder; nearest existing ancestor + `<rel>` and `<rel>/*` for one
+  absent at preparation, its `absent_base` recorded then so syncing reads
+  nothing and a folder appearing changes the set) are re-synced after every
   message when the client has `relativePatternSupport`; without it, or on a
   rejected registration, `schema_watch_fallback` makes every save mark the
   registries stale. A rejected workspace registration switches to
@@ -338,7 +341,16 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `didSave`, including an open buffer) and
   `invalidate_all_trigger_registries` (rescan, config reload, manifest
   change). A test that edits a schema file on disk must send one of those,
-  or the edit is invisible by design. Failure logging and trigger-file
+  or the edit is invisible by design. `Dependencies::searched` holds the
+  normalized `TriggerRegistry::searched_locations()`; an event at a
+  candidate, or at a folder above one (`candidate.starts_with(event)`),
+  affects the scope. A failed preparation carries the replaced scope's
+  `searched` and `folders` (`Preparation::carried`) so the broken file's
+  folder stays watched. A directory event for `schemas/shared` is already
+  covered by the folder rule (its parent holds the payload), so a test of the
+  folder-above-a-candidate rule needs a nested absent folder
+  (`schemas/shared/deep/` under an existing `schemas/shared/`). Protocol tests:
+  `tests/l1/searched_candidates.rs`. Failure logging and trigger-file
   diagnostics share one transition record per (workspace boundary,
   document folder): `warn` when new, `debug` on a repeat, `info` on
   recovery; a cold failure logs `trigger registry unavailable`. Root I/O
@@ -358,9 +370,17 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   the requester's folder — trigger path, payload value, schema roots, the
   requester's tree (`base_dir` + origin), `for_cwd(trigger folder)`, and
   `for_trusted_external_cwd(root)` per root; reuse also needs an unchanged
-  dependency/root-listing fingerprint. Keying on the requester's context
-  again makes every package folder miss (the original incident). Its tests
-  are `payload_memo_tests.rs` (rely on nextest's process per test).
+  fingerprint: dependency bytes, listings of roots, dependency folders, and
+  every `ResolvedPayload::searched` candidate's folder, plus each candidate's
+  kind (absent/file/dir/other). Only `NotFound`/`NotADirectory` are expected
+  absence; any other read error yields no fingerprint (no hit, nothing
+  stored). Tests inject that failure with the `#[cfg(test)]`
+  `assemble::fail_observing(path)` guard, never permission bits. A test that
+  a new nearer candidate misses must put it where no root or dependency
+  folder listing changes (e.g. `shared/deep/` under an existing `shared/`),
+  or it passes without the searched folding. Keying on the requester's
+  context again makes every package folder miss (the original incident). Its
+  tests are `payload_memo_tests.rs` (rely on nextest's process per test).
 - Pass line: `run_pass` starts a `PayloadMemoTally` (thread-scoped, from
   `darkmatter::markdown::schemas::triggers`) for the pass, and `run_document`
   starts its own so an interrupting document job is excluded;

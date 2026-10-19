@@ -91,7 +91,7 @@ impl Fixture {
 /// tally's counts.
 fn tallied_scan(context: &FileResolutionContext) -> (TriggerRegistry, PayloadMemoCounts) {
     let tally = PayloadMemoTally::start();
-    let registry = scan(context).expect("trigger scan");
+    let registry = scan(context).unwrap_or_else(|error| panic!("trigger scan: {error}"));
     (registry, tally.counts())
 }
 
@@ -429,4 +429,234 @@ fn a_registry_reports_searched_locations_apart_from_its_dependencies() {
     let (repeat, counts) = tallied_scan(&document);
     assert_eq!(counts, HIT);
     assert_eq!(repeat.searched_locations().collect::<Vec<_>>(), searched);
+}
+
+/// The non-null JSON Schema type the optional payload property `property`
+/// resolved to.
+fn property_type(registry: &TriggerRegistry, property: &str) -> String {
+    let schema = &registry.payloads[0].json_schema["properties"][property];
+    schema["anyOf"]
+        .as_array()
+        .expect("an optional property is a null union")
+        .iter()
+        .map(|arm| arm["type"].as_str().expect("typed arm"))
+        .find(|kind| *kind != "null")
+        .expect("a non-null arm")
+        .to_string()
+}
+
+const SHARED_FIELDS: &str = "$schema:\n  Fields: string\n";
+const NEARER_FIELDS: &str = "$schema:\n  Fields: number\n";
+
+/// The concrete stale case: `claudine.yaml` in `schemas/` imports
+/// `Fields@shared/types.yaml`, which resolves in the authoring folder first
+/// (`schemas/shared/types.yaml`, absent with its folder) and then the
+/// repository root (`shared/types.yaml`). Creating the nearer file must win
+/// over a held payload, and deleting it must fall back again.
+#[test]
+fn a_nearer_import_candidate_created_in_an_absent_folder_is_resolved_again() {
+    let fixture = Fixture::new();
+    fixture.write("schemas/claudine.yaml", "$schema:\n  fields: Fields@shared/types.yaml\n");
+    fixture.write("shared/types.yaml", SHARED_FIELDS);
+    let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+    let shared = fixture.root.join("shared/types.yaml");
+    let nearer = fixture.root.join("schemas/shared/types.yaml");
+
+    let (first, first_counts) = tallied_scan(&document);
+    let (repeat, repeat_counts) = tallied_scan(&document);
+    assert_eq!((first_counts, repeat_counts), (MISS, HIT));
+    assert!(Arc::ptr_eq(&first.payloads[0].json_schema, &repeat.payloads[0].json_schema));
+    assert_eq!(property_type(&repeat, "fields"), "string");
+    assert!(repeat.dependencies().any(|dependency| dependency == shared));
+
+    fixture.write("schemas/shared/types.yaml", NEARER_FIELDS);
+    let (shadowed, shadowed_counts) = tallied_scan(&document);
+    assert_eq!(shadowed_counts, MISS);
+    assert_eq!(property_type(&shadowed, "fields"), "number");
+    assert!(shadowed.dependencies().any(|dependency| dependency == nearer));
+    assert!(shadowed.dependencies().all(|dependency| dependency != shared), "the root file is no longer selected");
+    assert_eq!(tallied_scan(&document).1, HIT, "the shadowed result is held");
+
+    std::fs::remove_file(&nearer).expect("drop the nearer file");
+    let (fallback, fallback_counts) = tallied_scan(&document);
+    assert_eq!(fallback_counts, MISS);
+    assert_eq!(property_type(&fallback, "fields"), "string");
+    assert!(fallback.dependencies().any(|dependency| dependency == shared));
+}
+
+/// One reference shape per row, each with a nearer candidate in an absent
+/// folder `deep/` below an existing `shared/` folder that holds no
+/// dependency, so no schema-root or dependency-folder listing changes when
+/// the candidate appears; only the searched-candidate observations can. The
+/// first scan selects the repository-root file, a repeat hits, and creating
+/// the nearer file (`$nearer`, with `$nearer_contents`) misses and selects it.
+macro_rules! nearer_candidate_cases {
+    ($($name:ident: files $files:expr, nearer $nearer:literal => $nearer_contents:expr, property $property:literal;)+) => {
+        $(
+            #[test]
+            fn $name() {
+                let fixture = Fixture::new();
+                fixture.write("schemas/shared/readme.md", "unrelated\n");
+                for (relative, contents) in $files {
+                    fixture.write(relative, contents);
+                }
+                let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+                assert_eq!(tallied_scan(&document).1, MISS);
+                let (held, held_counts) = tallied_scan(&document);
+                assert_eq!(held_counts, HIT);
+                let nearer = fixture.root.join($nearer);
+                assert!(held.dependencies().all(|dependency| dependency != nearer));
+                assert!(held.searched_locations().any(|searched| searched == nearer), "{nearer:?} was searched");
+
+                fixture.write($nearer, $nearer_contents);
+                let (registry, counts) = tallied_scan(&document);
+
+                assert_eq!(counts, MISS);
+                assert!(registry.dependencies().any(|dependency| dependency == nearer), "{nearer:?} is selected");
+                assert_eq!(payload_properties(&registry), [$property]);
+            }
+        )+
+    };
+}
+
+nearer_candidate_cases! {
+    a_nearer_payload_path_is_resolved_again:
+        files [
+            ("schemas/claudine.trigger.yaml", "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: shared/deep/payload.yaml\n"),
+            ("shared/deep/payload.yaml", PAYLOAD),
+        ],
+        nearer "schemas/shared/deep/payload.yaml" => "$schema:\n  owner: string(required)\n",
+        property "owner";
+    a_nearer_import_is_resolved_again:
+        files [
+            ("schemas/claudine.yaml", "$schema:\n  fields: Fields@shared/deep/types.yaml\n"),
+            ("shared/deep/types.yaml", SHARED_FIELDS),
+        ],
+        nearer "schemas/shared/deep/types.yaml" => NEARER_FIELDS,
+        property "fields";
+    a_nearer_transitive_import_is_resolved_again:
+        files [
+            ("schemas/claudine.yaml", "$schema:\n  fields: Fields@./types/fields.yaml\n"),
+            ("schemas/types/fields.yaml", "$schema:\n  Fields:\n    inner: Inner@shared/deep/inner.yaml\n"),
+            ("schemas/types/shared/readme.md", "unrelated\n"),
+            ("shared/deep/inner.yaml", "$schema:\n  Inner: string\n"),
+        ],
+        nearer "schemas/types/shared/deep/inner.yaml" => "$schema:\n  Inner: number\n",
+        property "fields";
+    a_nearer_example_file_is_resolved_again:
+        files [
+            ("schemas/claudine.yaml", "$schema:\n  model: \"string(example(shared/deep/model.yaml))\"\n"),
+            ("shared/deep/model.yaml", "kind: example\ninvocation: \"x\"\nreturns: y\ndescription: root\n"),
+        ],
+        nearer "schemas/shared/deep/model.yaml" => "kind: example\ninvocation: \"x\"\nreturns: y\ndescription: nearer\n",
+        property "model";
+}
+
+/// An explicit `./` reference names one location: a file of the same name
+/// at the repository root is never a fallback, and the failure is not held.
+#[test]
+fn an_explicit_relative_reference_gains_no_fallback() {
+    let fixture = Fixture::new();
+    fixture.write("schemas/claudine.yaml", "$schema:\n  fields: Fields@./shared/types.yaml\n");
+    fixture.write("shared/types.yaml", SHARED_FIELDS);
+    let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+
+    for attempt in 0..2 {
+        let tally = PayloadMemoTally::start();
+        assert!(scan(&document).is_err(), "attempt {attempt}: `./` must not fall back to the root");
+        assert_eq!(tally.counts(), MISS, "attempt {attempt}");
+    }
+
+    fixture.write("schemas/shared/types.yaml", NEARER_FIELDS);
+    let (registry, counts) = tallied_scan(&document);
+    assert_eq!(counts, MISS);
+    assert_eq!(property_type(&registry, "fields"), "number");
+}
+
+/// The nearer candidate's folder already exists (with an unrelated file), so
+/// only its listing changes when the candidate appears.
+#[test]
+fn a_nearer_candidate_in_an_existing_folder_is_resolved_again() {
+    let fixture = Fixture::new();
+    fixture.write("schemas/claudine.yaml", "$schema:\n  fields: Fields@shared/types.yaml\n");
+    fixture.write("shared/types.yaml", SHARED_FIELDS);
+    fixture.write("schemas/shared/readme.md", "unrelated\n");
+    let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+    assert_eq!(tallied_scan(&document).1, MISS);
+    assert_eq!(tallied_scan(&document).1, HIT);
+
+    fixture.write("schemas/shared/types.yaml", NEARER_FIELDS);
+    let (registry, counts) = tallied_scan(&document);
+
+    assert_eq!(counts, MISS);
+    assert_eq!(property_type(&registry, "fields"), "number");
+}
+
+/// A nearer candidate that is a directory is skipped. Replacing it with a
+/// regular file of the same name leaves its folder's entry names unchanged,
+/// so only the candidate's kind observation can notice the swap.
+#[test]
+fn a_nearer_candidate_swapped_from_directory_to_file_is_resolved_again() {
+    let fixture = Fixture::new();
+    fixture.write("schemas/claudine.yaml", "$schema:\n  fields: Fields@shared/types.yaml\n");
+    fixture.write("shared/types.yaml", SHARED_FIELDS);
+    let nearer = fixture.root.join("schemas/shared/types.yaml");
+    std::fs::create_dir_all(&nearer).expect("nearer candidate as a directory");
+    let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+    let (held, _) = tallied_scan(&document);
+    assert_eq!(property_type(&held, "fields"), "string");
+    assert_eq!(tallied_scan(&document).1, HIT);
+
+    std::fs::remove_dir(&nearer).expect("drop the directory");
+    std::fs::write(&nearer, NEARER_FIELDS).expect("same name as a file");
+    let (registry, counts) = tallied_scan(&document);
+
+    assert_eq!(counts, MISS);
+    assert_eq!(property_type(&registry, "fields"), "number");
+}
+
+/// A failed observation of a searched folder (other than its absence)
+/// neither validates the held entry nor seeds a new one; once the folder
+/// reads again, the next resolution is kept.
+#[test]
+fn a_failed_observation_is_never_a_hit() {
+    let fixture = Fixture::new();
+    fixture.write("schemas/claudine.yaml", "$schema:\n  fields: Fields@shared/types.yaml\n");
+    fixture.write("shared/types.yaml", SHARED_FIELDS);
+    let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+    assert_eq!(tallied_scan(&document).1, MISS);
+    assert_eq!(tallied_scan(&document).1, HIT, "control: the unedited state hits");
+
+    {
+        let _failing = super::assemble::fail_observing(&fixture.root.join("schemas/shared"));
+        for attempt in 0..2 {
+            let (registry, counts) = tallied_scan(&document);
+            assert_eq!(counts, MISS, "attempt {attempt}");
+            assert_eq!(property_type(&registry, "fields"), "string", "attempt {attempt} still resolves");
+        }
+    }
+
+    assert_eq!(tallied_scan(&document).1, MISS, "nothing was kept while observation failed");
+    assert_eq!(tallied_scan(&document).1, HIT);
+}
+
+/// Files outside every searched folder, and new content in a searched folder
+/// that changes no listed name or dependency, keep the held payload.
+#[test]
+fn unrelated_edits_keep_the_held_payload() {
+    let fixture = Fixture::new();
+    fixture.write("schemas/claudine.yaml", "$schema:\n  fields: Fields@shared/types.yaml\n");
+    fixture.write("shared/types.yaml", SHARED_FIELDS);
+    fixture.write("shared/notes.md", "first\n");
+    let document = fixture.document(&fixture.repository_context(), "pkg-a/doc.md");
+    let (first, first_counts) = tallied_scan(&document);
+    assert_eq!(first_counts, MISS);
+
+    fixture.write("pkg-a/unrelated.yaml", "$schema:\n  other: string\n");
+    fixture.write("pkg-b/nested/unrelated.yaml", "$schema:\n  other: string\n");
+    fixture.write("shared/notes.md", "second\n");
+    let (repeat, counts) = tallied_scan(&document);
+
+    assert_eq!(counts, HIT);
+    assert!(Arc::ptr_eq(&first.payloads[0].json_schema, &repeat.payloads[0].json_schema));
 }

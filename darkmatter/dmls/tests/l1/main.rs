@@ -42,6 +42,7 @@ mod registry_preparation;
 mod repository_contexts;
 mod schema_roots_parity;
 mod schema_yaml_spellings;
+mod searched_candidates;
 mod shell_suffixes;
 mod standalone_stdio;
 mod startup_log_lines;

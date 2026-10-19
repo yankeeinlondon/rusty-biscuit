@@ -530,9 +530,9 @@ impl OverlayState {
         cache.triggers.invalidate_all();
     }
 
-    /// The folders the prepared trigger registries read from, for
-    /// schema-location watches.
-    pub fn trigger_watch_folders(&self) -> std::collections::BTreeSet<PathBuf> {
+    /// The folders the prepared trigger registries read from or searched,
+    /// for schema-location watches.
+    pub fn trigger_watch_folders(&self) -> std::collections::BTreeSet<crate::workspace::watch::WatchedFolder> {
         let cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.watch_folders()
     }

@@ -416,7 +416,7 @@ struct WatchLedger {
     /// Outstanding schema-location registration request ids.
     schema: HashSet<RequestId>,
     /// The folders the last schema-location registration watches.
-    schema_folders: std::collections::BTreeSet<PathBuf>,
+    schema_folders: std::collections::BTreeSet<crate::workspace::watch::WatchedFolder>,
     /// Whether a schema-location registration was ever sent.
     schema_registered: bool,
     next: u64,
@@ -1650,12 +1650,17 @@ impl Router {
             return;
         }
         let mut folders = self.state.overlay.trigger_watch_folders();
-        folders.extend(self.state.dependency_folders());
+        folders.extend(
+            self.state
+                .dependency_folders()
+                .into_iter()
+                .map(crate::workspace::watch::WatchedFolder::present),
+        );
         if folders == self.watches.schema_folders {
             return;
         }
         let Some(registration) =
-            schema_watch_registration(folders.iter().map(PathBuf::as_path))
+            schema_watch_registration(&folders)
         else {
             return;
         };

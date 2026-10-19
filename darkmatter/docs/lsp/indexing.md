@@ -322,10 +322,26 @@ whose roots both reach `{repo}/schemas/prompt.trigger.yaml`, resolve that
 payload once. A document under a different home, environment, `@` scope, or
 tree root resolves it again.
 
-A kept payload is reused only when every file it read still has the same
-xxHash and no file was added to or removed from a schema root or a folder
-it read from, so a new file that a bare name would now find is noticed.
-A failed resolution is never kept. Each reuse makes a payload the most
+A kept payload is reused only when all of these still hold:
+
+- every file it read has the same xxHash;
+- no file was added to or removed from a schema root, a folder it read from,
+  or the folder of any location it searched, and a searched folder that did
+  not exist still does not;
+- every location it searched is still the same kind of thing: missing, a
+  file, or a folder.
+
+A searched location is every candidate tried before the one selected, plus
+the selected one. For example, `Fields@shared/types.yaml` in
+`schemas/payload.yaml` searches `schemas/shared/types.yaml` before
+`shared/types.yaml` at the repository root. Creating the nearer file, even
+together with its `schemas/shared/` folder, is noticed on the next lookup,
+as is a nearer folder of that name being replaced by a file. A recursive `%`
+reference's search is not tracked, so a file added below it is not noticed.
+
+If a schema root, a folder, or a searched location cannot be read for any
+reason other than not existing, the payload is resolved again, so the
+resolver reports its own error. A failed resolution is never kept. Each reuse makes a payload the most
 recently used one, and the least recently used is dropped to make room.
 The [workspace pass line](#the-workspace-pass-line) counts reuses as
 `payload_hits` and resolutions as `payload_misses`.
@@ -344,6 +360,7 @@ for changes on each lookup.
 | --- | --- |
 | `workspace/didChangeWatchedFiles` for a known file | re-read; its xxHash is compared with the recorded one, and only a changed file is reclassified and its scopes prepared again |
 | a file created or deleted in a searched root, or in a folder holding a payload, import, or example | the affected registries are prepared again (no hash to compare) |
+| a file or folder created, deleted, or replaced at a location payload resolution searched, or a folder created or deleted above one | the affected registries are prepared again, so a nearer file now wins (see the example below) |
 | `textDocument/didSave` of any `.yaml` or `.yml` file, open in the editor or not | the same as a watched change for that path |
 | a server rescan (see below) | every registry is marked stale; each file is re-hashed on next use and keeps its class if unchanged |
 | a configuration change, or a watched `.dmls.toml`, that changes the effective configuration | every registry is marked stale |
@@ -359,10 +376,25 @@ without a document opening there, and a trigger fixed in a scope with no open
 document clears its diagnostic.
 
 Each preparation records what it read: the searched and absent root folders,
-every root file and dependency with its xxHash, and the folders that hold the
-dependencies. A dependency can live anywhere, even outside every workspace
+every root file and dependency with its xxHash, the folders that hold the
+dependencies, and every location payload resolution tried on its way to each
+selected file. A dependency can live anywhere, even outside every workspace
 folder. A scope that failed is prepared again after any change it recorded,
-so creating a missing payload file recovers it.
+so creating a missing payload file recovers it. A failed scope keeps the
+searched locations and dependency folders of the registry it replaced, so
+the folder holding a broken file stays watched until the file is repaired.
+
+For example, `schemas/payload.yaml` imports `Fields@shared/types.yaml`. The
+import is tried in the authoring folder first (`schemas/shared/types.yaml`)
+and then at the repository root (`shared/types.yaml`), where it is found.
+Both locations are recorded. When you later create
+`schemas/shared/types.yaml`, its event (or the event for the new
+`schemas/shared/` folder alone) marks the registry stale, and the next
+preparation selects the nearer file. Deleting it falls back to the root file
+the same way. An unrelated `elsewhere/shared/types.yaml` affects nothing.
+Locations under a recursive `%` reference are not recorded, so a new file
+deep below a recursive search root is noticed only by a rescan, a
+configuration change, or a restart.
 
 Unsaved edits to a schema file do not affect other documents. The registry
 reads disk, so a change applies after you save.
@@ -372,9 +404,17 @@ reads disk, so a change applies after you save.
 Schema roots and dependency folders can sit outside the workspace, where the
 workspace's file watchers do not reach. A client that supports watchers
 rooted at a folder (`relativePatternSupport`) is also asked to watch each of
-those folders, including a root that does not exist yet, and the folder of
-every Markdown file parsed as a referenced target outside the file list (see
+those folders, including a root that does not exist yet, the folder of every
+searched payload location, and the folder of every Markdown file parsed as a
+referenced target outside the file list (see
 [Targets outside the file list](#targets-outside-the-file-list)).
+
+A folder that exists is watched from its parent with `<folder>/*`. A folder
+that does not exist yet (`schemas/shared/` above) is watched from its nearest
+existing ancestor with both `shared` and `shared/*`, so its creation is
+noticed whether the client reports the folder or only the file inside it.
+Once the folder exists, the next preparation records that, and the watch is
+registered again from the folder's parent.
 
 When the client lacks that support or rejects the registration, DMLS falls
 back to the save: **every save marks every registry stale**, and each is
