@@ -352,6 +352,13 @@ pub struct Prepared {
     deps: Dependencies,
 }
 
+impl Prepared {
+    /// Whether the registry failed to load.
+    pub fn failed(&self) -> bool {
+        self.result.is_err()
+    }
+}
+
 impl Preparation {
     /// Scans the document's roots and reads its payload dependencies' hashes.
     /// Does all of a preparation's I/O, and touches no shared state.

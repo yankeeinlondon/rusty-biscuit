@@ -566,18 +566,20 @@ impl OverlayState {
     /// its folder's current context, through
     /// [`prepare_registry_held`](Self::prepare_registry_held) with `hold`. A
     /// registry that is still fresh is not prepared again, and a folder
-    /// whose context cannot be built is skipped, since its documents report
-    /// the context failure.
+    /// whose context cannot be built is skipped (and reported
+    /// [`Failed`](ProbeOutcome::Failed)), since its documents report the
+    /// context failure.
     pub fn prepare_workspace_probe(
         &self,
         probe: &Path,
         workspace_roots: &[PathBuf],
         contexts: &crate::context::RepositoryContexts,
         hold: &dyn Fn(),
-    ) {
+    ) -> ProbeOutcome {
         let resolution = contexts.for_document(probe);
-        if let Ok(context) = resolution.context() {
-            self.prepare_registry_held(probe, workspace_roots, context, hold);
+        match resolution.context() {
+            Ok(context) => self.run_preparation(probe, workspace_roots, context, hold).0,
+            Err(_) => ProbeOutcome::Failed,
         }
     }
 
@@ -679,20 +681,37 @@ impl OverlayState {
         context: &FileResolutionContext,
         hold: &dyn Fn(),
     ) -> bool {
+        self.run_preparation(path, workspace_roots, context, hold).1
+    }
+
+    /// [`prepare_registry_held`](Self::prepare_registry_held), also reporting
+    /// what the preparation did.
+    ///
+    /// ## Returns
+    ///
+    /// The outcome, and whether the registry is fresh afterwards.
+    fn run_preparation(
+        &self,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+        context: &FileResolutionContext,
+        hold: &dyn Fn(),
+    ) -> (ProbeOutcome, bool) {
         let Some(boundary) = schema::trigger_boundary(path, workspace_roots) else {
-            return true;
+            return (ProbeOutcome::Fresh, true);
         };
         let preparation = {
             let mut cache = self.inner.lock().expect("overlay lock poisoned");
             cache.triggers.begin(path, &boundary, context)
         };
         let Some(preparation) = preparation else {
-            return true;
+            return (ProbeOutcome::Fresh, true);
         };
         let prepared = preparation.run();
+        let outcome = if prepared.failed() { ProbeOutcome::Failed } else { ProbeOutcome::Prepared };
         hold();
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
-        cache.triggers.install(prepared)
+        (outcome, cache.triggers.install(prepared))
     }
 
     /// [`prepare_registry`](Self::prepare_registry) for the registry
@@ -924,6 +943,19 @@ pub const WORKSPACE_PROBE: &str = ".dmls-workspace";
 /// A scope that contains the folder (a package or repository above a
 /// workspace subfolder) is the folder's own context and needs no probe of
 /// its own; a catalog root outside every folder has no workspace documents.
+/// What [`OverlayState::prepare_workspace_probe`] did with one probe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// Nothing to prepare: the registry was fresh, or the probe is under no
+    /// trigger boundary. Nothing was read.
+    Fresh,
+    /// A preparation ran and its registry loaded.
+    Prepared,
+    /// A preparation ran and failed (a trigger or schema root did not
+    /// load), or the folder's context could not be built.
+    Failed,
+}
+
 fn workspace_probes(
     workspace_roots: &[PathBuf],
     repositories: &[PathBuf],

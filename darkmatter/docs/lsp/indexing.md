@@ -199,6 +199,27 @@ job on the **registry worker**, a background thread
 - The worker is the only thread that prepares registries and runs one job
   at a time, so no two preparations ever overlap.
 
+A request on a document opened while a workspace pass runs waits only for
+the scope in progress:
+
+```mermaid
+sequenceDiagram
+    participant C as editor
+    participant D as dispatch thread
+    participant W as registry worker
+    Note over W: workspace pass: preparing scope A
+    C->>D: didOpen doc.md
+    D->>W: queue doc.md's document job
+    C->>D: semanticTokens/full doc.md
+    Note over D: request parked on doc.md's job
+    W-->>D: scope A installed
+    Note over W: before scope B: run waiting document jobs
+    W-->>D: doc.md's registry installed
+    D->>C: publishDiagnostics doc.md
+    D->>C: semanticTokens answer
+    Note over W: the pass goes on with scope B
+```
+
 ```mermaid
 sequenceDiagram
     participant C as editor
@@ -279,6 +300,35 @@ for trigger and in the same order, as what `md` discovers for that document.
 Root contents are shared: two documents whose roots include the same folder
 read it once. Each document's registry is kept separately, because payloads
 and `$path` patterns resolve in that document's own context.
+
+### Resolved payloads are shared
+
+Resolving a trigger's payload (its `$schema`, imports, and examples) is the
+expensive part of a preparation; a large payload can take hundreds of
+milliseconds. So the process keeps the last 32 resolved payloads, and a
+preparation that needs one with the same inputs reuses it instead of
+resolving it again. The inputs are what resolution reads, not which document
+asked:
+
+- the trigger file's path and its payload value;
+- the document's schema roots;
+- the file-resolution context as seen from the trigger's folder and from each
+  schema root;
+- the document's file tree root (the repository root in a repository).
+
+The folder of the document that asked is not an input. Two documents in
+different packages of one repository, `area/a/doc.md` and `area/b/doc.md`,
+whose roots both reach `{repo}/schemas/prompt.trigger.yaml`, resolve that
+payload once. A document under a different home, environment, `@` scope, or
+tree root resolves it again.
+
+A kept payload is reused only when every file it read still has the same
+xxHash and no file was added to or removed from a schema root or a folder
+it read from, so a new file that a bare name would now find is noticed.
+A failed resolution is never kept. Each reuse makes a payload the most
+recently used one, and the least recently used is dropped to make room.
+The [workspace pass line](#the-workspace-pass-line) counts reuses as
+`payload_hits` and resolutions as `payload_misses`.
 
 ### Ready lookups do no I/O
 
@@ -1002,6 +1052,7 @@ each.
 | `retaining last-good trigger registry` | `warn`, then `debug` | a trigger fails to load and a last-good registry is kept |
 | `trigger registry unavailable` | `warn`, then `debug` | a trigger or root fails with no last-good registry |
 | `trigger registry recovered` | `info` | a scope loads after a recorded failure |
+| `trigger registries prepared` | `debug` | a workspace pass on the registry worker finishes |
 | `skipping duplicate physical file …` | `warn` | a second path to an already listed file |
 | `workspace discovery incomplete` | `warn` | a listing walk hit an error |
 | `slow request` / `request complete` | `warn` / `debug` | every request, by elapsed time |
@@ -1166,6 +1217,36 @@ that decides "this failure is new" is the same one that decides whether the
 trigger-file diagnostic is published again, so a repeated failure is neither
 re-published nor re-logged at `warn`.
 
+#### The workspace pass line
+
+Each workspace pass (the refresh the registry worker runs after a
+configuration or schema change) ends with one `debug` line. Run with
+`--log-level debug` to see it; it tells you how much a refresh cost and
+whether the trigger-payload memo saved work:
+
+```text
+2026-10-18T11:20:03.418220Z DEBUG dmls::router: trigger registries prepared probes=2 prepared=1 fresh=1 failed=0 payload_hits=0 payload_misses=1 elapsed_ms=38 workspace=file:///Users/me/repo/docs,file:///Users/me/repo/claudine
+```
+
+| Field | Meaning |
+| --- | --- |
+| `probes` | the workspace scopes the pass checked |
+| `prepared` | scopes whose registry was prepared and loaded |
+| `fresh` | scopes still fresh, or outside every trigger boundary; nothing was read for them |
+| `failed` | scopes whose preparation failed (a trigger or schema root did not load), or whose folder context could not be built |
+| `payload_hits` | trigger payloads reused from the memo after their dependency fingerprint matched |
+| `payload_misses` | trigger payloads resolved because the memo had no valid entry, whether or not the resolution succeeded |
+| `elapsed_ms` | time spent building the probe list and preparing probes |
+
+`prepared + fresh + failed` equals `probes`. The counts and the time belong
+to the pass alone: a document job that runs between two of its probes (so a
+waiting request is answered sooner) is not counted, and a fresh scope records
+neither a hit nor a miss. Startup's phases do not log this line; startup
+reports the one `schema registry ready` line instead. Like every log line
+here, it carries counts and identifiers only, never payload, schema, or
+environment text. The code is `RegistryWorker::run_pass` and
+`log_workspace_pass` in [`router.rs`](../../dmls/src/router.rs).
+
 ### Request timing lines
 
 Every request and notification ends in exactly one timing event, on every
@@ -1185,7 +1266,7 @@ code is [`request_timing.rs`](../../dmls/src/request_timing.rs) and
   request, run with `--log-level debug`.
 
 ```text
-2026-10-17T09:15:40.112903Z  WARN dmls::request_timing: slow request method="textDocument/hover" uri="file:///Users/me/repo/docs/guide.md" id=14 outcome="ok" elapsed_ms=612 overlay_build_ms=27 schema_assembly_ms=19 trigger_registry_ms=0 provider_chain_ms=9 waited_for_file_list=false waited_for_index=false waited_for_trigger_registry=true
+2026-10-17T09:15:40.112903Z  WARN dmls::request_timing: slow request method="textDocument/hover" uri="file:///Users/me/repo/docs/guide.md" id=14 outcome="ok" elapsed_ms=612 overlay_build_ms=27 schema_assembly_ms=19 trigger_registry_ms=0 provider_chain_ms=9 waited_for_file_list=false waited_for_index=false waited_for_trigger_registry=true trigger_registry_wait_ms=571
 2026-10-17T09:20:11.905130Z  WARN dmls::request_timing: slow request method="textDocument/references" uri="file:///Users/me/repo/docs/guide.md" id=21 outcome="ok" elapsed_ms=4858 overlay_build_ms=1 schema_assembly_ms=0 trigger_registry_ms=0 provider_chain_ms=3 waited_for_file_list=false waited_for_index=true waited_for_trigger_registry=false
 2026-10-17T09:15:41.020447Z DEBUG dmls::request_timing: request complete method="workspace/symbol" id=15 outcome="cancelled" cancelled=true elapsed_ms=12 waited_for_file_list=false waited_for_index=true waited_for_trigger_registry=false
 ```
@@ -1202,6 +1283,7 @@ code is [`request_timing.rs`](../../dmls/src/request_timing.rs) and
 | `waited_for_file_list` | the request waited for the startup file list (today, only an index build started before the list was ready) |
 | `waited_for_index` | the request waited for an index build (the index store revalidating) |
 | `waited_for_trigger_registry` | the request waited for the registry worker to prepare its document's trigger registry |
+| `trigger_registry_wait_ms` | how long the request was parked on trigger-registry jobs, summed over every time it parked (a request whose job finished in an outdated context parks again); present only when `waited_for_trigger_registry` is `true` |
 
 Stage times **nest**; they are not parts of `elapsed_ms` to be added up:
 
@@ -1217,9 +1299,15 @@ When the document is itself a trigger-schema file being authored,
 `trigger_registry_ms` is timed directly under the overlay build. A stage that
 runs more than once in one message, such as a notification that refreshes
 every open document, reports the sum of its runs. In the hover sample above,
-almost all the time is outside every stage, and `waited_for_trigger_registry`
+almost all the time is outside every stage, and `trigger_registry_wait_ms=571`
 says it was spent waiting for the document's registry to be prepared; in the
 references sample, almost all of it is the wait for the index build.
+
+`trigger_registry_wait_ms` covers both the time the document's job sat in
+the worker's queue and the time it took to prepare; it does not separate the
+two. Each parked interval ends when the request resumes, is cancelled, or is
+answered at shutdown, so a cancelled request reports it too, and handler work
+or an index wait between two intervals is not included.
 
 Timing events never contain source text, frontmatter values, or protocol
 payloads. At `debug`, the `lsp_server` crate's own transport trace does

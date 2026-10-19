@@ -37,6 +37,7 @@ mod named_type_references;
 mod no_side_effects;
 mod packaging_contract;
 mod referenced_targets;
+mod registry_observability;
 mod registry_preparation;
 mod repository_contexts;
 mod schema_roots_parity;

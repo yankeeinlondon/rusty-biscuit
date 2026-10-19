@@ -275,6 +275,20 @@ impl<'workspace> LspFixture<'workspace> {
         fixture
     }
 
+    /// [`LspFixture::start_with_registry_gate`] on a server timed by `clock`,
+    /// so a test can advance time while a request is parked on a held job.
+    pub fn start_with_registry_gate_and_clock(
+        workspace: &'workspace LspWorkspace,
+        clock: Arc<dyn dmls::clock::Clock>,
+    ) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks { registry_gate: Some(gate_rx), ..dmls::StartupHooks::default() };
+        let mut fixture =
+            Self::spawn_with_clock(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks, Some(clock));
+        fixture.registry_gate = Some(gate_tx);
+        fixture
+    }
+
     /// Lets one held trigger-registry job through.
     pub fn release_registry_job(&self) {
         if let Some(gate) = &self.registry_gate {
@@ -524,7 +538,18 @@ impl<'workspace> LspFixture<'workspace> {
         workspace: &'workspace LspWorkspace,
         epilogue_delay: Duration,
         snapshot: RequestSnapshot,
+        hooks: dmls::StartupHooks,
+    ) -> Self {
+        Self::spawn_with_clock(workspace, epilogue_delay, snapshot, hooks, None)
+    }
+
+    /// [`LspFixture::spawn_with_all_hooks`], timed by `clock` when given.
+    fn spawn_with_clock(
+        workspace: &'workspace LspWorkspace,
+        epilogue_delay: Duration,
+        snapshot: RequestSnapshot,
         mut hooks: dmls::StartupHooks,
+        clock: Option<Arc<dyn dmls::clock::Clock>>,
     ) -> Self {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
         hooks.observer = Some(events_tx);
@@ -534,7 +559,10 @@ impl<'workspace> LspFixture<'workspace> {
         let worker_observations = Arc::clone(&observations);
         let workspace_root: PathBuf = workspace.path().to_path_buf();
         let server_thread = std::thread::spawn(move || {
-            let options = dmls::RunOptions::new(snapshot).with_startup_hooks(hooks);
+            let mut options = dmls::RunOptions::new(snapshot).with_startup_hooks(hooks);
+            if let Some(clock) = clock {
+                options = options.with_clock(clock);
+            }
             let result = dmls::run_server(server_side, options).map_err(|error| error.to_string());
             if !epilogue_delay.is_zero() {
                 std::thread::sleep(epilogue_delay);

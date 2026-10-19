@@ -350,6 +350,24 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   new measured work in `timings.time(Stage::…, ..)`, call
   `record_wait(Wait::…)` when a request blocks on the file list or the
   index build (`Wait::Index`), and call `OverlayState::for_document_timed` from dispatch paths.
+  A request parked on a registry job uses `begin_registry_wait`; `proceed`
+  and `answer_waiter` call `end_registry_wait`, so `trigger_registry_wait_ms`
+  sums every parked interval (requeue, cancel, shutdown included).
+- Payload memo (`triggers/assemble.rs::file_payload_memo`, process-wide,
+  32-entry true LRU, successes only): keyed by what resolution reads, never
+  the requester's folder — trigger path, payload value, schema roots, the
+  requester's tree (`base_dir` + origin), `for_cwd(trigger folder)`, and
+  `for_trusted_external_cwd(root)` per root; reuse also needs an unchanged
+  dependency/root-listing fingerprint. Keying on the requester's context
+  again makes every package folder miss (the original incident). Its tests
+  are `payload_memo_tests.rs` (rely on nextest's process per test).
+- Pass line: `run_pass` starts a `PayloadMemoTally` (thread-scoped, from
+  `darkmatter::markdown::schemas::triggers`) for the pass, and `run_document`
+  starts its own so an interrupting document job is excluded;
+  `run_workspace` logs `trigger registries prepared` at `debug` with
+  `prepare_workspace_probe`'s `ProbeOutcome` counts. Startup phases do not
+  log it. Tests: `tests/l1/registry_observability.rs`
+  (`LspFixture::start_with_registry_gate_and_clock` for a `ManualClock`).
   `RunOptions::with_clock` injects the clock. Never log text, frontmatter
   values, or payloads; `lsp_server`'s own debug trace already prints full
   payloads, so a leak test must scope to `dmls`/`darkmatter` records.

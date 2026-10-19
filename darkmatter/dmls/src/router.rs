@@ -50,6 +50,7 @@ use lsp_types::{
     WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use darkmatter::markdown::compose::RequestSnapshot;
+use darkmatter::markdown::schemas::triggers::{PayloadMemoCounts, PayloadMemoTally};
 use thiserror::Error;
 
 use crate::capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};
@@ -60,7 +61,7 @@ use crate::diagnostics::DiagnosticsScheduler;
 use crate::graph::{WorkspaceGraph, WorkspaceIndex};
 use crate::index_build::{Build, FactsPlan, IndexBuildState, PassTotals, Trigger, Waiter};
 use crate::index_store::{PassReport, WorkspaceFacts};
-use crate::overlay::{OverlayState, RegistryNeed, RegistrySummary};
+use crate::overlay::{OverlayState, ProbeOutcome, RegistryNeed, RegistrySummary};
 use crate::providers::{DocumentContext, ProviderRegistry};
 use crate::registry_jobs::{
     PendingRegistries, RegistryJob, RegistryJobKind, RegistryQueue, StartupPhase, StartupReady,
@@ -307,6 +308,7 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
     let (internal_tx, internal_rx) = crossbeam_channel::unbounded();
     // Background threads log through the server thread's subscriber.
     let dispatch = tracing::dispatcher::get_default(Clone::clone);
+    let workspace = workspace_identifier(&params, &roots);
     let registry_jobs = spawn_registry_worker(RegistryWorker {
         internal: internal_tx.clone(),
         observer: options.startup.observer.clone(),
@@ -317,6 +319,7 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         overlay: Arc::clone(&overlay),
         contexts: Arc::clone(&contexts),
         clock: Arc::clone(&options.clock),
+        workspace: workspace.clone(),
         dispatch: dispatch.clone(),
     });
     let mut registries = PendingRegistries::new(registry_jobs, options.startup.observer.clone());
@@ -333,7 +336,6 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
     });
 
     let diagnostics = DiagnosticsScheduler::new(connection.sender.clone(), config.effective());
-    let workspace = workspace_identifier(&params, &roots);
     let state = ServerState {
         documents: DocumentStore::new(encoding),
         config,
@@ -472,7 +474,22 @@ struct RegistryWorker {
     overlay: Arc<OverlayState>,
     contexts: Arc<RepositoryContexts>,
     clock: Arc<dyn Clock>,
+    /// The workspace identifier the pass line reports.
+    workspace: String,
     dispatch: tracing::Dispatch,
+}
+
+/// What one pass (a startup phase or a workspace pass) did. Document jobs
+/// that interrupted it are not part of it.
+#[derive(Default)]
+struct RegistryPass {
+    /// The time spent building the probe list and preparing probes.
+    preparing: Duration,
+    probes: usize,
+    prepared: usize,
+    fresh: usize,
+    failed: usize,
+    payload: PayloadMemoCounts,
 }
 
 /// Spawns the thread that prepares every trigger registry the server
@@ -527,6 +544,9 @@ impl RegistryWorker {
     ///
     /// Whether the dispatch loop still listens.
     fn run_document(&self, need: RegistryNeed) -> bool {
+        // Takes over payload counting so a pass this job interrupts does not
+        // count the job's lookups.
+        let _own_tally = PayloadMemoTally::start();
         self.hold();
         self.overlay.prepare_registry(&need.path, &self.roots, &need.context);
         self.report(RegistryJobKind::Document, Some(need.path))
@@ -547,9 +567,10 @@ impl RegistryWorker {
                 let _ = gate.recv();
             }
         };
-        if self.run_pass(queue, &before_probe, &|| {}).is_none() {
+        let Some(pass) = self.run_pass(queue, &before_probe, &|| {}) else {
             return false;
-        }
+        };
+        log_workspace_pass(&pass, &self.workspace);
         queue.finish_workspace();
         self.report(RegistryJobKind::Workspace, None)
     }
@@ -569,7 +590,7 @@ impl RegistryWorker {
                 let _ = gate.recv();
             }
         };
-        let Some(preparing) = self.run_pass(queue, &|| {}, &before_install) else {
+        let Some(RegistryPass { preparing, .. }) = self.run_pass(queue, &|| {}, &before_install) else {
             return false;
         };
         let summary = self.overlay.trigger_registry_summary();
@@ -585,26 +606,42 @@ impl RegistryWorker {
     ///
     /// ## Returns
     ///
-    /// The time spent building the probe list and preparing probes (with
-    /// `before_install` included, so a gated preparation reads long), or
-    /// `None` once the dispatch loop no longer listens.
-    fn run_pass(&self, queue: &RegistryQueue, before_probe: &dyn Fn(), before_install: &dyn Fn()) -> Option<Duration> {
+    /// What the pass did, its preparation time including `before_install`
+    /// (so a gated preparation reads long), or `None` once the dispatch loop
+    /// no longer listens.
+    fn run_pass(
+        &self,
+        queue: &RegistryQueue,
+        before_probe: &dyn Fn(),
+        before_install: &dyn Fn(),
+    ) -> Option<RegistryPass> {
         if !self.run_waiting_documents(queue) {
             return None;
         }
+        let tally = PayloadMemoTally::start();
         let started = self.clock.now();
         let probes = self.overlay.workspace_probes(&self.roots, &self.contexts);
-        let mut preparing = self.clock.now().saturating_duration_since(started);
+        let mut pass = RegistryPass {
+            preparing: self.clock.now().saturating_duration_since(started),
+            probes: probes.len(),
+            ..RegistryPass::default()
+        };
         for probe in probes {
             if !self.run_waiting_documents(queue) {
                 return None;
             }
             before_probe();
             let started = self.clock.now();
-            self.overlay.prepare_workspace_probe(&probe, &self.roots, &self.contexts, before_install);
-            preparing += self.clock.now().saturating_duration_since(started);
+            let outcome = self.overlay.prepare_workspace_probe(&probe, &self.roots, &self.contexts, before_install);
+            pass.preparing += self.clock.now().saturating_duration_since(started);
+            match outcome {
+                ProbeOutcome::Fresh => pass.fresh += 1,
+                ProbeOutcome::Prepared => pass.prepared += 1,
+                ProbeOutcome::Failed => pass.failed += 1,
+            }
         }
-        Some(preparing)
+        pass.payload = tally.counts();
+        Some(pass)
     }
 
     /// Runs every document job queued now.
@@ -1225,6 +1262,24 @@ impl ServerState {
             self.snapshot.store(index.snapshot());
         }
     }
+}
+
+/// Logs one workspace pass at `debug`: its probe outcomes, the payload memo's
+/// hits and misses during its own preparations, and its preparation time.
+/// Counts and identifiers only; never a payload, schema, or environment
+/// value.
+fn log_workspace_pass(pass: &RegistryPass, workspace: &str) {
+    tracing::debug!(
+        probes = pass.probes,
+        prepared = pass.prepared,
+        fresh = pass.fresh,
+        failed = pass.failed,
+        payload_hits = pass.payload.hits,
+        payload_misses = pass.payload.misses,
+        elapsed_ms = pass.preparing.as_millis(),
+        workspace = %workspace,
+        "trigger registries prepared"
+    );
 }
 
 /// Logs the startup registry line: `schema registry ready`, or
@@ -1917,6 +1972,7 @@ impl Router {
     /// Answers a waiting request with an error and emits its completion
     /// event.
     fn answer_waiter(&mut self, waiter: Waiter, code: ErrorCode, message: &str, outcome: Outcome) {
+        waiter.timings.end_registry_wait();
         let id = waiter.request.id.clone();
         self.respond(Response::new_err(id.clone(), code as i32, message.to_string()));
         CompletionEvent {
@@ -2029,6 +2085,7 @@ impl Router {
     /// of its document. A parked request comes back here when that
     /// prerequisite finishes, so each is checked again.
     fn proceed(&mut self, waiter: Waiter) {
+        waiter.timings.end_registry_wait();
         if !self.cancelled.contains(&waiter.request.id) {
             if let Some(trigger) = Trigger::for_method(&waiter.request.method)
                 && self.needs_index_build(&waiter.request)
@@ -2037,7 +2094,7 @@ impl Router {
                 return;
             }
             if let Some(need) = self.request_registry_need(&waiter.request) {
-                waiter.timings.record_wait(Wait::TriggerRegistry);
+                waiter.timings.begin_registry_wait();
                 self.state.registries.borrow_mut().wait_for(need, None, Some(waiter));
                 return;
             }
