@@ -44,6 +44,22 @@ Run 5 was caused by `wt`. fseventsd was healthy (0.6 % CPU afterward), and
 `wt` deleted about 6,600 entries a second, faster than FSEvents could take
 the events, so it dropped some.
 
+### Second occurrence: a modest checkout, healthy fseventsd
+
+Later the same day, `wt remove agent-a9a8d534778b78274` (an agent worktree
+with 61,778 entries, 34,545 of them under `target/`) stopped on its first
+attempt with `CoverageLost::Overflow`. The timeline in `report.json` shows the
+move, then 7,035 entries deleted in about 1.0 s (about 7,000 a second), then
+the loss. That is a little over three `DEFAULT_DRAIN_EVERY` intervals. Two
+hours later fseventsd was at 0.5 % CPU, eight hours after its last restart.
+This was run 5's failure without run 1–3's degraded fseventsd. So it is not
+limited to huge trees: any worktree that has been built is large enough to
+hit it. Retrying hits the same burst. The removal had to be finished by hand
+(`rm -rf` of the hidden directory, `git worktree prune`, `git branch -d`).
+
+The report could not say which drop flag fired, which is the gap Decision 2's
+first bullet closes.
+
 ## Decisions
 
 ### 1. A slow stream is not a lost stream (macOS and Windows)
@@ -168,3 +184,16 @@ file.
    the stream's own pending event count, where FSEvents exposes one?
 3. **Delay warning threshold.** Should a slow start barrier (> 1 s) only warn,
    or refuse up front with exit 4, before anything has moved?
+4. **Rescan instead of stopping on a drop.** `MustScanSubDirs` tells a client
+   to rescan, not that it has failed. The inventory records every entry, so a
+   rescan of the hidden directory could take the place of the missing events.
+   It would check that every entry this removal deleted is still absent, that
+   every entry it has not reached still matches its record, and that nothing
+   else exists. Then deletion would continue on a fresh drain. A change that
+   is made and then undone between drains would go unseen, but it leaves
+   nothing to lose. A write into an entry before its unlink is already caught
+   by the per-entry check. This would make a drop a slower path instead of a
+   stop, and the drain interval would only tune speed. It contradicts the
+   non-goal "coverage loss still stops the removal", so it needs a decision.
+   Should the drain interval (Decision 2) be the only fix, or should a
+   bounded number of rescans per removal (for example 3) also be allowed?
