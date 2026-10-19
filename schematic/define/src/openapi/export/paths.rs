@@ -4,22 +4,20 @@ use openapiv3::{Operation, PathItem, Paths, ReferenceOr};
 use super::super::OpenApiError;
 use super::super::extensions::SchematicOpExtension;
 use super::super::options::ExportOptions;
-use super::components::SchemaRegistryLike;
 use super::parameters::map_parameters;
 use super::request_body::map_request_body;
 use super::responses::map_responses;
 use crate::types::{Endpoint, RestMethod};
 
 /// Maps all endpoints to OpenAPI paths.
-pub(super) fn map_paths<R: SchemaRegistryLike>(
+pub(super) fn map_paths(
     api: &crate::types::RestApi,
-    registry: &R,
     options: &ExportOptions,
 ) -> Result<Paths, OpenApiError> {
     let mut paths = IndexMap::new();
 
     for endpoint in &api.endpoints {
-        let operation = map_operation(endpoint, registry, options)?;
+        let operation = map_operation(endpoint, options)?;
         let path_params = extract_path_params(&endpoint.path);
 
         // A reserved-expansion marker (`{+name}`) is a runtime encoding hint;
@@ -67,9 +65,8 @@ pub(super) fn map_paths<R: SchemaRegistryLike>(
 }
 
 /// Maps a single endpoint to an OpenAPI operation.
-pub(super) fn map_operation<R: SchemaRegistryLike>(
+pub(super) fn map_operation(
     endpoint: &Endpoint,
-    _registry: &R,
     options: &ExportOptions,
 ) -> Result<Operation, OpenApiError> {
     let request_body = endpoint

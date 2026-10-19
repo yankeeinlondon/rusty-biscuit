@@ -351,12 +351,12 @@ fn collection_errors(api: &RestApi, endpoint: &Endpoint, collection: &Collection
         errors.push(PaginationError::EmptyValue("item type"));
     }
     match &endpoint.response {
-        ApiResponse::Json(schema) => {
-            let is_vec = super::root_array_item_type(&endpoint.response).is_some();
+        ApiResponse::Json(reference) => {
+            let is_vec = super::root_array_item_type(api, &endpoint.response).is_some();
             if is_vec && matches!(collection.items.record.first(), Some(Step::Key(_))) {
                 errors.push(PaginationError::NotAnArrayLocation(format!(
                     "the response `{}` is a root array, so it has no key `{}`",
-                    schema.type_name, collection.items
+                    api.rust_type(reference).unwrap_or_default(), collection.items
                 )));
             }
         }

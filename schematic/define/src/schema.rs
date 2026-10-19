@@ -56,15 +56,14 @@ impl<T> SchemaObject for T where
 {
 }
 
-/// A schema descriptor for code generation.
+/// A WebSocket message schema, named by Rust type.
 ///
-/// This struct captures type information needed to generate strongly-typed
-/// request and response structs. It stores the type name and optional
-/// module path for proper imports in generated code.
+/// REST JSON bodies do not use this type; they reference schema components
+/// through [`crate::TypeRef`] (see [`crate::SchemaComponent`]).
 ///
 /// ## Examples
 ///
-/// Create a schema with just a type name:
+/// Create a stored WebSocket schema with just a type name:
 ///
 /// ```
 /// use schematic_define::Schema;
@@ -74,7 +73,7 @@ impl<T> SchemaObject for T where
 /// assert_eq!(schema.full_path(), "ListModelsResponse");
 /// ```
 ///
-/// Create a schema with a module path:
+/// Create a stored WebSocket schema with a module path:
 ///
 /// ```
 /// use schematic_define::Schema;
@@ -83,7 +82,7 @@ impl<T> SchemaObject for T where
 /// assert_eq!(schema.full_path(), "crate::types::Model");
 /// ```
 ///
-/// ## Usage Guide
+/// ## WebSocket usage guide
 ///
 /// Use [`Schema::new()`] when:
 /// - The type is defined in the same generated module
@@ -98,8 +97,6 @@ impl<T> SchemaObject for T where
 /// ## Code Generation Behavior
 ///
 /// WebSocket generation uses [`Schema::full_path()`] to qualify message types.
-/// REST builders store the fully qualified context path in `type_name`; REST
-/// generation ignores `module_path`, which remains for shared WebSocket schemas.
 ///
 /// | Constructor | Result | Generated Code |
 /// |-------------|--------|----------------|
@@ -116,12 +113,8 @@ impl<T> SchemaObject for T where
 pub struct Schema {
     /// The Rust type name (e.g., "ListModelsResponse").
     pub type_name: String,
-    /// WebSocket message module path. REST typed schemas always leave this unset.
+    /// Module path qualifying `type_name`, if any.
     pub module_path: Option<String>,
-    /// Typed authoring evidence, checked against the destination context at API build.
-    /// Stored schemas may lack evidence; REST API builders reject those references.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descriptor: Option<crate::TypeDesc>,
 }
 
 impl Schema {
@@ -143,7 +136,6 @@ impl Schema {
         Self {
             type_name: type_name.into(),
             module_path: None,
-            descriptor: None,
         }
     }
 
@@ -164,7 +156,6 @@ impl Schema {
         Self {
             type_name: type_name.into(),
             module_path: Some(module_path.into()),
-            descriptor: None,
         }
     }
 

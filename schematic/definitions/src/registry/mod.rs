@@ -4,19 +4,22 @@
 //! derived from Rust types using schemars. The registry can then be converted
 //! to OpenAPI schema format for API documentation generation.
 //!
-//! ## Examples
+//! Provider authoring uses one typed context; the registry is its export adapter.
+//! Low-level string registration remains for stored-form compatibility and tests.
 //!
 //! ```
+//! use schematic_define::DefinitionContext;
 //! use schematic_definitions::registry::SchemaRegistry;
 //! use schematic_definitions::openai::{Model, ListModelsResponse, DeleteModelResponse};
 //!
-//! let registry = SchemaRegistry::new()
-//!     .register::<Model>("Model")
-//!     .register::<ListModelsResponse>("ListModelsResponse")
-//!     .register::<DeleteModelResponse>("DeleteModelResponse");
-//!
+//! let mut context = DefinitionContext::types_in("::schematic_definitions::openai");
+//! context.register::<Model>()?;
+//! context.register::<ListModelsResponse>()?;
+//! context.register::<DeleteModelResponse>()?;
+//! let registry = SchemaRegistry::from_context(&context)?;
 //! assert_eq!(registry.len(), 3);
 //! assert!(registry.get("Model").is_some());
+//! # Ok::<(), schematic_define::DefinitionError>(())
 //! ```
 
 mod conversion;
@@ -64,22 +67,10 @@ impl SchemaRegistry {
             .collect() })
     }
 
-    /// Registers a type's JSON schema in the registry.
-    ///
-    /// The type must implement `schemars::JsonSchema`. The schema is generated
-    /// using OpenAPI 3.0 compatible settings.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use schematic_definitions::registry::SchemaRegistry;
-    /// use schematic_definitions::openai::Model;
-    ///
-    /// let registry = SchemaRegistry::new()
-    ///     .register::<Model>("Model");
-    ///
-    /// assert!(registry.get("Model").is_some());
-    /// ```
+    /// Low-level stored-form registration using OpenAPI 3.0 schema settings.
+    /// Provider authoring uses [`Self::from_context`] so names, type identity,
+    /// and collisions are checked together. This compatibility API overwrites
+    /// an existing entry of the same name.
     #[must_use]
     pub fn register<T: JsonSchema>(mut self, name: &str) -> Self {
         // Use OpenAPI 3.0 settings for maximum compatibility
@@ -140,8 +131,9 @@ impl SchemaRegistry {
     /// use schematic_definitions::registry::SchemaRegistry;
     /// use schematic_definitions::openai::Model;
     ///
-    /// let registry = SchemaRegistry::new()
-    ///     .register::<Model>("Model");
+    /// let mut context = schematic_define::DefinitionContext::types_in("::schematic_definitions::openai");
+    /// context.register::<Model>().unwrap();
+    /// let registry = SchemaRegistry::from_context(&context).unwrap();
     ///
     /// let openapi_schemas = registry.to_openapi_schemas();
     /// assert!(openapi_schemas.contains_key("Model"));
@@ -233,8 +225,9 @@ impl SchemaRegistry {
     /// assert!(openapi_registry().validate_completeness(&api).is_ok());
     ///
     /// // Incomplete registry fails validation
-    /// let incomplete_registry = SchemaRegistry::new()
-    ///     .register::<Model>("Model");
+    /// let mut context = schematic_define::DefinitionContext::types_in("::schematic_definitions::openai");
+    /// context.register::<Model>().unwrap();
+    /// let incomplete_registry = SchemaRegistry::from_context(&context).unwrap();
     ///
     /// let result = incomplete_registry.validate_completeness(&api);
     /// assert!(result.is_err());

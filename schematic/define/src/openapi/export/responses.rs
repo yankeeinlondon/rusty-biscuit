@@ -3,31 +3,11 @@ use openapiv3::{MediaType, ReferenceOr, Response, Responses, StatusCode};
 
 use crate::response::ApiResponse;
 
-/// Builds the schema entry for a named body or response type.
-///
-/// A path-shaped name (`serde_json::Value`) names a foreign Rust type that has
-/// no component entry, so it is emitted as an unconstrained inline schema. A
-/// `$ref` to it would dangle and fail export's reference-closure check.
-pub(super) fn schema_reference(type_name: &str) -> ReferenceOr<openapiv3::Schema> {
-    if type_name.contains("::") {
-        return ReferenceOr::Item(openapiv3::Schema {
-            schema_data: Default::default(),
-            schema_kind: openapiv3::SchemaKind::Any(openapiv3::AnySchema::default()),
-        });
-    }
-
-    ReferenceOr::Reference {
-        reference: format!("#/components/schemas/{type_name}"),
-    }
-}
-
-/// Typed descriptors keep component names and wrapper schemas separate from Rust paths.
-pub(super) fn body_schema(schema: &crate::Schema) -> Result<ReferenceOr<openapiv3::Schema>, crate::openapi::OpenApiError> {
-    if let Some(desc) = &schema.descriptor {
-        serde_json::from_value(desc.wire_schema()).map_err(|error| crate::openapi::OpenApiError::Validation {
-            path: schema.type_name.clone(), message: format!("typed wire schema is not OpenAPI-compatible: {error}"),
-        })
-    } else { Ok(schema_reference(&schema.type_name)) }
+/// The body schema of a JSON reference: nominal `$ref`s plus wrapper shape.
+pub(super) fn body_schema(reference: &crate::TypeRef) -> Result<ReferenceOr<openapiv3::Schema>, crate::openapi::OpenApiError> {
+    serde_json::from_value(reference.wire_schema()).map_err(|error| crate::openapi::OpenApiError::Validation {
+        path: format!("{reference:?}"), message: format!("wire schema is not OpenAPI-compatible: {error}"),
+    })
 }
 
 /// Maps response type to OpenAPI Responses.

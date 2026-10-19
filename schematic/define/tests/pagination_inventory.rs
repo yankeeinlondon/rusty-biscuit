@@ -10,7 +10,7 @@
 
 mod pagination_support;
 
-use pagination_support::{api, get, post, resolution, with_query};
+use pagination_support::{api, get, post, registered, resolution, with_query};
 use schematic_define::RestApi;
 use schematic_define::pagination::{
     Collection, CursorSource, Direction, IndexBase, InputParam, ItemSelector, Knob, LinkSource,
@@ -337,7 +337,7 @@ fn size_knob(param: &str, server_default: Option<u32>, max: Option<u32>) -> Knob
 #[test]
 fn every_inventory_fixture_is_valid() {
     for api in all_apis() {
-        assert_eq!(validate_pagination(&api), vec![], "{}", api.name);
+        assert_eq!(validate_pagination(&registered(api.clone())), vec![], "{}", api.name);
     }
 }
 
@@ -514,7 +514,7 @@ fn openai_cursor_without_resume_cannot_adopt_after() {
     let mut fixture = openai();
     let s7_not_resumable = Strategy::cursor("after", CursorSource::body("next")).more_when(MoreSignal::has_more("has_more"));
     fixture.endpoints.iter_mut().find(|endpoint| endpoint.id == "ListRoles").unwrap().pagination = Some(Collection::at("data").item_type("Role").paginate(s7_not_resumable));
-    let errors: Vec<PaginationError> = validate_pagination(&fixture).into_iter().map(|d| d.error).collect();
+    let errors: Vec<PaginationError> = validate_pagination(&registered(fixture.clone())).into_iter().map(|d| d.error).collect();
     assert_eq!(errors, vec![PaginationError::AdoptionWithoutKnob("after".into())]);
 }
 

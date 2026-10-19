@@ -2,21 +2,13 @@ use indexmap::IndexMap;
 use openapiv3::ReferenceOr;
 
 use super::super::options::ExportOptions;
+use super::conversion::convert_json_schema_to_openapi;
 use super::security::map_security;
 use crate::types::RestApi;
 
-/// Trait for schema registry abstraction.
-///
-/// This allows the export function to work with different registry implementations.
-pub trait SchemaRegistryLike {
-    /// Returns OpenAPI schemas indexed by name.
-    fn to_openapi_schemas(&self) -> IndexMap<String, openapiv3::Schema>;
-}
-
 /// Maps API components (schemas and security schemes).
-pub(super) fn map_components<R: SchemaRegistryLike>(
+pub(super) fn map_components(
     api: &RestApi,
-    registry: &R,
     _options: &ExportOptions,
 ) -> openapiv3::Components {
     let mut security_schemes = IndexMap::new();
@@ -25,10 +17,10 @@ pub(super) fn map_components<R: SchemaRegistryLike>(
         security_schemes.insert(name, ReferenceOr::Item(scheme));
     }
 
-    let schemas = registry
-        .to_openapi_schemas()
-        .into_iter()
-        .map(|(name, schema)| (name, ReferenceOr::Item(schema)))
+    let schemas = api
+        .schemas
+        .iter()
+        .map(|component| (component.name.clone(), ReferenceOr::Item(convert_json_schema_to_openapi(&component.schema))))
         .collect();
 
     openapiv3::Components {

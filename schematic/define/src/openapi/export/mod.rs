@@ -7,16 +7,16 @@
 //!
 //! ```text
 //! use schematic_define::openapi::{export, ExportOptions};
-//! use schematic_definitions::openai::{define_openai_api, openapi_registry};
+//! use schematic_definitions::openai::define_openai_api;
 //!
 //! let api = define_openai_api();
-//! let registry = openapi_registry();
 //! let options = ExportOptions::new().with_version("1.0.0");
 //!
-//! let openapi_doc = export(&api, &registry, &options)?;
+//! let openapi_doc = export(&api, &options)?;
 //! ```
 
 mod components;
+mod conversion;
 mod info;
 mod paths;
 mod parameters;
@@ -39,7 +39,6 @@ use paths::map_paths;
 use security::map_security_requirements;
 use validate::validate_ref_closure;
 
-pub use components::SchemaRegistryLike;
 pub use paths::extract_path_params;
 pub use security::map_security;
 
@@ -51,8 +50,8 @@ pub use security::map_security;
 ///
 /// ## Parameters
 ///
-/// - `api` - The REST API definition to export
-/// - `registry` - Schema registry containing JSON schemas for response types
+/// - `api` - The REST API definition to export; `components.schemas` comes
+///   from [`RestApi::schemas`]
 /// - `options` - Export configuration options
 ///
 /// ## Returns
@@ -62,16 +61,15 @@ pub use security::map_security;
 /// ## Errors
 ///
 /// Returns `OpenApiError` if the export fails due to validation issues.
-pub fn export<R: SchemaRegistryLike>(
+pub fn export(
     api: &RestApi,
-    registry: &R,
     options: &ExportOptions,
 ) -> Result<OpenAPI, OpenApiError> {
     let info = map_info(api, options);
     let servers = map_servers(api);
-    let paths = map_paths(api, registry, options)?;
+    let paths = map_paths(api, options)?;
     let security = map_security_requirements(api);
-    let components = map_components(api, registry, options);
+    let components = map_components(api, options);
 
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
@@ -122,38 +120,14 @@ mod tests {
     use crate::response::ApiResponse;
     use crate::types::{Endpoint, RestMethod};
 
-    struct TestRegistry {
-        schemas: IndexMap<String, openapiv3::Schema>,
-    }
-
-    impl TestRegistry {
-        fn new() -> Self {
-            Self {
-                schemas: IndexMap::new(),
-            }
-        }
-
-        fn with_schema(mut self, name: &str) -> Self {
-            self.schemas.insert(
-                name.to_string(),
-                openapiv3::Schema {
-                    schema_data: openapiv3::SchemaData {
-                        description: Some(format!("{} schema", name)),
-                        ..Default::default()
-                    },
-                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
-                        openapiv3::ObjectType::default(),
-                    )),
-                },
-            );
-            self
-        }
-    }
-
-    impl SchemaRegistryLike for TestRegistry {
-        fn to_openapi_schemas(&self) -> IndexMap<String, openapiv3::Schema> {
-            self.schemas.clone()
-        }
+    /// Give `api` one object component per name.
+    fn with_components(mut api: RestApi, names: &[&str]) -> RestApi {
+        api.schemas = names.iter().map(|name| crate::SchemaComponent {
+            name: (*name).to_string(),
+            rust_path: Some(format!("::models::{name}")),
+            schema: serde_json::json!({"description": format!("{name} schema"), "type": "object"}),
+        }).collect();
+        api
     }
 
     fn create_test_api() -> RestApi {
@@ -179,6 +153,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             }
     }
 
@@ -225,50 +200,45 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             }
     }
 
     #[test]
     fn export_produces_valid_openapi_version() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert_eq!(doc.openapi, "3.0.3");
     }
 
     #[test]
     fn export_includes_info() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert_eq!(doc.info.title, "TestAPI");
     }
 
     #[test]
     fn export_includes_paths() {
         let api = create_test_api_with_endpoints();
-        let registry = TestRegistry::new()
-            .with_schema("ListResponse")
-            .with_schema("Item");
+        let api = with_components(api, &["ListResponse", "Item"]);
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(!doc.paths.paths.is_empty());
     }
 
     #[test]
     fn export_includes_components_schemas() {
         let api = create_test_api();
-        let registry = TestRegistry::new()
-            .with_schema("TestSchema")
-            .with_schema("AnotherSchema");
+        let api = with_components(api, &["TestSchema", "AnotherSchema"]);
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(doc.components.is_some());
 
         let components = doc.components.unwrap();
@@ -279,10 +249,9 @@ mod tests {
     #[test]
     fn export_includes_security_schemes() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         let components = doc.components.unwrap();
 
         assert!(components.security_schemes.contains_key("bearerAuth"));
@@ -291,30 +260,27 @@ mod tests {
     #[test]
     fn export_includes_vendor_extensions_by_default() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(doc.extensions.contains_key("x-schematic"));
     }
 
     #[test]
     fn export_skips_extensions_when_requested() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new().skip_extensions();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(!doc.extensions.contains_key("x-schematic"));
     }
 
     #[test]
     fn export_includes_external_docs_when_present() {
         let api = create_test_api();
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         assert!(doc.external_docs.is_some());
         assert_eq!(doc.external_docs.unwrap().url, "https://docs.test.com");
     }
@@ -325,10 +291,9 @@ mod tests {
         api.module_path = Some("mymodule".to_string());
         api.request_suffix = Some("Params".to_string());
 
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
         let ext = doc.extensions.get("x-schematic").unwrap();
 
         assert!(ext.get("module_path").is_some());
@@ -366,11 +331,11 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let result = export(&api, &registry, &options);
+        let result = export(&api, &options);
         assert!(result.is_err());
         let err = result.unwrap_err();
         let err_str = err.to_string();
@@ -412,11 +377,11 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
-        let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
-        let result = export(&api, &registry, &options);
+        let result = export(&api, &options);
         assert!(result.is_err());
         let err = result.unwrap_err();
         let err_str = err.to_string();
@@ -458,11 +423,12 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
-        let registry = TestRegistry::new().with_schema("Model");
+        let api = with_components(api, &["Model"]);
         let options = ExportOptions::new();
 
-        let doc = export(&api, &registry, &options).unwrap();
+        let doc = export(&api, &options).unwrap();
 
         // The path key renders as valid `{repo_id}`, never `{+repo_id}`.
         assert!(doc.paths.paths.contains_key("/models/{repo_id}"));
@@ -516,13 +482,12 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
-        let registry = TestRegistry::new()
-            .with_schema("RequestBody")
-            .with_schema("ResponseBody");
+        let api = with_components(api, &["RequestBody", "ResponseBody"]);
         let options = ExportOptions::new();
 
-        let result = export(&api, &registry, &options);
+        let result = export(&api, &options);
         assert!(
             result.is_ok(),
             "export should succeed when all refs are resolved"
@@ -560,7 +525,7 @@ mod tests {
             cross_origin: None, pagination: None,
         }];
 
-        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+        let doc = export(&api, &ExportOptions::new())
             .expect("export should succeed");
 
         let ReferenceOr::Item(path_item) = &doc.paths.paths["/items"] else {
@@ -615,7 +580,7 @@ mod tests {
             },
         ];
 
-        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+        let doc = export(&api, &ExportOptions::new())
             .expect("export should succeed");
 
         let ReferenceOr::Item(path_item) = &doc.paths.paths["/items/{item_id}"] else {
@@ -639,7 +604,8 @@ mod tests {
                 .optional().with_description("metadata")]).build().unwrap();
         let api = RestApi::builder(&ctx, "Typed", "https://example.com").describes("Typed")
             .no_auth().endpoints([json, form]).build().unwrap();
-        let doc = export(&api, &TestRegistry::new().with_schema("Duration"), &ExportOptions::new()).unwrap();
+        assert_eq!(api.schemas.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Duration"]);
+        let doc = export(&api, &ExportOptions::new()).unwrap();
         let value = serde_json::to_value(doc).unwrap();
         let response = &value["paths"]["/json"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
         assert_eq!(response["anyOf"][0]["type"], "array");
@@ -650,18 +616,9 @@ mod tests {
         let form = &value["paths"]["/form"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"];
         assert_eq!(form["properties"]["metadata"]["allOf"][0]["items"]["$ref"], "#/components/schemas/Duration");
         assert!(form["required"].as_array().is_none_or(|v| v.is_empty()));
-        assert!(matches!(export(&api, &TestRegistry::new(), &ExportOptions::new()), Err(OpenApiError::UnresolvedRefs { .. })));
-    }
-
-    #[test]
-    fn malformed_typed_wire_schema_returns_export_error() {
-        let mut api = create_test_api();
-        let desc = serde_json::from_value(serde_json::json!({
-            "shape": {"Inline": {"rust_path": "::std::string::String", "schema": {"type": 123}}}, "structure": null
-        })).unwrap();
-        api.endpoints.push(Endpoint::get("Malformed", "/malformed").describes("Malformed")
-            .returns(crate::Success::json(desc)).build().unwrap());
-        assert!(matches!(export(&api, &TestRegistry::new(), &ExportOptions::new()), Err(OpenApiError::Validation { .. })), "{:?}", export(&api, &TestRegistry::new(), &ExportOptions::new()));
+        let mut without_components = api.clone();
+        without_components.schemas.clear();
+        assert!(matches!(export(&without_components, &ExportOptions::new()), Err(OpenApiError::UnresolvedRefs { .. })));
     }
 
 }

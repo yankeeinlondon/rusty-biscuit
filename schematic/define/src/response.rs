@@ -4,9 +4,14 @@
 //! The response type determines how the generated client deserializes
 //! the response body.
 
+//!
+//! These constructors describe stored transfer data.
+//! REST authors use typed endpoint builders; API build rejects JSON
+//! references that do not resolve to one of the API's schema components.
+
 use serde::{Deserialize, Serialize};
 
-use crate::schema::Schema;
+use crate::TypeRef;
 
 /// Describes the expected response from an API endpoint.
 ///
@@ -42,11 +47,11 @@ use crate::schema::Schema;
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiResponse {
-    /// JSON response with a typed schema.
+    /// JSON response, referencing the API's schema components.
     ///
-    /// The response body will be deserialized as JSON into the specified type.
+    /// The response body is deserialized as JSON into the referenced type.
     /// This is the most common response type for REST APIs.
-    Json(Schema),
+    Json(TypeRef),
 
     /// Plain text response.
     ///
@@ -67,62 +72,37 @@ pub enum ApiResponse {
 }
 
 impl ApiResponse {
-    /// Creates a JSON response with the given schema.
-    ///
-    /// Use this when you have a pre-built [`Schema`] with a module path.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use schematic_define::{ApiResponse, Schema};
-    ///
-    /// let schema = Schema::with_path("User", "crate::models");
-    /// let response = ApiResponse::json(schema);
-    /// ```
-    pub fn json(schema: Schema) -> Self {
-        Self::Json(schema)
+    /// Creates a JSON response with the given reference.
+    pub fn json(reference: TypeRef) -> Self {
+        Self::Json(reference)
     }
 
-    /// Creates a JSON response with just a type name.
-    ///
-    /// This is the most common way to specify a JSON response. The type
-    /// name should match a struct in the generated or imported code.
+    /// Creates a JSON response naming one schema component.
     ///
     /// ## Examples
     ///
     /// ```
-    /// use schematic_define::ApiResponse;
+    /// use schematic_define::{ApiResponse, TypeRef};
     ///
     /// let response = ApiResponse::json_type("ListModelsResponse");
-    ///
-    /// // Verify the schema was created correctly
-    /// if let ApiResponse::Json(schema) = response {
-    ///     assert_eq!(schema.type_name, "ListModelsResponse");
-    /// }
+    /// assert_eq!(response, ApiResponse::Json(TypeRef::Named("ListModelsResponse".into())));
     /// ```
-    pub fn json_type(type_name: impl Into<String>) -> Self {
-        Self::Json(Schema::new(type_name))
+    pub fn json_type(component: impl Into<String>) -> Self {
+        Self::Json(TypeRef::Named(component.into()))
     }
 
-    /// Creates a JSON response that deserializes to `Vec<T>`.
-    ///
-    /// Convenience wrapper around [`json_type`](Self::json_type) for list endpoints
-    /// that return arrays of items.
+    /// Creates a JSON response that is an array of one schema component.
     ///
     /// ## Examples
     ///
     /// ```
-    /// use schematic_define::ApiResponse;
+    /// use schematic_define::{ApiResponse, TypeRef};
     ///
     /// let response = ApiResponse::json_vec_type("ModelInfo");
-    ///
-    /// // Equivalent to: ApiResponse::json_type("Vec<ModelInfo>")
-    /// if let ApiResponse::Json(schema) = response {
-    ///     assert_eq!(schema.type_name, "Vec<ModelInfo>");
-    /// }
+    /// assert_eq!(response, ApiResponse::Json(TypeRef::Array(Box::new(TypeRef::Named("ModelInfo".into())))));
     /// ```
-    pub fn json_vec_type(item_type: impl Into<String>) -> Self {
-        Self::json_type(format!("Vec<{}>", item_type.into()))
+    pub fn json_vec_type(component: impl Into<String>) -> Self {
+        Self::Json(TypeRef::Array(Box::new(TypeRef::Named(component.into()))))
     }
 
     /// Returns true if this is a JSON response.
@@ -149,15 +129,6 @@ impl ApiResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn json_vec_type_wraps_in_vec() {
-        let response = ApiResponse::json_vec_type("ModelInfo");
-        match response {
-            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "Vec<ModelInfo>"),
-            _ => panic!("Expected Json variant"),
-        }
-    }
 
     #[test]
     fn is_json_returns_true_for_json_response() {

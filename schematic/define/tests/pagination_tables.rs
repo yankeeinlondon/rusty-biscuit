@@ -4,7 +4,7 @@
 mod pagination_support;
 
 use pagination_support::{
-    api, endpoint, errors, get, listed, post, resolution, with_headers, with_query,
+    api, endpoint, errors, get, listed, post, reference, registered, resolution, with_headers, with_query,
     with_required_query,
 };
 use schematic_define::pagination::{
@@ -83,7 +83,7 @@ fn only_get_with_an_explicit_vec_is_recognized() {
     for endpoint in &forge.endpoints {
         assert_eq!(resolution(&forge, &endpoint.id), Resolution::NotAList, "{}", endpoint.id);
     }
-    assert_eq!(validate_pagination(&forge), vec![]);
+    assert_eq!(validate_pagination(&registered(forge.clone())), vec![]);
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn an_endpoint_collection_decides_before_inference() {
             origin: ResolutionOrigin::Exception,
         }
     );
-    assert_eq!(validate_pagination(&forge), vec![]);
+    assert_eq!(validate_pagination(&registered(forge.clone())), vec![]);
 }
 
 #[test]
@@ -140,16 +140,19 @@ fn a_wrapper_collection_without_a_default_is_an_unpaginated_list() {
         resolution(&plain, "ListModels"),
         Resolution::Unpaginated { origin: ResolutionOrigin::Unauthored, .. }
     ));
-    assert_eq!(validate_pagination(&plain), vec![]);
+    assert_eq!(validate_pagination(&registered(plain.clone())), vec![]);
 }
 
 #[test]
-fn root_array_item_type_reads_only_an_explicit_vec() {
-    assert_eq!(root_array_item_type(&ApiResponse::json_type("Vec<Issue>")).as_deref(), Some("Issue"));
-    assert_eq!(root_array_item_type(&ApiResponse::json_type(" Vec< serde_json::Value > ")).as_deref(), Some("serde_json::Value"));
-    assert_eq!(root_array_item_type(&ApiResponse::json_type("Vec<>")), None);
-    assert_eq!(root_array_item_type(&ApiResponse::json_type("ListModelsResponse")), None);
-    assert_eq!(root_array_item_type(&ApiResponse::Text), None);
+fn root_array_item_type_reads_only_a_root_array_reference() {
+    let mut fixture = api("Fixture");
+    fixture.endpoints = vec![get("ListIssues", "/issues", "Vec<Issue>"), get("ListModels", "/models", "ListModelsResponse")];
+    let fixture = registered(fixture);
+    assert_eq!(root_array_item_type(&fixture, &ApiResponse::json_vec_type("Issue")).as_deref(), Some("Issue"));
+    assert_eq!(root_array_item_type(&fixture, &ApiResponse::Json(reference("Vec<serde_json::Value>"))).as_deref(), Some("::serde_json::Value"));
+    assert_eq!(root_array_item_type(&fixture, &ApiResponse::json_vec_type("Unregistered")), None);
+    assert_eq!(root_array_item_type(&fixture, &ApiResponse::json_type("ListModelsResponse")), None);
+    assert_eq!(root_array_item_type(&fixture, &ApiResponse::Text), None);
 }
 
 #[test]
@@ -198,7 +201,7 @@ fn endpoint_collection_list_shape_rules() {
 #[test]
 fn an_unpaginated_collection_needs_no_item_type() {
     let opt_out = listed(get("ListAuthUsers", "/users", "Paged"), Collection::at("data").unpaginated());
-    assert_eq!(validate_pagination(&opt_out), vec![]);
+    assert_eq!(validate_pagination(&registered(opt_out.clone())), vec![]);
 }
 
 #[test]
@@ -220,7 +223,7 @@ fn alternates_are_validated_and_resolved_but_add_no_knobs() {
     assert_eq!(errors(&bad_label), vec![PaginationError::InvalidLabel("Key Set".into())]);
 
     let valid = listed(get("L", "/l", "Vec<T>"), primary().or_paginate("keyset", keyset()));
-    assert_eq!(validate_pagination(&valid), vec![]);
+    assert_eq!(validate_pagination(&registered(valid.clone())), vec![]);
     let resolved = resolution(&valid, "L");
     let Resolution::Paginated { alternates, .. } = &resolved else { panic!("paginated expected") };
     assert_eq!(alternates[0].label, "keyset");
@@ -229,7 +232,7 @@ fn alternates_are_validated_and_resolved_but_add_no_knobs() {
 
     // An alternate's own errors name it.
     let broken = listed(get("L", "/l", "Vec<T>"), primary().or_paginate("keyset", keyset().constant("pagination", "x")));
-    let diagnostics = validate_pagination(&broken);
+    let diagnostics = validate_pagination(&registered(broken.clone()));
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].alternate.as_deref(), Some("keyset"));
     assert!(diagnostics[0].to_string().ends_with("(alternate `keyset`)"));
@@ -246,7 +249,7 @@ fn an_alternate_constant_may_shadow_a_declared_parameter() {
         .constant("sort", "asc");
     let group_projects = with_query(get("ListGroupProjects", "/groups/{id}/projects", "Vec<Project>"), &["order_by", "sort"]);
     let api = listed(group_projects, Collection::root().paginate(page_default()).or_paginate("keyset", keyset));
-    assert_eq!(validate_pagination(&api), vec![]);
+    assert_eq!(validate_pagination(&registered(api.clone())), vec![]);
 }
 
 #[test]
@@ -254,7 +257,7 @@ fn api_default_errors_are_reported_once_without_an_endpoint() {
     let mut forge = api("Forge");
     forge.default_pagination = Some(Strategy::cursor("after", CursorSource::last_item("id")).build());
     forge.endpoints = vec![get("ListA", "/a", "Vec<A>"), get("ListB", "/b", "Vec<B>")];
-    let diagnostics = validate_pagination(&forge);
+    let diagnostics = validate_pagination(&registered(forge.clone()));
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].endpoint, None);
     assert_eq!(diagnostics[0].error, PaginationError::CursorWithoutEndSignal);
@@ -267,7 +270,7 @@ fn endpoint_dependent_errors_of_the_default_are_reported_per_endpoint() {
         Strategy::cursor(InputParam::body("cursor"), CursorSource::body("next")).build(),
     );
     forge.endpoints = vec![get("ListA", "/a", "Vec<A>")];
-    let diagnostics = validate_pagination(&forge);
+    let diagnostics = validate_pagination(&registered(forge.clone()));
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].endpoint.as_deref(), Some("ListA"));
     assert_eq!(diagnostics[0].error, PaginationError::BodyInputOnGet("cursor".into()));
@@ -294,7 +297,7 @@ fn a_declared_parameter_with_its_knob_is_adopted() {
     assert!(adopted.iter().all(|a| a.location == ParamLocation::Query && !a.required));
 
     let api = listed(list_files, Collection::at("data").item_type("OpenAIFile").paginate(openai_cursor()));
-    assert_eq!(validate_pagination(&api), vec![]);
+    assert_eq!(validate_pagination(&registered(api.clone())), vec![]);
     let knobs = caller_knobs(&resolution(&api, "ListFiles"));
     assert!(knobs.contains(&Knob::ResumeCursor { direction: Direction::Forward, parts: 1 }));
     assert!(knobs.iter().any(|knob| matches!(knob, Knob::PageSize { .. })));
@@ -312,7 +315,7 @@ fn a_declared_parameter_without_its_knob_is_refused_and_kept() {
     assert_eq!(outcomes, [AdoptionOutcome::WithoutKnob]);
 
     let api = listed(list_files.clone(), Collection::at("data").item_type("F").paginate(not_resumable));
-    let diagnostics = validate_pagination(&api);
+    let diagnostics = validate_pagination(&registered(api.clone()));
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].error, PaginationError::AdoptionWithoutKnob("after".into()));
     assert_eq!(diagnostics[0].error.group(), PaginationRuleGroup::Parameter);
@@ -421,6 +424,6 @@ fn partition_inputs_are_adopted_with_their_knob() {
 fn total_from_body_is_a_total_knob() {
     let runs = page_default().total(ValueSource::body("total_count"));
     let api = listed(get("ListWorkflowRuns", "/runs", "WorkflowRunsResponse"), Collection::at("workflow_runs").item_type("WorkflowRun").paginate(runs));
-    assert_eq!(validate_pagination(&api), vec![]);
+    assert_eq!(validate_pagination(&registered(api.clone())), vec![]);
     assert!(caller_knobs(&resolution(&api, "ListWorkflowRuns")).contains(&Knob::Total));
 }

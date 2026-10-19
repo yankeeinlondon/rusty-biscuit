@@ -54,15 +54,15 @@
 //!
 //! ```text
 //! use schematic_define::openapi::{export, ExportOptions, ExportFormat, serialize};
-//! use schematic_definitions::openai::{define_openai_api, openapi_registry};
+//! use schematic_definitions::openai::define_openai_api;
 //!
+//! // Component schemas come from the API's own `schemas`.
 //! let api = define_openai_api();
-//! let registry = openapi_registry();
 //! let options = ExportOptions::new()
 //!     .with_version("1.0.0")
 //!     .with_format(ExportFormat::Yaml);
 //!
-//! let doc = export(&api, &registry, &options)?;
+//! let doc = export(&api, &options)?;
 //! let yaml_str = serialize(&doc, ExportFormat::Yaml)?;
 //! ```
 //!
@@ -83,7 +83,7 @@ mod options;
 mod source;
 
 pub use error::OpenApiError;
-pub use export::{SchemaRegistryLike, export, extract_path_params, map_security};
+pub use export::{export, extract_path_params, map_security};
 pub use extensions::{
     AuthExtension, SchematicDocExtension, SchematicOpExtension, SchematicSchemaExtension,
 };

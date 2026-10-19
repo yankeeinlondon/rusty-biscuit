@@ -12,6 +12,7 @@ use super::strategy::{IndexBase, InputParam, MoreSignal, PageStrategy, SessionOp
 use crate::params::ParamDef;
 use crate::response::ApiResponse;
 use crate::types::{Endpoint, RestApi, RestMethod};
+use crate::TypeRef;
 
 /// What decided an endpoint's pagination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -93,7 +94,7 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
         if endpoint.method != RestMethod::Get {
             return Resolution::NotAList;
         }
-        let Some(item_type) = root_array_item_type(&endpoint.response) else {
+        let Some(item_type) = root_array_item_type(api, &endpoint.response) else {
             return Resolution::NotAList;
         };
         let list = ResolvedList {
@@ -118,7 +119,7 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
         collection
             .items
             .is_root_array()
-            .then(|| root_array_item_type(&endpoint.response))
+            .then(|| root_array_item_type(api, &endpoint.response))
             .flatten()
     });
     let list = ResolvedList {
@@ -149,23 +150,16 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
     }
 }
 
-/// The `T` of an explicit `Vec<T>` JSON response, as written.
+/// The Rust path of `T` when `response` is a JSON array of `T`.
 ///
-/// Typed authoring recognizes the descriptor's root Vec shape. Legacy strings
-/// recognize only `Vec<..>`; aliases, qualified strings, and free-form JSON
-/// still need an authored collection.
-pub fn root_array_item_type(response: &ApiResponse) -> Option<String> {
-    let ApiResponse::Json(schema) = response else {
+/// Only a root array reference qualifies; a nominal component that is itself
+/// a list (an alias or wrapper type) still needs an authored collection.
+/// `None` also when the item does not resolve through `api`'s components.
+pub fn root_array_item_type(api: &RestApi, response: &ApiResponse) -> Option<String> {
+    let ApiResponse::Json(TypeRef::Array(item)) = response else {
         return None;
     };
-    if let Some(desc) = &schema.descriptor { return desc.root_array_item(); }
-    let inner = schema
-        .type_name
-        .trim()
-        .strip_prefix("Vec<")?
-        .strip_suffix('>')?
-        .trim();
-    (!inner.is_empty()).then(|| inner.to_owned())
+    api.rust_type(item)
 }
 
 // ---------------------------------------------------------------------------

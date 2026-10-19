@@ -1,4 +1,4 @@
-//! Additive assembly seam for definitions and their shared module registry.
+//! Assembly of definitions and their shared ordered module registry.
 use schematic_define::{DefinitionContext, DefinitionError, RestApi};
 use super::SchemaRegistry;
 

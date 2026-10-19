@@ -1,5 +1,6 @@
-//! Required-fact REST authoring. Descriptors survive lowering so API assembly
-//! can validate their entire shape against its destination context.
+//! Required-fact REST authoring. Typed registrations lower to component
+//! references; API build stores the context's components and checks that
+//! every reference resolves to one.
 //!
 //! ```compile_fail
 //! use schematic_define::Endpoint;
@@ -33,8 +34,8 @@
 
 use std::marker::PhantomData;
 use crate::{ApiRequest, ApiResponse, AuthPolicy, AuthStrategy, CrossOrigin, DefinitionContext,
-    DefinitionError, Endpoint, EndpointParams, EnvMapping, FormField, FormFieldKind,
-    ParamDef, Registration, RestApi, RestMethod, Schema, TypeDesc};
+    DefinitionError, Endpoint, EndpointParams, EnvMapping, FormField,
+    ParamDef, Registration, RestApi, RestMethod, TypeDesc};
 
 /// A required fact has not been declared.
 pub struct Missing;
@@ -47,7 +48,7 @@ pub struct Present;
 pub struct Success(ApiResponse);
 #[allow(missing_docs)]
 impl Success {
-    pub fn json(desc: TypeDesc) -> Self { Self(ApiResponse::Json(typed_schema(desc))) }
+    pub fn json(desc: TypeDesc) -> Self { Self(ApiResponse::Json(desc.into_type_ref())) }
     pub fn text() -> Self { Self(ApiResponse::Text) }
     pub fn binary() -> Self { Self(ApiResponse::Binary) }
     pub fn empty() -> Self { Self(ApiResponse::Empty) }
@@ -66,13 +67,10 @@ impl ErrorSet {
 impl FormField {
     /// Typed JSON form metadata, validated with other endpoint references at API build.
     pub fn json_desc(name: impl Into<String>, desc: TypeDesc) -> Self {
-        Self::json(name, typed_schema(desc))
+        Self::json(name, desc.into_type_ref())
     }
 }
 
-fn typed_schema(desc: TypeDesc) -> Schema {
-    Schema { type_name: desc.rust_path(), module_path: None, descriptor: Some(desc) }
-}
 fn invalid(api: &str, endpoint: &str, message: impl Into<String>) -> DefinitionError {
     DefinitionError::InvalidDefinition { api: api.into(), endpoint: endpoint.into(), message: message.into() }
 }
@@ -125,7 +123,7 @@ impl<D, S> EndpointBuilder<D, S> {
     pub fn errors(self, _: ErrorSet) -> Self { self }
     pub fn request_json<T: Registration>(mut self, ctx: &mut DefinitionContext) -> Self {
         match ctx.register_for::<T>("<endpoint>", &self.endpoint.id) {
-            Ok(desc) => self.endpoint.request = Some(ApiRequest::Json(typed_schema(desc))),
+            Ok(desc) => self.endpoint.request = Some(ApiRequest::Json(desc.into_type_ref())),
             Err(error) => if self.error.is_none() { self.error = Some(error); },
         }
         self
@@ -179,7 +177,7 @@ impl RestApi {
             docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![], env_username: None,
             headers: vec![], endpoints: vec![], module_path: None, request_suffix: None, version: None,
             env_mapping: None, cross_origin: CrossOrigin::same_origin(), request_id_header: None, secret_names: vec![],
-            default_pagination: None }, auth_choices: 0, error: None, state: PhantomData }
+            default_pagination: None, schemas: vec![] }, auth_choices: 0, error: None, state: PhantomData }
     }
 }
 #[allow(missing_docs)]
@@ -224,9 +222,10 @@ impl RestApiBuilder<'_, Present, Present> {
     /// Validate coherent authentication and every typed reference, without
     /// weakening output-specific generator validation for legacy fixtures.
     pub fn build(self) -> Result<RestApi, DefinitionError> {
-        self.ctx.finish()?;
+        let schemas = self.ctx.components()?;
         if let Some(error) = self.error { return Err(error); }
-        let api = self.api;
+        let mut api = self.api;
+        api.schemas = schemas;
         let fail = |message: &str| invalid(&api.name, "<api>", message);
         if self.auth_choices != 1 { return Err(fail("authentication must be declared exactly once")); }
         let url = url::Url::parse(&api.base_url).map_err(|_| fail("invalid base URL"))?;
@@ -268,29 +267,8 @@ impl RestApiBuilder<'_, Present, Present> {
                         && !valid_rust_name(name) { return Err(invalid(&api.name, &ep.id, "invalid Rust parameter name")); }
                 }
             }
-            let mut schemas = vec![];
-            if let ApiResponse::Json(schema) = &ep.response { schemas.push(schema); }
-            if let Some(request) = &ep.request {
-                match request {
-                    ApiRequest::Json(schema) => schemas.push(schema),
-                    ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields } => for field in fields {
-                        if let FormFieldKind::Json(schema) = &field.kind { schemas.push(schema); }
-                    },
-                    _ => {},
-                }
-            }
-            for schema in schemas {
-                if let Some(desc) = &schema.descriptor {
-                    self.ctx.validate_reference(&api.name, &ep.id, desc)?;
-                    if schema.type_name != desc.rust_path() || schema.module_path.is_some() {
-                        return Err(invalid(&api.name, &ep.id, "lowered schema disagrees with its typed descriptor"));
-                    }
-                } else {
-                    return Err(DefinitionError::InvalidDescriptor { api: api.name.clone(),
-                        endpoint: ep.id.clone(), rust_type: schema.type_name.clone() });
-                }
-            }
         }
+        api.validate_references()?;
         Ok(api)
     }
 }

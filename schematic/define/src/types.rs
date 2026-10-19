@@ -202,6 +202,10 @@ pub struct RestApi {
     /// `None` leaves lists unpaginated. A GET endpoint whose response is an
     /// explicit `Vec<T>` is a list automatically; any other list needs an endpoint collection. See [`crate::pagination::resolve`].
     pub default_pagination: Option<Strategy>,
+    /// Every schema component of this API's definition context, in
+    /// registration order. JSON body references name these; see
+    /// [`RestApi::validate_references`].
+    pub schemas: Vec<crate::SchemaComponent>,
 }
 
 impl RestApi {
@@ -509,6 +513,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
 
         let mapping = api.default_env_mapping();
@@ -540,6 +545,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
 
         let mapping = api.default_env_mapping();
@@ -574,6 +580,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
 
         let mapping = api.default_env_mapping();
@@ -606,6 +613,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
 
         let mapping = api.default_env_mapping();
@@ -636,6 +644,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
 
         let mapping = api.default_env_mapping();
@@ -682,6 +691,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
 
         let mapping = api.default_env_mapping();
@@ -721,6 +731,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
+            schemas: vec![],
             };
 
         let mapping1 = api.default_env_mapping();

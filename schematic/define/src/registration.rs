@@ -1,17 +1,13 @@
 //! Typed registrations for one generated module group.
 //!
-//! Deserialization creates untrusted transfer data. Call
-//! [`DefinitionContext::validate_reference`] before using it in a definition.
+//! A [`TypeDesc`] is an authoring handle: builders lower it to a
+//! [`TypeRef`] naming components, and API build stores the context's
+//! components on the API (see [`crate::SchemaComponent`]).
 //! The first registration of a canonical Rust type fixes its name and path.
 //!
 //! ```compile_fail
 //! use schematic_define::TypeDesc;
 //! let descriptor = TypeDesc::new("Model");
-//! ```
-//! ```compile_fail
-//! use schematic_define::{DefinitionContext, TypeRef};
-//! let mut ctx = DefinitionContext::types_in("::models");
-//! ctx.register::<String>().unwrap().structure(TypeRef::Named("Model".into()));
 //! ```
 //! ```compile_fail
 //! let path = schematic_define::rust_path!(::std::string::Misspelled);
@@ -24,63 +20,27 @@
 
 use std::{any::{TypeId, type_name}, collections::HashMap, marker::PhantomData};
 use schemars::{JsonSchema, Schema, generate::SchemaSettings};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use crate::TypeRef;
+use serde_json::Value;
+use crate::{PrimitiveType, SchemaComponent, TypeRef};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-enum Shape {
-    Named { schema_name: String, rust_path: String },
-    Inline { rust_path: String, schema: Value },
-    Vec(Box<Shape>),
-    Option(Box<Shape>),
-    Map { key: String, value: Box<Shape> },
-}
-
-/// Transfer representation of a registered type, including its Rust wrappers.
+/// A registered type: the reference builders store, and its Rust spelling.
 ///
-/// Fields are private: registration is the authoring constructor. Data received
-/// through Serde must pass destination-context validation before use.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Fields are private: registration is the only constructor.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeDesc {
-    shape: Shape,
-    structure: Option<TypeRef>,
+    reference: TypeRef,
+    rust_path: String,
 }
 impl TypeDesc {
+    fn new(reference: TypeRef, rust_path: String) -> Self { Self { reference, rust_path } }
     /// Fully qualified Rust spelling, preserving aliases and container shape.
-    pub fn rust_path(&self) -> String { self.shape.rust_path() }
-    pub(crate) fn root_array_item(&self) -> Option<String> {
-        match &self.shape { Shape::Vec(item) => Some(item.rust_path()), _ => None }
-    }
+    pub fn rust_path(&self) -> &str { &self.rust_path }
     /// Wire schema with container shape and nominal component references.
-    pub fn wire_schema(&self) -> Value { self.shape.wire_schema() }
-}
-impl Shape {
-    fn rust_path(&self) -> String {
-        match self {
-            Self::Named { rust_path, .. } | Self::Inline { rust_path, .. } => rust_path.clone(),
-            Self::Vec(t) => format!("::std::vec::Vec<{}>", t.rust_path()),
-            Self::Option(t) => format!("::std::option::Option<{}>", t.rust_path()),
-            Self::Map { key, value } => format!("::std::collections::HashMap<{key}, {}>", value.rust_path()),
-        }
-    }
-    fn wire_schema(&self) -> Value {
-        match self {
-            Self::Named { schema_name, .. } => json!({"$ref": format!("#/components/schemas/{schema_name}")}),
-            Self::Inline { schema, .. } => schema.clone(),
-            Self::Vec(t) => json!({"type":"array", "items":t.wire_schema()}),
-            Self::Option(t) => {
-                let mut schema = schemars::json_schema!({"anyOf":[t.wire_schema(), {"type":"null"}]});
-                for mut transform in SchemaSettings::openapi3().transforms {
-                    transform.transform(&mut schema);
-                }
-                schema.to_value()
-            },
-            Self::Map { value, .. } => json!({"type":"object", "additionalProperties":value.wire_schema()}),
-        }
-    }
+    pub fn wire_schema(&self) -> Value { self.reference.wire_schema() }
+    /// The stored reference: component names plus wrapper shape.
+    pub fn type_ref(&self) -> &TypeRef { &self.reference }
+    /// Lower to the stored reference.
+    pub fn into_type_ref(self) -> TypeRef { self.reference }
 }
 
 /// A type-checked authored path produced by [`crate::rust_path!`].
@@ -108,9 +68,9 @@ pub enum DefinitionError {
     /// All collected collisions, in encounter order.
     #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
     Collisions(Vec<DefinitionError>),
-    /// A transferred descriptor does not match a destination registration.
-    #[error("{api} endpoint {endpoint}: invalid type descriptor {rust_type}")]
-    InvalidDescriptor { api: String, endpoint: String, rust_type: String },
+    /// A reference names a component the API does not carry.
+    #[error("{api} endpoint {endpoint}: unresolved schema reference \"{name}\"")]
+    UnresolvedReference { api: String, endpoint: String, name: String },
     /// Invalid authored facts, with assembly context.
     #[error("{api} endpoint {endpoint}: {message}")]
     InvalidDefinition { api: String, endpoint: String, message: String },
@@ -128,7 +88,7 @@ impl DefinitionError {
     pub fn diagnostics(&self, api: &str) -> String {
         match self {
             Self::Collisions(errors) => errors.iter().map(|e| e.diagnostics(api)).collect::<Vec<_>>().join("\n"),
-            Self::InvalidDescriptor { .. } | Self::UnsupportedKey { .. } => self.to_string(),
+            Self::UnresolvedReference { .. } | Self::UnsupportedKey { .. } => self.to_string(),
             _ => format!("API {api}: {self}"),
         }
     }
@@ -148,7 +108,7 @@ impl TypeRegistration {
     pub fn schema_name(&self) -> &str { &self.name }
     /// Fully qualified Rust leaf path.
     pub fn rust_path(&self) -> &str { &self.path }
-    /// Schema generated with the registry's OpenAPI-compatible settings.
+    /// Schema generated with the context's OpenAPI-compatible settings.
     pub fn schema(&self) -> &Schema { &self.schema }
 }
 
@@ -157,14 +117,13 @@ impl TypeRegistration {
 pub struct DefinitionContext {
     entries: Vec<TypeRegistration>,
     errors: Vec<DefinitionError>,
-    descriptors: Vec<TypeDesc>,
     module_path: String,
 }
 impl DefinitionContext {
     /// State the generated types module once; it must be publicly accessible
     /// from the generated crate. Generated-client compilation proves visibility.
     pub fn types_in(module_path: impl Into<String>) -> Self {
-        Self { entries: Vec::new(), errors: Vec::new(), descriptors: Vec::new(), module_path: module_path.into() }
+        Self { entries: Vec::new(), errors: Vec::new(), module_path: module_path.into() }
     }
     #[doc(hidden)]
     pub fn register_nominal<T: Registration>(&mut self) -> Result<TypeDesc, DefinitionError> {
@@ -178,26 +137,20 @@ impl DefinitionContext {
     }
     /// Registration with diagnostic context, used by endpoint authoring.
     pub fn register_for<T: Registration>(&mut self, api: &str, endpoint: &str) -> Result<TypeDesc, DefinitionError> {
-        let desc = T::register(self).map_err(|e| match e {
+        T::register(self).map_err(|e| match e {
             DefinitionError::UnsupportedKey { rust_type, .. } => DefinitionError::UnsupportedKey { api: api.into(), endpoint: endpoint.into(), rust_type },
             other => other,
-        })?;
-        self.remember(desc)
+        })
     }
     /// Exceptional naming must precede the first implicit registration of T.
     /// Repeated registration reuses the original name, path, and position.
     pub fn register_as<T: Registration>(&mut self, path: RustPath<T>) -> Result<TypeDesc, DefinitionError> {
         if !T::IS_LEAF { return Err(DefinitionError::NotLeaf); }
-        let desc = self.leaf::<T>(path.path, path.schema_name)?;
-        self.remember(desc)
-    }
-    fn remember(&mut self, desc: TypeDesc) -> Result<TypeDesc, DefinitionError> {
-        if !self.descriptors.contains(&desc) { self.descriptors.push(desc.clone()); }
-        Ok(desc)
+        self.leaf::<T>(path.path, path.schema_name)
     }
     fn leaf<T: JsonSchema + 'static>(&mut self, path: &str, name: Option<&str>) -> Result<TypeDesc, DefinitionError> {
         if let Some(entry) = self.entries.iter().find(|e| e.identity == TypeId::of::<T>()) {
-            return Ok(TypeDesc { shape: Shape::Named { schema_name: entry.name.clone(), rust_path: entry.path.clone() }, structure: None });
+            return Ok(TypeDesc::new(TypeRef::Named(entry.name.clone()), entry.path.clone()));
         }
         let name = name.map(str::to_owned).unwrap_or_else(|| T::schema_name().into_owned());
         if let Some(entry) = self.entries.iter().find(|e| e.name == name) {
@@ -206,7 +159,7 @@ impl DefinitionContext {
             return Err(error);
         }
         self.entries.push(TypeRegistration { identity: TypeId::of::<T>(), diagnostic: type_name::<T>(), name: name.clone(), path: path.into(), schema: SchemaSettings::openapi3().into_generator().into_root_schema_for::<T>() });
-        Ok(TypeDesc { shape: Shape::Named { schema_name: name, rust_path: path.into() }, structure: None })
+        Ok(TypeDesc::new(TypeRef::Named(name), path.into()))
     }
     /// Fail assembly with every distinct collision seen so far.
     pub fn finish(&self) -> Result<(), DefinitionError> {
@@ -214,14 +167,11 @@ impl DefinitionContext {
     }
     /// Ordered nominal entries, including explicit types unused by endpoints.
     pub fn registrations(&self) -> &[TypeRegistration] { &self.entries }
-    /// Accept transferred data only when the destination registered the same
-    /// component, Rust path, and wrapper shape. Reserved structure is unsupported.
-    pub fn validate_reference(&self, api: &str, endpoint: &str, desc: &TypeDesc) -> Result<(), DefinitionError> {
-        if desc.structure.is_none() && self.descriptors.contains(desc) {
-            Ok(())
-        } else {
-            Err(DefinitionError::InvalidDescriptor { api: api.into(), endpoint: endpoint.into(), rust_type: desc.rust_path() })
-        }
+    /// Every component this context defines, in registration order, with
+    /// nested `$defs` flattened into their own entries. Fails on collisions.
+    pub fn components(&self) -> Result<Vec<SchemaComponent>, DefinitionError> {
+        self.finish()?;
+        Ok(crate::components::flatten(self.entries.iter().map(|e| (e.name.as_str(), e.path.as_str(), e.schema.as_value()))))
     }
 }
 
@@ -265,11 +215,17 @@ macro_rules! definition_type {
 }
 impl<T: Registration> Registration for Vec<T> {
     const IS_LEAF: bool = false;
-    fn register(c: &mut DefinitionContext) -> Result<TypeDesc, DefinitionError> { Ok(TypeDesc { shape: Shape::Vec(Box::new(c.register::<T>()?.shape)), structure: None }) }
+    fn register(c: &mut DefinitionContext) -> Result<TypeDesc, DefinitionError> {
+        let item = c.register::<T>()?;
+        Ok(TypeDesc::new(TypeRef::Array(Box::new(item.reference)), format!("::std::vec::Vec<{}>", item.rust_path)))
+    }
 }
 impl<T: Registration> Registration for Option<T> {
     const IS_LEAF: bool = false;
-    fn register(c: &mut DefinitionContext) -> Result<TypeDesc, DefinitionError> { Ok(TypeDesc { shape: Shape::Option(Box::new(c.register::<T>()?.shape)), structure: None }) }
+    fn register(c: &mut DefinitionContext) -> Result<TypeDesc, DefinitionError> {
+        let inner = c.register::<T>()?;
+        Ok(TypeDesc::new(TypeRef::Optional(Box::new(inner.reference)), format!("::std::option::Option<{}>", inner.rust_path)))
+    }
 }
 /// Explicit Serde object-key contract. String-like newtypes may implement this
 /// only when Serde encodes them as strings; `path` must name their public type.
@@ -282,32 +238,38 @@ impl<K: MapKey, V: Registration> Registration for HashMap<K, V> {
     const IS_LEAF: bool = false;
     fn register(c: &mut DefinitionContext) -> Result<TypeDesc, DefinitionError> {
         let key = K::path().ok_or(DefinitionError::UnsupportedKey { api: "<module group>".into(), endpoint: "<registration>".into(), rust_type: type_name::<K>() })?;
-        Ok(TypeDesc { shape: Shape::Map { key: key.into(), value: Box::new(c.register::<V>()?.shape) }, structure: None })
+        let value = c.register::<V>()?;
+        let rust_path = format!("::std::collections::HashMap<{key}, {}>", value.rust_path);
+        let reference = if key == PrimitiveType::String.rust_path() {
+            TypeRef::Map(Box::new(value.reference))
+        } else {
+            TypeRef::KeyedMap { key: key.into(), value: Box::new(value.reference) }
+        };
+        Ok(TypeDesc::new(reference, rust_path))
     }
 }
 macro_rules! inline {
-    ($t:ty, $path:expr) => {
+    ($t:ty, $primitive:ident) => {
         impl Registration for $t {
             const IS_LEAF: bool = false;
             fn register(_: &mut DefinitionContext) -> Result<TypeDesc, DefinitionError> {
-                let schema = SchemaSettings::openapi3().into_generator().into_root_schema_for::<Self>();
-                let mut schema = schema.to_value();
-                if let Some(object) = schema.as_object_mut() { object.remove("$schema"); object.remove("title"); }
-                Ok(TypeDesc { shape: Shape::Inline { rust_path: $path.into(), schema }, structure: None })
+                let primitive = PrimitiveType::$primitive;
+                Ok(TypeDesc::new(TypeRef::Primitive(primitive), primitive.rust_path().into()))
             }
         }
     };
 }
 macro_rules! integer {
-    ($($t:ty),*) => { $(
-        inline!($t, stringify!($t));
+    ($($t:ty => $primitive:ident),*) => { $(
+        inline!($t, $primitive);
         impl MapKey for $t { fn path() -> Option<&'static str> { Some(stringify!($t)) } }
     )* };
 }
-integer!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
-inline!(String, "::std::string::String");
-inline!(bool, "bool"); inline!(f32, "f32"); inline!(f64, "f64"); inline!(char, "char");
-inline!(Value, "::serde_json::Value"); inline!((), "()");
+integer!(i8 => I8, i16 => I16, i32 => I32, i64 => Integer, i128 => I128, isize => Isize,
+    u8 => U8, u16 => U16, u32 => U32, u64 => U64, u128 => U128, usize => Usize);
+inline!(String, String);
+inline!(bool, Boolean); inline!(f32, F32); inline!(f64, Number); inline!(char, Char);
+inline!(Value, Json); inline!((), Unit);
 // Foreign leaf implementations belong here: downstream crates cannot implement
 // this trait for types they do not own.
 impl Registration for std::time::Duration {

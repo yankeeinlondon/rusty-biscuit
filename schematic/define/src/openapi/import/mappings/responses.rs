@@ -6,12 +6,10 @@ use super::super::resolver::RefResolver;
 use super::super::{ContentPreference, OpenApiImportOptions};
 use crate::request::{ApiRequest, FormField};
 use crate::response::ApiResponse;
+use crate::{PrimitiveType, TypeRef};
 
-/// Type path used when a body or response has no named schema to reference.
-///
-/// This is a path, not an identifier; code generation must render it with
-/// `syn` parsing rather than `format_ident!`.
-const JSON_VALUE_TYPE: &str = "serde_json::Value";
+/// Reference used when a body or response has no named schema to reference.
+const JSON_VALUE: TypeRef = TypeRef::Primitive(PrimitiveType::Json);
 
 pub fn map_request_body(
     body: &Option<ReferenceOr<openapiv3::RequestBody>>,
@@ -62,8 +60,7 @@ fn map_media_type_to_request(
 
     if ct_lower.contains("json") {
         if let Some(ref schema) = media_type.schema {
-            let type_name = extract_type_name_from_schema(schema, resolver, diagnostics);
-            return Some(ApiRequest::json_type(&type_name));
+            return Some(ApiRequest::json(reference_from_schema(schema, resolver, diagnostics)));
         }
     } else if ct_lower.contains("octet-stream") || ct_lower.contains("binary") {
         return Some(ApiRequest::binary(content_type));
@@ -328,10 +325,9 @@ fn map_response_ref(
     match classify_response_content_type(content_type) {
         ResponseContentClass::Json => match media_type.schema {
             Some(ref schema) => {
-                let type_name = extract_type_name_from_schema(schema, resolver, diagnostics);
-                Some(ApiResponse::json_type(&type_name))
+                Some(ApiResponse::json(reference_from_schema(schema, resolver, diagnostics)))
             }
-            None => Some(ApiResponse::json_type(JSON_VALUE_TYPE)),
+            None => Some(ApiResponse::json(JSON_VALUE)),
         },
         ResponseContentClass::Binary => Some(ApiResponse::Binary),
         ResponseContentClass::EventStream => {
@@ -388,24 +384,24 @@ fn classify_response_content_type(content_type: &str) -> ResponseContentClass {
     ResponseContentClass::Other
 }
 
-fn extract_type_name_from_schema(
+fn reference_from_schema(
     schema: &ReferenceOr<Schema>,
     _resolver: &RefResolver,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
-) -> String {
+) -> TypeRef {
     match schema {
         ReferenceOr::Reference { reference } => {
             if let Some(name) = reference.strip_prefix("#/components/schemas/") {
-                sanitize_rust_ident(name)
+                TypeRef::Named(sanitize_rust_ident(name))
             } else {
                 diagnostics.push(OpenApiDiagnostic::warn(
                     reference.clone(),
                     "Unexpected reference format".to_string(),
                 ));
-                JSON_VALUE_TYPE.to_string()
+                JSON_VALUE
             }
         }
-        ReferenceOr::Item(_) => JSON_VALUE_TYPE.to_string(),
+        ReferenceOr::Item(_) => JSON_VALUE,
     }
 }
 

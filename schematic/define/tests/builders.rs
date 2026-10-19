@@ -1,6 +1,6 @@
 use schematic_define::{ApiKeyEnv, ApiRequest, ApiResponse, AuthMethod, AuthPolicy, AuthStrategy,
     DefinitionContext, Endpoint, EndpointParams, EnvAuthStrategy, EnvList, EnvMapping, ErrorSet,
-    FormField, FormFieldKind, RestApi, RestMethod, Schema, Success, TypeDesc, definition_type};
+    DefinitionError, FormField, FormFieldKind, RestApi, RestMethod, SchemaComponent, Success, TypeRef, definition_type};
 use schemars::JsonSchema;
 use serde_json::json;
 
@@ -36,9 +36,8 @@ fn every_verb_preserves_required_facts_and_empty_parameters() {
 fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
     let mut ctx = DefinitionContext::types_in("::models");
     let desc = ctx.register::<Model>().unwrap();
-    for (success, expected) in [(Success::json(desc.clone()), ApiResponse::Json(Schema {
-        type_name: desc.rust_path(), module_path: None, descriptor: Some(desc.clone()),
-    })), (Success::text(), ApiResponse::Text), (Success::binary(), ApiResponse::Binary),
+    for (success, expected) in [(Success::json(desc.clone()), ApiResponse::Json(TypeRef::Named("Model".into()))),
+        (Success::text(), ApiResponse::Text), (Success::binary(), ApiResponse::Binary),
         (Success::empty(), ApiResponse::Empty)] {
         let ep = Endpoint::post("Operation", "/items").describes("Operation").returns(success).build().unwrap();
         assert_eq!(ep.response, expected);
@@ -46,8 +45,8 @@ fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
     }
     let json = Endpoint::post("Json", "/items").describes("JSON").request_json::<Model>(&mut ctx)
         .returns_json::<Vec<Model>>(&mut ctx).build().unwrap();
-    assert!(matches!(&json.request, Some(ApiRequest::Json(s)) if s.type_name == desc.rust_path()));
-    assert!(matches!(&json.response, ApiResponse::Json(s) if s.type_name.contains("Vec<")));
+    assert_eq!(json.request, Some(ApiRequest::Json(desc.type_ref().clone())));
+    assert_eq!(json.response, ApiResponse::Json(TypeRef::Array(Box::new(desc.type_ref().clone()))));
     assert_eq!(api(&ctx, json.clone()).unwrap().endpoints, [json]);
     for (ep, request, response) in [
         (Endpoint::post("Text", "/").describes("Text").request_text().returns_text().build().unwrap(), ApiRequest::Text { content_type: "text/plain".into() }, ApiResponse::Text),
@@ -60,7 +59,7 @@ fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
     let fields = vec![FormField::text("caption").optional().with_description("Caption"),
         FormField::file_accept("image", vec!["image/png".into()]),
         FormField { name: "metadata".into(), required: true, description: Some("Metadata".into()),
-            kind: FormFieldKind::Json(Schema { type_name: desc.rust_path(), module_path: None, descriptor: Some(desc) }) }];
+            kind: FormFieldKind::Json(desc.into_type_ref()) }];
     for ep in [Endpoint::post("Multipart", "/").describes("Upload").request_form(fields.clone()).returns_empty().build().unwrap(),
         Endpoint::post("Encoded", "/").describes("Submit").request_urlencoded(fields.clone()).returns_empty().build().unwrap()] {
         match &ep.request { Some(ApiRequest::FormData { fields: actual } | ApiRequest::UrlEncoded { fields: actual }) => assert_eq!(actual, &fields), _ => panic!("form shape lost") }
@@ -139,53 +138,83 @@ fn explicit_multi_method_policy_preserves_authoritative_fallback() {
 }
 
 #[test]
-fn destination_context_checks_transfers_roundtrips_and_forged_wrappers() {
+fn references_resolve_through_the_destination_context_and_survive_transfer() {
     let mut source = DefinitionContext::types_in("::models");
-    let mut desc = source.register::<Option<Vec<Model>>>().unwrap();
-    for _ in 0..2 { desc = serde_json::from_str(&serde_json::to_string(&desc).unwrap()).unwrap(); }
+    let desc = source.register::<Option<Vec<Model>>>().unwrap();
     let ep = Endpoint::get("GetModels", "/models").describes("Models").returns(Success::json(desc.clone())).build().unwrap();
     let mut destination = DefinitionContext::types_in("::models");
-    let error = api(&destination, ep.clone()).unwrap_err().to_string();
-    assert!(error.contains("Fixture") && error.contains("GetModels") && error.contains("Model"));
-    destination.register::<Option<Vec<Model>>>().unwrap();
-    assert_eq!(api(&destination, ep.clone()).unwrap().endpoints, [ep]);
-    let mut stripped = Endpoint::get("Stripped", "/").describes("Stripped")
-        .returns(Success::json(desc.clone())).build().unwrap();
-    let ApiResponse::Json(schema) = &mut stripped.response else { panic!("JSON response") };
-    schema.descriptor = None;
-    let error = api(&destination, stripped).unwrap_err().to_string();
-    assert!(error.contains("Fixture") && error.contains("Stripped") && error.contains("Model"));
-    let original = serde_json::to_value(desc).unwrap();
-    let mut wrong_path = original.clone();
-    wrong_path["shape"]["Option"]["Vec"]["Named"]["rust_path"] = json!("::other::Model");
-    let mut wrong_name = original.clone();
-    wrong_name["shape"]["Option"]["Vec"]["Named"]["schema_name"] = json!("Missing");
-    let mut wrong_shape = original.clone();
-    wrong_shape["shape"] = json!({"Vec": original["shape"].clone()});
-    let mut reserved = original;
-    reserved["structure"] = json!({"Named":"unsupported"});
-    for data in [wrong_path, wrong_name, wrong_shape, reserved] {
-        let forged: TypeDesc = serde_json::from_value(data).unwrap();
-        let ep = Endpoint::get("Forged", "/").describes("Forged").returns(Success::json(forged)).build().unwrap();
-        let error = api(&destination, ep).unwrap_err().to_string();
-        assert!(error.contains("Fixture") && error.contains("Forged"));
-    }
-    let valid = Endpoint::get("Roundtrip", "/").describes("Roundtrip")
-        .returns_json::<Option<Vec<Model>>>(&mut source).build().unwrap();
-    let mut persisted = api(&destination, valid).unwrap();
+    let error = api(&destination, ep.clone()).unwrap_err();
+    assert_eq!(error, DefinitionError::UnresolvedReference { api: "Fixture".into(), endpoint: "GetModels".into(), name: "Model".into() });
+    assert_eq!(error.diagnostics("Fixture"), "Fixture endpoint GetModels: unresolved schema reference \"Model\"");
+    // The wrapper shape lives in the reference, so only the leaf must be registered.
+    destination.register::<Model>().unwrap();
+    let built = api(&destination, ep.clone()).unwrap();
+    assert_eq!(built.endpoints, std::slice::from_ref(&ep));
+    assert_eq!(built.rust_type(desc.type_ref()).as_deref(), Some("::std::option::Option<::std::vec::Vec<::models::Model>>"));
+    // The destination, not the authoring context, owns the Rust path.
+    let mut other = DefinitionContext::types_in("::other");
+    other.register::<Model>().unwrap();
+    assert_eq!(api(&other, ep).unwrap().rust_type(desc.type_ref()).as_deref(), Some("::std::option::Option<::std::vec::Vec<::other::Model>>"));
+    let mut persisted = built;
     for _ in 0..2 {
-        persisted = serde_json::from_str(&serde_json::to_string(&persisted).unwrap()).unwrap();
-        assert_eq!(api(&destination, persisted.endpoints[0].clone()).unwrap(), persisted);
+        let read: RestApi = serde_json::from_str(&serde_json::to_string(&persisted).unwrap()).unwrap();
+        read.validate_references().unwrap();
+        assert_eq!(read, persisted);
+        persisted = read;
     }
     let request = Endpoint::post("Request", "/").describes("Request").request_json::<Model>(&mut source).returns_empty().build().unwrap();
-    assert!(api(&DefinitionContext::types_in("::models"), request.clone()).is_err());
+    assert!(matches!(api(&DefinitionContext::types_in("::models"), request.clone()), Err(DefinitionError::UnresolvedReference { endpoint, .. }) if endpoint == "Request"));
     api(&destination, request).unwrap();
-    let mut changed_lowering = Endpoint::get("ChangedLowering", "/").describes("Changed lowering")
-        .returns_json::<Model>(&mut source).build().unwrap();
-    let ApiResponse::Json(schema) = &mut changed_lowering.response else { panic!("JSON response") };
-    schema.type_name = "::other::Model".into();
-    let error = api(&destination, changed_lowering).unwrap_err().to_string();
-    assert!(error.contains("Fixture") && error.contains("ChangedLowering") && error.contains("disagrees"));
+}
+
+#[test]
+fn deserialized_definitions_are_checked_by_the_same_resolution() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    let ep = Endpoint::get("Get", "/").describes("Get").returns_json::<Vec<Model>>(&mut ctx).build().unwrap();
+    let value = serde_json::to_value(api(&ctx, ep).unwrap()).unwrap();
+    let load = |value: &serde_json::Value| serde_json::from_value::<RestApi>(value.clone()).map_err(|e| e.to_string()).and_then(|api| api.validate_references().map_err(|e| e.to_string()));
+    load(&value).unwrap();
+    let mut dangling = value.clone();
+    dangling["endpoints"][0]["response"] = json!({"Json": {"Array": {"Named": "Missing"}}});
+    assert_eq!(load(&dangling).unwrap_err(), "Fixture endpoint Get: unresolved schema reference \"Missing\"");
+    let mut nested_only = value.clone();
+    nested_only["schemas"][0]["rust_path"] = serde_json::Value::Null;
+    assert!(load(&nested_only).unwrap_err().contains("unresolved schema reference \"Model\""));
+    let mut duplicate = value.clone();
+    let component = duplicate["schemas"][0].clone();
+    duplicate["schemas"].as_array_mut().unwrap().push(component);
+    assert!(load(&duplicate).unwrap_err().contains("defined more than once"));
+    let mut composition = value.clone();
+    composition["endpoints"][0]["response"] = json!({"Json": {"OneOf": [{"Named": "Model"}]}});
+    assert!(load(&composition).unwrap_err().contains("unsupported schema reference"));
+    let mut empty_key = value.clone();
+    empty_key["endpoints"][0]["response"] = json!({"Json": {"KeyedMap": {"key": " ", "value": {"Named": "Model"}}}});
+    assert!(load(&empty_key).unwrap_err().contains("unsupported schema reference"));
+    let mut unknown_field = value;
+    unknown_field["schemas"][0]["extra"] = json!(true);
+    assert!(load(&unknown_field).unwrap_err().contains("unknown field"));
+}
+
+definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Outer { pub inner: Inner });
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+pub struct Inner { pub flag: bool }
+definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Unused { pub note: String });
+
+#[test]
+fn api_carries_the_whole_context_with_nested_definitions_flattened() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    ctx.register::<Unused>().unwrap();
+    let ep = Endpoint::get("Get", "/").describes("Get").returns_json::<Outer>(&mut ctx).build().unwrap();
+    let built = api(&ctx, ep).unwrap();
+    let names = |api: &RestApi| api.schemas.iter().map(|c| (c.name.clone(), c.rust_path.clone())).collect::<Vec<_>>();
+    assert_eq!(names(&built), [("Unused".into(), Some("::models::Unused".into())), ("Outer".into(), Some("::models::Outer".into())), ("Inner".into(), None)]);
+    let outer = built.component("Outer").unwrap();
+    assert_eq!(outer.schema["properties"]["inner"]["$ref"], "#/components/schemas/Inner");
+    for key in ["$schema", "$defs", "components"] { assert!(outer.schema.get(key).is_none(), "{key} kept"); }
+    assert_eq!(built.component("Inner").unwrap().schema["properties"]["flag"]["type"], "boolean");
+    let stored: &SchemaComponent = built.component("Unused").unwrap();
+    assert_eq!(stored.schema["properties"]["note"]["type"], "string");
 }
 
 #[test]
@@ -205,6 +234,7 @@ fn public_default_set_equals_documented_allow_list() {
     let corpus = [
         include_str!("../src/auth.rs"),
         include_str!("../src/builders.rs"),
+        include_str!("../src/components.rs"),
         include_str!("../src/cross_origin.rs"),
         include_str!("../src/headers/builder/auth.rs"),
         include_str!("../src/headers/builder/env.rs"),
@@ -224,6 +254,7 @@ fn public_default_set_equals_documented_allow_list() {
         include_str!("../src/oauth.rs"),
         include_str!("../src/openapi/error.rs"),
         include_str!("../src/openapi/export/components.rs"),
+        include_str!("../src/openapi/export/conversion.rs"),
         include_str!("../src/openapi/export/info.rs"),
         include_str!("../src/openapi/export/mod.rs"),
         include_str!("../src/openapi/export/parameters.rs"),
@@ -334,7 +365,7 @@ fn missing_destination_references_fail_in_both_form_encodings() {
     let mut source = DefinitionContext::types_in("::models");
     let desc = source.register::<Model>().unwrap();
     let fields = vec![FormField { name: "metadata".into(), required: true, description: None,
-        kind: FormFieldKind::Json(Schema { type_name: desc.rust_path(), module_path: None, descriptor: Some(desc) }) }];
+        kind: FormFieldKind::Json(desc.into_type_ref()) }];
     let destination = DefinitionContext::types_in("::models");
     for ep in [Endpoint::post("Multipart", "/").describes("Multipart").request_form(fields.clone()).returns_empty().build().unwrap(),
         Endpoint::post("Encoded", "/").describes("Encoded").request_urlencoded(fields).returns_empty().build().unwrap()] {
@@ -386,10 +417,10 @@ fn primitive_and_free_form_json_successes_remain_component_free() {
     let primitive = Endpoint::get("Primitive", "/").describes("Primitive").returns_json::<String>(&mut ctx).build().unwrap();
     let free_form = Endpoint::get("FreeForm", "/").describes("Free form").returns_json::<serde_json::Value>(&mut ctx).build().unwrap();
     let built = RestApi::builder(&ctx, "Fixture", "https://example.com").describes("API").no_auth().endpoints([primitive, free_form]).build().unwrap();
-    assert!(ctx.registrations().is_empty());
+    assert!(ctx.registrations().is_empty() && built.schemas.is_empty());
     for ep in built.endpoints {
-        let ApiResponse::Json(schema) = ep.response else { panic!("JSON shape lost") };
-        let wire = schema.descriptor.unwrap().wire_schema();
+        let ApiResponse::Json(reference) = ep.response else { panic!("JSON shape lost") };
+        let wire = reference.wire_schema();
         assert!(wire.get("$ref").is_none());
         assert!(wire == json!({}) || wire == json!({"type":"string"}));
     }
@@ -410,4 +441,62 @@ fn explicit_empty_mapping_preserves_the_absence_of_environment_credentials() {
         assert_eq!(api.env_mapping, Some(EnvMapping::default()));
         assert_eq!(api.default_env_mapping(), EnvMapping::default());
     }
+}
+
+/// One edit per cell of the transfer matrix over the fields API loading reads:
+/// each component's `name`, `rust_path` and `schema`, the `schemas` list, and
+/// the endpoint reference.
+#[test]
+fn transferred_components_and_references_input_matrix() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    let ep = Endpoint::get("Get", "/").describes("Get").returns_json::<Vec<Model>>(&mut ctx).build().unwrap();
+    let control = serde_json::to_string(&api(&ctx, ep).unwrap()).unwrap();
+    let load = |text: &str| serde_json::from_str::<RestApi>(text).map_err(|e| e.to_string())
+        .and_then(|api| api.validate_references().map(|()| api).map_err(|e| e.to_string()));
+    let edit = |change: &dyn Fn(&mut serde_json::Value)| { let mut value: serde_json::Value = serde_json::from_str(&control).unwrap(); change(&mut value); value.to_string() };
+    let component = |field: &'static str, replacement: serde_json::Value| edit(&move |v| v["schemas"][0][field] = replacement.clone());
+    let remove = |field: &'static str| edit(&move |v| { v["schemas"][0].as_object_mut().unwrap().remove(field); });
+
+    // Control: the unedited document loads and the edited fields matter.
+    let loaded = load(&control).unwrap();
+    assert_eq!(loaded.rust_type(loaded.endpoints[0].json_references()[0]).as_deref(), Some("::std::vec::Vec<::models::Model>"));
+    assert_eq!(load(&component("name", json!("Renamed"))).unwrap_err(), "Fixture endpoint Get: unresolved schema reference \"Model\"");
+    assert!(load(&component("rust_path", json!("::other::Model"))).is_ok_and(|api| api.rust_type(api.endpoints[0].json_references()[0]).unwrap().contains("::other::Model")));
+
+    // Absent and explicit null: a missing name or schema is a load error; an
+    // absent or null Rust path both mean a nested-only component.
+    for text in [remove("name"), component("name", serde_json::Value::Null), remove("schema")] { assert!(load(&text).is_err(), "{text}"); }
+    assert!(load(&component("schema", serde_json::Value::Null)).unwrap_err().contains("not a JSON Schema"));
+    for text in [remove("rust_path"), component("rust_path", serde_json::Value::Null)] {
+        assert!(load(&text).unwrap_err().contains("unresolved schema reference"), "{text}");
+    }
+
+    // Wrong whole type.
+    for (field, value) in [("name", json!(123)), ("rust_path", json!(false)), ("name", json!(["Model"])), ("rust_path", json!({}))] {
+        assert!(load(&component(field, value)).is_err());
+    }
+    for value in [json!(123), json!("object"), json!(["type"])] {
+        assert!(load(&component("schema", value)).unwrap_err().contains("not a JSON Schema"));
+    }
+    assert!(load(&edit(&|v| v["schemas"] = json!({"Model": {}}))).is_err());
+
+    // One wrong element, every wrong element, and empty.
+    assert!(load(&edit(&|v| v["schemas"].as_array_mut().unwrap().push(json!(123)))).is_err());
+    assert!(load(&edit(&|v| v["schemas"] = json!([123, "Model"]))).is_err());
+    assert!(load(&edit(&|v| v["schemas"] = json!([]))).unwrap_err().contains("unresolved schema reference \"Model\""));
+    assert!(load(&component("name", json!(" "))).unwrap_err().contains("empty name"));
+    assert!(load(&component("rust_path", json!(""))).unwrap_err().contains("empty Rust path"));
+    assert!(load(&component("schema", json!({}))).is_ok(), "an unconstrained schema is valid");
+    assert!(load(&edit(&|v| v["endpoints"][0]["response"] = json!({"Json": {"Named": ""}}))).unwrap_err().contains("unresolved schema reference \"\""));
+    assert!(load(&edit(&|v| v["endpoints"][0]["response"] = json!({"Json": {}}))).is_err());
+
+    // Duplicate keys, preserved textually, and trailing content.
+    for (field, first) in [("\"name\":", "\"Model\""), ("\"rust_path\":", "\"::models::Model\""), ("\"schema\":", "{}")] {
+        let start = control.find("\"schemas\":[").unwrap();
+        let (head, tail) = control.split_at(start);
+        let duplicated = format!("{head}{}", tail.replacen(field, &format!("{field}{first},{field}"), 1));
+        let error = load(&duplicated).unwrap_err();
+        assert!(error.contains("duplicate field"), "{field}: {error}");
+    }
+    assert!(load(&format!("{control} trailing")).is_err());
 }

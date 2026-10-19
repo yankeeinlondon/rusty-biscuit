@@ -1,7 +1,7 @@
 ---
-total_phases: 8
+total_phases: 9
 created: 2026-10-11
-phase: 7
+phase: 9
 agent: codex/gpt-6.1-sol
 yolo: "true"
 source_files_during_phase_1:
@@ -550,6 +550,339 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
   - .claude/skills/os/windows.md
   - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_8:
+  - schematic/define/src/lib.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/tests/authoring_guidance.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+docs_updated_during_phase_8:
+  - .claude/commands/create-schematic-api.md
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/gen/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/typed-registration.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+  - schematic/docs/research/samsung-design.md
+  - schematic/docs/research/multipart-form-data.md
+  - schematic/docs/research/oauth/integration-with-schematic.md
+docs_created_during_phase_8:
+  - schematic/docs/authoring-examples.md
+  - schematic/docs/generation/generated-clients.md
+skills_files_updated_during_phase_8:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_code:
+  - Cargo.lock
+  - schematic/define/src/cross_origin.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/examples/capture_definition_baseline.rs
+  - schematic/gen/examples/support/definition_snapshot.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/justfile
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.lock
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.toml
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/mismatched_type.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/misspelled_path.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/private_descriptor.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/prove.py
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/bin/emitted_path_source.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/lib.rs
+  - schematic/gen/tests/fixtures/definition-baseline/anthropic.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-critpt.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-data.json
+  - schematic/gen/tests/fixtures/definition-baseline/bitbucket.json
+  - schematic/gen/tests/fixtures/definition-baseline/elevenlabs.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-basic.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-bearer.json
+  - schematic/gen/tests/fixtures/definition-baseline/eversolo.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitea.json
+  - schematic/gen/tests/fixtures/definition-baseline/github.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitlab.json
+  - schematic/gen/tests/fixtures/definition-baseline/huggingface.json
+  - schematic/gen/tests/fixtures/definition-baseline/lmstudio.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-native.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/samsung-smart-tv.json
+  - schematic/gen/tests/fixtures/definition-baseline/unfolded-circle-core-rest.json
+  - schematic/define/Cargo.toml
+  - schematic/define/src/lib.rs
+  - schematic/define/src/models/type_ref.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/tests/typed_registration.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/define/src/builders.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/request_body.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/request.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_forms.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/single.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/origin.rs
+  - schematic/runtime/tests/l1/pager_surface.rs
+  - schematic/runtime/tests/l1/redirects.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/import_normalization.rs
+  - schematic/definitions/src/openai/types.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/definitions/tests/pagination_coverage/openai.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_import_test.rs
+  - schematic/openapi/openai.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/schema/src/openai/mod.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/pagination/collection.rs
+  - schematic/define/tests/construction_enforcement.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_partitions.rs
+  - schematic/define/tests/pagination_serde.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/definitions/src/anthropic/types/api.rs
+  - schematic/definitions/src/anthropic/types/messages.rs
+  - schematic/definitions/src/anthropic/types/tools.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/types/branches.rs
+  - schematic/definitions/src/bitbucket/types/common.rs
+  - schematic/definitions/src/bitbucket/types/downloads.rs
+  - schematic/definitions/src/bitbucket/types/issues.rs
+  - schematic/definitions/src/bitbucket/types/pull_requests.rs
+  - schematic/definitions/src/bitbucket/types/repos.rs
+  - schematic/definitions/src/bitbucket/types/tags.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/history.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/elevenlabs/types/voices.rs
+  - schematic/definitions/src/elevenlabs/types/workspace.rs
+  - schematic/definitions/src/emqx/types/auth.rs
+  - schematic/definitions/src/emqx/types/banned.rs
+  - schematic/definitions/src/emqx/types/broker.rs
+  - schematic/definitions/src/emqx/types/clients.rs
+  - schematic/definitions/src/emqx/types/common.rs
+  - schematic/definitions/src/emqx/types/messaging.rs
+  - schematic/definitions/src/emqx/types/rules.rs
+  - schematic/definitions/src/eversolo/types.rs
+  - schematic/definitions/src/gitea/types.rs
+  - schematic/definitions/src/github/types/issues.rs
+  - schematic/definitions/src/github/types/pull_requests.rs
+  - schematic/definitions/src/github/types/releases.rs
+  - schematic/definitions/src/github/types/repos.rs
+  - schematic/definitions/src/github/types/workflow.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/gitlab/types/branches.rs
+  - schematic/definitions/src/gitlab/types/common.rs
+  - schematic/definitions/src/gitlab/types/issues.rs
+  - schematic/definitions/src/gitlab/types/merge_requests.rs
+  - schematic/definitions/src/gitlab/types/pipelines.rs
+  - schematic/definitions/src/gitlab/types/projects.rs
+  - schematic/definitions/src/gitlab/types/releases.rs
+  - schematic/definitions/src/huggingface/types/collections.rs
+  - schematic/definitions/src/huggingface/types/common.rs
+  - schematic/definitions/src/huggingface/types/datasets.rs
+  - schematic/definitions/src/huggingface/types/discussions.rs
+  - schematic/definitions/src/huggingface/types/models.rs
+  - schematic/definitions/src/huggingface/types/repos.rs
+  - schematic/definitions/src/huggingface/types/spaces.rs
+  - schematic/definitions/src/huggingface/types/stubs.rs
+  - schematic/definitions/src/huggingface/types/users.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/prelude.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/samsung_smart_tv/types.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/types.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/definitions/tests/pagination_coverage/forges.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/naming.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/postman/gitea.postman_collection.json
+  - schematic/postman/gitlab.postman_collection.json
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+  - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/gitlab.rs
+  - schematic/gen/build.rs
+  - schematic/define/src/response.rs
+  - schematic/define/tests/authoring_guidance.rs
+documentation:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/inventory.md
+  - schematic/features/2026-10-14-schematic-definition-api/prerequisite-interfaces.md
+  - schematic/features/2026-10-14-schematic-definition-api/reproduction.md
+  - schematic/features/2026-10-14-schematic-definition-api/spike/README.md
+  - schematic/docs/typed-registration.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/gen/README.md
+  - schematic/definitions/README.md
+  - schematic/README.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/generation/workflow.md
+  - .claude/commands/create-schematic-api.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/research/samsung-design.md
+  - schematic/docs/research/multipart-form-data.md
+  - schematic/docs/research/oauth/integration-with-schematic.md
+  - schematic/docs/authoring-examples.md
+  - schematic/docs/generation/generated-clients.md
+completed_phase: 8
+implemented: false
 ---
 
 # Schematic definition API implementation plan
@@ -778,11 +1111,11 @@ Phase gate: generated-schema and all affected consumer checks pass; the evidence
 
 ### Wave 16 — Documentation and Closure (Parallel)
 
-- [ ] **Update Authoring Guidance**
+- [x] **Update Authoring Guidance**
   - Update schematic-define README/rustdoc, area and relevant package READMEs, definition/registration and IO topic pages, schematic-define/Schematic skills, and `.claude/commands/create-schematic-api.md` to teach builders, explicit context assembly, typed aliases, auth coherence, pagination, parameter locations with the GET-body rule, and endpoint identity as `(method, path)` (R26).
   - Provide compact compiling examples for ordinary types, alias registration, containers, and one API definition; explain required facts and errors. Use a Mermaid flow for context → endpoint builds → API validation → registry/output assembly. Current-behavior docs never name feature/fix directories.
   - Review docs/comments on every behavior-changed symbol and remove drift. Update dependency docs only for actual crate additions/removals. Search for stale literal/string/pagination authoring patterns, permitting only explicit historical mentions.
-- [ ] **Close Evidence Ledger**
+- [x] **Close Evidence Ledger**
   - Map every R1–R31 requirement to concrete tests, scan results, artifacts, and platform evidence. Record every PD default, non-exhaustive outcome, dispatcher choice/bounds, structural carrier, fallible signature, Default allow-list, field disposition, normalization, retired test, dependent edit, and unexplained failure as it occurs.
   - Complete all 16 review-agenda entries, including accepted-gap candidates (optional auth, wider auth dual-source cleanup, HuggingFace stub shapes, orphaned types) and the already accepted convenience-method omission. No gap is silently claimed fixed.
   - Document the implemented R13 method table, reserved names, final descriptor/serde/adoption contracts, and facts needed to refresh `2026-10-15-schematic-definition-vocabulary` and `2026-10-16-schematic-response-model-graphql` after author review 1. Do not implement their features or refresh them prematurely.
@@ -864,7 +1197,63 @@ its Collection representation is the existing pagination model.
   - Audit affected read paths for `#[serde(default)]`, Option where absence/null differ, `filter_map(.. as_str())`, `unwrap_or_default()`, and `.ok()` swallowing load-bearing errors. Any review finding reports every other cell in its row and column. Matrix evidence is required at the owning phase's gate, not deferred to final review.
 
 
+## Phase 9 — Normalize Schema References (Review 1 Remediation)
+
+Author review 1, item 1 rejected embedding descriptor evidence in stored schema references. The follow-up rulings of 2026-10-18 fixed the design below. This phase replaces Phase 1's **Wrapper storage** rule and the stored-reference part of Wave 4's destination validation. Typed authoring (`DefinitionContext`, `Registration`, `rust_path!`, builders) is unchanged, so the roughly 1,700 provider uses of `TypeDesc` as `register()`'s return value need no edits.
+
+### Necessary Rules
+
+| Item | Rule |
+| --- | --- |
+| Reference form | REST `ApiResponse::Json`, `ApiRequest::Json` and `FormFieldKind::Json` store a `TypeRef`: canonical component names (`Named`) plus wrapper shape (`Array`, `Optional`, `Map`). A reference holds no Rust path and no copy of a registered schema. |
+| `TypeRef` extension | Extend `TypeRef`, never replace it, only where lowering needs it: the Rust spelling of primitive widths (`i8`–`u128`, `isize`/`usize`, `f32`/`f64`, `char`, `()`), and Rust map key types. Free-form JSON uses the existing `PrimitiveType::Json`. Log each extension. Inline JSON schemas for primitives are derived from the `TypeRef`, not stored. |
+| Registry | `RestApi` gains an ordered `schemas` field built by `RestApiBuilder::build` from the **whole** destination context: one entry per component name holding its Rust path and wire schema, with nested `$defs` flattened into entries (the `SchemaRegistry` extraction logic moves to `schematic-define`). Explicit registrations that no endpoint uses are retained. APIs that share a module group (ollama, emqx) each carry the full group registry; the duplication is intentional so that each `RestApi` is self-contained. |
+| Validation | API build checks that every `Named` reference in every endpoint resolves in `api.schemas`. A dangling name fails with API, endpoint and name. Context collision aggregation is unchanged. A single reference-resolution function serves build and any deserialized `RestApi`. `DefinitionContext::validate_reference`, the context's descriptor list, `DefinitionError::InvalidDescriptor`, the lowered-path agreement check, and the forgery tests are removed; resolution and dangling-name tests replace them. |
+| `TypeDesc` | Authoring handle only: it lowers to a `TypeRef` at the builder and is never stored on an endpoint. Its serde derives and the reserved `structure: Option<TypeRef>` carrier are removed, because no reader remains and a `TypeRef` reference can already carry `OneOf`/`AnyOf`/`AllOf`. **This departs from the spec's approved reserved-carrier constraint;** log it and surface it in the closing handoff for the next specification's refresh (R6). |
+| WebSocket | `Schema` loses only its `descriptor` field. `type_name`, `module_path`, `Schema::new` and `Schema::with_path` stay for WebSocket messages. |
+| Legacy untyped REST | REST has no string-schema form. Verified on 2026-10-18: no shipped artifact depends on the generator's untyped branch (`needs_response_import`). The `use super::responses::*` imports in the elevenlabs, github, bitbucket and openai artifacts come from unqualified pagination `item_type` strings, which this phase keeps. Fixtures that inject legacy REST strings become name references, or deliberately dangling ones where they test diagnostics. |
+| `SchemaRegistry` | Deleted with no compatibility view: `SchemaRegistry`, `SchemaRegistryLike`, `validate_completeness`, `get_registry`, `get_registries_for_module`, every provider's `openapi_registry()`, and `ModuleGroup::registry`. OpenAPI export, generator validation and the pipeline read `api.schemas`; `registry_for` is removed. Strict OpenAPI completeness coverage is kept, re-pointed at `api.schemas`. No consumers exist outside `schematic/` (workspace scan, 2026-10-18). |
+| Out of scope | Pagination `Collection::item_type` remains a Rust-path string, and WebSocket schemas remain strings. R7 bundle construction, `oneOf` vocabulary, and any reachable-only registry trimming belong to the next specification. |
+
+### Wave 17 — Stored Model (Sequential)
+
+- [x] **Normalize References**
+  - In `schematic-define`, change the three REST JSON carriers to `TypeRef`, add `RestApi::schemas` and its entry type with serde derives, extend `TypeRef` as ruled, and lower `TypeDesc` to `TypeRef` in `Success::json`, request JSON and `FormField::json_desc`.
+  - Populate `schemas` from the context in `RestApiBuilder::build`, flattening nested `$defs`; replace descriptor validation with the reference-resolution function. Remove `Schema::descriptor`, the `TypeDesc` serde derives and `structure`, `validate_reference`, the context's descriptor list and `InvalidDescriptor`.
+  - Re-point pagination's root-`Vec` recognition (`root_array_item_type`) at `TypeRef::Array(Named)`, resolving the item's Rust path through `api.schemas`. Re-point OpenAPI body and response export at `TypeRef` plus `api.schemas` and drop the separate registry argument.
+  - Update the touched rustdoc/module docs in `schema.rs`, `request.rs`, `response.rs`, `builders.rs` and `registration.rs` in the same change.
+  - Replace the descriptor and forgery cases in `define/tests/builders.rs` and `define/tests/typed_registration.rs` with: resolved references for every wrapper and primitive form; a dangling name naming API, endpoint and name; a deserialized `RestApi` with a dangling reference rejected by the same function; whole-context registry retention, including an unused registration; and nested-`$defs` flattening.
+
+Checkpoint: `schematic-define` builds and its L1 tests and doctests pass. Downstream crates may not compile yet.
+
+### Wave 18 — Consumers (Parallel with Disjoint Ownership)
+
+- [ ] **Migrate Definitions**
+  - Delete `SchemaRegistry`, its lookups, `ModuleGroup::registry` and every provider's `openapi_registry()`; `assemble_module_group` returns the APIs only. After the callback returns, it sets every member API's `schemas` to the finished context's `components()` and re-runs `validate_references`. An API built before a later member registered its types would otherwise carry a partial registry, and grouped OpenAPI output (ollama, emqx) would change. Rewrite the bitbucket and registry tests that read `schema.descriptor` to assert `TypeRef` references and `api.schemas` entries. Keep `definitions/tests/registry_invariants.rs` coverage by pointing it at `api.schemas`.
+- [ ] **Migrate Generator**
+  - The Rust generator derives type paths from `TypeRef` plus `api.schemas`. Remove the untyped-schema branch of `needs_response_import`, keeping the pager-item branch. Remove `registry_for` and the `SchemaRegistry` parameters from the pipeline, validation and OpenAPI export. Re-point `openapi_strict_completeness` and the other `gen/tests/l1` users. Convert the legacy-string REST fixtures named in the Wave 7 log entry to name references or deliberate dangling references.
+  - The import emitter (`definition_gen.rs`) keeps emitting builder source; confirm the OpenAI re-import still reproduces the committed definition.
+
+Checkpoint: `just test`, `just lint` and `just doctest` pass in `schematic/`.
+
+### Wave 19 — Artifacts, Baselines and Documentation (Sequential)
+
+- [ ] **Regenerate and Compare**
+  - Regenerate the definition JSON snapshots and the canonical baseline under `gen/tests/fixtures/definition-baseline/`, then the Rust, OpenAPI and Postman trees. Generated Rust, OpenAPI and Postman output should be byte-identical to the Phase 7 artifacts. Log any difference by API, file and cause; the only expected changes are in the definition snapshots and baseline (reference form and the new `schemas` field).
+  - Run `just test-schema`, `just lint-schema`, the dependent checks from Wave 15 (including sniff's Gitea and GitLab users), and `just check-tier-coverage schematic`.
+- [ ] **Correct Documentation**
+  - Update `docs/typed-registration.md`, `docs/definition-builders.md`, `docs/io/export-openapi.md`, `docs/io/import-openapi.md`, `docs/generation/generated-clients.md`, `docs/generation/validation.md`, the `define` and `definitions` READMEs, and `.claude/skills/schematic-define/` to describe name-plus-wrapper references and `RestApi::schemas`, and to remove `SchemaRegistry`.
+  - Amend the implementation log's **Builder implementation and lowering** entry with a dated departure note, and record this phase's evidence. Update the plan and log frontmatter inventories, and set `completed_phase: 9` and `implemented: true` only when every gate has passed.
+
+Phase gate: every Phase 9 checkbox is complete; `just test`, `just lint`, `just doctest`, `just test-schema` and `just lint-schema` pass; generated artifacts show no unexplained drift; and no reader of `Schema::descriptor`, `SchemaRegistry` or `validate_reference` remains in the workspace. The terminal state is **implementation complete, ready for review**.
+
 ## Refresh log
+
+### 2026-10-18 — Review 1 ruling: normalized schema references
+
+- Added Phase 9 from author review 1, item 1 and its follow-up rulings: `TypeRef` references, a whole-context registry on `RestApi`, removal of legacy untyped REST schemas, and deletion of `SchemaRegistry`.
+- Recorded the 2026-10-18 verification that no shipped artifact depends on the untyped branch, and the workspace scan showing no `SchemaRegistry` consumers outside `schematic/`.
+- Phases 1–8 remain as executed; Phase 9 supersedes the Phase 1 **Wrapper storage** rule.
 
 ### 2026-10-14 — Pagination review 2 and implementation log
 

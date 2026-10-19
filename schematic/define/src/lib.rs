@@ -19,7 +19,8 @@
 //! - [`ApiRequest`] - Request body type definitions (JSON, FormData, UrlEncoded, Text, Binary)
 //! - [`FormField`] - Form field definitions for multipart and URL-encoded requests
 //! - [`FormFieldKind`] - Form field type classification (Text, File, Files, Json)
-//! - [`Schema`] - Type information for request/response bodies
+//! - [`SchemaComponent`] - A named schema carried by [`RestApi::schemas`]; JSON bodies reference it through [`TypeRef`]
+//! - [`Schema`] - Type information for WebSocket message bodies
 //!
 //! ### Header and Authentication Types
 //!
@@ -116,7 +117,10 @@
 //!
 //! See `schematic_definitions::anthropic` for a comprehensive example.
 
+#![doc = include_str!("../../docs/authoring-examples.md")]
+
 pub mod auth;
+pub mod components;
 pub mod cross_origin;
 pub mod headers;
 pub mod models;
@@ -139,6 +143,7 @@ pub mod openapi;
 pub use auth::{
     ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy,
 };
+pub use components::SchemaComponent;
 pub use cross_origin::CrossOrigin;
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use models::{

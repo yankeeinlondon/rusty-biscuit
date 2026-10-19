@@ -19,11 +19,11 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
+status: human-in-the-loop
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 1
 clarified: false
 implemented: false
 parent: ../../reviews/2026-07-31-macro-review/spec.md
@@ -34,31 +34,17 @@ related: []
 next_spec: 2026-10-15-schematic-definition-vocabulary
 human_review: false
 message_to_agent: |-
-  Phase 7 is complete: all local Schematic gates and dependent test/lint/all-target
-  checks passed. Native source/compiler/wire/consumer evidence covers macOS, Linux,
-  native Windows/MSVC, and WSL2; generated-schema tests passed 55/55 on each.
-  The WSL2 relocated archive passed 641/641 with manifest verification and the
-  builder target hidden. These dirty-tree cross-check snapshots are verification,
-  not published qualifying CI receipts. Exact commands/results/exclusions and
-  per-host source snapshots are in the Phase 7 implementation log.
-  Keep schematic/gen/build.rs: migrated catalog assembly overflowed Windows'
-  default 1 MiB main stack in three public CLI tests. Its target-specific 8 MiB
-  reservation fixes those exact inputs; MSVC was executed, GNU follows the
-  established linker pattern. All updated CLI/artifact checks pass below 5 s.
-  Postman drift now checks the complete file set as well as expected-file bytes;
-  a temporary retired-file negative control proved it fails and was removed.
-  Regeneration produced no new artifact differences from Phase 6. Do not widen
-  historical normalization or recapture the preserved migration baselines.
-  Existing native-Windows aws-lc TLS ignores, other resource/helper exclusions,
-  unrelated Windows warnings, and broad-run timing observations are explicitly
-  recorded; do not describe them as fixed or as new acceptance exemptions.
-  Phase 8 remains pending: finish authoring guidance and the full R1-R31/review
-  ledger, including the command guidance. No dependency changed in this phase.
-  Preserve Phase 6's GitLab git_ref setter, concrete Bitbucket generic paths,
-  explicit empty EnvMapping semantics, 93 pagers, and retained serialized
-  Exception/PaginationException and WebSocket Schema.module_path contracts.
-  Required-query constructor fidelity remains deferred to the vocabulary work.
-  Do not implement or refresh the follow-up specs before author review.
+  All eight phases are implemented; author review 1 is next. Phase 8 closes the
+  R1-R31 and 16-item review ledgers in implementation-log.md and updates current
+  authoring guidance, both skills, and the creation command. Preserve the Phase 7
+  four-host results and explicit exclusions; no new remote receipt is claimed.
+  Refresh the vocabulary plan first and response/GraphQL plan second only after
+  author review. Preserve private TypeDesc shape plus reserved Option<TypeRef>,
+  Registration bounds, alias-first naming, non-exhaustive REST construction,
+  93 pagers, auth_policy and explicit empty mappings, WebSocket module_path,
+  and the Windows generator stack reservation. Adjacent optional-auth, wider
+  dual-source auth cleanup, HuggingFace stub shapes, and orphaned types remain
+  deferred candidates, not fixed behavior. No lifecycle move or commit occurred.
 ---
 
 # Schematic definition API: builders and typed registration

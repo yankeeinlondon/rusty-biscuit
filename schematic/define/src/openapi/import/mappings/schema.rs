@@ -99,7 +99,7 @@ fn remap_type_ref(type_ref: &mut TypeRef, mapping: &std::collections::HashMap<St
                 .cloned()
                 .unwrap_or_else(|| sanitize_rust_ident(name));
         }
-        TypeRef::Array(inner) | TypeRef::Map(inner) | TypeRef::Optional(inner) => {
+        TypeRef::Array(inner) | TypeRef::Map(inner) | TypeRef::Optional(inner) | TypeRef::KeyedMap { value: inner, .. } => {
             remap_type_ref(inner, mapping);
         }
         TypeRef::OneOf(refs) | TypeRef::AnyOf(refs) | TypeRef::AllOf(refs) => {
