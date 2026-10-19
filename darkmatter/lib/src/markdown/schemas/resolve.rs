@@ -72,15 +72,14 @@ pub struct ResolvedSchema {
 
     /// Resolved paths of files pulled in by `Name@file` named-type imports
     /// (Feature B), in sorted order. Empty for schemas that use no imports.
-    /// These are the dependency edges the base-schema LRU cache and DMLS live
-    /// index consume to invalidate a schema when an imported file changes; the
-    /// downstream invalidation wiring itself is deferred.
+    /// These are dependency edges: a change to an imported file's content
+    /// invalidates a cached effective schema or resolved trigger payload.
     pub imports: Vec<PathBuf>,
 
     /// Resolved paths of `example(...)` artifact files (Feature A), in sorted
     /// order. Empty for schemas with no `example()` constraints. Like
-    /// [`ResolvedSchema::imports`], these are dependency edges for warm-cache /
-    /// DMLS invalidation; the invalidation wiring itself is deferred.
+    /// [`ResolvedSchema::imports`], these are dependency edges for cache and
+    /// DMLS invalidation.
     pub examples: Vec<PathBuf>,
 
     /// Resolved paths of the schema FILES this `$schema` references directly:

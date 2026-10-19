@@ -396,6 +396,30 @@ Locations under a recursive `%` reference are not recorded, so a new file
 deep below a recursive search root is noticed only by a rescan, a
 configuration change, or a restart.
 
+The same searched locations feed every step, from the first probe to the
+next preparation:
+
+```mermaid
+flowchart TD
+    Probe["Resolve the payload:<br/>try schemas/shared/types.yaml (absent),<br/>then shared/types.yaml (selected)"]
+    Record["Record both locations as searched,<br/>with schemas/shared/ as an absent folder"]
+    Fingerprint["Kept payload's fingerprint:<br/>each location's kind and its folder's entries"]
+    Watch["Watch schemas/ for shared and shared/*"]
+    Event["schemas/shared/types.yaml is created:<br/>a watched event, a save, or a rescan"]
+    Stale["The registry is marked stale"]
+    Prepare["Prepare again: the fingerprint differs,<br/>so the payload is resolved again"]
+    Nearer["The nearer file is selected,<br/>and schemas/shared/ is now watched from schemas/"]
+
+    Probe --> Record
+    Record --> Fingerprint
+    Record --> Watch
+    Watch --> Event
+    Event --> Stale
+    Stale --> Prepare
+    Fingerprint --> Prepare
+    Prepare --> Nearer
+```
+
 Unsaved edits to a schema file do not affect other documents. The registry
 reads disk, so a change applies after you save.
 
