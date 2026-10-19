@@ -26,8 +26,14 @@ initialize:
 start:
     message: "🖊️ creating a plan for the `{{ parent_dir(underlying) }}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
 success:
-    stderr: "The {{code_link(plan)}} _plan_ has been created"
-    message: "✅  the _plan_ for the spec `{{parent_dir(underlying)}}` was created (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
+    - stderr: "The {{code_link(plan)}} _plan_ has been created"
+    - message: "✅  the _plan_ for the spec `{{parent_dir(underlying)}}` was created (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
+    - when: "file_exists(plan) && !is_empty(frontmatter(plan, 'open_questions'))"
+      then:
+          - warn: |-
+                the plan has **{{ length(frontmatter(plan, 'open_questions')) }}** open question(s) that must be resolved in `{{ underlying }}` before it can be implemented:
+
+                {{ as_ordered_list(frontmatter(plan, 'open_questions')) }}
 failure:
     message: "❌️  failed to create a _plan_ for `{{parent_dir(underlying)}}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})!"
 ---
@@ -67,17 +73,17 @@ Your high level task is to convert the following documents into a high confidenc
     - if there is an opportunity to run multiple **tasks** concurrently then this should be represented as a **step** 
 - Each phase of the plan should be represented as an H2 heading the planning document
 - Once you have a first pass of the Phases and Tasks associated with each phase
+- Resolve decisions now, not during implementation. The implementation runs unattended, phase after phase, and every question it has to put to the author stops it. Key decisions belong to the {{ground_truth}} and its review; the plan settles what remains:
+    - **already decided:** a question the {{ground_truth}} answers -- including a stated fallback such as "when X is not available, do Y" -- is not open. Follow it and cite the section; never ask the author to "confirm" it
+    - **yours to decide:** a question the {{ground_truth}} leaves open, but whose goals and constraints make one answer reasonable, is decided by you. Record it under an H2 `## Planning Decisions` section placed before Phase 1: the decision, the alternatives, and why, with a reference to the part of the {{ground_truth}} it rests on. The implementer follows these decisions and the author can overrule any of them at review, so phrase each one as decided, never as "confirm or amend"
+    - **escalation triggers:** where the right course depends on evidence the implementation will produce (for example, a comparison that may come out mixed), decide the course for each clear outcome and name the specific outcome that must stop for the author. List these under `## Planning Decisions` as well
+    - **open questions:** only a question you cannot reasonably decide -- it would change scope, contradict the {{ground_truth}}, choose between outcomes the {{ground_truth}} does not rank, or needs information only the author has -- is left open. Do not schedule it into Phase 1. Add it to the plan's `open_questions` frontmatter (a list; each item uses YAML's `|-` and states the question, the options, and your recommendation) and describe it under `## Planning Decisions`. A plan with open questions cannot be implemented until the author resolves them in the {{ground_truth}}, so expect few or none
 ::block when="spec"
-- If there are any aspects of the specification/design for this feature which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
-    - add an H3 heading `### Necessary Rules` directly under 
-- After _rulings_ we need to consider if there are "spikes" that should be run to lower the risk for this implementation or to better inform the specification and/or design
+- After the decisions we need to consider if there are "spikes" that should be run to lower the risk for this implementation or to better inform the specification and/or design
     - a spike runs once, before the work it informs; do not schedule it again as a re-check in later phases
     - a performance spike is one host and a quick sample, unless the spec names a known cost that is specific to one OS
-    - if the spec's own figures already answer a spike's question, record that as a ruling and drop the spike
-    - do not widen a spike beyond what the spec asks for; list any wider measurement you think is needed as a ruling for the author to decide
-::end-block
-::block when="review"
-- If there are any aspects of the review which you feel are unclear or require rulings on you should make sure that these rulings are explicitly mentioned and are attached to Phase 1
+    - if the spec's own figures already answer a spike's question, record that under `## Planning Decisions` and drop the spike
+    - do not widen a spike beyond what the spec asks for; record any wider measurement you think is worthwhile under `## Planning Decisions` as out of scope, so the author can add it at review
 ::end-block
 
 - Order tasks by dependency
@@ -102,3 +108,4 @@ Your high level task is to convert the following documents into a high confidenc
     - `phase` set this to the starting phase number; usually 1 but may be 0 sometimes
     - `agent` set this to "{{ ctx.agent }}/{{ ctx.model }}"
     - `yolo` set this to "{{ env.YOLO }}"
+    - `open_questions` only when questions remain open (see above); omit it otherwise

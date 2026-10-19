@@ -47,6 +47,13 @@ initialize:
           - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
+    - when: "!is_empty(frontmatter(plan, 'open_questions'))"
+      then:
+          - warn: |-
+                the plan `{{parent_dir(plan)}}` has **{{ length(frontmatter(plan, 'open_questions')) }}** open question(s); resolve them in the spec, then remove `open_questions` from {{link(plan)}}:
+
+                {{ as_ordered_list(frontmatter(plan, 'open_questions')) }}
+          - error: "the plan `{{parent_dir(plan)}}` has unresolved `open_questions`; implementation will not start until they are resolved"
 
 start:
     - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
@@ -94,6 +101,34 @@ failure:
 loop:
     until: "phase >= total_phases || frontmatter(log, 'human_review') == true"
     action: "increment(phase)"
+    # The gate runs before `until` is checked, so this explains a pause that
+    # would otherwise look like the loop silently giving up.
+    gate:
+        - when: "phase >= total_phases && !is_empty(frontmatter(log, 'decisions_for_review'))"
+          then:
+              - info: "the implementation made **{{ length(frontmatter(log, 'decisions_for_review')) }}** decision(s) that the spec and plan left open; review them under `decisions_for_review` in {{link(log)}}"
+        - when: "frontmatter(log, 'human_review') == true"
+          then:
+              - warn: "⏸️  implementation **paused for human review** after phase **{{phase}}** (_of {{total_phases}}_) of `{{parent_dir(plan)}}`"
+              - stderr: |-
+                    The phase {{phase}} agent raised **{{ length(frontmatter(log, 'human_review_items') || []) }}** item(s) that need your decision. Each one lists its options and a recommendation under `human_review_items` in {{link(log)}}.
+              - when: "phase < total_phases"
+                then:
+                    - stderr: |-
+                          To continue with phase {{phase + 1}}:
+
+                          1. answer the items in {{link(log)}} (or pass your answer on through its `message_to_agent`)
+                          2. set `human_review: false` in {{link(log)}}
+                          3. set `start_phase: {{phase + 1}}` in {{link(plan)}} so phase {{phase}} is not repeated
+                          4. rerun the same `compose` command
+                    - message: "⏸️  implementation of `{{parent_dir(plan)}}` paused after phase **{{phase}}** (_of {{total_phases}}_): human review needed before phase {{phase + 1}} — see `{{log}}`"
+                else:
+                    - stderr: "This was the final phase; resolve the items in {{link(log)}} before treating the implementation as complete."
+                    - message: "⏸️  implementation of `{{parent_dir(plan)}}` finished its final phase but needs human review — see `{{log}}`"
+              - say: "The implementation paused after phase {{phase}} because it needs your review"
+              # A pause must exit non-zero so a chained command (`&& just fix …`)
+              # does not run against a partly implemented plan.
+              - error: "implementation of `{{parent_dir(plan)}}` paused for human review after phase {{phase}} (of {{total_phases}})"
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
@@ -233,18 +268,32 @@ You are done when:
 
 Set these properties on the implementation log ({{log}}), never on the spec or plan:
 
-- If something happened during the implementation of this phase (# {{phase}}) that you feel requires human involvement _before_ proceeding onto the next phase for implementation then set `human_review` to `true` (otherwise set to `false`)
-    - this should be kept to a minimum as it will impact flow but when it's necessary it needs to be raised
-    - when `human_review` is set to `true` you must also set `human_review_items`:
-        - a list of things which the human is expected to weigh in on
-        - each item should use the YAML `|-` operator so that the text description is more easily read by a human
-        - don't use jargon and don't assume the human knows this repo or the details of this plan
-        - each list item should describe:
-            - why this decision is critical to be made _before_ the next phase is implemented
-            - bullet point out various options/solutions to choose from
-            - each option/solution should have a clear description and relative pros and cons
-            - you must recommend one of these options and explain why you're recommending it
-        - you can use Markdown formatting to help produce a nice looking and clear message
+This plan runs unattended; key decisions were made in the spec and its review, and setting `human_review` to `true` stops the whole run. Treat as already decided -- never as a question for the author:
+
+- anything the spec decides, including a stated fallback such as "when X is not available, do Y"
+- the plan's planning decisions, and any ruling in the plan that carries a proposal or recommendation: follow it, even when it is worded "confirm or amend"
+
+When this phase raises a question neither answers, make the decision the spec's goals best support, prefer the choice that is easiest to reverse, carry on, and record it in `decisions_for_review`: a list on the implementation log where each item uses YAML's `|-` and states what you decided, the alternatives, and why. Add to the list; do not replace earlier phases' entries. These are reviewed after the run and never stop it.
+
+Set `human_review` to `true` only when one of these holds; otherwise set it to `false`:
+
+- continuing would contradict the spec or a planning decision, for example because this phase's evidence shows one of the spec's assumptions is wrong
+- an escalation trigger named in the plan has fired
+- the next phase cannot be done without something only the author can provide (access, credentials, a fact about their environment) and no reasonable default exists
+- the next phase would take a step that is costly to undo -- an external or published action, deleting data -- that neither the spec nor the plan authorizes
+
+If you would describe an item as "not blocking", it belongs in `decisions_for_review`, not `human_review_items`.
+
+- when `human_review` is set to `true` you must also set `human_review_items`:
+    - a list of things which the human is expected to weigh in on
+    - each item should use the YAML `|-` operator so that the text description is more easily read by a human
+    - don't use jargon and don't assume the human knows this repo or the details of this plan
+    - each list item should describe:
+        - why this decision is critical to be made _before_ the next phase is implemented
+        - bullet point out various options/solutions to choose from
+        - each option/solution should have a clear description and relative pros and cons
+        - you must recommend one of these options and explain why you're recommending it
+    - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
     - `message_to_agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
 
