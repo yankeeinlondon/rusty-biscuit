@@ -847,6 +847,22 @@ source_code:
   - schematic/gen/build.rs
   - schematic/define/src/response.rs
   - schematic/define/tests/authoring_guidance.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/mappings/schema.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/registry/conversion.rs
+  - schematic/definitions/tests/registry_invariants.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/form.rs
+  - schematic/gen/src/export/body.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/common/mod.rs
 documentation:
   - docs/dependencies.md
   - schematic/define/README.md
@@ -880,8 +896,167 @@ documentation:
   - schematic/docs/research/oauth/integration-with-schematic.md
   - schematic/docs/authoring-examples.md
   - schematic/docs/generation/generated-clients.md
-completed_phase: 8
-implemented: false
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/review-1.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+completed_phase: 9
+implemented: true
+source_files_during_phase_9:
+  - Cargo.lock
+  - schematic/define/src/builders.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/models/type_ref.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/mappings/schema.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/authoring_guidance.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/typed_registration.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/conversion.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/registry_invariants.rs
+  - schematic/gen/examples/support/definition_snapshot.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/form.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/body.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/common/mod.rs
+  - schematic/gen/tests/fixtures/definition-baseline/anthropic.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-critpt.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-data.json
+  - schematic/gen/tests/fixtures/definition-baseline/bitbucket.json
+  - schematic/gen/tests/fixtures/definition-baseline/elevenlabs.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-basic.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-bearer.json
+  - schematic/gen/tests/fixtures/definition-baseline/eversolo.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitea.json
+  - schematic/gen/tests/fixtures/definition-baseline/github.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitlab.json
+  - schematic/gen/tests/fixtures/definition-baseline/huggingface.json
+  - schematic/gen/tests/fixtures/definition-baseline/lmstudio.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-native.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/samsung-smart-tv.json
+  - schematic/gen/tests/fixtures/definition-baseline/unfolded-circle-core-rest.json
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/openai.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/schema/Cargo.lock
+docs_updated_during_phase_9:
+  - schematic/definitions/README.md
+  - schematic/docs/authoring-examples.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/review-1.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+skills_files_updated_during_phase_9:
+  - .claude/commands/create-schematic-api.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+docs_created_during_phase_9: []
+human_review: false
+implementation_1: "2026-10-20T08:11:36-07:00"
 ---
 
 # Implementation Log for 2026-10-14-schematic-definition-api (8 phases)
@@ -1094,6 +1269,8 @@ Added all seven verb constructors, independent description/success typestate, fo
 A required R7 coupling was absent from the old stored model: lowering only to a Rust string would lose schema-name/wrapper evidence before destination assembly. Added optional `Schema::descriptor` evidence, omitted on legacy serialized schemas, and Eq on descriptors. API build validates complete descriptor identity/shape and its agreement with the lowered Rust path, including JSON form fields. This is additive to the existing model rather than a process-local registry or hidden global state. Existing constructors leave evidence None. All legacy shipped baselines must remain exact; typed-built schemas intentionally carry evidence. Typed OpenAPI body export now consumes the wire schema through fallible conversion, retaining component names and wrapper/nullability instead of treating fully qualified Rust paths as free-form JSON. This is necessary to keep the new builder's ordinary output correct.
 
 Initial compilation exposed struct-shaped stored request variants and a missing direct URL dependency; corrected both before tests. No formatter ran. Compiler tests reuse the existing diagnostic-checked isolated misuse suite, adding exact E0599/name assertions for all seven required-fact/error-placeholder failures, alongside seven compile-fail doctests.
+
+> **Departure (2026-10-20):** superseded by author review 1, item 1. Stored REST references are `TypeRef` names plus wrappers, and `RestApi::schemas` carries the registry; `Schema::descriptor` and the descriptor agreement checks were removed. See Phase 9.
 
 ### Pagination boundary discovered before migration
 
@@ -1978,3 +2155,155 @@ Pre-edit facts:
 - `cargo test -p schematic-define --all-features --doc`: 161 + 10 passed.
 - `cargo clippy -p schematic-define --tests`, with and without `--all-features`: no warnings.
 - As the checkpoint allows, `schematic-definitions` and `schematic-gen` do not compile yet.
+
+### 2026-10-20 — Phase 9 closing verification
+
+The Wave 18 and Wave 19 work was carried out by the review-findings cycle recorded under **Implementation of Review Findings #1** below, and every Phase 9 checkbox was already ticked. This run re-verified the unchanged tree against the phase gate and completed the closing metadata. It changed no source code.
+
+- **Metadata.** The cumulative `source_code` list was missing 16 Phase 9 source files, and `documentation` was missing 4 skill files; both lists now include them. The feature's plan, spec, log and `review-1.md` were added to `docs_updated_during_phase_9`. `docs_created_during_phase_9: []` and `human_review: false` were added. The spec now records `implemented: true`.
+- **Reader check.** `git grep` for `SchemaRegistry`, `validate_reference`, `.descriptor`, `openapi_registry` and `InvalidDescriptor` in `*.rs` and `*.md` files finds no hits. The search excluded `features/`, `research/`, `reviews/` and `plans/`, and the unrelated `descriptor` fields in `sniff` and `worktree`.
+- **Gates (macOS, from `schematic/`).**
+  - `just test`: 2,277 passed, 13 skipped; slow tier 7/7; 1/1. No test failed or timed out.
+  - `just lint`: exit 0.
+  - `just doctest`: 161, 10, 44 (2 ignored), 18, 3 and 1 passed.
+  - `just test-schema`: 55/55.
+  - `just lint-schema`: exit 0.
+  - `just check-tier-coverage schematic`: 0 stranded.
+- **Dependents.**
+  - `cargo nextest run -p sniff --features remote -E 'test(/gitea|gitlab/)'`: 69/69.
+  - `cargo nextest run -p model-citizen -E 'test(/scanner::(ollama|lmstudio)::/)'`: 45/45.
+- **Cross-OS check.** Not run. The change is a data-model and code-generation refactor with no path, process, console or `#[cfg]`-specific code.
+
+**Phase 9 complete: implementation complete, ready for review.**
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-10-20T08:11:36-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- review 1 is a decision-only review: `findings: []` and `observations: []`. Its one actionable item is the author's **Human rulings → Item 1** (normalize schema references, option C), which this cycle tracks as finding `R1-H1`, with one child row per "Required direction" bullet
+- inventory before edits (08:12):
+        - commit `ee6a67ae6` already landed plan Phase 9 **Wave 17** (stored model in `schematic-define`), recorded in this log under Phase 9
+        - `schematic-definitions` fails to compile (`SchemaRegistryLike` no longer exists), so `schematic-gen` cannot build either; plan Phase 9 **Wave 18** (definitions, generator) and **Wave 19** (artifacts, baselines, docs) remain open
+        - matches for `ModuleGroup`, `validate_reference` and similar names in `darkmatter/`, `sniff/` and `worktree/` are unrelated symbols that share a name
+
+### Finding Ledger
+
+| ID         | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| ---------- | --------------------------------------------------------- | ----------- | -------------------------------- |
+| R1-H1      | Human ruling item 1: normalize REST schema references (option C) within this spec | fixed | every child row below is fixed; area gates `just test`, `just lint`, `just doctest` pass on macOS |
+| R1-H1.1    | A REST request/response reference stores only canonical identity plus wrapper shape as `TypeRef`, with no Rust path and no inline schema copy | fixed | Wave 17 (`ee6a67ae6`): `ApiResponse::Json`/`ApiRequest::Json`/`FormFieldKind::Json` hold `TypeRef`; verified in `define/src/components.rs` (`json_references`) and the 18-API equivalence proof (every old reference maps to a `TypeRef` whose `api.rust_type` equals the old spelling) |
+| R1-H1.2    | `RestApi` carries its context's registry (name → Rust path + wire schema), each fact stored once | fixed | `RestApi::schemas: Vec<SchemaComponent { name, rust_path, schema }>` built from the whole context (Wave 17); module groups re-apply the finished context (`members_built_before_a_later_registration_carry_the_full_components`); `registry_invariants.rs` asserts identical group registries |
+| R1-H1.3    | API assembly validation: every reference resolves in the destination registry (dangling → error naming API, endpoint, name); merging module-group registries rejects conflicting definitions; descriptor agreement/forgery checks removed | fixed | `RestApi::validate_references` → `UnresolvedReference { api, endpoint, name }` for builds and deserialized APIs (`deserialized_definitions_are_checked_by_the_same_resolution`, `a_dangling_reference_fails_group_assembly`); conflicting group registrations fail through the shared context (`isolated_groups_can_reuse_names_but_shared_collisions_fail_assembly`, including a swallowed collision); descriptor agreement/forgery checks removed |
+| R1-H1.4    | `TypeRef` extended (not replaced) for Rust map keys and free-form JSON; extensions recorded in the log | fixed | `PrimitiveType` widths and `TypeRef::KeyedMap { key, value }` added; free-form JSON uses existing `PrimitiveType::Json`; recorded in the Phase 9 Wave 17 entry; `wrapper_references_spell_their_rust_types_through_the_components` |
+| R1-H1.5    | `Schema::descriptor` removed; WebSocket `Schema` (`type_name` + `module_path`) unchanged | fixed | `Schema` is `{ type_name, module_path }` only (`define/src/schema.rs`); no `.descriptor` reader remains in the workspace (grep) |
+| R1-H1.6    | Consumer: `schematic-definitions` (delete `SchemaRegistry` and lookups, `ModuleGroup::registry`, every `openapi_registry()`; module groups re-apply the finished context's components; registry/bitbucket tests) | fixed | `SchemaRegistry`, `ModuleGroup`, lookups and 15 `openapi_registry()` deleted; `schematic-definitions` 566/566, doctests 44, clippy clean |
+| R1-H1.7    | Consumer: generator type-path derivation from `TypeRef` + `api.schemas`; untyped-schema branch removed; `registry_for` and registry parameters removed from pipeline/validation | fixed | types spelled through `api.rust_type`; `registry_for`/registry parameters and `validate_openapi_registry` removed; `invalid-schema-reference` diagnostic (`a_dangling_reference_names_the_api_endpoint_and_name_for_rust_and_openapi`); `schematic-gen` 657/657 |
+| R1-H1.8    | Consumer: OpenAPI and Postman export read `api.schemas`; strict OpenAPI completeness coverage kept | fixed | `openapi::export(api, options)` reads `api.schemas`; `real_apis_still_pass_strict_completeness`, `real_module_documents_carry_exactly_their_components`; Postman tree byte-identical |
+| R1-H1.9    | Consumer: typed list (pagination root-array) inference through `TypeRef::Array` + `api.schemas` | fixed | `root_array_item_type` recognizes `TypeRef::Array` and resolves through `api.schemas` (Wave 17); pagination validation resolves via `api.component`; pagination section identical in all 18 baselines |
+| R1-H1.10   | JSON definition snapshots and canonical baseline regenerated in the normalized form; generated Rust/OpenAPI/Postman output unchanged or every difference explained | fixed | 18 baselines regenerated after a 0-difference equivalence proof against `d12321ae5`; `schematic/schema` and `schematic/postman` byte-identical; 15 OpenAPI files differ only in `x-schematic` values (orchestrator re-check: 0 non-`x-schematic` diffs); `just migration-check` 33/33, `just check-drift` 9/9, `just test-schema` 55/55 |
+| R1-H1.11   | Builder/transfer tests updated to the normalized form | fixed | Wave 17 rewrote `define/tests/builders.rs`/`typed_registration.rs` (transfer matrix `transferred_components_and_references_input_matrix`); generator and definitions tests rewritten to `TypeRef`/`api.schemas` |
+| R1-H1.12   | The **Builder implementation and lowering** log entry amended to record the departure | fixed | Departure note appended under **Builder implementation and lowering** |
+| R1-H1.13   | Docs, READMEs and the `schematic-define` skill describe name-plus-wrapper references and `RestApi::schemas`; no reader of `Schema::descriptor`, `SchemaRegistry` or `validate_reference` remains | fixed | 11 docs pages, `definitions/README.md`, 4 skill files and the `create-schematic-api` command updated; docs-reading tests (`authoring_guidance`, `builders`) and doctests pass; workspace grep finds no current-API reader of `Schema::descriptor`, `SchemaRegistry` or `validate_reference` |
+
+### Progress
+
+- starting the work on 'R1-H1 / Wave 18 — Migrate Definitions (R1-H1.6)' at 08:12:51
+        - defect class: a stored or derived copy of schema identity (a registry view, a descriptor, a Rust-path string) is kept alongside `RestApi::schemas`, so a reader can consult a second source that may disagree with the API's own registry
+        - deleted `SchemaRegistry` (and `SchemaRegistryLike` impl, `validate_completeness`, `from_context`), `ModuleGroup`, `get_registry`, `get_registries_for_module`, `get_module_group`, all 15 provider `openapi_registry()` functions and `definitions/src/registry/conversion.rs`; `assemble_module_group` now returns `Result<Vec<RestApi>, DefinitionError>`
+        - `assemble_module_group` runs `context.finish()` (collisions are still aggregated even when the callback swallows one), then gives every member the finished `context.components()` and re-runs `validate_references`
+        - discovery: `api.schemas` uses the flatten (OpenAPI `components.schemas`) order, not the old registration order, so six inventory tests (anthropic, bitbucket, gitea, gitlab, lmstudio, ollama) now expect component order
+        - sibling sweep: besides `schema.descriptor` (bitbucket ×4), REST tests in gitea ×8, github ×7, gitlab ×9, huggingface ×1 and bitbucket ×2 read `schema.type_name` strings; all now assert `TypeRef` shape. WebSocket `Schema::new` (elevenlabs, unfolded_circle) and pagination `item_type` strings are out of scope per the ruling and plan (clean)
+        - kept `registry_key_for` as the stable per-API artifact key used by `schematic-gen`; it is not a registry lookup
+        - the committed `src/openai/mod.rs` was edited by hand to the new `module_group() -> Result<Vec<RestApi>, DefinitionError>` shape; the generator's import emitter must reproduce it (handed to the generator task)
+        - tests added: `members_built_before_a_later_registration_carry_the_full_components`, `a_dangling_reference_fails_group_assembly`, `component_schema_includes_description_from_doc_comments`, `registry_key_for_covers_every_shipped_api`; `tests/registry_invariants.rs` re-pointed at `api.schemas` (unique keys, references resolve, every reference has a Rust type, module-group members carry identical `schemas`)
+        - orchestrator: removed the now-unused `openapiv3` dependency from `schematic-definitions` (`Cargo.lock` −1 line; no per-area dependency doc lists this crate)
+        - verification (macOS): `cargo nextest run -p schematic-definitions --all-features` 566/566 passed; doctests 44 passed, 2 ignored; `cargo clippy -p schematic-definitions --all-features --tests -- -D warnings` clean
+- work completed for 'R1-H1 / Wave 18 — Migrate Definitions (R1-H1.6)' at 08:26:43
+- starting the work on 'R1-H1 / Wave 18 — Migrate Generator (R1-H1.7, R1-H1.8, R1-H1.9)' at 08:26:43
+        - the generator spells every JSON body/response type through `api.rust_type(&reference)` (one helper, `json_type_name`); an unresolved reference is spelled as a `::core::compile_error!(..)` type, so unvalidated generation fails to compile at that type
+        - removed `registry_for` (from `generate_batch`), every registry argument of `write_openapi`/`write_openapi_grouped`/`build_openapi_grouped`, and `validate_openapi_registry`; `generate_request_struct*` now take `api: &RestApi`
+        - diagnostic `incomplete-schema-registry` (`Feature::IncompleteSchemaRegistry`) replaced by `invalid-schema-reference` (`Feature::InvalidSchemaReference`): Rust and OpenAPI validation report each dangling name with API, endpoint and component, then run `api.validate_references()` for malformed components; Postman never reads schemas
+        - `needs_response_import` keeps only the pager-item branch; pagination validation resolves items through `api.component(..)` and now walks typed shipped responses it previously skipped (no shipped API reports a diagnostic)
+        - the import emitter (`definition_gen.rs`) emits the new `module_group() -> Result<Vec<RestApi>, DefinitionError>` shape; the OpenAI re-import reproduces the committed `schematic/definitions/src/openai/mod.rs` byte for byte
+        - discovery: a standalone (`--output`) import has no registered schemas, so validation rejected every standalone import; `import_pipeline.rs` now gives it one component per generated model (bare model name as Rust path, schema `{}` because the standalone client never exports OpenAPI)
+        - `schematic-define`: `TypeRef::names()` made `pub` so the generator can name the dangling component; the misuse compile test now expects E0624 (private `TypeDesc::new`) instead of E0599
+        - sibling sweep: every REST body match that read `type_name` (request body, response, form field, definition emitter, validation) migrated; legacy `"Vec<Release>"`-style string fixtures converted to name or wrapper references, with deliberately broken Rust spellings moved into a component's `rust_path`; no other workspace crate uses the removed APIs
+        - tests added: `wrapper_references_spell_their_rust_types_through_the_components`, `a_json_form_part_spells_its_rust_type_through_the_components`, `an_unresolved_reference_is_spelled_as_a_compile_error`, `a_dangling_reference_names_the_api_endpoint_and_name_for_rust_and_openapi`, `a_nested_only_component_cannot_be_referenced`, `a_malformed_component_is_reported_for_the_api`, `every_dangling_name_of_a_wrapped_reference_is_reported`, `real_apis_still_pass_strict_completeness`, `real_module_documents_carry_exactly_their_components`, `dangling_reference_blocks_rust_and_openapi_but_not_postman`, `grouped_export_rejects_a_dangling_reference_and_names_files_by_module`; removed `incomplete_registry_blocks_only_openapi` and `grouped_export_fails_when_module_registry_missing` (concepts gone)
+        - artifact finding: generated Rust and Postman trees are byte-identical; all 15 OpenAPI documents differ **only** in each operation's `x-schematic.request`/`response` value (449 responses, 140 requests), which serializes the stored `ApiRequest`/`ApiResponse` and now holds the `TypeRef` (for example `{"Json":{"Named":"MessageResponse"}}`) instead of `{type_name, module_path, descriptor}`; with `x-schematic` removed every document, including component order, is byte-identical
+        - verification (macOS): `cargo nextest run -p schematic-gen` 637/637 passed excluding 20 fixture-comparison tests (default and `--all-features`); slow tier 7/7; doctests 18; clippy `-D warnings` clean for define/definitions/gen; `just lint` exit 0; `schematic-define` 650/650
+        - 20 fixture tests left red for Wave 19: `artifact_drift::generated_openapi_artifacts_are_up_to_date` and 19 `definition_baseline::` tests (stored form and `schemas`-derived registry section)
+- work completed for 'R1-H1 / Wave 18 — Migrate Generator (R1-H1.7, R1-H1.8, R1-H1.9)' at 08:51:58
+- starting the work on 'R1-H1 / Wave 19 — Regenerate and Compare (R1-H1.10)' at 08:51:58
+        - equivalence proof before regeneration: the pre-Phase-9 commit `d12321ae5` (where `definition_baseline::` passed 25/25 against the old fixtures) was extracted with `git archive` and built separately; its snapshot and `SchemaRegistry` values were compared, using `python3 -I` scripts, with a dump of the new snapshot plus `api.rust_type(..)` for every `json_references()` entry
+        - result: 0 unexplained differences across all 18 APIs; API metadata (minus `schemas`), endpoint IDs and order, and pagination are identical; every old `{type_name, module_path: null, descriptor}` maps to a `TypeRef` (`Named`→`Named`, `Vec`→`Array`, `Inline(::serde_json::Value)`→`Primitive(Json)`) whose `api.rust_type` equals the old `type_name` exactly; `api.schemas` equals the old registry run through `flatten()` (names, order, content); registered order moved only where a registration first appeared nested in an earlier type (anthropic, bitbucket, elevenlabs, emqx, gitea, gitlab, lmstudio, ollama, openai)
+        - `definition_snapshot.rs`: registry rows are now `{name, rust_path, blake3}` in `api.schemas` order; the readable `definition` section and the `api_metadata` fingerprint leave out `schemas` (full schema text would make the baseline 3–4× larger, toward PD20's 5 MB limit, and each component is still fingerprinted)
+        - `definition_baseline.rs`: removed the historical `phase6_lowering` and OpenAI beta/alias reconstruction (+16/−190); `EXPLAINED` and `changed_description_is_detected_at_its_exact_field` kept
+        - regenerated all 18 `gen/tests/fixtures/definition-baseline/*.json` (1,347,051 bytes, was 1,270,391) and, via `just generate`, all 15 `schematic/openapi/*.json`
+        - artifact diff: `schematic/schema` and `schematic/postman` have no diff; in `schematic/openapi` every document with `x-schematic.request`/`response` removed is identical to `HEAD`; the 589 changed values are 576 `Named` leaves (41 inside `Vec`) and 13 OpenAI inline `::serde_json::Value` → `{"Primitive":"Json"}`, each mapped from its old descriptor
+        - verification (macOS): `just migration-check` 33/33; `cargo nextest run -p schematic-gen` 657/657 (3 skipped); `just check-drift` 9/9; `just test-schema` 55/55; `just lint-schema` clean; `just check-tier-coverage schematic` 0 stranded; clippy clean; Wave 15 dependents `cargo check --all-targets -p sniff -p sniff-cli -p biscuit-speaks -p biscuit-speaks-cli -p model-citizen -p model-citizen-cli -p homelab -p homelab-cli -p homelab-server -p eversolo-integration -p arcam-amp-integration -p sony-receiver-integration -p unfolded-integration-helper --features …` passed; `cargo nextest run -p sniff --features remote -E 'test(/gitea|gitlab/)'` 69/69; `cargo nextest run -p model-citizen -E 'test(/scanner::(ollama|lmstudio)::/)'` 45/45
+- work completed for 'R1-H1 / Wave 19 — Regenerate and Compare (R1-H1.10)' at 09:04:27
+- starting the work on 'R1-H1 / Wave 19 — Correct Documentation (R1-H1.12, R1-H1.13)' at 09:04:27
+        - Departure note appended under **Builder implementation and lowering** (R1-H1.12)
+        - updated `docs/definition-builders.md` (with a reference → `RestApi::schemas` → Rust path / OpenAPI `$ref` Mermaid diagram), `docs/typed-registration.md`, `docs/io/{import-openapi,export-openapi,openapi-extensions,export-postman}.md`, `docs/generation/{validation,generated-clients}.md`, `docs/definition-snapshots.md` (layout and 1,347,051-byte corpus), `docs/authoring-examples.md` (prose and diagram only), `docs/dependencies.md` (one wording line), `definitions/README.md`, four `schematic-define` skill files and `.claude/commands/create-schematic-api.md`
+        - discovered stale docs that the name grep missed and fixed them: the `invalid-type-syntax` example in `validation.md` (now places the bad spelling in a component's `rust_path`), `Json(Schema)` in `export-postman.md` and the skill, and `export(&api, &registry, …)` in `openapi-extensions.md`
+        - left as is: `schematic/docs/research/` notes (historical research), `research/project-mgmt/jira.md` (a Jira app "descriptor"), and `registry: &registry` in `partial-generation.md` (the list of APIs, not schemas)
+        - verification: `authoring_guidance` + `builders` 19/19; `schematic-define` doctests 161 + 10; `schematic-definitions` doctests 44 (2 ignored)
+- work completed for 'R1-H1 / Wave 19 — Correct Documentation (R1-H1.12, R1-H1.13)' at 09:18:28
+- orchestrator reconciliation at 09:18:28:
+        - workspace grep for `SchemaRegistry`, `openapi_registry`, `validate_completeness`, `InvalidDescriptor`, `Schema::descriptor`, `.descriptor`, `validate_openapi_registry`, `registry_for`, `get_registries_for_module`, `IncompleteSchemaRegistry` (Rust, Markdown, justfiles; excluding `features/` and `research/`): the only hits are historical snapshots (`homelab/plans/2026-03-04…`, `schematic/reviews/2026-07-31-macro-review/spec.md`) and unrelated `descriptor` fields in `sniff` and `worktree`
+        - independent OpenAPI check (`python3 -I` script): 15 files, 0 differences once `x-schematic` is removed; `git diff schematic/schema schematic/postman` shows only `schematic/schema/Cargo.lock` losing `openapiv3`, which follows from the dependency removal
+        - plan Phase 9 checkboxes ticked; plan and log frontmatter set `completed_phase: 9`, `implemented: true` with Phase 9 file inventories
+
+### Completion Report
+
+**Outcome: complete.** Elapsed: 08:11:36 → 09:18:28 (about 1 h 10 min).
+
+- review 1 had no frontmatter or body findings; its one actionable item, the author ruling on item 1, is tracked as `R1-H1` with 13 child rows
+- parent findings: **total 1 = fixed 1 + already fixed 0 + blocked 0 + deferred 0 + unresolved 0 + disputed 0**
+- child rows: 13 of 13 fixed (R1-H1.1–R1-H1.5, R1-H1.9 and R1-H1.11 were landed in Wave 17, commit `ee6a67ae6`, and re-verified in this cycle; the rest were implemented in this cycle)
+- open finding IDs: none
+
+#### Verified repairs
+
+- **Stored model (R1-H1.1–R1-H1.5):** REST bodies are `TypeRef`; `RestApi::schemas` carries the whole context; `validate_references` is the single resolution check; `Schema::descriptor` is gone and WebSocket `Schema` is unchanged
+- **Definitions (R1-H1.6):** `SchemaRegistry` and every registry lookup removed; module groups re-apply the finished components to each member
+- **Generator and export (R1-H1.7–R1-H1.9):** type spelling, OpenAPI components, validation and pagination all read `api.schemas`; dangling references produce `invalid-schema-reference`
+- **Artifacts (R1-H1.10):** an equivalence proof against `d12321ae5` found 0 unexplained differences before the baselines were regenerated; generated Rust and Postman output is byte-identical, and OpenAPI differs only in `x-schematic` reference values
+- **Tests and docs (R1-H1.11–R1-H1.13):** see the progress entries above
+
+#### Notes for the next review
+
+- **New `x-schematic` form:** OpenAPI `x-schematic.request`/`response` now serializes the `TypeRef` form (for example `{"Json":{"Named":"MessageResponse"}}`). The plan expected byte-identical OpenAPI output; this is the one artifact change, and it follows directly from the stored-model change.
+- **Baseline leaves out `schemas`:** the baseline's readable `definition` section and `api_metadata` fingerprint omit `schemas`, and each component is fingerprinted separately. This keeps the corpus under PD20's 5 MB limit.
+- **Standalone imports:** a standalone `--output` import now gets one `{}`-schema component per generated model, so its references resolve.
+- **Not checked:** the fresh fixture crate prints "unused import `schematic_definitions::fixture_basic::*`" warnings. They fail nothing, and this cycle did not establish whether they predate it.
+- **Cross-OS check not run:** the change is a data-model and code-generation refactor with no path, process, console or `#[cfg]`-specific code, so it carries no notable cross-OS risk; CI covers Linux and macOS.
+
+#### Changed files
+
+- `schematic/define/src/models/type_ref.rs` (`TypeRef::names` made public)
+- `schematic/definitions/`: `Cargo.toml` (dropped `openapiv3`), `README.md`, `src/lib.rs`, `src/registry/{mod,lookup,typed}.rs`, `src/registry/conversion.rs` (deleted), 15 provider modules, `src/artificial_analysis/types.rs`, `tests/registry_invariants.rs`
+- `schematic/gen/src/`: `pipeline.rs`, `validation.rs`, `diagnostics.rs`, `lib.rs`, `export/{openapi,body}.rs`, `definition_gen.rs`, `import_pipeline.rs`, `model_gen.rs`, `output/{mod,assemble/api}.rs`, `codegen/request_structs/*`, `codegen/endpoint_methods/*`, `codegen/request_enum.rs`, unit-test modules, `test_utils.rs`
+- `schematic/gen/tests/`: `common/{mod,components}.rs` (components is new), and in `l1/`: `artifact_drift`, `definition_baseline`, `e2e_generation`, `fresh_output_compile`, `import_overlay`, `openapi_strict_completeness`, `output_validation`, `pagination_validation`, `partial_generation`, `path_substitution`, `postman_golden`, `query_params_codegen`
+- `schematic/gen/examples/support/definition_snapshot.rs`
+- artifacts: 18 `gen/tests/fixtures/definition-baseline/*.json`, 15 `schematic/openapi/*.json`, `schematic/schema/Cargo.lock`, `Cargo.lock`
+- docs, skills and command files: listed in the Correct Documentation entry above
+- feature artifacts: `implementation-log.md`, `plan.md`, `review-1.md` (metadata only)
+
+#### Final verification (macOS)
+
+| Command (from `schematic/` unless noted) | Result | Verifies |
+| --- | --- | --- |
+| `just test` | exit 0: 2,277 passed (13 skipped); slow 7/7; 1/1 | R1-H1 overall |
+| `just lint` | exit 0 | R1-H1 overall |
+| `just doctest` | all passed (161, 10, 44 + 2 ignored, 18, 3, 1) | R1-H1.13 (transcluded docs) |
+| `just migration-check` | 33/33 | R1-H1.10 |
+| `just check-drift` | 9/9 | R1-H1.10 |
+| `just test-schema` / `just lint-schema` | 55/55 / clean | R1-H1.10 |
+| `just check-tier-coverage schematic` (repo root) | 0 stranded | new tests are selected |
+| Wave 15 dependents `cargo check --all-targets …`; `sniff` gitea/gitlab 69/69; `model-citizen` scanner 45/45 | passed | downstream consumers |
+| OpenAPI `x-schematic`-stripped comparison with `HEAD` | 0 of 15 differ | R1-H1.8, R1-H1.10 |
+
+**Implementation complete, ready for review.**

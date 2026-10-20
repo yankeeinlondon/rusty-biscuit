@@ -30,11 +30,13 @@ blocked: false
 reviewed_by: codex/gpt-6.1-sol
 created: "2026-10-14T22:56:32-07:00"
 spec: "2026-10-14-schematic-definition-api/spec.md"
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-10-14-schematic-definition-api/spec.md`"
 feature: "2026-10-14-schematic-definition-api/review-1.md"
 next_spec: "schematic/features/2026-10-15-schematic-definition-vocabulary/spec.md"
 next_plan: "schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md"
+log: "/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/implementation-log.md"
+implemented_by: claude/opus
 ---
 
 # Review 1: author decision before implementation review

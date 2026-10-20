@@ -25,7 +25,7 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 1
 clarified: false
-implemented: false
+implemented: true
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
     - 2026-10-13-schematic-pagination
@@ -45,6 +45,7 @@ message_to_agent: |-
   and the Windows generator stack reservation. Adjacent optional-auth, wider
   dual-source auth cleanup, HuggingFace stub shapes, and orphaned types remain
   deferred candidates, not fixed behavior. No lifecycle move or commit occurred.
+implemented_by: "claude/opus"
 ---
 
 # Schematic definition API: builders and typed registration

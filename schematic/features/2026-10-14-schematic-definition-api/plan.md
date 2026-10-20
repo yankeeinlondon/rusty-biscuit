@@ -848,6 +848,22 @@ source_code:
   - schematic/gen/build.rs
   - schematic/define/src/response.rs
   - schematic/define/tests/authoring_guidance.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/mappings/schema.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/registry/conversion.rs
+  - schematic/definitions/tests/registry_invariants.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/form.rs
+  - schematic/gen/src/export/body.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/common/mod.rs
 documentation:
   - docs/dependencies.md
   - schematic/define/README.md
@@ -881,8 +897,165 @@ documentation:
   - schematic/docs/research/oauth/integration-with-schematic.md
   - schematic/docs/authoring-examples.md
   - schematic/docs/generation/generated-clients.md
-completed_phase: 8
-implemented: false
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/review-1.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+completed_phase: 9
+implemented: true
+source_files_during_phase_9:
+  - Cargo.lock
+  - schematic/define/src/builders.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/models/type_ref.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/mappings/schema.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/authoring_guidance.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/typed_registration.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/conversion.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/registry_invariants.rs
+  - schematic/gen/examples/support/definition_snapshot.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/form.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/body.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/common/mod.rs
+  - schematic/gen/tests/fixtures/definition-baseline/anthropic.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-critpt.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-data.json
+  - schematic/gen/tests/fixtures/definition-baseline/bitbucket.json
+  - schematic/gen/tests/fixtures/definition-baseline/elevenlabs.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-basic.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-bearer.json
+  - schematic/gen/tests/fixtures/definition-baseline/eversolo.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitea.json
+  - schematic/gen/tests/fixtures/definition-baseline/github.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitlab.json
+  - schematic/gen/tests/fixtures/definition-baseline/huggingface.json
+  - schematic/gen/tests/fixtures/definition-baseline/lmstudio.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-native.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/samsung-smart-tv.json
+  - schematic/gen/tests/fixtures/definition-baseline/unfolded-circle-core-rest.json
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/openai.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/schema/Cargo.lock
+docs_updated_during_phase_9:
+  - schematic/definitions/README.md
+  - schematic/docs/authoring-examples.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/review-1.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+skills_files_updated_during_phase_9:
+  - .claude/commands/create-schematic-api.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+docs_created_during_phase_9: []
 ---
 
 # Schematic definition API implementation plan
@@ -1228,9 +1401,9 @@ Checkpoint: `schematic-define` builds and its L1 tests and doctests pass. Downst
 
 ### Wave 18 — Consumers (Parallel with Disjoint Ownership)
 
-- [ ] **Migrate Definitions**
+- [x] **Migrate Definitions**
   - Delete `SchemaRegistry`, its lookups, `ModuleGroup::registry` and every provider's `openapi_registry()`; `assemble_module_group` returns the APIs only. After the callback returns, it sets every member API's `schemas` to the finished context's `components()` and re-runs `validate_references`. An API built before a later member registered its types would otherwise carry a partial registry, and grouped OpenAPI output (ollama, emqx) would change. Rewrite the bitbucket and registry tests that read `schema.descriptor` to assert `TypeRef` references and `api.schemas` entries. Keep `definitions/tests/registry_invariants.rs` coverage by pointing it at `api.schemas`.
-- [ ] **Migrate Generator**
+- [x] **Migrate Generator**
   - The Rust generator derives type paths from `TypeRef` plus `api.schemas`. Remove the untyped-schema branch of `needs_response_import`, keeping the pager-item branch. Remove `registry_for` and the `SchemaRegistry` parameters from the pipeline, validation and OpenAPI export. Re-point `openapi_strict_completeness` and the other `gen/tests/l1` users. Convert the legacy-string REST fixtures named in the Wave 7 log entry to name references or deliberate dangling references.
   - The import emitter (`definition_gen.rs`) keeps emitting builder source; confirm the OpenAI re-import still reproduces the committed definition.
 
@@ -1238,10 +1411,10 @@ Checkpoint: `just test`, `just lint` and `just doctest` pass in `schematic/`.
 
 ### Wave 19 — Artifacts, Baselines and Documentation (Sequential)
 
-- [ ] **Regenerate and Compare**
+- [x] **Regenerate and Compare**
   - Regenerate the definition JSON snapshots and the canonical baseline under `gen/tests/fixtures/definition-baseline/`, then the Rust, OpenAPI and Postman trees. Generated Rust, OpenAPI and Postman output should be byte-identical to the Phase 7 artifacts. Log any difference by API, file and cause; the only expected changes are in the definition snapshots and baseline (reference form and the new `schemas` field).
   - Run `just test-schema`, `just lint-schema`, the dependent checks from Wave 15 (including sniff's Gitea and GitLab users), and `just check-tier-coverage schematic`.
-- [ ] **Correct Documentation**
+- [x] **Correct Documentation**
   - Update `docs/typed-registration.md`, `docs/definition-builders.md`, `docs/io/export-openapi.md`, `docs/io/import-openapi.md`, `docs/generation/generated-clients.md`, `docs/generation/validation.md`, the `define` and `definitions` READMEs, and `.claude/skills/schematic-define/` to describe name-plus-wrapper references and `RestApi::schemas`, and to remove `SchemaRegistry`.
   - Amend the implementation log's **Builder implementation and lowering** entry with a dated departure note, and record this phase's evidence. Update the plan and log frontmatter inventories, and set `completed_phase: 9` and `implemented: true` only when every gate has passed.
 
