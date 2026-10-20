@@ -251,22 +251,20 @@ fn stall_at_the_second_drain(fixture: &Fixture, options: DeletionOptions) -> (cr
     (observation.diagnostics().loss.expect("the stall is recorded"), deletion)
 }
 
-/// The default interval is 512 entries on macOS and 2,048 elsewhere; the
-/// loss a drain receives during deletion carries the entries processed
-/// since the previous drain.
+/// The default interval is 2,048 entries on every platform; the loss a
+/// drain receives during deletion carries the entries processed since the
+/// previous drain.
 #[test]
-fn the_default_drain_interval_is_512_on_macos_and_2048_elsewhere() {
+fn the_default_drain_interval_is_2048_on_every_platform() {
     let fixture = Fixture::with(flat_600);
 
     let (loss, deletion) = stall_at_the_second_drain(&fixture, DeletionOptions::default());
 
-    assert_eq!(DEFAULT_DRAIN_EVERY, if cfg!(target_os = "macos") { 512 } else { 2048 });
+    assert_eq!(DEFAULT_DRAIN_EVERY, 2048);
     assert_eq!(loss.stage, crate::remove::observation::ObservationStage::Deletion);
-    // macOS drains after the second batch; elsewhere only the level's end
-    // drains, after all 600.
-    let expected = if cfg!(target_os = "macos") { 512 } else { 600 };
-    assert_eq!(loss.entries_since_drain, Some(expected));
-    assert_eq!(deletion.deleted.len() as u64, expected, "nothing is deleted past the stalled drain");
+    // 600 entries never reach the interval, so only the level's end drains.
+    assert_eq!(loss.entries_since_drain, Some(600));
+    assert_eq!(deletion.deleted.len(), 600, "nothing is deleted past the stalled drain");
 }
 
 /// The interval is checked after each whole batch, so a drain comes at most

@@ -258,11 +258,17 @@ record, Arc<inventory>)` (the inventory is journal line 2), the move,
   handle's identity uses `rename::handle_identity`. That costs about 0.5 ms an
   entry on build-win-native (600 files took ~1.2 s per test); keep Windows
   fixtures small.
-- **Drains are per depth level** (plus every `DEFAULT_DRAIN_EVERY` entries:
-  512 on macOS, 2,048 elsewhere), never per batch or entry: a macOS drain is
-  ~11 ms. The interval is checked after each batch, so a drain can come one
-  batch minus one entry late. 512 paces bursts that made FSEvents drop
-  events at about 7,000 deletions a second; it cannot rule a drop out. Journal batches
+- **Drains are per depth level** (plus every `DEFAULT_DRAIN_EVERY` entries,
+  2,048 on every OS), never per batch or entry: a macOS drain is ~11 ms.
+  The interval is checked after each batch, so a drain can come one batch
+  minus one entry late. macOS used 512 for a while to pace FSEvents drops;
+  a 12-run same-host comparison (2,048 / 512 / 256, fresh and settled
+  101,002-entry trees) saw no drop at any interval while each halving
+  roughly doubled deletion time, so it went back to 2,048. No interval rules
+  a drop out. A large-tree measurement harness must exclude Spotlight
+  (a `*.noindex` parent) and Git auto-gc (`gc.auto=0`), or `mdworker_shared`
+  and a detached `git gc` hold the fresh tree and the removal pauses with
+  exit 3. Journal batches
   stay one directory, at most 256 entries. `.git` and everything under it are
   deleted after all other content.
 - **Event resolution is by exact path, not kind:** a path the engine deleted

@@ -207,9 +207,11 @@ with `wt remove`:
   restart brought it to 0.1 % CPU and same-second delivery.
 - **A healthy fseventsd still drops under a fast deletion burst.** About
   6,600 to 7,000 deletions a second made FSEvents drop events (which flags
-  fired was not recorded then; `FsEventsDropped` now keeps them). `wt`
-  drains every 512 entries on macOS (`DEFAULT_DRAIN_EVERY`) to spread
-  bursts out; that lowers the pressure but does not prevent a drop.
+  fired was not recorded then; `FsEventsDropped` now keeps them). Drops are
+  intermittent: a later 12-run comparison deleted at up to 11,000 entries a
+  second with no drop, and draining more often than every 2,048 entries
+  (`DEFAULT_DRAIN_EVERY`) only made deletion slower. No drain interval
+  prevents a drop.
 
 Diagnose by hand:
 

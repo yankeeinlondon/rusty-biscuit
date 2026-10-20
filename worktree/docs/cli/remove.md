@@ -375,10 +375,13 @@ stall. Two cases have been seen:
   at fseventsd.
 - **A fast burst of deletions.** A healthy fseventsd can still drop
   notifications when about 6,600 to 7,000 entries are deleted a second, which
-  ends as `fs_events_dropped`. This is why `wt` checks for activity every 512
-  entries on macOS (see [Checked deletion](#checked-deletion)). That lowers
-  the pressure, but cannot rule out a drop, since fseventsd is shared with
-  every other program.
+  ends as `fs_events_dropped`. Drops are intermittent: in a later comparison
+  on the same Mac, deleting at up to 11,000 entries a second dropped nothing,
+  and checking for activity more often than every 2,048 entries made
+  deletion about twice as slow without a measurable benefit. No checking
+  interval can rule out a drop, since fseventsd is shared with every other
+  program. A stopped removal continues where it left off when you run the
+  same `wt remove <name>` again.
 
 To see whether fseventsd is busy:
 
@@ -433,15 +436,14 @@ flowchart TD
   so nothing outside the checkout is deleted. A link in the checkout is
   deleted itself; its target is untouched.
 - Reported changes are checked after each level, and within a level after
-  every 512 entries on macOS and 2,048 elsewhere: a change at a path `wt`
+  every 2,048 entries: a change at a path `wt`
   deleted must still be a deletion, a change to an entry not yet reached must
   leave it matching the list, and anything else at either location, or in
   Git's record of the worktree, stops removal. A folder whose contents are
   gone but which cannot be removed (a new file appeared in it) also stops
   removal. The count is checked after each batch (below), so a check can come
-  up to 255 entries late. macOS checks more often because each check waits
-  for the system to catch up, which spreads out a large deletion's
-  notifications (see [When fseventsd is slow](#when-fseventsd-is-slow-macos)).
+  up to 255 entries late. On macOS each check also waits for the system to
+  catch up (see [When fseventsd is slow](#when-fseventsd-is-slow-macos)).
 - Each batch of up to 256 entries from one folder is written to the
   recovery record before it is deleted, and its results after. A crash between
   the two leaves those entries marked uncertain, not deleted.
@@ -619,7 +621,7 @@ deletion records its watching like this:
     "loss": {
       "stage": "deletion",
       "reason": { "kind": "fs_events_dropped", "raw": 6, "flags": ["kernel_dropped", "user_dropped"] },
-      "entries_since_drain": 512
+      "entries_since_drain": 2048
     }
   }
 }

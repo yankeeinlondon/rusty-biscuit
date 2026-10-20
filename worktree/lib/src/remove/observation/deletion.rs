@@ -45,17 +45,18 @@ use super::{CoverageLost, EventKind, Observation, ObservationStage, Scope};
 use crate::remove::outcome::{ActivityKind, ActivityLocation, ObservedActivity, OperationReport, RemovalOutcome, ReportNote};
 use crate::remove::recovery::journal::{EntryKind, JournalSink, JournalWriteError, JournalWriter, MAX_BATCH_ENTRIES, PlannedEntry, ResultState};
 
-/// How many entries may be processed between two drains: 512 on macOS, 2,048
-/// elsewhere. The interval is checked after each journal batch, so a drain
-/// can come up to one batch minus one entry later.
+/// How many entries may be processed between two drains, on every platform.
+/// The interval is checked after each journal batch, so a drain can come up
+/// to one batch minus one entry later.
 ///
-/// macOS drains more often because each drain also waits for FSEvents to
-/// catch up, which spreads a large deletion's events out: bursts of about
-/// 7,000 deletions a second made FSEvents drop events. That pacing lowers
-/// the pressure but cannot rule out a drop, which FSEvents shares with every
-/// other process. A deleted entry is not a count of queued platform events,
+/// macOS once drained every 512 entries to pace FSEvents, which dropped
+/// events during bursts of about 7,000 deletions a second. A same-host
+/// comparison of 2,048, 512 and 256 saw no drop at any of them, while each
+/// smaller interval roughly doubled deletion time, so macOS uses the common
+/// value. No interval rules a drop out: FSEvents is shared with every other
+/// process, and a deleted entry is not a count of queued platform events,
 /// since FSEvents coalesces and delivers late.
-pub const DEFAULT_DRAIN_EVERY: usize = if cfg!(target_os = "macos") { 512 } else { 2048 };
+pub const DEFAULT_DRAIN_EVERY: usize = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeletionOptions {
