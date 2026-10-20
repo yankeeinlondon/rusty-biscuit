@@ -8,7 +8,53 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - darkmatter
+    - claudine
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/tests/l1/shell_template_guards.rs
+    - darkmatter/lib/tests/l1/shell_template_execution.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - claudine/lib/src/composition/lifecycle/shell_template.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/inline/preflight-checks.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/expressions.md
 ---
 
 # Shared type scope implementation plan
@@ -155,7 +201,7 @@ affects this fix's correctness; the conversion ruling is explicitly future work.
 
 ### Wave 2 — Independent core foundations (parallel)
 
-- [ ] **Extend subtype relation**
+- [x] **Extend subtype relation**
   - In `markdown/schemas/simplified/subtype.rs`, add scalar-literal families,
     string-literal membership in enums, enum subsets, and source/destination
     union coverage independent of arm order.
@@ -164,7 +210,7 @@ affects this fix's correctness; the conversion ruling is explicitly future work.
     type; numeric `literal(4)` is not a subtype of string `enum('4')`.
   - Add focused relation tests, including all four structural examples in
     acceptance criterion 5 and existing shell-rule compatibility regressions.
-- [ ] **Build scope model**
+- [x] **Build scope model**
   - Add the Darkmatter-owned immutable scope and shared declared-type layer.
     Reuse existing presence calculation, reserved-root descriptors, and binding
     resolution; do not rebuild effective schemas per hole.
@@ -177,7 +223,7 @@ affects this fix's correctness; the conversion ruling is explicitly future work.
 
 ### Wave 3 — Branch algebra (depends on Wave 2)
 
-- [ ] **Implement guard facts**
+- [x] **Implement guard facts**
   - Implement `assume(&Expr, Polarity)` as the sole fact producer for truthiness,
     negation, parentheses, current predicates, equality, and representable
     discriminants. Resolve aliases and case through the canonical registry.
@@ -188,7 +234,7 @@ affects this fix's correctness; the conversion ruling is explicitly future work.
     JSON-text container comparisons, reversed operands, both-side unions,
     numeric formatting, conservative exclusions, and contradictions against
     the real evaluator. Keep unsupported parent projections unchanged.
-- [ ] **Implement fact invalidation**
+- [x] **Implement fact invalidation**
   - Add persistent invalidation/join operations and write-set propagation for
     static destinations, aliases, ancestors/descendants, and dynamic writes.
     Determine which effects can replace document bindings; require write sets
@@ -207,7 +253,7 @@ uses metadata only, and no core path evaluates expressions or performs I/O.
 
 ### Wave 4 — Shell construction and filling (parallel by module)
 
-- [ ] **Scope shell candidates**
+- [x] **Scope shell candidates**
   - Make candidate construction and `typing.rs` projection require a scope.
     Read narrowed types there; apply broad-string approval fallback afterward,
     retaining original validators and guard refinement provenance.
@@ -217,7 +263,7 @@ uses metadata only, and no core path evaluates expressions or performs I/O.
   - Preserve saved string-like rule syntax, non-string broad-string approval,
     unavailable-binding errors, grammar refusal, variable-program refusal,
     blacklist precedence, and offered/closed approval membership.
-- [ ] **Validate live holes**
+- [x] **Validate live holes**
   - Extend `fill.rs` and runtime validation to reject null and validate both
     declaration and approved refinement before conversion/dispatch. Use the
     once-resolved checked value for every argument position it fills.
