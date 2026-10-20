@@ -162,25 +162,27 @@ fn slow_imported_builders_compile_and_match_public_import() {
         .collect::<Vec<_>>().join("\n");
     let sources = [("petstore", module.as_str())];
     let lockfile = manifest_dir!().join("../schema/Cargo.lock");
-    let fresh = FreshCrate::generate(&[&imported.api], Definitions::Fixture(&sources), &lockfile);
+    // The client is generated beside the definitions fixture, whose models it
+    // glob-imports, so each referenced model is spelled by its bare name.
+    let generated = crate::common::components::with_referenced_components(imported.api.clone());
+    let fresh = FreshCrate::generate(&[&generated], Definitions::Fixture(&sources), &lockfile);
     let expected = serde_json::to_string(&imported.api).unwrap();
     let child = r#"
 #[test]
-fn imported_api_and_registry_match_the_public_import() {
-    use schematic_define::{ApiRequest, ApiResponse, RestApi, Schema};
-    fn untype(schema: &mut Schema) {
-        schema.type_name = schema.type_name.replace("::schematic_definitions::petstore::", "")
-            .replace("::std::vec::", "").replace("::std::option::", "").trim_start_matches("::").to_owned();
-        schema.descriptor = None;
-    }
-    let group = schematic_definitions::petstore::module_group().unwrap();
-    let mut api = group.apis.into_iter().next().unwrap();
-    group.registry.validate_completeness(&api).unwrap();
-    assert_eq!(group.registry.names().collect::<Vec<_>>(), ["Pet", "CreatePetRequest2", "PetStatus"]);
-    for endpoint in &mut api.endpoints {
-        if let ApiResponse::Json(schema) = &mut endpoint.response { untype(schema); }
-        if let Some(ApiRequest::Json(schema)) = &mut endpoint.request { untype(schema); }
-    }
+fn imported_api_and_components_match_the_public_import() {
+    use schematic_define::RestApi;
+    let mut api = schematic_definitions::petstore::module_group().unwrap().remove(0);
+    api.validate_references().unwrap();
+    let components: Vec<(&str, Option<&str>)> = api.schemas.iter()
+        .map(|component| (component.name.as_str(), component.rust_path.as_deref())).collect();
+    assert_eq!(components, [
+        ("Pet", Some("::schematic_definitions::petstore::Pet")),
+        ("PetStatus", Some("::schematic_definitions::petstore::PetStatus")),
+        ("CreatePetRequest2", Some("::schematic_definitions::petstore::CreatePetRequest2")),
+    ]);
+    // References are names, so the assembled endpoints equal the imported
+    // ones exactly; only the components are added by assembly.
+    api.schemas.clear();
     let expected: RestApi = serde_json::from_str(EXPECTED).unwrap();
     assert_eq!(api, expected);
     let client = schematic_schema::petstore::Petstore::new();

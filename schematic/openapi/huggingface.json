@@ -35,19 +35,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::ModelInfo",
-                      "schema_name": "ModelInfo"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::ModelInfo>"
+              "Array": {
+                "Named": "ModelInfo"
+              }
             }
           }
         }
@@ -73,17 +63,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::ModelInfo",
-                    "schema_name": "ModelInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::ModelInfo"
+              "Named": "ModelInfo"
             }
           }
         }
@@ -123,19 +103,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::RepoFile",
-                      "schema_name": "RepoFile"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoFile>"
+              "Array": {
+                "Named": "RepoFile"
+              }
             }
           }
         }
@@ -181,17 +151,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::FileMetadata",
-                    "schema_name": "FileMetadata"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::FileMetadata"
+              "Named": "FileMetadata"
             }
           }
         }
@@ -249,19 +209,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "schematic_definitions::huggingface::Commit",
-                      "schema_name": "Commit"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<schematic_definitions::huggingface::Commit>"
+              "Array": {
+                "Named": "Commit"
+              }
             }
           }
         }
@@ -349,17 +299,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::DiscussionList",
-                    "schema_name": "DiscussionList"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::DiscussionList"
+              "Named": "DiscussionList"
             }
           }
         }
@@ -441,19 +381,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::DatasetInfo",
-                      "schema_name": "DatasetInfo"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::DatasetInfo>"
+              "Array": {
+                "Named": "DatasetInfo"
+              }
             }
           }
         }
@@ -479,17 +409,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::DatasetInfo",
-                    "schema_name": "DatasetInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::DatasetInfo"
+              "Named": "DatasetInfo"
             }
           }
         }
@@ -529,19 +449,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::RepoFile",
-                      "schema_name": "RepoFile"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoFile>"
+              "Array": {
+                "Named": "RepoFile"
+              }
             }
           }
         }
@@ -587,17 +497,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::FileMetadata",
-                    "schema_name": "FileMetadata"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::FileMetadata"
+              "Named": "FileMetadata"
             }
           }
         }
@@ -655,19 +555,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "schematic_definitions::huggingface::Commit",
-                      "schema_name": "Commit"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<schematic_definitions::huggingface::Commit>"
+              "Array": {
+                "Named": "Commit"
+              }
             }
           }
         }
@@ -758,19 +648,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::SpaceInfo",
-                      "schema_name": "SpaceInfo"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::SpaceInfo>"
+              "Array": {
+                "Named": "SpaceInfo"
+              }
             }
           }
         }
@@ -796,17 +676,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::SpaceInfo",
-                    "schema_name": "SpaceInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::SpaceInfo"
+              "Named": "SpaceInfo"
             }
           }
         }
@@ -846,19 +716,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::RepoFile",
-                      "schema_name": "RepoFile"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoFile>"
+              "Array": {
+                "Named": "RepoFile"
+              }
             }
           }
         }
@@ -904,17 +764,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::FileMetadata",
-                    "schema_name": "FileMetadata"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::FileMetadata"
+              "Named": "FileMetadata"
             }
           }
         }
@@ -979,32 +829,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::CreateRepoBody",
-                    "schema_name": "CreateRepoBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::CreateRepoBody"
+              "Named": "CreateRepoBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::RepoUrl",
-                    "schema_name": "RepoUrl"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::RepoUrl"
+              "Named": "RepoUrl"
             }
           }
         }
@@ -1040,32 +870,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::DeleteRepoBody",
-                    "schema_name": "DeleteRepoBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::DeleteRepoBody"
+              "Named": "DeleteRepoBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::StatusResponse",
-                    "schema_name": "StatusResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::StatusResponse"
+              "Named": "StatusResponse"
             }
           }
         }
@@ -1101,32 +911,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::UpdateRepoSettingsBody",
-                    "schema_name": "UpdateRepoSettingsBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::UpdateRepoSettingsBody"
+              "Named": "UpdateRepoSettingsBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::StatusResponse",
-                    "schema_name": "StatusResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::StatusResponse"
+              "Named": "StatusResponse"
             }
           }
         }
@@ -1182,32 +972,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::MoveRepoBody",
-                    "schema_name": "MoveRepoBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::MoveRepoBody"
+              "Named": "MoveRepoBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::StatusResponse",
-                    "schema_name": "StatusResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::StatusResponse"
+              "Named": "StatusResponse"
             }
           }
         }
@@ -1233,17 +1003,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::UserInfo",
-                    "schema_name": "UserInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::UserInfo"
+              "Named": "UserInfo"
             }
           }
         }
@@ -1269,17 +1029,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::huggingface::UserInfo",
-                    "schema_name": "UserInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::huggingface::UserInfo"
+              "Named": "UserInfo"
             }
           }
         }
@@ -1319,19 +1069,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::RepoInfo",
-                      "schema_name": "RepoInfo"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoInfo>"
+              "Array": {
+                "Named": "RepoInfo"
+              }
             }
           }
         }
@@ -1371,19 +1111,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::huggingface::Collection",
-                      "schema_name": "Collection"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::Collection>"
+              "Array": {
+                "Named": "Collection"
+              }
             }
           }
         }

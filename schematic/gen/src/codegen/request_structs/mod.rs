@@ -19,7 +19,7 @@ mod tests;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::Endpoint;
+use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::pagination::OrdinaryDefault;
 use crate::parser::extract_path_params;
@@ -53,6 +53,9 @@ pub const PLACEHOLDER_API_MARKER: &str = "Api";
 /// This form names the API marker [`PLACEHOLDER_API_MARKER`]; generated
 /// modules use [`generate_request_struct_with_options`] with the API's own
 /// name.
+///
+/// JSON body and response types are spelled from `endpoint`'s references,
+/// resolved through `api`'s [`RestApi::schemas`].
 ///
 /// ## Examples
 ///
@@ -89,8 +92,8 @@ pub const PLACEHOLDER_API_MARKER: &str = "Api";
 ///     }
 /// }
 /// ```
-pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
-    generate_request_struct_with_suffix(endpoint, DEFAULT_REQUEST_SUFFIX)
+pub fn generate_request_struct(api: &RestApi, endpoint: &Endpoint) -> TokenStream {
+    generate_request_struct_with_suffix(api, endpoint, DEFAULT_REQUEST_SUFFIX)
 }
 
 /// Generates a request struct for the given endpoint with a custom suffix.
@@ -99,8 +102,8 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
 /// For example, using "Params" would generate `ListModelsParams` instead of `ListModelsRequest`.
 /// Like [`generate_request_struct`], it names the API marker
 /// [`PLACEHOLDER_API_MARKER`].
-pub fn generate_request_struct_with_suffix(endpoint: &Endpoint, suffix: &str) -> TokenStream {
-    generate_request_struct_with_options(endpoint, suffix, None, PLACEHOLDER_API_MARKER)
+pub fn generate_request_struct_with_suffix(api: &RestApi, endpoint: &Endpoint, suffix: &str) -> TokenStream {
+    generate_request_struct_with_options(api, endpoint, suffix, None, PLACEHOLDER_API_MARKER)
 }
 
 /// Generates a request struct for the given endpoint with full configuration.
@@ -110,18 +113,20 @@ pub fn generate_request_struct_with_suffix(endpoint: &Endpoint, suffix: &str) ->
 /// API type the request's `EndpointSpec::Api` names, which scopes the request
 /// to that API's client.
 pub fn generate_request_struct_with_options(
+    api: &RestApi,
     endpoint: &Endpoint,
     suffix: &str,
     module_path: Option<&str>,
     api_marker: &str,
 ) -> TokenStream {
-    generate_request_struct_with_defaults(endpoint, suffix, module_path, api_marker, &[])
+    generate_request_struct_with_defaults(api, endpoint, suffix, module_path, api_marker, &[])
 }
 
 /// [`generate_request_struct_with_options`] for an endpoint seen through its
 /// pager view, whose `into_parts` also sends `defaults`, the required
 /// parameters its pagination strategy adopted.
 pub(crate) fn generate_request_struct_with_defaults(
+    api: &RestApi,
     endpoint: &Endpoint,
     suffix: &str,
     module_path: Option<&str>,
@@ -145,7 +150,7 @@ pub(crate) fn generate_request_struct_with_defaults(
 
     // Form endpoints get a synthesized `{EndpointId}Form` body type, so from here
     // down they follow exactly the same path as JSON bodies.
-    let body_type_name = request_body_type_name(endpoint);
+    let body_type_name = request_body_type_name(api, endpoint);
     let body_type_name = body_type_name.as_deref();
     let has_body = body_type_name.is_some();
 
@@ -155,7 +160,7 @@ pub(crate) fn generate_request_struct_with_defaults(
         named_params::generate_named_param_fields(&header_params, ParamLocation::Header);
     let cookie_param_fields =
         named_params::generate_named_param_fields(&cookie_params, ParamLocation::Cookie);
-    let body_field = body::generate_body_field(endpoint);
+    let body_field = body::generate_body_field(api, endpoint);
 
     let derives = derives::generate_derives(has_body);
 
@@ -188,7 +193,7 @@ pub(crate) fn generate_request_struct_with_defaults(
 
     let into_parts_body = into_parts::generate_into_parts_body(endpoint, &path_params, &query_params, defaults);
     let endpoint_spec_impl =
-        endpoint_spec::generate_endpoint_spec_impl(&struct_name, api_marker, endpoint, into_parts_body);
+        endpoint_spec::generate_endpoint_spec_impl(api, &struct_name, api_marker, endpoint, into_parts_body);
 
     let doc_lines = generate_doc_comment_with_example(
         &endpoint.id,
@@ -217,7 +222,7 @@ pub(crate) fn generate_request_struct_with_defaults(
         }
     };
 
-    let form_struct = form::generate_form_struct(endpoint);
+    let form_struct = form::generate_form_struct(api, endpoint);
 
     let inherent_methods = quote! {
         #new_method
@@ -259,11 +264,11 @@ pub(crate) fn generate_request_struct_with_defaults(
 /// The type of the request's `body` field, or `None` when it sends no body:
 /// the JSON type, a generated `{EndpointId}Form`, `String` for a text body,
 /// or `Vec<u8>` for a binary body.
-pub(crate) fn request_body_type_name(endpoint: &Endpoint) -> Option<String> {
+pub(crate) fn request_body_type_name(api: &RestApi, endpoint: &Endpoint) -> Option<String> {
     use schematic_define::ApiRequest;
 
     match &endpoint.request {
-        Some(ApiRequest::Json(schema)) => Some(schema.type_name.clone()),
+        Some(ApiRequest::Json(reference)) => Some(shared::json_type_name(api, reference)),
         Some(ApiRequest::Text { .. }) => Some("String".to_string()),
         Some(ApiRequest::Binary { .. }) => Some("Vec<u8>".to_string()),
         _ => form::form_body_type_name(endpoint),

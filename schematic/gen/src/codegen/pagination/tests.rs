@@ -25,15 +25,15 @@ fn param(name: &str, required: bool) -> ParamDef {
     }
 }
 
-fn get(id: &str, path: &str, response: &str, query: Vec<ParamDef>) -> Endpoint {
-    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("{id} endpoint"); fixture.request = None; fixture.response = ApiResponse::json_type(response); fixture.headers = vec![]; fixture.params = (!query.is_empty()).then(|| EndpointParams {
+fn get(id: &str, path: &str, response: ApiResponse, query: Vec<ParamDef>) -> Endpoint {
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("{id} endpoint"); fixture.request = None; fixture.response = response; fixture.headers = vec![]; fixture.params = (!query.is_empty()).then(|| EndpointParams {
             query,
             ..Default::default()
         }); fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 fn api(endpoints: Vec<Endpoint>) -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Shelf".to_string(); fixture.description = "Shelf API".to_string(); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Shelf".to_string(); fixture.description = "Shelf API".to_string(); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
 }
 
 /// A GitHub-like API: page numbers ended by a `Link` relation, a bounded
@@ -43,10 +43,10 @@ fn github_like() -> RestApi {
         get(
             "ListReleases",
             "/repos/{owner}/releases",
-            "Vec<Release>",
+            ApiResponse::json_vec_type("Release"),
             vec![param("page", false), param("per_page", false), param("draft", false)],
         ),
-        get("GetRelease", "/releases/{id}", "Release", vec![]),
+        get("GetRelease", "/releases/{id}", ApiResponse::json_type("Release"), vec![]),
     ]);
     api.default_pagination = Some(
         Strategy::page_number("page", MoreSignal::link_rel("next"))
@@ -235,7 +235,7 @@ fn only_adopted_required_parameters_keep_default() {
     let mut api = api(vec![get(
         "ListShelves",
         "/shelves",
-        "Vec<Shelf>",
+        ApiResponse::json_vec_type("Shelf"),
         vec![param("page", true), param("per_page", true), param("draft", false)],
     )]);
     api.default_pagination = Some(
@@ -258,10 +258,10 @@ fn an_ordinary_send_carries_required_adopted_defaults_and_omits_optional_ones() 
     let shelves = get(
         "ListShelves",
         "/shelves",
-        "Vec<Shelf>",
+        ApiResponse::json_vec_type("Shelf"),
         vec![param("page", true), param("per_page", true), param("draft", false)],
     );
-    let mut books = get("ListBooks", "/books", "Vec<Book>", vec![param("offset", true), param("limit", false)]);
+    let mut books = get("ListBooks", "/books", ApiResponse::json_vec_type("Book"), vec![param("offset", true), param("limit", false)]);
     books.response = ApiResponse::json_type("BookList");
     let mut api = api(vec![shelves, books]);
     api.default_pagination = Some(
@@ -296,7 +296,7 @@ fn composite_inclusive_cursor_with_backward_leg_and_total() {
     let mut api = api(vec![get(
         "ListEvents",
         "/events",
-        "Vec<Event>",
+        ApiResponse::json_vec_type("Event"),
         vec![param("after", false), param("after_id", false), param("before", false)],
     )]);
     api.default_pagination = Some(
@@ -350,7 +350,7 @@ fn composite_inclusive_cursor_with_backward_leg_and_total() {
 
 #[test]
 fn next_link_with_body_prev_on_a_wrapper_list() {
-    let mut api = api(vec![get("ListRepos", "/repositories/{workspace}", "RepoPage", vec![])]);
+    let mut api = api(vec![get("ListRepos", "/repositories/{workspace}", ApiResponse::json_type("RepoPage"), vec![])]);
     { let (id, collection) = (
         "ListRepos",
         Collection::at("values").item_type("Repo").paginate(
@@ -382,7 +382,7 @@ fn next_link_with_body_prev_on_a_wrapper_list() {
 
 #[test]
 fn one_based_offset_strategy() {
-    let mut api = api(vec![get("ListLogs", "/logs", "Vec<Log>", vec![param("start", false)])]);
+    let mut api = api(vec![get("ListLogs", "/logs", ApiResponse::json_vec_type("Log"), vec![param("start", false)])]);
     api.default_pagination =
         Some(Strategy::offset("start", MoreSignal::NonEmptyPage).one_based().build());
 
@@ -399,7 +399,7 @@ fn one_based_offset_strategy() {
 
 #[test]
 fn session_strategy_forwards_with_session_and_its_knobs_but_no_outside_scope_iteration() {
-    let mut api = api(vec![get("Scroll", "/scroll", "Vec<Hit>", vec![param("keep", false)])]);
+    let mut api = api(vec![get("Scroll", "/scroll", ApiResponse::json_vec_type("Hit"), vec![param("keep", false)])]);
     api.default_pagination = Some(
         Strategy::cursor("cursor", CursorSource::body("next"))
             .more_when(MoreSignal::has_more("more"))
@@ -459,7 +459,7 @@ fn a_partition_without_a_session_forwards_partitioned_and_with_one_does_not() {
         let mut api = api(vec![get(
             "Scan",
             "/scan",
-            "Vec<Hit>",
+            ApiResponse::json_vec_type("Hit"),
             vec![param("slice", false), param("slices", false), param("partitioned", false)],
         )]);
         let strategy = Strategy::cursor("cursor", CursorSource::body("next"))
@@ -506,11 +506,11 @@ fn a_partition_without_a_session_forwards_partitioned_and_with_one_does_not() {
 
 #[test]
 fn unpaginated_lists_and_non_lists_emit_nothing_pagination_related() {
-    let mut post = get("CreateShelf", "/shelves", "Shelf", vec![]);
+    let mut post = get("CreateShelf", "/shelves", ApiResponse::json_type("Shelf"), vec![]);
     post.method = RestMethod::Post;
     let plain = api(vec![
-        get("ListShelves", "/shelves", "Vec<Shelf>", vec![param("page", false)]),
-        get("GetShelf", "/shelves/{id}", "Shelf", vec![]),
+        get("ListShelves", "/shelves", ApiResponse::json_vec_type("Shelf"), vec![param("page", false)]),
+        get("GetShelf", "/shelves/{id}", ApiResponse::json_type("Shelf"), vec![]),
         post,
     ]);
     let mut opted_out = plain.clone();
@@ -534,7 +534,7 @@ fn alternates_do_not_change_the_output() {
         let mut api = api(vec![get(
             "ListProjects",
             "/projects",
-            "Vec<Project>",
+            ApiResponse::json_vec_type("Project"),
             vec![param("page", false), param("order_by", false)],
         )]);
         { let (id, collection) = ("ListProjects", collection);  api.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
@@ -566,7 +566,7 @@ fn a_setter_named_like_a_pager_control_is_renamed() {
     let mut api = api(vec![get(
         "ListFiles",
         "/files",
-        "Vec<File>",
+        ApiResponse::json_vec_type("File"),
         vec![param("starting_after", false), param("after", false), param("page_size", false)],
     )]);
     api.default_pagination = Some(
@@ -609,7 +609,7 @@ fn an_unpaginated_endpoint_reserves_only_the_pager_entry_points() {
     let api = api(vec![get(
         "ListAll",
         "/all",
-        "Vec<Thing>",
+        ApiResponse::json_vec_type("Thing"),
         vec![param("pager", false), param("after", false), param("page_size", false)],
     )]);
 
@@ -622,7 +622,7 @@ fn an_unpaginated_endpoint_reserves_only_the_pager_entry_points() {
 #[test]
 fn wrapper_item_types_are_emitted_as_authored() {
     for item_type in ["serde_json::Value", "crate::types::Thing", "Vec<String>"] {
-        let mut api = api(vec![get("ListThings", "/things", "ThingPage", vec![])]);
+        let mut api = api(vec![get("ListThings", "/things", ApiResponse::json_type("ThingPage"), vec![])]);
         { let (id, collection) = (
             "ListThings",
             Collection::at("data")

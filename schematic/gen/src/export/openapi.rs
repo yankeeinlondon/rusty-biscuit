@@ -17,7 +17,7 @@ use indexmap::IndexMap;
 use openapiv3::{LinkOperation, OpenAPI, ReferenceOr};
 use schematic_define::RestApi;
 use schematic_define::openapi::{
-    ExportFormat, ExportOptions, SchemaRegistryLike, export, serialize,
+    ExportFormat, ExportOptions, export, serialize,
 };
 
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
@@ -38,8 +38,8 @@ use crate::validation::{ensure_no_errors, validate_openapi};
 ///
 /// ## Parameters
 ///
-/// - `api` - The REST API definition to export
-/// - `registry` - Schema registry containing JSON schemas for response types
+/// - `api` - The REST API definition to export; `components.schemas` come
+///   from its [`RestApi::schemas`]
 /// - `options` - Export configuration options (format, version, extensions)
 /// - `dir` - Output directory for the generated file
 ///
@@ -60,19 +60,17 @@ use crate::validation::{ensure_no_errors, validate_openapi};
 /// ```text
 /// use std::path::Path;
 /// use schematic_define::openapi::ExportOptions;
-/// use schematic_definitions::openai::{define_openai_api, openapi_registry};
+/// use schematic_definitions::openai::define_openai_api;
 /// use schematic_gen::export::openapi::write_openapi;
 ///
 /// let api = define_openai_api();
-/// let registry = openapi_registry();
 /// let options = ExportOptions::new().with_version("1.0.0");
 ///
-/// let path = write_openapi(&api, &registry, &options, Path::new("./openapi"))?;
+/// let path = write_openapi(&api, &options, Path::new("./openapi"))?;
 /// assert_eq!(path.file_name().unwrap(), "openai.json");
 /// ```
-pub fn write_openapi<R: SchemaRegistryLike>(
+pub fn write_openapi(
     api: &RestApi,
-    registry: &R,
     options: &ExportOptions,
     dir: &Path,
 ) -> Result<std::path::PathBuf, GeneratorError> {
@@ -82,7 +80,7 @@ pub fn write_openapi<R: SchemaRegistryLike>(
         return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));
     }
 
-    let doc = export(api, registry, options)
+    let doc = export(api, options)
         .map_err(|e| GeneratorError::ConfigError(format!("OpenAPI export failed: {}", e)))?;
     ensure_no_errors(
         Output::OpenApi,
@@ -113,14 +111,13 @@ pub fn write_openapi<R: SchemaRegistryLike>(
 /// ## Panics
 ///
 /// Panics if `apis` is empty — callers must supply at least one API.
-pub fn write_openapi_grouped<R: SchemaRegistryLike>(
+pub fn write_openapi_grouped(
     apis: &[&RestApi],
     module_name: &str,
-    registry: &R,
     options: &ExportOptions,
     dir: &Path,
 ) -> Result<PathBuf, GeneratorError> {
-    let doc = build_openapi_grouped(apis, module_name, registry, options)?;
+    let doc = build_openapi_grouped(apis, module_name, options)?;
     write_openapi_document(&doc, module_name, options.format, dir)
 }
 
@@ -143,9 +140,9 @@ pub fn write_openapi_grouped<R: SchemaRegistryLike>(
 ///   numeric suffix if that name is taken or is any operation's original id.
 ///   Links that name a renamed operation are updated for the API that wrote
 ///   them.
-/// - **components.schemas**: unioned via the merged `registry` (callers
-///   should pass the registry returned by
-///   [`schematic_definitions::registry::get_registries_for_module`]).
+/// - **components.schemas**: unioned across members' [`RestApi::schemas`].
+///   Members of one module group carry the same components, so same-named
+///   entries are equal and collapse.
 /// - **components.security_schemes**: unioned across members. If two members
 ///   define the same scheme name with different security-scheme content, the
 ///   second is renamed to `<scheme>_<api_snake>` and that API's operation and
@@ -170,10 +167,9 @@ pub fn write_openapi_grouped<R: SchemaRegistryLike>(
 /// ## Panics
 ///
 /// Panics if `apis` is empty — callers must supply at least one API.
-pub fn build_openapi_grouped<R: SchemaRegistryLike>(
+pub fn build_openapi_grouped(
     apis: &[&RestApi],
     module_name: &str,
-    registry: &R,
     options: &ExportOptions,
 ) -> Result<OpenAPI, GeneratorError> {
     assert!(
@@ -184,7 +180,7 @@ pub fn build_openapi_grouped<R: SchemaRegistryLike>(
 
     let mut docs: Vec<(String, OpenAPI)> = Vec::with_capacity(apis.len());
     for api in apis {
-        let doc = export(api, registry, options).map_err(|e| {
+        let doc = export(api, options).map_err(|e| {
             GeneratorError::ConfigError(format!(
                 "OpenAPI export failed for API '{}': {}",
                 api.name, e
@@ -837,7 +833,7 @@ mod tests {
     use biscuit_file::serde_yaml_ng;
     use schematic_define::CrossOrigin;
     use schematic_define::openapi::ExportFormat;
-    use schematic_definitions::openai::{define_openai_api, openapi_registry};
+    use schematic_definitions::openai::define_openai_api;
     use tempfile::TempDir;
 
     // =============================================
@@ -847,11 +843,10 @@ mod tests {
     #[test]
     fn write_openapi_creates_json_file() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().with_version("1.0.0");
         let temp_dir = TempDir::new().unwrap();
 
-        let result = write_openapi(&api, &registry, &options, temp_dir.path());
+        let result = write_openapi(&api, &options, temp_dir.path());
         assert!(result.is_ok());
 
         let path = result.unwrap();
@@ -862,13 +857,12 @@ mod tests {
     #[test]
     fn write_openapi_creates_yaml_file() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new()
             .with_version("1.0.0")
             .with_format(ExportFormat::Yaml);
         let temp_dir = TempDir::new().unwrap();
 
-        let result = write_openapi(&api, &registry, &options, temp_dir.path());
+        let result = write_openapi(&api, &options, temp_dir.path());
         assert!(result.is_ok());
 
         let path = result.unwrap();
@@ -879,11 +873,10 @@ mod tests {
     #[test]
     fn write_openapi_json_produces_valid_json() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().with_version("1.0.0");
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
 
         // Should be parseable as JSON
@@ -898,13 +891,12 @@ mod tests {
     #[test]
     fn write_openapi_yaml_produces_valid_yaml() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new()
             .with_version("1.0.0")
             .with_format(ExportFormat::Yaml);
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
 
         // Should be parseable as YAML
@@ -915,11 +907,10 @@ mod tests {
     #[test]
     fn write_openapi_file_name_lowercase() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new();
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
 
         // API name is "OpenAI" with module_path = None, so the filename falls
         // back to the lowercased name and produces "openai.json".
@@ -941,7 +932,7 @@ mod tests {
         );
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &EmptyRegistry, &ExportOptions::new(), temp_dir.path())
+        let path = write_openapi(&api, &ExportOptions::new(), temp_dir.path())
             .expect("write_openapi should succeed");
 
         assert_eq!(
@@ -954,10 +945,9 @@ mod tests {
     #[test]
     fn write_openapi_error_on_missing_directory() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new();
 
-        let result = write_openapi(&api, &registry, &options, Path::new("/nonexistent/path"));
+        let result = write_openapi(&api, &options, Path::new("/nonexistent/path"));
         assert!(result.is_err());
 
         match result {
@@ -971,11 +961,10 @@ mod tests {
     #[test]
     fn write_openapi_respects_version_option() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().with_version("2.5.0");
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&content).unwrap();
 
@@ -985,11 +974,10 @@ mod tests {
     #[test]
     fn write_openapi_includes_schemas() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new();
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&content).unwrap();
 
@@ -1001,11 +989,10 @@ mod tests {
     #[test]
     fn write_openapi_can_skip_extensions() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().skip_extensions();
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&content).unwrap();
 
@@ -1041,16 +1028,7 @@ mod tests {
         { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} synthetic API", name); fixture.base_url = format!("https://{}.example.com", name.to_lowercase()); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = endpoints
                 .iter()
                 .map(|(id, method, path)| { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = *method; fixture.path = path.to_string(); fixture.description = format!("Endpoint {}", id); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture })
-                .collect(); fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
-    }
-
-    /// Empty registry: synthetic APIs use `ApiResponse::Empty` so no schemas
-    /// need to be registered for these tests.
-    struct EmptyRegistry;
-    impl SchemaRegistryLike for EmptyRegistry {
-        fn to_openapi_schemas(&self) -> indexmap::IndexMap<String, openapiv3::Schema> {
-            indexmap::IndexMap::new()
-        }
+                .collect(); fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
     }
 
     #[test]
@@ -1064,7 +1042,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1085,7 +1062,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1117,7 +1093,6 @@ mod tests {
         let err = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1171,7 +1146,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&bearer_api, &basic_api],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1193,7 +1167,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1215,7 +1188,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1242,7 +1214,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new().skip_extensions(),
             temp.path(),
         )
@@ -1264,7 +1235,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new().with_format(ExportFormat::Yaml),
             temp.path(),
         )
@@ -1279,17 +1249,14 @@ mod tests {
     #[test]
     fn write_openapi_grouped_real_ollama_module() {
         use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
-        use schematic_definitions::registry::get_registries_for_module;
 
         let native = define_ollama_native_api();
         let openai = define_ollama_openai_api();
-        let registry = get_registries_for_module("ollama").expect("ollama registry");
         let temp = TempDir::new().unwrap();
 
         let path = write_openapi_grouped(
             &[&native, &openai],
             "ollama",
-            &registry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1317,7 +1284,7 @@ mod tests {
             "expected at least one openai-compatible path",
         );
 
-        // Schemas must be non-empty (registries provided).
+        // Schemas come from the members' own components.
         let schemas = doc.components.expect("components present").schemas;
         assert!(!schemas.is_empty(), "components.schemas must not be empty");
     }
@@ -1330,7 +1297,6 @@ mod tests {
         let err = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             Path::new("/nonexistent/never/here"),
         )
@@ -1359,7 +1325,7 @@ mod tests {
     }
 
     fn build(apis: &[&RestApi]) -> Result<OpenAPI, GeneratorError> {
-        build_openapi_grouped(apis, "foo", &EmptyRegistry, &ExportOptions::new())
+        build_openapi_grouped(apis, "foo", &ExportOptions::new())
     }
 
     #[test]
@@ -1534,15 +1500,11 @@ mod tests {
     #[test]
     fn unique_ids_are_unchanged_for_every_live_module() {
         use schematic_definitions::apis_by_module;
-        use schematic_definitions::registry::get_registries_for_module;
 
         for (module_name, apis) in apis_by_module() {
-            let Some(registry) = get_registries_for_module(&module_name) else {
-                continue;
-            };
             let refs: Vec<&RestApi> = apis.iter().collect();
             let doc =
-                build_openapi_grouped(&refs, &module_name, &registry, &ExportOptions::new())
+                build_openapi_grouped(&refs, &module_name, &ExportOptions::new())
                     .unwrap_or_else(|e| panic!("module {module_name}: {e}"));
 
             let declared: HashSet<&str> = apis
@@ -1623,8 +1585,8 @@ mod tests {
             ],
         );
         let options = ExportOptions::new();
-        let mut doc_a = export(&a, &EmptyRegistry, &options).unwrap();
-        let mut doc_b = export(&b, &EmptyRegistry, &options).unwrap();
+        let mut doc_a = export(&a, &options).unwrap();
+        let mut doc_b = export(&b, &options).unwrap();
         // Both documents link to their own `List`; the raw id is ambiguous
         // across them.
         add_link(&mut doc_a, "/a", "POST", "list", "List");
@@ -1657,7 +1619,7 @@ mod tests {
                 ("Other", RestMethod::Get, "/b"),
             ],
         );
-        let mut doc = export(&api, &EmptyRegistry, &ExportOptions::new()).unwrap();
+        let mut doc = export(&api, &ExportOptions::new()).unwrap();
         assert!(operation_id_diagnostics(&doc, &["FooA"]).is_empty());
 
         operation_mut(&mut doc, "/b", "GET").unwrap().operation_id = Some("List".to_string());

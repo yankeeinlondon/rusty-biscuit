@@ -27,40 +27,15 @@ pub use types::*;
 use schematic_define::ApiRequest;
 #[cfg(test)]
 use schematic_define::ApiResponse;
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
     AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, FormField,
     RestApi, RestMethod,
 };
 
-/// Creates a schema registry containing all Unfolded Circle Core REST response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Unfolded Circle Core REST API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::unfolded_circle::core_rest::{openapi_registry, define_unfolded_circle_core_rest_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_unfolded_circle_core_rest_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("ApiResponseMessage").is_some());
-/// assert!(registry.get("SystemInfo").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid shipped API").registry
-}
-
 /// Assemble the APIs and ordered schemas in one destination context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::unfolded_circle::core_rest", |ctx| {
         ctx.register::<LoginRequest>()?;
         ctx.register::<ApiResponseMessage>()?;
@@ -77,7 +52,7 @@ pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
 /// Build the Unfolded Circle Core REST API definition.
 #[must_use]
 pub fn define_unfolded_circle_core_rest_api() -> RestApi {
-    module_group().expect("valid shipped API").apis.remove(0)
+    module_group().expect("valid shipped API").remove(0)
 }
 
 #[allow(clippy::vec_init_then_push)]
@@ -302,12 +277,13 @@ mod tests {
     fn typed_module_group_preserves_endpoint_order_and_inline_components() {
         let group = module_group().unwrap();
         let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&group.apis[0]), ["Login", "Logout", "GetSystemInfo", "ExportBackup", "RestoreBackup", "UploadResource", "GetResource", "InstallCustomIntegration", "UploadCustomIrCodeSet", "InstallCustomComponent", "QueryLogsText"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(ids(&group[0]), ["Login", "Logout", "GetSystemInfo", "ExportBackup", "RestoreBackup", "UploadResource", "GetResource", "InstallCustomIntegration", "UploadCustomIrCodeSet", "InstallCustomComponent", "QueryLogsText"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
         for name in ["BackupRestoreReportItems", "ResourceItems"] {
-            assert!(group.registry.get(name).is_none(), "container component {name} must be inline");
+            assert!(group[0].component(name).is_none(), "container component {name} must be inline");
         }
     }
 

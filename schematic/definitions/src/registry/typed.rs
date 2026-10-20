@@ -1,36 +1,39 @@
-//! Assembly of definitions and their shared ordered module registry.
+//! Assembly of the APIs that share one generated types module.
 use schematic_define::{DefinitionContext, DefinitionError, RestApi};
-use super::SchemaRegistry;
 
-/// Definitions and registry produced from the same module-group context.
-#[derive(Debug)]
-pub struct ModuleGroup {
-    /// APIs sharing the generated types module, in authored order.
-    pub apis: Vec<RestApi>,
-    /// Ordered nominal registrations, retaining nested schema extraction.
-    pub registry: SchemaRegistry,
-}
-
-/// Assemble a module group once, propagating registration failures.
+/// Assemble the APIs of one module group from a single registration context.
 ///
 /// The callback owns its API inventory; this seam maintains no parallel list.
+/// Every returned API carries the finished context's complete components in
+/// [`RestApi::schemas`], including types a later member registered after an
+/// earlier member was built, and is re-validated against them.
+///
+/// ## Errors
+///
+/// Every distinct registration collision in the shared context, even when the
+/// callback stopped on one; otherwise the callback's own error, or the first
+/// reference that does not resolve in the finished components.
 pub fn assemble_module_group(
     module_path: &str,
     define: impl FnOnce(&mut DefinitionContext) -> Result<Vec<RestApi>, DefinitionError>,
-) -> Result<ModuleGroup, DefinitionError> {
+) -> Result<Vec<RestApi>, DefinitionError> {
     let mut context = DefinitionContext::types_in(module_path);
     let apis = define(&mut context);
-    // Preserve all collected collisions even if the callback stops on one.
     context.finish()?;
-    let apis = apis?;
-    let registry = SchemaRegistry::from_context(&context)?;
-    Ok(ModuleGroup { apis, registry })
+    let mut apis = apis?;
+    let schemas = context.components()?;
+    for api in &mut apis {
+        api.schemas = schemas.clone();
+        api.validate_references()?;
+    }
+    Ok(apis)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{definition_type, rust_path};
+    use super::super::registered_names;
+    use schematic_define::{ApiResponse, Endpoint, TypeRef, definition_type, rust_path};
     use schemars::JsonSchema;
     use crate::huggingface::CommitInfo;
     mod ollama_fixture {
@@ -39,80 +42,88 @@ mod tests {
         pub type PushModelProgress = PullModelProgress;
     }
     use ollama_fixture::PullModelProgress;
-    use crate::emqx::NodeInfo;
 
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] struct Nested { value: String });
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] struct Explicit { nested: Nested });
     definition_type!(#[derive(JsonSchema)] #[schemars(rename = "Explicit")] #[allow(dead_code)] struct Clash { other: bool });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] struct Late { flag: bool });
+
+    fn fixture_api<T: schematic_define::Registration>(ctx: &mut DefinitionContext, name: &str) -> Result<RestApi, DefinitionError> {
+        let endpoint = Endpoint::get("Get", "/item").describes("Get").returns_json::<T>(ctx).build()?;
+        RestApi::builder(ctx, name, "https://example.test").describes(name).no_auth().endpoints([endpoint]).build()
+    }
+
+    fn component<'a>(components: &'a [schematic_define::SchemaComponent], name: &str) -> &'a schematic_define::SchemaComponent {
+        components.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("missing component {name}"))
+    }
 
     #[test]
     fn aliases_preserve_shipped_huggingface_and_ollama_type_identity() {
         let mut hf = DefinitionContext::types_in("::schematic_definitions::huggingface");
         let commit = hf.register_as::<CommitInfo>(rust_path!(crate::huggingface::Commit).schema_name("Commit")).unwrap();
-        assert_eq!(hf.register::<Vec<CommitInfo>>().unwrap().wire_schema(), serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/Commit"}}));
+        assert_eq!(hf.register::<Vec<CommitInfo>>().unwrap().type_ref(), &TypeRef::Array(Box::new(TypeRef::Named("Commit".into()))));
         assert!(commit.rust_path().ends_with("::huggingface::Commit"));
         assert_eq!(hf.register::<CommitInfo>().unwrap(), commit);
-        let registry = SchemaRegistry::from_context(&hf).unwrap();
-        let expected = SchemaRegistry::new().register::<CommitInfo>("Commit");
-        assert_eq!(registry.get("Commit"), expected.get("Commit"));
-        assert_eq!(registry.names().collect::<Vec<_>>(), ["Commit"]);
+        let components = hf.components().unwrap();
+        assert_eq!(components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Commit"]);
+        assert!(component(&components, "Commit").rust_path.as_deref().is_some_and(|p| p.ends_with("::huggingface::Commit")));
 
         let mut ollama = DefinitionContext::types_in("::schematic_definitions::ollama");
         let progress = ollama.register_as::<PullModelProgress>(rust_path!(ollama_fixture::PushModelProgress)).unwrap();
         assert!(progress.rust_path().ends_with("::PushModelProgress"));
         assert_eq!(ollama.register::<PullModelProgress>().unwrap(), progress);
         assert_eq!(ollama.registrations().len(), 1);
-        assert_eq!(SchemaRegistry::from_context(&ollama).unwrap().get("PullModelProgress"), SchemaRegistry::new().register::<PullModelProgress>("PullModelProgress").get("PullModelProgress"));
+        let components = ollama.components().unwrap();
+        assert_eq!(component(&components, "PullModelProgress").rust_path, Some(progress.rust_path().to_owned()));
     }
 
     #[test]
-    fn shared_ollama_and_emqx_assemblies_reuse_one_ordered_context() {
-        let ollama = assemble_module_group("::schematic_definitions::ollama", |ctx| {
-            let first = ctx.register::<PullModelProgress>()?;
-            let second = ctx.register::<Option<Vec<PullModelProgress>>>()?;
-            ctx.validate_reference("OllamaNative", "Pull", &first)?;
-            ctx.validate_reference("OllamaOpenAI", "Progress", &second)?;
-            Ok(vec![crate::ollama::define_ollama_native_api(), crate::ollama::define_ollama_openai_api()])
+    fn members_built_before_a_later_registration_carry_the_full_components() {
+        let apis = assemble_module_group("::fixture", |ctx| {
+            let first = fixture_api::<Nested>(ctx, "First")?;
+            // Built before `Late` exists, so its own build saw a partial context.
+            assert!(first.component("Late").is_none());
+            let second = fixture_api::<Late>(ctx, "Second")?;
+            Ok(vec![first, second])
         }).unwrap();
-        assert_eq!(ollama.apis.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["OllamaNative", "OllamaOpenAI"]);
-        assert_eq!(ollama.registry.names().collect::<Vec<_>>(), ["PullModelProgress"]);
-        let emqx = assemble_module_group("::schematic_definitions::emqx", |ctx| {
-            ctx.register::<NodeInfo>()?;
-            ctx.register::<Vec<NodeInfo>>()?;
-            ctx.register::<NodeInfo>()?;
-            Ok(vec![crate::emqx::define_emqx_basic_api(), crate::emqx::define_emqx_bearer_api()])
-        }).unwrap();
-        assert_eq!(emqx.apis.len(), 2);
-        assert_eq!(emqx.registry.names().collect::<Vec<_>>(), ["NodeInfo"]);
+        assert_eq!(apis.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["First", "Second"]);
+        assert_eq!(registered_names(&apis[0]), ["Nested", "Late"]);
+        assert_eq!(apis[0].schemas, apis[1].schemas);
+        for api in &apis { api.validate_references().unwrap(); }
     }
 
     #[test]
-    fn adapter_preserves_order_nested_extraction_and_unused_types() {
-        let group = assemble_module_group("::fixture", |ctx| {
+    fn a_dangling_reference_fails_group_assembly() {
+        let error = assemble_module_group("::fixture", |ctx| {
+            let mut api = fixture_api::<Nested>(ctx, "Fixture")?;
+            api.endpoints[0].response = ApiResponse::json(TypeRef::Array(Box::new(TypeRef::Named("Missing".into()))));
+            Ok(vec![api])
+        }).unwrap_err();
+        assert_eq!(error, DefinitionError::UnresolvedReference { api: "Fixture".into(), endpoint: "Get".into(), name: "Missing".into() });
+    }
+
+    #[test]
+    fn components_preserve_order_nested_extraction_and_unused_types() {
+        let apis = assemble_module_group("::fixture", |ctx| {
             ctx.register::<Explicit>()?;
             ctx.register::<Nested>()?;
             ctx.register::<Explicit>()?;
-            Ok(vec![])
+            Ok(vec![fixture_api::<Late>(ctx, "Fixture")?])
         }).unwrap();
-        assert!(group.apis.is_empty());
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), ["Explicit", "Nested"]);
-        let expected = SchemaRegistry::new().register::<Explicit>("Explicit").register::<Nested>("Nested");
-        assert_eq!(group.registry.to_openapi_schemas(), expected.to_openapi_schemas());
-        assert_eq!(group.registry.to_openapi_schemas().keys().map(String::as_str).collect::<Vec<_>>(), ["Explicit", "Nested"]);
+        assert_eq!(registered_names(&apis[0]), ["Explicit", "Nested", "Late"]);
         let mut context = DefinitionContext::types_in("::fixture");
         context.register::<Explicit>().unwrap();
-        let nested = SchemaRegistry::from_context(&context).unwrap().to_openapi_schemas();
-        assert!(nested.contains_key("Nested"));
+        let nested = context.components().unwrap();
+        assert_eq!(nested.iter().map(|c| (c.name.as_str(), c.rust_path.is_some())).collect::<Vec<_>>(), [("Explicit", true), ("Nested", false)]);
     }
 
     #[test]
     fn isolated_groups_can_reuse_names_but_shared_collisions_fail_assembly() {
         for clash in [false, true] {
-            let group = assemble_module_group("::fixture", |ctx| {
-                if clash { ctx.register::<Clash>()?; } else { ctx.register::<Explicit>()?; }
-                Ok(vec![])
+            let apis = assemble_module_group("::fixture", |ctx| {
+                if clash { Ok(vec![fixture_api::<Clash>(ctx, "Fixture")?]) } else { Ok(vec![fixture_api::<Explicit>(ctx, "Fixture")?]) }
             }).unwrap();
-            assert_eq!(group.registry.names().collect::<Vec<_>>(), ["Explicit"]);
+            assert_eq!(registered_names(&apis[0])[0], "Explicit");
         }
         let error = assemble_module_group("::fixture", |ctx| {
             ctx.register::<Explicit>()?;
@@ -120,10 +131,13 @@ mod tests {
             Ok(vec![])
         }).unwrap_err();
         assert!(matches!(error, DefinitionError::Collisions(errors) if errors.len() == 1));
-        let mut invalid = DefinitionContext::types_in("::fixture");
-        invalid.register::<Explicit>().unwrap();
-        assert!(invalid.register::<Clash>().is_err());
-        assert!(SchemaRegistry::from_context(&invalid).is_err());
+        // The callback swallowing the collision does not hide it.
+        let error = assemble_module_group("::fixture", |ctx| {
+            ctx.register::<Explicit>()?;
+            let _ = ctx.register::<Clash>();
+            Ok(vec![])
+        }).unwrap_err();
+        assert!(matches!(error, DefinitionError::Collisions(errors) if errors.len() == 1));
         assert!(assemble_module_group("::fixture", |_| Err(DefinitionError::NotLeaf)).is_err());
     }
 }
@@ -139,9 +153,9 @@ mod generic_paths {
         let path: String = descriptor.rust_path().split_whitespace().collect();
         assert!(path.contains("bitbucket::PaginatedResponse<"), "{path}");
         assert!(path.contains("bitbucket::Repository>"), "{path}");
-        let reference = descriptor.wire_schema();
-        assert_eq!(reference["$ref"], "#/components/schemas/PaginatedResponse<Repository>");
-        let registry = SchemaRegistry::from_context(&context).unwrap();
-        assert!(registry.get("PaginatedResponse<Repository>").is_some());
+        assert_eq!(descriptor.type_ref(), &schematic_define::TypeRef::Named("PaginatedResponse<Repository>".into()));
+        let components = context.components().unwrap();
+        let component = components.iter().find(|c| c.name == "PaginatedResponse<Repository>").expect("wrapper component");
+        assert_eq!(component.rust_path.as_deref(), Some(descriptor.rust_path()));
     }
 }

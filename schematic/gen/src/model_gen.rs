@@ -74,7 +74,7 @@ pub fn assemble_model_tokens(catalog: &ModelCatalog) -> TokenStream {
 /// Assembles token stream for all model definitions.
 ///
 /// `derive_json_schema` adds `schemars::JsonSchema` and nominal typed registration. The
-/// definitions crate needs it so `openapi_registry()` can register the types;
+/// definitions crate needs it so its definition context can register the types;
 /// the standalone client output does not depend on `schemars`.
 pub fn assemble_model_tokens_with(catalog: &ModelCatalog, derive_json_schema: bool) -> TokenStream {
     let type_defs: Vec<TokenStream> = catalog

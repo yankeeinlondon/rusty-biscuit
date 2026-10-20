@@ -41,7 +41,7 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::{ApiResponse, RestMethod};
@@ -50,33 +50,6 @@ use schematic_define::{
     RestApi,
     pagination::{Collection},
 };
-
-/// Creates a schema registry containing all Anthropic response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Anthropic API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::anthropic::{openapi_registry, define_anthropic_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_anthropic_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("MessageResponse").is_some());
-/// assert!(registry.get("CountTokensResponse").is_some());
-/// assert!(registry.get("ListModelsResponse").is_some());
-/// assert!(registry.get("ModelInfo").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid anthropic definitions").registry
-}
 
 /// Creates the Anthropic API definition.
 ///
@@ -102,7 +75,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 4);
 /// ```
 pub fn define_anthropic_api() -> RestApi {
-    module_group().expect("valid anthropic definitions").apis.remove(0)
+    module_group().expect("valid anthropic definitions").remove(0)
 }
 
 fn build_anthropic_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -150,7 +123,7 @@ fn build_anthropic_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definitio
 }
 
 /// Assemble sibling APIs and their ordered nominal schemas in one context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::anthropic", |ctx| {
         ctx.register::<CreateMessageBody>()?;
         ctx.register::<CountTokensBody>()?;
@@ -265,12 +238,13 @@ mod tests {
     fn module_group_preserves_endpoint_and_registry_inventory() {
         let group = module_group().unwrap();
         assert_eq!(
-            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["CreateMessage", "CountTokens", "ListModels", "RetrieveModel"]
         );
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["CreateMessageBody", "CountTokensBody", "MessageResponse", "CountTokensResponse", "ListModelsResponse", "ModelInfo", "Message", "ContentBlock", "Tool"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["CreateMessageBody", "ContentBlock", "Message", "Tool", "CountTokensBody", "MessageResponse", "CountTokensResponse", "ListModelsResponse", "ModelInfo"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
     }
 

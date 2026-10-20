@@ -163,7 +163,7 @@ fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> 
 }
 
 fn fixture_api(name: &str, module: &str, auth: AuthStrategy, endpoints: Vec<Endpoint>) -> RestApi {
-    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} fixture API"); fixture.base_url = "http://127.0.0.1:1".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![format!("{}_TOKEN", module.to_uppercase())]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} fixture API"); fixture.base_url = "http://127.0.0.1:1".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![format!("{}_TOKEN", module.to_uppercase())]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::common::components::with_referenced_components(fixture) }
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
@@ -189,7 +189,7 @@ fn located_params(query: Vec<ParamDef>, header: Vec<ParamDef>, cookie: Vec<Param
 fn pages_fixture() -> RestApi {
     let int = |name| named_param(name, QueryParamType::Integer);
     let mut list_entries =
-        endpoint("ListEntries", RestMethod::Get, "/entries", ApiResponse::json_type("Vec<Entry>"));
+        endpoint("ListEntries", RestMethod::Get, "/entries", ApiResponse::json_vec_type("Entry"));
     list_entries.params = Some(located_params(
         vec![int("page"), int("per_page"), named_param("state", QueryParamType::String)],
         vec![],
@@ -205,9 +205,9 @@ fn pages_fixture() -> RestApi {
     allowed_linked.path = "/allowed-linked".to_string();
     let required = |name| ParamDef { rust_name: None, secret: false, pager_managed: false, required: true, ..int(name) };
     let mut list_required =
-        endpoint("ListRequired", RestMethod::Get, "/required", ApiResponse::json_type("Vec<Entry>"));
+        endpoint("ListRequired", RestMethod::Get, "/required", ApiResponse::json_vec_type("Entry"));
     list_required.params = Some(located_params(vec![required("page"), required("limit")], vec![], vec![]));
-    let scan_entries = endpoint("ScanEntries", RestMethod::Get, "/scan", ApiResponse::json_type("Vec<Entry>"));
+    let scan_entries = endpoint("ScanEntries", RestMethod::Get, "/scan", ApiResponse::json_vec_type("Entry"));
 
     let mut api = fixture_api(
         "FixturePages",
@@ -355,6 +355,7 @@ fn fixture_apis() -> Vec<RestApi> {
         .endpoints([typed_durations])
         .build().unwrap();
     bearer.endpoints.splice(0..0, [list_widgets, create_widget, get_widget, search]);
+    let mut bearer = crate::common::components::with_referenced_components(bearer);
     bearer.headers = vec![
         ("X-Client".to_string(), "fixture".to_string()),
         ("Cookie".to_string(), "api=1; theme=api".to_string()),
@@ -1596,11 +1597,11 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     (
         "a descriptor cannot be constructed from a bare name",
         "fn misuse() { let _ = schematic_define::TypeDesc::new(\"Model\"); }",
-        "E0599",
-        "TypeDesc",
+        "E0624",
+        "private",
     ),
     (
-        "reserved structure has no authoring setter",
+        "a descriptor carries no structure",
         "fn misuse() { let mut c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = c.register::<String>().unwrap().structure(schematic_define::TypeRef::Named(\"Model\".into())); }",
         "E0599",
         "structure",

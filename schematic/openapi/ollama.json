@@ -43,17 +43,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::GenerateBody",
-                    "schema_name": "GenerateBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::GenerateBody"
+              "Named": "GenerateBody"
             }
           },
           "response": "Binary"
@@ -91,17 +81,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::ChatBody",
-                    "schema_name": "ChatBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::ChatBody"
+              "Named": "ChatBody"
             }
           },
           "response": "Binary"
@@ -138,32 +118,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::EmbeddingsBody",
-                    "schema_name": "EmbeddingsBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::EmbeddingsBody"
+              "Named": "EmbeddingsBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::EmbeddingsResponse",
-                    "schema_name": "EmbeddingsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::EmbeddingsResponse"
+              "Named": "EmbeddingsResponse"
             }
           }
         }
@@ -189,17 +149,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::ListModelsResponse",
-                    "schema_name": "ListModelsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::ListModelsResponse"
+              "Named": "ListModelsResponse"
             }
           }
         }
@@ -235,32 +185,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::ShowModelBody",
-                    "schema_name": "ShowModelBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::ShowModelBody"
+              "Named": "ShowModelBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::ShowModelResponse",
-                    "schema_name": "ShowModelResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::ShowModelResponse"
+              "Named": "ShowModelResponse"
             }
           }
         }
@@ -297,17 +227,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::PullModelBody",
-                    "schema_name": "PullModelBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::PullModelBody"
+              "Named": "PullModelBody"
             }
           },
           "response": "Binary"
@@ -345,17 +265,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::PushModelBody",
-                    "schema_name": "PushModelBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::PushModelBody"
+              "Named": "PushModelBody"
             }
           },
           "response": "Binary"
@@ -385,17 +295,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::CopyModelBody",
-                    "schema_name": "CopyModelBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::CopyModelBody"
+              "Named": "CopyModelBody"
             }
           },
           "response": "Empty"
@@ -425,17 +325,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::DeleteModelBody",
-                    "schema_name": "DeleteModelBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::DeleteModelBody"
+              "Named": "DeleteModelBody"
             }
           },
           "response": "Empty"
@@ -473,17 +363,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::CreateModelBody",
-                    "schema_name": "CreateModelBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::CreateModelBody"
+              "Named": "CreateModelBody"
             }
           },
           "response": "Binary"
@@ -510,17 +390,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::ListRunningModelsResponse",
-                    "schema_name": "ListRunningModelsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::ListRunningModelsResponse"
+              "Named": "ListRunningModelsResponse"
             }
           }
         }
@@ -557,17 +427,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::OpenAIChatCompletionRequest",
-                    "schema_name": "OpenAIChatCompletionRequest"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::OpenAIChatCompletionRequest"
+              "Named": "OpenAIChatCompletionRequest"
             }
           },
           "response": "Binary"
@@ -605,17 +465,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::OpenAICompletionRequest",
-                    "schema_name": "OpenAICompletionRequest"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::OpenAICompletionRequest"
+              "Named": "OpenAICompletionRequest"
             }
           },
           "response": "Binary"
@@ -652,32 +502,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingRequest",
-                    "schema_name": "OpenAIEmbeddingRequest"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::OpenAIEmbeddingRequest"
+              "Named": "OpenAIEmbeddingRequest"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingResponse",
-                    "schema_name": "OpenAIEmbeddingResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::OpenAIEmbeddingResponse"
+              "Named": "OpenAIEmbeddingResponse"
             }
           }
         }
@@ -703,17 +533,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::ollama::OpenAIListModelsResponse",
-                    "schema_name": "OpenAIListModelsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::ollama::OpenAIListModelsResponse"
+              "Named": "OpenAIListModelsResponse"
             }
           }
         }

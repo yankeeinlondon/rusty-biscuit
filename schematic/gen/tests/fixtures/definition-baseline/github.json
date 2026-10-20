@@ -47,14 +47,12 @@
         "headers": [],
         "id": "GetRepository",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "RepositoryInfo"
+            "Named": "RepositoryInfo"
           }
         }
       },
@@ -63,11 +61,9 @@
         "headers": [],
         "id": "GetGitTree",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Fetch the tree recursively instead of a single level",
@@ -77,15 +73,13 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/git/trees/{tree_sha}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "GitTreeResponse"
+            "Named": "GitTreeResponse"
           }
         }
       },
@@ -99,7 +93,6 @@
         ],
         "id": "GetRepositoryContentRaw",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/contents/{+path}",
         "request": null,
@@ -110,18 +103,9 @@
         "headers": [],
         "id": "ListPullRequests",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -181,15 +165,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/pulls",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<PullRequestSummary>"
+            "Array": {
+              "Named": "PullRequestSummary"
+            }
           }
         }
       },
@@ -198,18 +182,9 @@
         "headers": [],
         "id": "ListPullRequestFiles",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -227,15 +202,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/pulls/{pull_number}/files",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<PullRequestFile>"
+            "Array": {
+              "Named": "PullRequestFile"
+            }
           }
         }
       },
@@ -244,18 +219,9 @@
         "headers": [],
         "id": "ListIssues",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -314,15 +280,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/issues",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<IssueSummary>"
+            "Array": {
+              "Named": "IssueSummary"
+            }
           }
         }
       },
@@ -331,14 +297,12 @@
         "headers": [],
         "id": "GetIssue",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/issues/{issue_number}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "IssueSummary"
+            "Named": "IssueSummary"
           }
         }
       },
@@ -347,18 +311,9 @@
         "headers": [],
         "id": "ListIssueComments",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -376,15 +331,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/issues/{issue_number}/comments",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<IssueComment>"
+            "Array": {
+              "Named": "IssueComment"
+            }
           }
         }
       },
@@ -393,18 +348,9 @@
         "headers": [],
         "id": "ListIssueTimeline",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -422,15 +368,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/issues/{issue_number}/timeline",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<TimelineEvent>"
+            "Array": {
+              "Named": "TimelineEvent"
+            }
           }
         }
       },
@@ -439,18 +385,9 @@
         "headers": [],
         "id": "ListTags",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -468,15 +405,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/tags",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepoTag>"
+            "Array": {
+              "Named": "RepoTag"
+            }
           }
         }
       },
@@ -485,18 +422,9 @@
         "headers": [],
         "id": "ListReleases",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -514,15 +442,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/releases",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Release>"
+            "Array": {
+              "Named": "Release"
+            }
           }
         }
       },
@@ -531,14 +459,12 @@
         "headers": [],
         "id": "GetTagReference",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/git/ref/tags/{tag}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "GitRef"
+            "Named": "GitRef"
           }
         }
       },
@@ -547,14 +473,12 @@
         "headers": [],
         "id": "GetBranchReference",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/git/ref/heads/{branch}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "GitRef"
+            "Named": "GitRef"
           }
         }
       },
@@ -563,14 +487,12 @@
         "headers": [],
         "id": "GetAnnotatedTag",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/git/tags/{tag_sha}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "AnnotatedTagObject"
+            "Named": "AnnotatedTagObject"
           }
         }
       },
@@ -579,18 +501,61 @@
         "headers": [],
         "id": "ListWorkflowRuns",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "WorkflowRun",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "workflow_runs"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "explicit",
+            "strategy": {
+              "constants": [],
+              "follow_up": null,
+              "kind": {
+                "base": "one_based",
+                "kind": "page_number",
+                "more": {
+                  "rel": "next",
+                  "signal": "link_rel"
+                },
+                "page": {
+                  "in": "query",
+                  "name": "page"
+                },
+                "size": {
+                  "adjustable": false,
+                  "max": 100,
+                  "min": 1,
+                  "param": {
+                    "in": "query",
+                    "name": "per_page"
+                  },
+                  "sent_default": null,
+                  "server_default": 30
+                }
+              },
+              "partition": null,
+              "session": null,
+              "terminal_values": [],
+              "total": {
+                "at": [
+                  "total_count"
+                ],
+                "from": "body"
+              }
+            }
+          }
+        },
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -649,15 +614,13 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/actions/runs",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "WorkflowRunsResponse"
+            "Named": "WorkflowRunsResponse"
           }
         }
       },
@@ -666,18 +629,9 @@
         "headers": [],
         "id": "ListOrgRepos",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -740,15 +694,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/orgs/{org}/repos",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepositoryInfo>"
+            "Array": {
+              "Named": "RepositoryInfo"
+            }
           }
         }
       }
@@ -785,133 +739,76 @@
     ],
     "module_path": "github",
     "name": "GitHub",
-    "pagination_exceptions": [
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "WorkflowRun",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "workflow_runs"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "explicit",
-            "strategy": {
-              "constants": [],
-              "follow_up": null,
-              "kind": {
-                "base": "one_based",
-                "kind": "page_number",
-                "more": {
-                  "rel": "next",
-                  "signal": "link_rel"
-                },
-                "page": {
-                  "in": "query",
-                  "name": "page"
-                },
-                "size": {
-                  "adjustable": false,
-                  "max": 100,
-                  "min": 1,
-                  "param": {
-                    "in": "query",
-                    "name": "per_page"
-                  },
-                  "sent_default": null,
-                  "server_default": 30
-                }
-              },
-              "partition": null,
-              "session": null,
-              "terminal_values": [],
-              "total": {
-                "at": [
-                  "total_count"
-                ],
-                "from": "body"
-              }
-            }
-          }
-        },
-        "endpoint": "ListWorkflowRuns"
-      }
-    ],
     "request_id_header": "x-github-request-id",
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "c96fcabea4abbfbac9954c3d6c3c41246a6204e73fd282e604d5acb42cea3ef6",
+    "api_metadata": "f09e4bfc0b9258bbed706a7f8cf6db28f611ac37c8b41e59a176464c05f8070a",
     "endpoints": [
       {
-        "blake3": "1cb507b25e95f0ee298cbd1ab33cc27d76168753eba0fdd055504f863d600caa",
+        "blake3": "0fcc165d650229cce2654ce5ac8994aad66634a2f258d1c2b718311a1aa83552",
         "id": "GetRepository"
       },
       {
-        "blake3": "7a7005d83d6c76c08b87385aef4ed878fc53fac4497ec68fd5ce81df50407376",
+        "blake3": "d1bba2642d470956fb475af0abfa4b312eafbddb476562bf05e3b612d6781249",
         "id": "GetGitTree"
       },
       {
-        "blake3": "68f098f2e5a34248dda212fc19629142902631be9f85d0a26b3f62478f9fa19d",
+        "blake3": "77c23bf641d1585af1fc340ab9267c6b687284b11deb555b2ed3e6c76d3df1cd",
         "id": "GetRepositoryContentRaw"
       },
       {
-        "blake3": "9d4e99f9c4e1118455d700d0345d3220fde648f6ffdc3aaca70b6f025b71c6e6",
+        "blake3": "a16c3aac70d349c6bfe7e959479dede85b84b84b88e34cef583b68401c0ea587",
         "id": "ListPullRequests"
       },
       {
-        "blake3": "6523eb266f0fc8dd28fe6e4ba26e6f9c72d8197a210153bb4384ac7f206603aa",
+        "blake3": "2364de592812aa91b7408bd2d0f162ef99a87a0c65810de2a103d35fbd9cb49b",
         "id": "ListPullRequestFiles"
       },
       {
-        "blake3": "c7726a0d690c822339fb080a0381cafb82c2170c075378c072df670448d23103",
+        "blake3": "b61a86ed129083ac0e5386fc522459d72f7d4b67313a0f4cdbeea7b3e35f7340",
         "id": "ListIssues"
       },
       {
-        "blake3": "d0d91ab4fd6075afb062bcc9e57e26396edcbe1e4e289c60acc69c98ce70c188",
+        "blake3": "27eddf038efa59416fa034bbdb926b522790af3682f6327b82d540be2bf1c89e",
         "id": "GetIssue"
       },
       {
-        "blake3": "c2028246b8ee1c4268d45ce94f8b710e60a05a1b337643e7f508592f1f046d92",
+        "blake3": "02d8d9816a886821e77a5111108e6def66d733e7c8863511af9b45abb3417ae4",
         "id": "ListIssueComments"
       },
       {
-        "blake3": "73e6474dda2b82abe9050902d0b859a99a1d3d161619a2b02ec04a8e08ff9265",
+        "blake3": "cf2fc3a5cc849304bcb0c99e23877eff4b633f4441f5617df729a71e5f15c73a",
         "id": "ListIssueTimeline"
       },
       {
-        "blake3": "b8a22cc434dd7e07a2aab89e497ba2a8c33d6d1021986f0fac9f60be78d73b79",
+        "blake3": "9f768e6c5ee86ddf61f4d2b220065cd29792ade8499bf37650ae70d12ba549f0",
         "id": "ListTags"
       },
       {
-        "blake3": "30299905e15ad45c5d074d1b7b3490e76605fe6fde5c9eb7b7f0288dd2750a79",
+        "blake3": "ee4709f2e527a6e6d54a7e628a5608b60b075da11a491abb2fc6914a5c34a112",
         "id": "ListReleases"
       },
       {
-        "blake3": "2e754402ee48ff3b6f8a968e41fc0764217216900f20628c1c33620bf3fcff1a",
+        "blake3": "917edcb3bdae171c8be3835e41f7d08636fa7b85e134736ee34b980c60396b0f",
         "id": "GetTagReference"
       },
       {
-        "blake3": "7492259f3c2261801e146f1d8c0d66777c41272ab7acaf3b8ad400fe0ee59dc0",
+        "blake3": "2e3dc2c1d66572be7c4799b7e37382d26df270c8fbd3de829529ad264d46a62e",
         "id": "GetBranchReference"
       },
       {
-        "blake3": "3a56595a484451acfdb125346d0efc6104c7e9022eba1464aeabeda7690a2422",
+        "blake3": "5a5125e8afb7788d5b9617303e6915eb6f63ea882f4eba51929b16b39586e98b",
         "id": "GetAnnotatedTag"
       },
       {
-        "blake3": "3542b08cc221b4c9a8159ef520f99e4390c755d31917366dc2ba7d2ba7634af8",
+        "blake3": "6ab793a62caf8b9d82540f992e356817471340be7e883625bd302cdd03dd6b17",
         "id": "ListWorkflowRuns"
       },
       {
-        "blake3": "9bcf38f3031975346fbf200c2e841211aad2cb8f6b812a6d98973fa5b7553dff",
+        "blake3": "9e8dcca9ae1a0eb22569ab4f26a60641318327e07e09dccfdf9694eefdbc0e68",
         "id": "ListOrgRepos"
       }
     ]
@@ -983,7 +880,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "PullRequestSummary",
+            "item_type": "::schematic_definitions::github::PullRequestSummary",
             "items": {
               "projection": [],
               "record": [
@@ -1074,7 +971,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "PullRequestFile",
+            "item_type": "::schematic_definitions::github::PullRequestFile",
             "items": {
               "projection": [],
               "record": [
@@ -1165,7 +1062,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "IssueSummary",
+            "item_type": "::schematic_definitions::github::IssueSummary",
             "items": {
               "projection": [],
               "record": [
@@ -1262,7 +1159,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "IssueComment",
+            "item_type": "::schematic_definitions::github::IssueComment",
             "items": {
               "projection": [],
               "record": [
@@ -1353,7 +1250,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "TimelineEvent",
+            "item_type": "::schematic_definitions::github::TimelineEvent",
             "items": {
               "projection": [],
               "record": [
@@ -1444,7 +1341,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "RepoTag",
+            "item_type": "::schematic_definitions::github::RepoTag",
             "items": {
               "projection": [],
               "record": [
@@ -1535,7 +1432,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Release",
+            "item_type": "::schematic_definitions::github::Release",
             "items": {
               "projection": [],
               "record": [
@@ -1744,7 +1641,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "RepositoryInfo",
+            "item_type": "::schematic_definitions::github::RepositoryInfo",
             "items": {
               "projection": [],
               "record": [
@@ -1790,84 +1687,129 @@
   ],
   "registry": [
     {
-      "blake3": "95fc500e1aa46cc03cde8475aaf03c2c7fcb3395ad91fa62fc808c68edb49f25",
-      "name": "RepositoryInfo"
+      "blake3": "d392ef37e3e1e902aa6567c3c58da9ae94254a94b38ed39856ddb287e877dbec",
+      "name": "RepositoryInfo",
+      "rust_path": "::schematic_definitions::github::RepositoryInfo"
     },
     {
-      "blake3": "eec1cacdfc741bef5b2c11992e16e9803c0861eb405719caa3ea333770bad1cf",
-      "name": "GitTreeResponse"
+      "blake3": "388d95ccf5493fad764f777b7a7db3dbd31d822d4e34e0c94cfbca553af01294",
+      "name": "LicenseInfo",
+      "rust_path": null
     },
     {
-      "blake3": "5f4e4281db41b1dc319b29a92b2e0f1f6e6b620c4ec1903e1c637894ef640b1a",
-      "name": "PullRequestSummary"
+      "blake3": "56373b609562fa1defd9a8cf26518d9bc3e6e2231a228ddcad8ae617563e45ba",
+      "name": "UserSummary",
+      "rust_path": null
     },
     {
-      "blake3": "bb07401efe24e89da8008d001ba5efbad6619f281661c9ed9d71e09928349a5f",
-      "name": "Vec<PullRequestSummary>"
+      "blake3": "2cf2ab4a347ac40caccc922a8dda5dbed275c957e26fbd01256e6d8ced022cfb",
+      "name": "GitTreeResponse",
+      "rust_path": "::schematic_definitions::github::GitTreeResponse"
     },
     {
-      "blake3": "d602831c4e608681e1f32095423d54366b64d90abd6295d7ac4896dde968b9c6",
-      "name": "PullRequestFile"
+      "blake3": "1a20ce3445df581714d0526bacc97a62b4759f855772418dced81dae2e452f75",
+      "name": "GitTreeEntry",
+      "rust_path": null
     },
     {
-      "blake3": "02ff605f26ff3b681e57ce4c6000a491e7f4d56b104618b4c8c2aebdd046b3f7",
-      "name": "Vec<PullRequestFile>"
+      "blake3": "f1d1fb5e759d5de9864ceac9b42d07c13bb703ceb0c469987641274c64f98312",
+      "name": "PullRequestSummary",
+      "rust_path": "::schematic_definitions::github::PullRequestSummary"
     },
     {
-      "blake3": "213a09cd86cf4a66984a5b9bbf07166e89de1420c06634759e338b2527c641f2",
-      "name": "IssueSummary"
+      "blake3": "0ceb4cfa1aceceecd62bf969171c0eb599a20534da5379f46a81df7abc8ff461",
+      "name": "BranchRef",
+      "rust_path": null
     },
     {
-      "blake3": "3773cd5cf42c705785cb00ecc265e5245107dfbfb411561eb8aed2dd8f877f74",
-      "name": "Vec<IssueSummary>"
+      "blake3": "7f0abcf12329b6410e0a1b9e01dda3e3a773cd219ce3a7c768c5140929b5a0dd",
+      "name": "IssueLabel",
+      "rust_path": null
     },
     {
-      "blake3": "3b81b43981eddd7e8720b9d439bbf21709c9d50e9b0c53597cad8e8c69df4c79",
-      "name": "IssueComment"
+      "blake3": "84020416c4895f7f9619693b94e66482a058c7f60a5afcacb53e79dd3adcd87d",
+      "name": "PullRequestFile",
+      "rust_path": "::schematic_definitions::github::PullRequestFile"
     },
     {
-      "blake3": "7676c51e1ca1f83ea70aa1696101ed3c7e983b517979e25a640eb0c57822a68e",
-      "name": "Vec<IssueComment>"
+      "blake3": "f573494bda9be6b48d7b626599dfec103e57ca195dda1951ea2a3f8399fb93c6",
+      "name": "IssueSummary",
+      "rust_path": "::schematic_definitions::github::IssueSummary"
     },
     {
-      "blake3": "127785c336778a727fee619d9adf8a1f51964d1f301901b2d4d2c93983ed2eb2",
-      "name": "TimelineEvent"
+      "blake3": "ed23feb412f7de967e7141f286601baeca67850a23a8b652a7538c8bf53d019e",
+      "name": "Milestone",
+      "rust_path": null
     },
     {
-      "blake3": "b90379083eb7b826142353e1a360b4b9a5c711bf84211e03635c93527606ef81",
-      "name": "Vec<TimelineEvent>"
+      "blake3": "c72c35e26ad8390907adfe5461925944ea6f75f322ebe5e3517a050658227ff6",
+      "name": "IssueComment",
+      "rust_path": "::schematic_definitions::github::IssueComment"
     },
     {
-      "blake3": "8efcd8de58227c4a20bdb5be76bb73e4a94365c565502d2e825b5b4afa925d97",
-      "name": "RepoTag"
+      "blake3": "f65984a82d5ad11620965c1f93221c285890281bd63162f1fd0ca616b7de373d",
+      "name": "TimelineEvent",
+      "rust_path": "::schematic_definitions::github::TimelineEvent"
     },
     {
-      "blake3": "8a8189174fbddb3b9a602b022a83ccacfa33f20585330a751c0c7ff87ebb1bde",
-      "name": "Vec<RepoTag>"
+      "blake3": "4ab5bacb835b4ebc127973429a060e4615817b8a4133732cfab666d65eed1223",
+      "name": "RepoTag",
+      "rust_path": "::schematic_definitions::github::RepoTag"
     },
     {
-      "blake3": "25968030cdf1993ece5bcc87ecba88ba7d1d798ed816227b748d6336432e3ed0",
-      "name": "Release"
+      "blake3": "0c41cb05e5a268a8f79df5a993a96e5caaa1bc5cc115b39df2c9349ca6ce93aa",
+      "name": "TagCommit",
+      "rust_path": null
     },
     {
-      "blake3": "ea8a626dc412924b0d2a4b4a416053d170cc6d7a0e688295663a8eae71c608b6",
-      "name": "Vec<Release>"
+      "blake3": "65d1476f6cab6cab05929bbaa8d82bc8481403d9ace68cc2f3a34f5a2d621d56",
+      "name": "Release",
+      "rust_path": "::schematic_definitions::github::Release"
     },
     {
-      "blake3": "dc48b095d44aa5a74cff199e55134169509065ba62cd41a0358d4389416ceb18",
-      "name": "GitRef"
+      "blake3": "4463d5f47e533988cf402947832b761275916e9d6ddc10b79590c9dd3e85d08e",
+      "name": "ReleaseAsset",
+      "rust_path": null
     },
     {
-      "blake3": "218096adc8c10db7c67241624acb27cecd90e78f0e392160d1ff90f1683587b0",
-      "name": "AnnotatedTagObject"
+      "blake3": "e9ba1e43ca65603531c25e135d95513dc7a6d27bacdf826fa6f4431b6669eea5",
+      "name": "GitRef",
+      "rust_path": "::schematic_definitions::github::GitRef"
     },
     {
-      "blake3": "5d5ea8d381b15af45e59bfa301c1754eb83ba97bc7ba2a73fa2226dc0c3b1ac8",
-      "name": "WorkflowRunsResponse"
+      "blake3": "a9fe401f308bd7863428e1caceb2b3dfcf8f7a188d9547d4d4e7350cb12fb85e",
+      "name": "GitRefObject",
+      "rust_path": null
     },
     {
-      "blake3": "40a6702c6322f0fbbbda793899ee816b8147bec72a9319998c1b8295994642a8",
-      "name": "Vec<RepositoryInfo>"
+      "blake3": "a2598b9d9d2eac05118d892f1eaec04210181a3a42aa536deccddbf2578ea5b6",
+      "name": "AnnotatedTagObject",
+      "rust_path": "::schematic_definitions::github::AnnotatedTagObject"
+    },
+    {
+      "blake3": "b552967fd745090e62b19471302b8ede9b621ac2ba56077d6b8ee908aadfc214",
+      "name": "AnnotatedTagger",
+      "rust_path": null
+    },
+    {
+      "blake3": "a0b3a60b662fb1440f7bada9b9a9cad49d1fadc9daf2437ab3469eaf62237543",
+      "name": "TagObjectRef",
+      "rust_path": null
+    },
+    {
+      "blake3": "083bc551b063f7a355bbc8c43935586b2557a22acb5eac6a411a2c0bdf6711d2",
+      "name": "TagVerification",
+      "rust_path": null
+    },
+    {
+      "blake3": "d13ec8512969cade2579b1b39820351da23637c0f8a321ab906ac20aba6f765b",
+      "name": "WorkflowRunsResponse",
+      "rust_path": "::schematic_definitions::github::WorkflowRunsResponse"
+    },
+    {
+      "blake3": "31a6faff02ffe6d0d3a142908e74f1fc2049ea7c80b943eaacc1899aaf7d1fa1",
+      "name": "WorkflowRun",
+      "rust_path": null
     }
   ]
 }

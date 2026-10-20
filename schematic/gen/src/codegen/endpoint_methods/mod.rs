@@ -73,7 +73,7 @@ pub fn generate_endpoint_methods(api: &RestApi) -> TokenStream {
     let mut call_types = TokenStream::new();
     let mut methods = TokenStream::new();
     for (endpoint, names) in api.endpoints.iter().zip(&names.endpoints) {
-        let args = required_args(endpoint);
+        let args = required_args(api, endpoint);
         call_types.extend(call_type(&api.name, &tag, names));
         methods.extend(endpoint_method(endpoint, names, &args));
     }
@@ -102,7 +102,7 @@ pub(crate) fn example_invocation(api: &RestApi, endpoint: &Endpoint, client: &st
         .into_iter()
         .map(|param| format!("\"{}\"", param_field_name(param)))
         .collect();
-    if request_body_type_name(endpoint).is_some() {
+    if request_body_type_name(api, endpoint).is_some() {
         args.push("body".to_string());
     }
     format!("{client}.{}({})", names.method, args.join(", "))
@@ -115,7 +115,7 @@ pub(crate) fn setter_type(setter: &SetterName) -> TokenStream {
 
 /// The required arguments of `endpoint`, in `{Endpoint}Request::new` order:
 /// each path parameter, then the body.
-fn required_args(endpoint: &Endpoint) -> Vec<RequiredArg> {
+fn required_args(api: &RestApi, endpoint: &Endpoint) -> Vec<RequiredArg> {
     let mut args: Vec<RequiredArg> = extract_path_params(&endpoint.path)
         .into_iter()
         .map(|param| RequiredArg {
@@ -124,7 +124,7 @@ fn required_args(endpoint: &Endpoint) -> Vec<RequiredArg> {
             role: format!("the `{{{param}}}` path parameter"),
         })
         .collect();
-    if let Some(body) = request_body_type_name(endpoint) {
+    if let Some(body) = request_body_type_name(api, endpoint) {
         args.push(RequiredArg {
             name: "body".to_string(),
             ty: type_name_to_tokens(&body),

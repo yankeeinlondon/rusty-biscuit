@@ -1,25 +1,29 @@
 use schematic_define::RestApi;
 use schematic_define::pagination::{caller_knobs, param_adoptions, resolve};
-use schematic_definitions::registry::{get_registry, registry_key_for};
 use serde_json::{Value, json};
 
 pub fn snapshot(api: &RestApi) -> Value {
-    let registry = get_registry(&registry_key_for(&api.name)).expect("shipped registry");
-    let entries: Vec<_> = registry.names().map(|name| json!({
-        "name": name, "blake3": fingerprint(registry.get(name).unwrap().as_value()),
+    // `api.schemas` is stored as one fingerprinted row per component, in its
+    // own order, rather than readably: the schema text would exceed the
+    // fixture size limit. Metadata fingerprints exclude it for the same reason.
+    let entries: Vec<_> = api.schemas.iter().map(|component| json!({
+        "name": component.name, "rust_path": component.rust_path,
+        "blake3": fingerprint(&component.schema),
     })).collect();
+    let mut definition = serde_json::to_value(api).unwrap();
+    definition.as_object_mut().unwrap().remove("schemas");
     let pagination: Vec<_> = api.endpoints.iter().map(|endpoint| {
         let resolution = resolve(api, endpoint);
         json!({"endpoint": endpoint.id, "resolution": resolution,
             "caller_knobs": caller_knobs(&resolution),
             "param_adoptions": resolution.strategy().map(|strategy| param_adoptions(endpoint, strategy)).unwrap_or_default()})
     }).collect();
-    let mut metadata = serde_json::to_value(api).unwrap();
+    let mut metadata = definition.clone();
     metadata.as_object_mut().unwrap().remove("endpoints");
     let endpoints: Vec<_> = api.endpoints.iter().map(|endpoint| json!({
         "id": endpoint.id, "blake3": fingerprint(&serde_json::to_value(endpoint).unwrap()),
     })).collect();
-    json!({"definition": api, "registry": entries, "pagination": pagination,
+    json!({"definition": definition, "registry": entries, "pagination": pagination,
         "fingerprints": {"api_metadata": fingerprint(&metadata), "endpoints": endpoints}})
 }
 
@@ -27,7 +31,7 @@ pub fn fingerprint(value: &Value) -> String {
     biscuit_hash::blake3_hash(&serde_json::to_string(&canonical(value.clone())).unwrap())
 }
 
-// Object keys are canonical; arrays retain endpoint and registration order.
+// Object keys are canonical; arrays retain endpoint and component order.
 pub fn canonical(value: Value) -> Value {
     match value {
         Value::Object(object) => {

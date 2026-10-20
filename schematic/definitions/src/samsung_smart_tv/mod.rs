@@ -23,36 +23,13 @@ pub mod remote_ws;
 pub use remote_ws::define_samsung_smart_tv_remote_ws_api;
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::{ApiResponse, RestMethod};
 use schematic_define::{
     Endpoint, EnvMapping, RestApi,
 };
-
-/// Creates a schema registry containing Samsung Smart TV REST response types.
-///
-/// This registry is used for OpenAPI export of the `SamsungSmartTv` REST API.
-/// The `SamsungDeviceInfo` nested type is registered explicitly so `$ref`
-/// resolution remains complete in generated component schemas.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::samsung_smart_tv::{define_samsung_smart_tv_api, openapi_registry};
-///
-/// let registry = openapi_registry();
-/// let api = define_samsung_smart_tv_api();
-///
-/// assert!(registry.get("SamsungDeviceInfoResponse").is_some());
-/// assert!(registry.get("SamsungDeviceInfo").is_some());
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid samsung_smart_tv definitions").registry
-}
 
 /// Creates the Samsung Smart TV REST API definition.
 ///
@@ -72,7 +49,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// ```
 #[must_use]
 pub fn define_samsung_smart_tv_api() -> RestApi {
-    module_group().expect("valid samsung_smart_tv definitions").apis.remove(0)
+    module_group().expect("valid samsung_smart_tv definitions").remove(0)
 }
 
 fn build_samsung_smart_tv_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -134,7 +111,7 @@ fn build_samsung_smart_tv_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<E
 }
 
 /// Assemble sibling APIs and their ordered nominal schemas in one context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::samsung_smart_tv", |ctx| {
         ctx.register::<SamsungDeviceInfoResponse>()?;
         ctx.register::<SamsungDeviceInfo>()?;
@@ -151,26 +128,25 @@ mod tests {
     use schematic_define::AuthStrategy;
 
     #[test]
-    fn openapi_registry_contains_samsung_rest_types() {
-        let registry = openapi_registry();
-        assert!(registry.get("SamsungDeviceInfoResponse").is_some());
-        assert!(registry.get("SamsungDeviceInfo").is_some());
-        assert!(registry.get("SamsungAppStatusResponse").is_some());
-        assert_eq!(registry.len(), 3);
-    }
-
-    #[test]
-    fn openapi_registry_validates_against_api() {
-        let registry = openapi_registry();
+    fn schemas_contain_samsung_rest_types() {
         let api = define_samsung_smart_tv_api();
-        let result = registry.validate_completeness(&api);
-        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+        assert!(api.component("SamsungDeviceInfoResponse").is_some());
+        assert!(api.component("SamsungDeviceInfo").is_some());
+        assert!(api.component("SamsungAppStatusResponse").is_some());
+        assert_eq!(crate::registry::registered_names(&api).len(), 3);
     }
 
     #[test]
-    fn openapi_registry_converts_to_openapi_schemas() {
-        let registry = openapi_registry();
-        let schemas = registry.to_openapi_schemas();
+    fn references_resolve_in_api_schemas() {
+        let api = define_samsung_smart_tv_api();
+        api.validate_references().expect("every reference resolves in api.schemas");
+    }
+
+    #[test]
+    fn openapi_export_includes_api_schemas() {
+        let api = define_samsung_smart_tv_api();
+        let schemas = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
+            .expect("export succeeds").components.expect("components").schemas;
         assert!(schemas.contains_key("SamsungDeviceInfoResponse"));
         assert!(schemas.contains_key("SamsungDeviceInfo"));
     }
@@ -287,8 +263,7 @@ mod tests {
         use schematic_define::openapi::{ExportOptions, export};
 
         let api = define_samsung_smart_tv_api();
-        let registry = openapi_registry();
-        let doc = export(&api, &registry, &ExportOptions::new().with_version("1.0.0"))
+        let doc = export(&api, &ExportOptions::new().with_version("1.0.0"))
             .expect("Samsung OpenAPI export should succeed");
 
         assert_eq!(doc.openapi, "3.0.3");
@@ -304,12 +279,13 @@ mod tests {
     fn module_group_preserves_endpoint_and_registry_inventory() {
         let group = module_group().unwrap();
         assert_eq!(
-            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["GetDeviceInfo", "GetServerLogs", "LaunchApplicationById", "LaunchApplicationByName", "GetAppStatus", "CloseApp", "InstallApp"]
         );
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["SamsungDeviceInfoResponse", "SamsungDeviceInfo", "SamsungAppStatusResponse"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["SamsungDeviceInfoResponse", "SamsungDeviceInfo", "SamsungAppStatusResponse"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
     }
 

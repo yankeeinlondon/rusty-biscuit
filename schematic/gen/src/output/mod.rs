@@ -701,7 +701,7 @@ mod tests {
                 endpoint.response = ApiResponse::json_type("ListItemsResponse");
                 endpoint
             }];
-            api
+            crate::test_utils::with_referenced_components(api)
         }
     }
 
@@ -739,7 +739,7 @@ mod tests {
                     endpoint
                 },
             ];
-            api
+            crate::test_utils::with_referenced_components(api)
         }
     }
 
@@ -757,9 +757,8 @@ mod tests {
         assert!(rust.contains("GetMessage"));
         assert!(rust.contains("std :: string :: String"));
 
-        let registry = schematic_definitions::registry::SchemaRegistry::new();
         let openapi = crate::export::openapi::build_openapi_grouped(
-            &[&api], "message_api", &registry,
+            &[&api], "message_api",
             &schematic_define::openapi::ExportOptions::default(),
         ).unwrap();
         let document = serde_json::to_value(openapi).unwrap();
@@ -1031,7 +1030,7 @@ mod tests {
                     endpoint.response = ApiResponse::json_type("TestResponse");
                     endpoint
                 }];
-                api
+                crate::test_utils::with_referenced_components(api)
             };
 
             let temp_dir = TempDir::new().unwrap();
@@ -1071,7 +1070,7 @@ mod tests {
                 .authentication(AuthStrategy::None, Vec::<String>::new())
                 .build().expect("valid API fixture");
             api.endpoints = endpoints;
-            api
+            crate::test_utils::with_referenced_components(api)
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1132,7 +1131,7 @@ mod tests {
             }];
             api.module_path = Some("foo".to_string());
             api.request_suffix = Some("NativeRequest".to_string());
-            api
+            crate::test_utils::with_referenced_components(api)
         };
 
         let api_b = {
@@ -1150,7 +1149,7 @@ mod tests {
             }];
             api.module_path = Some("foo".to_string());
             api.request_suffix = Some("CompatRequest".to_string());
-            api
+            crate::test_utils::with_referenced_components(api)
         };
 
         (api_a, api_b)
@@ -1401,7 +1400,7 @@ mod tests {
                 .build().expect("valid API fixture");
             api.docs_url = Some("https://docs.large.com".to_string());
             api.endpoints = endpoints;
-            api
+            crate::test_utils::with_referenced_components(api)
         }
     }
 
@@ -1496,9 +1495,11 @@ mod tests {
         );
 
         let requests_rs = fs::read_to_string(dir.join("requests.rs")).unwrap();
+        // JSON bodies are spelled by their components' Rust paths; only an
+        // unqualified pager item type needs the `responses` glob import.
         assert!(
-            requests_rs.contains("use super::responses::*;"),
-            "requests.rs should import the response types it names"
+            !requests_rs.contains("use super::responses::*;"),
+            "requests.rs imports responses only for a local pager item type"
         );
         assert!(
             requests_rs.contains("use super::{LargeApi, LargeApiApi};"),

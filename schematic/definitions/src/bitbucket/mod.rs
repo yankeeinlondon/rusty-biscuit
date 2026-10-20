@@ -55,7 +55,7 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::{ApiResponse, RestMethod};
@@ -64,33 +64,6 @@ use schematic_define::{
     RestApi,
     pagination::{Collection, LinkSource, PageSize, Strategy, ValueSource},
 };
-
-/// Creates a schema registry containing all Bitbucket response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Bitbucket API.
-/// All response types used by the API endpoints are registered, including
-/// concrete instantiations of the generic `PaginatedResponse<T>` type.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::bitbucket::{openapi_registry, define_bitbucket_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_bitbucket_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("Repository").is_some());
-/// assert!(registry.get("PullRequest").is_some());
-/// assert!(registry.get("Issue").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid bitbucket definitions").registry
-}
 
 /// Creates Bitbucket-style pagination parameters.
 fn bitbucket_pagination() -> EndpointParams {
@@ -143,7 +116,7 @@ fn bitbucket_next_link() -> Strategy {
 /// assert_eq!(api.endpoints.len(), 15);
 /// ```
 pub fn define_bitbucket_api() -> RestApi {
-    module_group().expect("valid bitbucket definitions").apis.remove(0)
+    module_group().expect("valid bitbucket definitions").remove(0)
 }
 
 fn build_bitbucket_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -257,7 +230,7 @@ fn build_bitbucket_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definitio
 }
 
 /// Assemble sibling APIs and their ordered nominal schemas in one context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::bitbucket", |ctx| {
         ctx.register::<Repository>()?;
         ctx.register::<PaginatedResponse<SourceEntry>>()?;
@@ -282,37 +255,37 @@ pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::TypeRef;
 
     // =============================================
-    // openapi_registry() tests
+    // api.schemas tests
     // =============================================
 
     #[test]
-    fn openapi_registry_contains_all_response_types() {
-        let registry = openapi_registry();
-
-        assert!(registry.get("Repository").is_some());
-        assert!(registry.get("PaginatedResponse<SourceEntry>").is_some());
-        assert!(registry.get("PaginatedResponse<PullRequest>").is_some());
-        assert!(registry.get("PullRequest").is_some());
-        assert!(registry.get("Issue").is_some());
-        assert!(registry.get("Tag").is_some());
-        assert_eq!(registry.len(), 14);
-    }
-
-    #[test]
-    fn openapi_registry_validates_against_api() {
-        let registry = openapi_registry();
+    fn schemas_contain_all_response_types() {
         let api = define_bitbucket_api();
 
-        let result = registry.validate_completeness(&api);
-        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+        assert!(api.component("Repository").is_some());
+        assert!(api.component("PaginatedResponse<SourceEntry>").is_some());
+        assert!(api.component("PaginatedResponse<PullRequest>").is_some());
+        assert!(api.component("PullRequest").is_some());
+        assert!(api.component("Issue").is_some());
+        assert!(api.component("Tag").is_some());
+        assert_eq!(crate::registry::registered_names(&api).len(), 14);
     }
 
     #[test]
-    fn openapi_registry_converts_to_openapi_schemas() {
-        let registry = openapi_registry();
-        let openapi_schemas = registry.to_openapi_schemas();
+    fn references_resolve_in_api_schemas() {
+        let api = define_bitbucket_api();
+
+        api.validate_references().expect("every reference resolves in api.schemas");
+    }
+
+    #[test]
+    fn openapi_export_includes_api_schemas() {
+        let api = define_bitbucket_api();
+        let openapi_schemas = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
+            .expect("export succeeds").components.expect("components").schemas;
 
         assert!(
             openapi_schemas.len() >= 13,
@@ -507,7 +480,7 @@ mod tests {
         );
         assert!(endpoint.request.is_none());
         match &endpoint.response {
-            ApiResponse::Json(schema) => assert_eq!(schema.descriptor.as_ref().unwrap().wire_schema()["$ref"].as_str(), Some("#/components/schemas/Branch")),
+            ApiResponse::Json(reference) => assert_eq!(reference, &TypeRef::Named("Branch".into())),
             _ => panic!("Expected JSON response"),
         }
         assert!(matches!(api.auth, AuthStrategy::Basic));
@@ -607,12 +580,10 @@ mod tests {
                 .unwrap_or_else(|| panic!("Endpoint {} not found", id));
 
             match &endpoint.response {
-                ApiResponse::Json(schema) => {
+                ApiResponse::Json(reference) => {
                     assert!(
-                        schema.descriptor.as_ref().unwrap().wire_schema()["$ref"].as_str().is_some_and(|name| name.starts_with("#/components/schemas/PaginatedResponse<")),
-                        "Endpoint {} should return PaginatedResponse type, got {}",
-                        id,
-                        schema.type_name
+                        matches!(reference, TypeRef::Named(name) if name.starts_with("PaginatedResponse<")),
+                        "Endpoint {id} should return PaginatedResponse type, got {reference:?}",
                     );
                 }
                 _ => panic!("Endpoint {} should return JSON", id),
@@ -641,17 +612,13 @@ mod tests {
 
             // GetSource and GetDownload return Binary;
             // only assert single-item shape for JSON responses.
-            if let ApiResponse::Json(schema) = &endpoint.response {
+            if let ApiResponse::Json(reference) = &endpoint.response {
                 assert!(
-                    !schema.descriptor.as_ref().unwrap().wire_schema()["$ref"].as_str().is_some_and(|name| name.starts_with("#/components/schemas/PaginatedResponse<")),
+                    !matches!(reference, TypeRef::Named(name) if name.starts_with("PaginatedResponse<")),
                     "Endpoint {} should return single item, not PaginatedResponse",
                     id
                 );
-                assert_eq!(
-                    schema.type_name.rsplit("::").next().unwrap(), expected_type,
-                    "Endpoint {} should return {}, got {}",
-                    id, expected_type, schema.type_name
-                );
+                assert_eq!(reference, &TypeRef::Named(expected_type.into()), "Endpoint {id} should return {expected_type}");
             }
         }
     }
@@ -725,12 +692,10 @@ mod tests {
         assert_eq!(endpoint.path, "/repositories/{workspace}");
 
         match &endpoint.response {
-            ApiResponse::Json(schema) => {
-                assert!(
-                    schema.descriptor.as_ref().unwrap().wire_schema()["$ref"] == "#/components/schemas/PaginatedResponse<Repository>",
-                    "Expected PaginatedResponse<Repository>, got {}",
-                    schema.type_name
-                );
+            ApiResponse::Json(reference) => {
+                assert_eq!(reference, &TypeRef::Named("PaginatedResponse<Repository>".into()));
+                let rust_type: String = api.rust_type(reference).expect("registered component").split_whitespace().collect();
+                assert!(rust_type.contains("bitbucket::PaginatedResponse<") && rust_type.contains("bitbucket::Repository>"), "{rust_type}");
             }
             _ => panic!("Expected JSON response"),
         }
@@ -757,12 +722,13 @@ mod tests {
     fn module_group_preserves_endpoint_and_registry_inventory() {
         let group = module_group().unwrap();
         assert_eq!(
-            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["GetRepository", "GetSource", "ListPullRequests", "GetPullRequest", "ListPullRequestComments", "ListIssues", "GetIssue", "ListIssueComments", "ListIssueChanges", "GetBranch", "ListTags", "GetTag", "ListDownloads", "GetDownload", "ListWorkspaceRepos"]
         );
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["Repository", "PaginatedResponse<SourceEntry>", "PaginatedResponse<PullRequest>", "PullRequest", "PaginatedResponse<PullRequestComment>", "PaginatedResponse<Issue>", "Issue", "PaginatedResponse<IssueComment>", "PaginatedResponse<IssueChange>", "PaginatedResponse<Tag>", "Branch", "Tag", "PaginatedResponse<Download>", "PaginatedResponse<Repository>"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["Repository", "PaginatedResponse<SourceEntry>", "PaginatedResponse<PullRequest>", "PullRequest", "PaginatedResponse<PullRequestComment>", "PaginatedResponse<Issue>", "Issue", "PaginatedResponse<IssueComment>", "PaginatedResponse<IssueChange>", "PaginatedResponse<Tag>", "Tag", "Branch", "PaginatedResponse<Download>", "PaginatedResponse<Repository>"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
     }
 

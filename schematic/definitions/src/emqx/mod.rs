@@ -62,42 +62,15 @@ pub use types::*;
 
 #[cfg(test)]
 use schematic_define::ApiResponse;
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
     AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
     RestMethod,
 };
 
-/// Creates a schema registry containing all EMQX response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the EMQX API.
-/// All response types used by both the Basic and Bearer API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::emqx::{openapi_registry, define_emqx_basic_api, define_emqx_bearer_api};
-///
-/// let registry = openapi_registry();
-/// let basic_api = define_emqx_basic_api();
-/// let bearer_api = define_emqx_bearer_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("NodeInfo").is_some());
-/// assert!(registry.get("ListClientsResponse").is_some());
-///
-/// // Registry is complete for both APIs
-/// assert!(registry.validate_completeness(&basic_api).is_ok());
-/// assert!(registry.validate_completeness(&bearer_api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid shipped API").registry
-}
-
 /// Assemble the APIs and ordered schemas in one destination context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::emqx", |ctx| {
         ctx.register::<LoginBody>()?;
         ctx.register::<LoginResponse>()?;
@@ -172,7 +145,7 @@ pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
 /// assert!(api.endpoints.len() >= 30);
 /// ```
 pub fn define_emqx_basic_api() -> RestApi {
-    module_group().expect("valid shipped API").apis.remove(0)
+    module_group().expect("valid shipped API").remove(0)
 }
 
 fn build_emqx_basic_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -218,7 +191,7 @@ fn build_emqx_basic_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definiti
 /// assert!(api.endpoints.len() > 30);
 /// ```
 pub fn define_emqx_bearer_api() -> RestApi {
-    module_group().expect("valid shipped API").apis.remove(1)
+    module_group().expect("valid shipped API").remove(1)
 }
 
 fn build_emqx_bearer_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -718,14 +691,15 @@ mod tests {
         let group = module_group().unwrap();
         let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
         let expected = ["ListNodes", "GetNode", "GetCluster", "ListListeners", "GetListener", "ListMetrics", "ListStats", "GetPrometheus", "ListAlarms", "ListClients", "GetClient", "DisconnectClient", "SubscribeClient", "UnsubscribeClient", "ListSubscriptions", "Publish", "PublishBulk", "ListTopics", "ListRetained", "GetRetained", "DeleteRetained", "ListRules", "CreateRule", "GetRule", "UpdateRule", "DeleteRule", "TestRule", "ListAuthenticators", "GetAuthenticator", "ListAuthUsers", "CreateAuthUser", "DeleteAuthUser", "ListAuthzSources", "ListBanned", "CreateBan", "DeleteBan"];
-        assert_eq!(ids(&group.apis[0]), expected);
+        assert_eq!(ids(&group[0]), expected);
         let bearer = [vec!["Login", "Logout"], expected.to_vec()].concat();
-        assert_eq!(ids(&group.apis[1]), bearer);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(ids(&group[1]), bearer);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
-        assert!(group.registry.get("Vec<AuthUser>").is_none(), "container component must be inline");
-        for api in &group.apis {
+        assert!(group[0].component("Vec<AuthUser>").is_none(), "container component must be inline");
+        for api in &group {
             for id in ["ListAlarms", "ListClients", "ListSubscriptions", "ListTopics", "ListRetained", "ListRules", "ListBanned"] {
                 let endpoint = api.endpoints.iter().find(|ep| ep.id == id).unwrap();
                 assert!(endpoint.pagination.is_some(), "{id} retains its explicit collection");

@@ -47,38 +47,12 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{
     ApiKeyEnv, EnvList, EnvMapping, AuthStrategy, DefinitionError, Endpoint,
     RestApi,
     pagination::{Collection, LinkSource, MoreSignal, PageSize, Strategy, ValueSource},
 };
-
-/// Creates a schema registry containing all GitLab response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the GitLab API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::gitlab::{openapi_registry, define_gitlab_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_gitlab_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("Project").is_some());
-/// assert!(registry.get("MergeRequest").is_some());
-/// assert!(registry.get("Issue").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid gitlab definition").registry
-}
 
 /// GitLab's page size: `per_page`, at most 100, 20 when omitted.
 fn gitlab_page_size() -> PageSize {
@@ -144,11 +118,11 @@ fn gitlab_keyset() -> Strategy {
 /// assert_eq!(api.endpoints.len(), 19);
 /// ```
 pub fn define_gitlab_api() -> RestApi {
-    module_group().expect("valid gitlab definition").apis.remove(0)
+    module_group().expect("valid gitlab definition").remove(0)
 }
 
 /// Assemble the API and its schemas from one ordered registration context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::gitlab", |ctx| {
         ctx.register::<TreeItem>()?;
         ctx.register::<FileContent>()?;
@@ -210,44 +184,43 @@ pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
 mod tests {
     use super::*;
     use schematic_define::QueryParamType;
-    use schematic_define::{ApiResponse, RestMethod};
+    use schematic_define::{ApiResponse, RestMethod, TypeRef};
     use schematic_define::pagination::{resolve, Resolution};
 
     // =============================================
-    // openapi_registry() tests
+    // api.schemas tests
     // =============================================
 
     #[test]
-    fn openapi_registry_contains_all_response_types() {
-        let registry = openapi_registry();
-
-        assert!(registry.get("Project").is_some());
-        assert!(!registry.get("Vec<Project>").is_some());
-        assert!(registry.get("TreeItem").is_some());
-        assert!(!registry.get("Vec<TreeItem>").is_some());
-        assert!(registry.get("FileContent").is_some());
-        assert!(registry.get("MergeRequest").is_some());
-        assert!(!registry.get("Vec<MergeRequest>").is_some());
-        assert!(registry.get("Issue").is_some());
-        assert!(registry.get("Tag").is_some());
-        assert!(registry.get("Release").is_some());
-        assert!(registry.get("Pipeline").is_some());
-        assert_eq!(registry.len(), 13);
-    }
-
-    #[test]
-    fn openapi_registry_validates_against_api() {
-        let registry = openapi_registry();
+    fn schemas_contain_all_response_types() {
         let api = define_gitlab_api();
 
-        let result = registry.validate_completeness(&api);
-        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+        assert!(api.component("Project").is_some());
+        assert!(api.component("Vec<Project>").is_none());
+        assert!(api.component("TreeItem").is_some());
+        assert!(api.component("Vec<TreeItem>").is_none());
+        assert!(api.component("FileContent").is_some());
+        assert!(api.component("MergeRequest").is_some());
+        assert!(api.component("Vec<MergeRequest>").is_none());
+        assert!(api.component("Issue").is_some());
+        assert!(api.component("Tag").is_some());
+        assert!(api.component("Release").is_some());
+        assert!(api.component("Pipeline").is_some());
+        assert_eq!(crate::registry::registered_names(&api).len(), 13);
     }
 
     #[test]
-    fn openapi_registry_converts_to_openapi_schemas() {
-        let registry = openapi_registry();
-        let openapi_schemas = registry.to_openapi_schemas();
+    fn references_resolve_in_api_schemas() {
+        let api = define_gitlab_api();
+
+        api.validate_references().expect("every reference resolves in api.schemas");
+    }
+
+    #[test]
+    fn openapi_export_includes_api_schemas() {
+        let api = define_gitlab_api();
+        let openapi_schemas = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
+            .expect("export succeeds").components.expect("components").schemas;
 
         assert!(
             openapi_schemas.len() >= 13,
@@ -324,7 +297,7 @@ mod tests {
         assert!(endpoint.request.is_none());
         match &endpoint.response {
             schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.starts_with("::std::vec::Vec<"));
+                assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
         }
@@ -356,7 +329,7 @@ mod tests {
         assert_eq!(git_ref.rust_name.as_deref(), Some("git_ref"));
         assert!(git_ref.required);
         assert_eq!(git_ref.param_type, QueryParamType::String);
-        assert!(matches!(&endpoint.response, ApiResponse::Json(schema) if schema.type_name.ends_with("::FileContent")));
+        assert!(matches!(&endpoint.response, ApiResponse::Json(schema) if *schema == TypeRef::Named("FileContent".into())));
     }
 
     #[test]
@@ -483,7 +456,7 @@ mod tests {
         assert!(endpoint.request.is_none());
         match &endpoint.response {
             schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.ends_with("::Branch"));
+                assert!(*schema == TypeRef::Named("Branch".into()));
             }
             _ => panic!("Expected JSON response"),
         }
@@ -545,10 +518,10 @@ mod tests {
             match &endpoint.response {
                 schematic_define::ApiResponse::Json(schema) => {
                     assert!(
-                        schema.type_name.starts_with("::std::vec::Vec<"),
-                        "Endpoint {} should return Vec type, got {}",
+                        matches!(schema, TypeRef::Array(_)),
+                        "Endpoint {} should return Vec type, got {:?}",
                         id,
-                        schema.type_name
+                        schema
                     );
                 }
                 _ => panic!("Endpoint {} should return JSON", id),
@@ -577,7 +550,7 @@ mod tests {
             match &endpoint.response {
                 schematic_define::ApiResponse::Json(schema) => {
                     assert!(
-                        !schema.type_name.starts_with("::std::vec::Vec<"),
+                        !matches!(schema, TypeRef::Array(_)),
                         "Endpoint {} should return single item, not Vec",
                         id
                     );
@@ -646,7 +619,7 @@ mod tests {
 
         match &endpoint.response {
             schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.ends_with("::Project"));
+                assert!(*schema == TypeRef::Named("Project".into()));
             }
             _ => panic!("Expected JSON response"),
         }
@@ -666,7 +639,7 @@ mod tests {
 
         match &endpoint.response {
             schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.starts_with("::std::vec::Vec<"));
+                assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
         }
@@ -692,7 +665,7 @@ mod tests {
 
         match &endpoint.response {
             schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.starts_with("::std::vec::Vec<"));
+                assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
         }
@@ -730,11 +703,11 @@ mod tests {
     #[test]
     fn typed_module_group_preserves_endpoint_order_and_completeness() {
         let group = module_group().unwrap();
-        assert_eq!(group.apis.len(), 1);
-        let api = &group.apis[0];
+        assert_eq!(group.len(), 1);
+        let api = &group[0];
         assert_eq!(api.endpoints.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["ListRepositoryTree", "GetRepositoryFile", "GetProject", "ListGroupProjects", "GetBranch", "ListMergeRequests", "GetMergeRequest", "ListMergeRequestCommits", "ListMergeRequestChanges", "ListIssues", "GetIssue", "ListIssueNotes", "ListIssueParticipants", "ListTags", "GetTag", "ListReleases", "GetRelease", "GetLatestRelease", "ListProjectPipelines"]);
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["TreeItem", "FileContent", "MergeRequest", "Commit", "MergeRequestChanges", "Issue", "Note", "User", "Branch", "Tag", "Release", "Project", "Pipeline"]);
-        group.registry.validate_completeness(api).unwrap();
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["TreeItem", "FileContent", "MergeRequest", "User", "Commit", "MergeRequestChanges", "Issue", "Note", "Branch", "Tag", "Release", "Project", "Pipeline"]);
+        api.validate_references().unwrap();
         assert!(api.endpoints.iter().all(|e| !e.path.contains('?')));
     }
 

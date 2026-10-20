@@ -13,14 +13,12 @@
         "headers": [],
         "id": "GetDeviceInfo",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v2/",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "SamsungDeviceInfoResponse"
+            "Named": "SamsungDeviceInfoResponse"
           }
         }
       },
@@ -29,7 +27,6 @@
         "headers": [],
         "id": "GetServerLogs",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/logs/",
         "request": null,
@@ -40,7 +37,6 @@
         "headers": [],
         "id": "LaunchApplicationById",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v2/applications/{app_id}",
         "request": null,
@@ -51,7 +47,6 @@
         "headers": [],
         "id": "LaunchApplicationByName",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ws/apps/{app_name}",
         "request": null,
@@ -62,14 +57,12 @@
         "headers": [],
         "id": "GetAppStatus",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v2/applications/{app_id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "SamsungAppStatusResponse"
+            "Named": "SamsungAppStatusResponse"
           }
         }
       },
@@ -78,7 +71,6 @@
         "headers": [],
         "id": "CloseApp",
         "method": "DELETE",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v2/applications/{app_id}",
         "request": null,
@@ -89,7 +81,6 @@
         "headers": [],
         "id": "InstallApp",
         "method": "PUT",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v2/applications/{app_id}",
         "request": null,
@@ -107,41 +98,40 @@
     "headers": [],
     "module_path": "samsung_smart_tv",
     "name": "SamsungSmartTv",
-    "pagination_exceptions": [],
     "request_id_header": null,
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "49dee3da4dbe24e6626f9eabc866570d0a5d110b07ebd481b4c040f6421dcef6",
+    "api_metadata": "ed229c66ec61b1d9d59a1f143d318d281e9b99110a148504754bce3ad95c73f3",
     "endpoints": [
       {
-        "blake3": "8917a76562a54d49429ee55d157c0d040712c382d93cb520f7717c8625938cac",
+        "blake3": "5d6cc1f13f796df84a35dbed514c5756d2e4075840d267400cf42bffff535e02",
         "id": "GetDeviceInfo"
       },
       {
-        "blake3": "277952b76e327d24257793b0cf99ed35fe942a33923edb619f980d4c46ff8670",
+        "blake3": "74629d07014fe78d5c1e7f74bf20a835c11cf591aa8a2bfc8ebc0229c1e29a72",
         "id": "GetServerLogs"
       },
       {
-        "blake3": "4cc61a5baa81dda6863b801c35bb730d3983341db9327c170a07879fa78067d8",
+        "blake3": "62d3946fda5d4fb55982abc27f7188a9169cef265f985f6a23481afff9daa79e",
         "id": "LaunchApplicationById"
       },
       {
-        "blake3": "81ee43b9498e07ee00c0b74e9066d28dda7463ef49294f5db305890d18336940",
+        "blake3": "21e2a64f0f1d9721ac94fb295bbbfe57db892da320da26b382911efbecbefe67",
         "id": "LaunchApplicationByName"
       },
       {
-        "blake3": "388b382e4218a40529452573efbd8d3107263fe643eaee6eadd92eb3c80bc0dd",
+        "blake3": "607597d530c194b099c3c1eec252d65d5eaf98e72a8fbf93a070f87a8e0b8d84",
         "id": "GetAppStatus"
       },
       {
-        "blake3": "526b915779cd1f704b51e80e715750875cb9628f60661742147be5edfbaa2162",
+        "blake3": "4dc0c22d68c4ed0813ecd8271225cb07c285b687915a08ff6e365fb7b9b829d1",
         "id": "CloseApp"
       },
       {
-        "blake3": "d46d462c7b58c72305102bab48cb7f72131c3ef802ca54916ec7d623fe10c441",
+        "blake3": "45acbbb3d3c1a8a5e77857222589ad76f73e03f5b6a17ab4dbd0835d1435dd8d",
         "id": "InstallApp"
       }
     ]
@@ -192,16 +182,19 @@
   ],
   "registry": [
     {
-      "blake3": "f510708ed273984502889a81bc69a2c5e48bf4518800b89f5b1d537747ffd1e5",
-      "name": "SamsungDeviceInfoResponse"
+      "blake3": "833a1c0dd652dd02a37fc8fc85285b40eacc0dbb2bc3cf1b6b736e21b9370f46",
+      "name": "SamsungDeviceInfoResponse",
+      "rust_path": "::schematic_definitions::samsung_smart_tv::SamsungDeviceInfoResponse"
     },
     {
-      "blake3": "e145244638ed2187bdd089dccc648f8975de3f314cb26f741673ba2ae2aafefe",
-      "name": "SamsungDeviceInfo"
+      "blake3": "97a622c7ef6b87588bda99a958fde86f014a5a6527ba3ddec28e9c9f0fcf10cc",
+      "name": "SamsungDeviceInfo",
+      "rust_path": "::schematic_definitions::samsung_smart_tv::SamsungDeviceInfo"
     },
     {
-      "blake3": "2488cdc04c0168c6651fff7a06b7aa6a6aa0489b54f3276982a6330a2114e451",
-      "name": "SamsungAppStatusResponse"
+      "blake3": "ec576dc717eebd933f0c5c004192060998d122ec50bf2114865c61819ee485fe",
+      "name": "SamsungAppStatusResponse",
+      "rust_path": "::schematic_definitions::samsung_smart_tv::SamsungAppStatusResponse"
     }
   ]
 }

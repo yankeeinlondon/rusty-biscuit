@@ -21,121 +21,14 @@ fn unexplained(changed: Vec<String>, explained: &[(&str, &str)]) -> Vec<String> 
 }
 
 fn assert_baseline(key: &str, text: &str) {
-    let mut expected: Value = serde_json::from_str(text).unwrap();
-    let api = resolve_api(key).unwrap();
-    let mut actual = snapshot(&api);
-    phase6_lowering(&mut expected, key, true);
-    phase6_lowering(&mut actual, key, false);
-    let expected = canonical(expected);
-    let actual = canonical(actual);
+    let expected = canonical(serde_json::from_str(text).unwrap());
+    let actual = canonical(snapshot(&resolve_api(key).unwrap()));
     let mut changed = Vec::new();
     differences(&expected, &actual, key, &mut changed);
     let prefix = format!("{key}/");
     let explained: Vec<_> = EXPLAINED.iter().copied().filter(|(path, _)| path.starts_with(&prefix)).collect();
     let changed = unexplained(changed, &explained);
     assert!(changed.is_empty(), "unexplained historical differences:\n{}", changed.join("\n"));
-}
-
-// Each transformation corresponds to removed metadata or a ruled migration.
-// Historical files are never rewritten, and nominal fingerprints remain exact.
-fn phase6_lowering(value: &mut Value, key: &str, historical: bool) {
-    if historical {
-        let definition = value["definition"].as_object_mut().unwrap();
-        let rows = definition.remove("pagination_exceptions").unwrap_or(serde_json::json!([]));
-        let endpoints = definition["endpoints"].as_array_mut().unwrap();
-        for row in rows.as_array().unwrap() {
-            let id = row.get("endpoint_id").or_else(|| row.get("endpoint")).unwrap();
-            let endpoint = endpoints.iter_mut().find(|endpoint| endpoint["id"] == *id).unwrap();
-            endpoint["pagination"] = row["collection"].clone();
-        }
-        if key == "gitea" {
-            endpoints.retain(|endpoint| endpoint["id"] != "GetGitTreeRecursive");
-            let tree = endpoints.iter_mut().find(|endpoint| endpoint["id"] == "GetGitTree").unwrap();
-            tree["description"] = serde_json::json!("Get a Git tree; set recursive to include nested entries");
-            tree["params"] = serde_json::to_value(schematic_define::EndpointParams::new()).unwrap();
-            tree["params"]["query"] = serde_json::json!([schematic_define::ParamDef::new("recursive", schematic_define::QueryParamType::Boolean)]);
-        }
-        if key == "gitlab" {
-            let endpoint = endpoints.iter_mut().find(|endpoint| endpoint["id"] == "GetRepositoryFile").unwrap();
-            endpoint["path"] = serde_json::json!(endpoint["path"].as_str().unwrap().split_once('?').unwrap().0);
-            endpoint["params"] = serde_json::to_value(schematic_define::EndpointParams::new()).unwrap();
-            endpoint["params"]["query"] = serde_json::json!([schematic_define::ParamDef::new("ref", schematic_define::QueryParamType::String)
-                .required().rust_name("git_ref")]);
-        }
-        if key == "unfolded-circle-core-rest" {
-            for (id, alias, expanded) in [("RestoreBackup", "BackupRestoreReportItems", "Vec<BackupRestoreReportItem>"), ("UploadResource", "ResourceItems", "Vec<ResourceItem>")] {
-                let endpoint = endpoints.iter_mut().find(|endpoint| endpoint["id"] == id).unwrap();
-                assert_eq!(endpoint["response"]["Json"]["type_name"], alias);
-                endpoint["response"]["Json"]["type_name"] = serde_json::json!(expanded);
-            }
-        }
-        if key == "gitea" {
-            value["pagination"].as_array_mut().unwrap().retain(|row| row["endpoint"] != "GetGitTreeRecursive");
-        }
-        let dropped: &[&str] = match key {
-            "github" => &["Vec<PullRequestSummary>", "Vec<PullRequestFile>", "Vec<IssueSummary>", "Vec<IssueComment>", "Vec<TimelineEvent>", "Vec<RepoTag>", "Vec<Release>", "Vec<RepositoryInfo>"],
-            "gitea" => &["Vec<PullRequestSummary>", "Vec<PullRequestFile>", "Vec<IssueSummary>", "Vec<IssueComment>", "Vec<TimelineEvent>", "Vec<RepoTag>", "Vec<Release>", "Vec<GitRef>", "Vec<RepositoryInfo>"],
-            "gitlab" => &["Vec<TreeItem>", "Vec<MergeRequest>", "Vec<Commit>", "Vec<Issue>", "Vec<Note>", "Vec<User>", "Vec<Tag>", "Vec<Release>", "Vec<Project>", "Vec<Pipeline>"],
-            "huggingface" => &["Vec<ModelInfo>", "Vec<RepoFile>", "Vec<Commit>", "Vec<DatasetInfo>", "Vec<SpaceInfo>", "Vec<RepoInfo>", "Vec<Collection>"],
-            "emqx-basic" | "emqx-bearer" => &["Vec<AuthUser>"],
-            "elevenlabs" => &["Vec<ModelInfo>"],
-            _ => &[],
-        };
-        let replacements: &[(&str, &str, &str)] = match key {
-            "huggingface" => &[
-                ("Vec<RepoFile>", "RepoFile", "9d08f34fb9814801e40e62a98aa82b30de1dda59c9587383e75171b0082c1b9f"),
-                ("Vec<Commit>", "Commit", "7dd08295b2a7b782f0e07a9b8c200637837cc4f37ed7bc3f565ff68377a61a10"),
-                ("Vec<RepoInfo>", "RepoInfo", "d3aa10749627917aa4da8a129bc1eca5d15ffa9f5d6d98f6a2a598ab6d306e98"),
-                ("Vec<Collection>", "Collection", "dc192f26af395565e0f87690696161d8a68a75a46bf487c05c4351dbdc32f569"),
-            ],
-            "elevenlabs" => &[("Vec<ModelInfo>", "ModelInfo", "4025f3b295dc5e8a4b847725055650d07c7e59c2d0ac9feb90be6d3f2845f33d")],
-            "unfolded-circle-core-rest" => &[
-                ("BackupRestoreReportItems", "BackupRestoreReportItem", "9e98c28e85b2d4991eca17235a31b422bb7fc916d70b1ef6a58d50ba849881ef"),
-                ("ResourceItems", "ResourceItem", "898a5837d34f76aa79adfce8d477ec9ef8994dc09ffe881cc92b5c2d1056b880"),
-            ],
-            _ => &[],
-        };
-        for (old, name, fingerprint) in replacements {
-            let row = value["registry"].as_array_mut().unwrap().iter_mut().find(|row| row["name"] == *old).expect("historical container registration");
-            *row = serde_json::json!({"name": name, "blake3": fingerprint});
-        }
-        value["registry"].as_array_mut().unwrap().retain(|row| !dropped.contains(&row["name"].as_str().unwrap()));
-    }
-    fn lower(value: &mut Value) {
-        match value {
-            Value::Object(object) => {
-                object.remove("oauth_scopes");
-                if object.contains_key("query") && object.contains_key("cookie") {
-                    object.remove("pagination"); object.remove("response_pagination");
-                }
-                if let Some(name) = object.get("type_name").and_then(Value::as_str) {
-                    let mut name: String = name.split_whitespace().collect();
-                    for module in ["anthropic", "artificial_analysis", "bitbucket", "elevenlabs", "emqx", "eversolo", "gitea", "github", "gitlab", "huggingface", "lmstudio", "ollama", "openai", "samsung_smart_tv", "unfolded_circle::core_rest"] {
-                        name = name.replace(&format!("::schematic_definitions::{module}::"), "").replace(&format!("schematic_definitions::{module}::"), "");
-                    }
-                    name = name.replace("::std::vec::", "").replace("::std::string::", "").replace("::serde_json::", "serde_json::");
-                    object.insert("type_name".into(), serde_json::json!(name));
-                    object.remove("descriptor");
-                }
-                if let Some(Value::String(name)) = object.get_mut("item_type") {
-                    for module in ["anthropic", "artificial_analysis", "bitbucket", "elevenlabs", "emqx", "eversolo", "gitea", "github", "gitlab", "huggingface", "lmstudio", "ollama", "openai", "samsung_smart_tv", "unfolded_circle::core_rest"] {
-                        *name = name.replace(&format!("::schematic_definitions::{module}::"), "")
-                            .replace(&format!("schematic_definitions::{module}::"), "");
-                    }
-                }
-                for value in object.values_mut() { lower(value); }
-            }
-            Value::Array(values) => for value in values { lower(value); },
-            _ => {},
-        }
-    }
-    value["definition"].as_object_mut().unwrap().remove("pagination_exceptions");
-    lower(value);
-    let mut metadata = value["definition"].clone();
-    metadata.as_object_mut().unwrap().remove("endpoints");
-    value["fingerprints"]["api_metadata"] = serde_json::json!(definition_snapshot::fingerprint(&metadata));
-    value["fingerprints"]["endpoints"] = Value::Array(value["definition"]["endpoints"].as_array().unwrap().iter().map(|endpoint|
-        serde_json::json!({"id": endpoint["id"], "blake3": definition_snapshot::fingerprint(endpoint)})).collect());
 }
 
 #[test]
@@ -215,75 +108,7 @@ fn ollama_openai() {
 
 #[test]
 fn openai() {
-    let mut expected: Value = serde_json::from_str(include_str!("../fixtures/definition-baseline/openai.json")).unwrap();
-    let api = resolve_api("openai").unwrap();
-    let mut actual = snapshot(&api);
-    let historical_endpoints = expected["definition"]["endpoints"].as_array().unwrap().clone();
-    let beta: Vec<_> = historical_endpoints.iter().filter(|e| e["path"].as_str().unwrap().contains('?')).cloned().collect();
-    assert_eq!(beta.len(), 7);
-    let mut endpoints = historical_endpoints.clone();
-    for candidate in &beta {
-        let base = candidate["path"].as_str().unwrap().split_once('?').unwrap().0;
-        let twin = endpoints.iter_mut().find(|e| e["path"] == base && e["method"] == candidate["method"]).unwrap();
-        for field in ["request", "response"] { twin[field] = candidate[field].clone(); }
-        let mut params = twin["params"].clone();
-        if params.is_null() { params = serde_json::to_value(schematic_define::EndpointParams::new()).unwrap(); }
-        for location in ["query", "header", "cookie"] {
-            let mut values = params[location].as_array().cloned().unwrap_or_default();
-            if let Some(imported) = candidate["params"][location].as_array() {
-                for param in imported {
-                    if let Some(existing) = values.iter_mut().find(|p| p["name"] == param["name"]) { *existing = param.clone(); }
-                    else { values.push(param.clone()); }
-                }
-            }
-            if location == "query" { values.push(serde_json::to_value(schematic_define::ParamDef::new("beta", schematic_define::QueryParamType::Boolean)).unwrap()); }
-            params[location] = Value::Array(values);
-        }
-        twin["params"] = params;
-    }
-    endpoints.retain(|e| !e["path"].as_str().unwrap().contains('?'));
-    let rows = expected["definition"]["pagination_exceptions"].as_array().unwrap().clone();
-    for row in rows {
-        if row["endpoint"] == "BetaListInputItems" { continue; }
-        let id = row.get("endpoint_id").or_else(|| row.get("endpoint")).unwrap();
-        let ep = endpoints.iter_mut().find(|e| e["id"] == *id).unwrap();
-        ep["pagination"] = row["collection"].clone();
-        if id == "ListInputItems" { ep["pagination"]["item_type"] = serde_json::json!("BetaItemResource"); }
-    }
-    expected["definition"]["endpoints"] = Value::Array(endpoints);
-    expected["definition"]["pagination_exceptions"] = serde_json::json!([]);
-    expected["pagination"].as_array_mut().unwrap().retain(|row| !beta.iter().any(|endpoint| endpoint["id"] == row["endpoint"]));
-    for row in expected["pagination"].as_array_mut().unwrap() {
-        if row["endpoint"] == "ListInputItems" { row["resolution"]["Paginated"]["list"]["item_type"] = serde_json::json!("BetaItemResource"); }
-    }
-    let aliases: Vec<_> = include_str!("../../../definitions/src/openai/types.rs").lines()
-        .filter_map(|line| line.strip_prefix("pub type ").and_then(|s| s.split_once(" = ")).map(|(name, _)| name)).collect();
-    assert_eq!(aliases, ["ChatCompletionMessageToolCalls", "ChunkingStrategyRequestParam", "ComputerActionList", "CreateEvalItem", "EvalGraderLabelModel", "EvalGraderPython", "EvalGraderScoreModel", "EvalGraderStringCheck", "EvalGraderTextSimilarity", "EvalItemContentArray", "EvalItemContentText", "FineTuneChatCompletionRequestAssistantMessage", "InputMessageContentList", "Item", "ParallelToolCalls", "ToolsArray", "TranscriptionChunkingStrategy", "BetaItem", "BetaComputerActionList", "BetaInputMessageContentList", "BetaToolsArray"], "review each inline alias removal");
-    expected["registry"].as_array_mut().unwrap().retain(|row| !aliases.contains(&row["name"].as_str().unwrap()));
-    for endpoint in actual["definition"]["endpoints"].as_array_mut().unwrap() {
-        for field in ["request", "response"] {
-            if let Some(schema) = endpoint[field].get_mut("Json") {
-                assert_eq!(schema["module_path"], Value::Null);
-                assert!(schema.get("descriptor").is_some());
-                schema.as_object_mut().unwrap().remove("descriptor");
-                schema["type_name"] = serde_json::json!(schema["type_name"].as_str().unwrap()
-                    .replace("::schematic_definitions::openai::", "").replace("::std::vec::", "").trim_start_matches("::"));
-            }
-        }
-    }
-    for value in [&mut expected, &mut actual] {
-        let mut metadata = value["definition"].clone();
-        metadata.as_object_mut().unwrap().remove("endpoints");
-        value["fingerprints"]["api_metadata"] = serde_json::json!(definition_snapshot::fingerprint(&metadata));
-        let fingerprints: Vec<_> = value["definition"]["endpoints"].as_array().unwrap().iter().map(|e|
-            serde_json::json!({"id":e["id"], "blake3":definition_snapshot::fingerprint(e)})).collect();
-        value["fingerprints"]["endpoints"] = Value::Array(fingerprints);
-    }
-    let mut changed = Vec::new();
-    phase6_lowering(&mut expected, "openai", false);
-    phase6_lowering(&mut actual, "openai", false);
-    differences(&canonical(expected), &canonical(actual), "openai", &mut changed);
-    assert!(changed.is_empty(), "unexplained historical differences:\n{}", changed.join("\n"));
+    assert_baseline("openai", include_str!("../fixtures/definition-baseline/openai.json"));
 }
 
 #[test]
@@ -348,14 +173,11 @@ fn shipped_definitions_round_trip() {
 
 #[test]
 fn changed_description_is_detected_at_its_exact_field() {
-    let mut expected: Value = serde_json::from_str(include_str!("../fixtures/definition-baseline/github.json")).unwrap();
+    let expected: Value = serde_json::from_str(include_str!("../fixtures/definition-baseline/github.json")).unwrap();
     let mut api = resolve_api("github").unwrap();
     api.endpoints[0].description.push_str(" deliberately changed");
     let mut changed = Vec::new();
-    let mut actual = snapshot(&api);
-    phase6_lowering(&mut expected, "github", true);
-    phase6_lowering(&mut actual, "github", false);
-    differences(&canonical(expected), &canonical(actual), "github", &mut changed);
+    differences(&canonical(expected), &canonical(snapshot(&api)), "github", &mut changed);
     assert_eq!(changed, [format!("github/definition/endpoints/0:{}/description", api.endpoints[0].id),
         format!("github/fingerprints/endpoints/0:{}/blake3", api.endpoints[0].id)]);
 }

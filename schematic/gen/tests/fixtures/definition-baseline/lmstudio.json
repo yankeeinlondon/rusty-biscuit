@@ -17,13 +17,11 @@
         "headers": [],
         "id": "Chat",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v1/chat",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "ChatBody"
+            "Named": "ChatBody"
           }
         },
         "response": "Binary"
@@ -33,14 +31,12 @@
         "headers": [],
         "id": "ListModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v1/models",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListModelsResponse"
+            "Named": "ListModelsResponse"
           }
         }
       },
@@ -49,19 +45,16 @@
         "headers": [],
         "id": "LoadModel",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v1/models/load",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "LoadModelBody"
+            "Named": "LoadModelBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "LoadModelResponse"
+            "Named": "LoadModelResponse"
           }
         }
       },
@@ -70,19 +63,16 @@
         "headers": [],
         "id": "UnloadModel",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v1/models/unload",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "UnloadModelBody"
+            "Named": "UnloadModelBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "UnloadModelResponse"
+            "Named": "UnloadModelResponse"
           }
         }
       },
@@ -91,13 +81,11 @@
         "headers": [],
         "id": "DownloadModel",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v1/models/download",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "DownloadModelBody"
+            "Named": "DownloadModelBody"
           }
         },
         "response": "Binary"
@@ -107,19 +95,16 @@
         "headers": [],
         "id": "GetDownloadStatus",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/api/v1/models/download/status",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "DownloadStatusBody"
+            "Named": "DownloadStatusBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "DownloadStatusResponse"
+            "Named": "DownloadStatusResponse"
           }
         }
       }
@@ -137,37 +122,36 @@
     "headers": [],
     "module_path": null,
     "name": "LmStudio",
-    "pagination_exceptions": [],
     "request_id_header": null,
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "380c18c379c0cc06bb311145239491303ae257e9d7693df65fea0e02083ea1ff",
+    "api_metadata": "ef53981f19fbe304cf1591641525e98254b1f89f3bfa0b6a4223c8429f3b9f39",
     "endpoints": [
       {
-        "blake3": "c3cb596a674cf29adf103ac76cf36c2752dd7373bbce44a7a66416aec50f1410",
+        "blake3": "fd9bab3353040b5bdb6bacee393f1f0079d69859a60326ba5932bd1a4e1d52e8",
         "id": "Chat"
       },
       {
-        "blake3": "a5bb86ed4a44d4790ac91817b2b7c8295d3a656ec4d6d0d536fb5315a87a500f",
+        "blake3": "0fae5b4031bf055d46ed8669d78413da63af681c965b3722a9b206ca82b96224",
         "id": "ListModels"
       },
       {
-        "blake3": "bb01648cddce9a80c39d8cfc97f1c8b889997a644bf9d4358c2d5512166f0c81",
+        "blake3": "6d6b7bfbe0db6fa86b1653171f428ad45a379ca294711764ab6e5ff3b9300a90",
         "id": "LoadModel"
       },
       {
-        "blake3": "d23aae4ae94fdfcd72463c8070dfcaeee449ec51bca4b1aa127ee8b6b18069cf",
+        "blake3": "4e906f5d35a62ae51a47e8a8987cb2ec0c85c58c7ce4459b4ef23b294a9f2546",
         "id": "UnloadModel"
       },
       {
-        "blake3": "52002a255da68d54da99994e99ef3b44750b014c7f513919216722d1d775c44b",
+        "blake3": "410b376c72fa10dbdd62d70010b3d89b655a2553ca3eaee39ef23875ef2cafba",
         "id": "DownloadModel"
       },
       {
-        "blake3": "4dc87880d38b362f725e0f0cdafaf514721043f86f8690cf6b6d24521f2e5fc8",
+        "blake3": "5d791a02326ef7af28d6a70e66eda52a58859bcefc8d8621a8ab7aafd9cd72d4",
         "id": "GetDownloadStatus"
       }
     ]
@@ -212,64 +196,94 @@
   ],
   "registry": [
     {
-      "blake3": "14b798d4ece8d524b12d420c0725f97d0b5cad6d919e2bfa93292136f48afe06",
-      "name": "ChatBody"
+      "blake3": "e1cf1adddaf259386ac00cc364c130891e877fcd70766b1d0748a72450919522",
+      "name": "ChatBody",
+      "rust_path": "::schematic_definitions::lmstudio::ChatBody"
     },
     {
-      "blake3": "1140b6ef4092990f2f44effc3612b86eb1d50367322fe5821b0dbf9ace4c54c5",
-      "name": "LoadModelBody"
+      "blake3": "e9a02366eac1c54609d4c236baca65c9d2761a165b5f73c8b7cbe27b8ebee0f6",
+      "name": "Message",
+      "rust_path": null
     },
     {
-      "blake3": "50d104414cc1bd404f391cd6a73fd94bd3daa81537d48e24ed9fb01f48b5f1b8",
-      "name": "UnloadModelBody"
+      "blake3": "f03467170330a0c60d2ab6047fd07795e51e0962b7500c86e89b1fc4d43bf5ae",
+      "name": "LoadModelBody",
+      "rust_path": "::schematic_definitions::lmstudio::LoadModelBody"
     },
     {
-      "blake3": "8debff19ba09fd4ae949217667d001cefcabf09496b5588b7b240af6f93157e1",
-      "name": "DownloadModelBody"
+      "blake3": "ca2c083a67e5dc9b04da7313347431a096f8ec68eaaa152d48be5989987da9ae",
+      "name": "Integration",
+      "rust_path": null
     },
     {
-      "blake3": "2f1145e84d388d0de1f2c8b6288f959c0a7a39d7db21b83903327770f78b3ded",
-      "name": "DownloadStatusBody"
+      "blake3": "dbf70123a4670210bcf5dbf1ecce116af907e41d6428b52fcf946fce0a8d3cb0",
+      "name": "LoadConfig",
+      "rust_path": null
     },
     {
-      "blake3": "dda0ab525dec8578e92b0953f9e13de079c7f886e1ca3923a5d69e74991cea3f",
-      "name": "ListModelsResponse"
+      "blake3": "84879926966506f34bf9aa5faa2eef79673368fc5f3c10f70f2b70bd21bf2380",
+      "name": "UnloadModelBody",
+      "rust_path": "::schematic_definitions::lmstudio::UnloadModelBody"
     },
     {
-      "blake3": "3a299c7ec454929a74039702f0c93878897c4e02da6d60d8037d5f0ee160c273",
-      "name": "ModelInfo"
+      "blake3": "7325738e82d2f8d61f4a49e812f8ee5610d9e262309cc024f757c44e681f0399",
+      "name": "DownloadModelBody",
+      "rust_path": "::schematic_definitions::lmstudio::DownloadModelBody"
     },
     {
-      "blake3": "abc32bfd6f889cca6f4531a9cd0b048ada441709c2346eafb7554d5b5c7b8b3d",
-      "name": "Quantization"
+      "blake3": "d46008ea153192a77470e1e3ce6dc98e9c33f8bd3a8eda159946bfff55e8c41b",
+      "name": "DownloadStatusBody",
+      "rust_path": "::schematic_definitions::lmstudio::DownloadStatusBody"
     },
     {
-      "blake3": "b8f5b3fe529e683b8c7e809ff07d573eab91a25eefdfd35493d37e8d42adf613",
-      "name": "Capabilities"
+      "blake3": "62b08a68a3be6244955ac05fd8d046b7388e680828f1dfe4adee384eb2b3a846",
+      "name": "ListModelsResponse",
+      "rust_path": "::schematic_definitions::lmstudio::ListModelsResponse"
     },
     {
-      "blake3": "8aa8669ceefdbc01145bd7d51e73ad1d79c79337af526f1b5d2c3cfd68a3acb5",
-      "name": "LoadedInstance"
+      "blake3": "b226d1792d4f5bba62e523e1a6bb689685c4b920236c807c71ff5d37fdb830ea",
+      "name": "Capabilities",
+      "rust_path": "::schematic_definitions::lmstudio::Capabilities"
     },
     {
-      "blake3": "d2d243635f1ab8c43c74db3846292f8369cfeae46527bcbf7d7d79cc95f9d01c",
-      "name": "Stats"
+      "blake3": "33a49f6834bda9035f5934d523fc68e4a8869a2d787a1a14621e22f59da31df4",
+      "name": "LoadedInstance",
+      "rust_path": "::schematic_definitions::lmstudio::LoadedInstance"
     },
     {
-      "blake3": "729fe86ae24106fb935cb0aa19e8095a1ad4a93c562bafcdc7a3c9c7b472905d",
-      "name": "LoadModelResponse"
+      "blake3": "86e62779f3d82a759bd45df052fb3b071102483be41961b78fedfe0dae6ae876",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::lmstudio::ModelInfo"
     },
     {
-      "blake3": "dcfe31405264f0a7b99c3e7185e0e003ba53a70b8d4c6c1701a8f5e12d4690a3",
-      "name": "UnloadModelResponse"
+      "blake3": "c749e1208070f99fc7ef3173138a4b5ba94efda0dc6961c5137eb81d33ec8219",
+      "name": "Quantization",
+      "rust_path": "::schematic_definitions::lmstudio::Quantization"
     },
     {
-      "blake3": "8db88c185c77715951e764b0ca46093add96b882f361ba4a6eef4bf080a49804",
-      "name": "DownloadStatusResponse"
+      "blake3": "08f6e5d949a4da79640332beb2f8bd411f62f889c8b743f29c7b578e36a314b3",
+      "name": "Stats",
+      "rust_path": "::schematic_definitions::lmstudio::Stats"
     },
     {
-      "blake3": "45aa155b35488b0ada16771c7c0aea936d1190f79aa70a266559e86ef031e3f8",
-      "name": "OutputItem"
+      "blake3": "41f7507576d24812d518e101fe429f26d64b57d01661260bb228f043a35f6382",
+      "name": "LoadModelResponse",
+      "rust_path": "::schematic_definitions::lmstudio::LoadModelResponse"
+    },
+    {
+      "blake3": "18c6db3597d1cab1ef5e3c71f36533c444e20ae70095ccb7728a79df73411088",
+      "name": "UnloadModelResponse",
+      "rust_path": "::schematic_definitions::lmstudio::UnloadModelResponse"
+    },
+    {
+      "blake3": "e110d2d7f6fb6ccbfbf30551b256e9759463473835d6480bc5a27ab580dff507",
+      "name": "DownloadStatusResponse",
+      "rust_path": "::schematic_definitions::lmstudio::DownloadStatusResponse"
+    },
+    {
+      "blake3": "bf1415eae9b91ae301ca628310f4511a34eccda35b54ede6dedbe3708aae8b56",
+      "name": "OutputItem",
+      "rust_path": "::schematic_definitions::lmstudio::OutputItem"
     }
   ]
 }

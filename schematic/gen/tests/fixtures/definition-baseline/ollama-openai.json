@@ -13,13 +13,11 @@
         "headers": [],
         "id": "ChatCompletions",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/v1/chat/completions",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "OpenAIChatCompletionRequest"
+            "Named": "OpenAIChatCompletionRequest"
           }
         },
         "response": "Binary"
@@ -29,13 +27,11 @@
         "headers": [],
         "id": "Completions",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/v1/completions",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "OpenAICompletionRequest"
+            "Named": "OpenAICompletionRequest"
           }
         },
         "response": "Binary"
@@ -45,19 +41,16 @@
         "headers": [],
         "id": "Embeddings",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/v1/embeddings",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "OpenAIEmbeddingRequest"
+            "Named": "OpenAIEmbeddingRequest"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "OpenAIEmbeddingResponse"
+            "Named": "OpenAIEmbeddingResponse"
           }
         }
       },
@@ -66,14 +59,12 @@
         "headers": [],
         "id": "ListModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/v1/models",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "OpenAIListModelsResponse"
+            "Named": "OpenAIListModelsResponse"
           }
         }
       }
@@ -89,29 +80,28 @@
     "headers": [],
     "module_path": "ollama",
     "name": "OllamaOpenAI",
-    "pagination_exceptions": [],
     "request_id_header": null,
     "request_suffix": "OaiRequest",
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "79b0b13f6dad94e6b8978b4679d4d30258ed6443822458197c5ecaa737caeca3",
+    "api_metadata": "9510ce031e766aa0f75ba8bf3854ed243fd7d583cec65033dc8cb6844ff53185",
     "endpoints": [
       {
-        "blake3": "4934f6f7f0996460ae26833b19bb9e8ddd142c7e37d570945a3cc792d8e6e2be",
+        "blake3": "e92fa9ab0d9a6683b9178c773d06006490cee293200544793a396c08595fbcfa",
         "id": "ChatCompletions"
       },
       {
-        "blake3": "b0f3d2b592e9529ab17e6d6be13760c20ca7e31f33c2da49a6ec2d61c62ef634",
+        "blake3": "076808dd0c59e22c6443eb64660e843bcf365e69ad794a4e07ce8f5e7966afdb",
         "id": "Completions"
       },
       {
-        "blake3": "c4a6766242024886bbf50cef02e445dec341d5db99be464d586c3170c0d25d3a",
+        "blake3": "b2c77b0b0995dbedcd05fb53972802ebd2d63783058008d92829bc24bd065fe2",
         "id": "Embeddings"
       },
       {
-        "blake3": "7bec44db027c4f7172c8978996177e21fdf742133624ea1c643d12ab33d950a8",
+        "blake3": "efe5a032e9a263c57988f2ea4311088d66d1a44cd644308d6f1f746573bd744c",
         "id": "ListModels"
       }
     ]
@@ -144,108 +134,139 @@
   ],
   "registry": [
     {
-      "blake3": "dc44eadab874698275e2df3409191ebd0d519c9cdc984ae58a3624c3e7156940",
-      "name": "GenerateBody"
+      "blake3": "34bb9767dcfae55e14c49677c87c1ca9a52159005100277095c379b7c71db81c",
+      "name": "GenerateBody",
+      "rust_path": "::schematic_definitions::ollama::GenerateBody"
     },
     {
-      "blake3": "c868ac7df0fa6a2a22e2ced4f19bb81b7632df671433512f13376ffd7cc1fd4d",
-      "name": "ChatBody"
+      "blake3": "1c90304b157b698c80ce547c218f35869670c91de22257014bd3580c126190ba",
+      "name": "ModelOptions",
+      "rust_path": null
     },
     {
-      "blake3": "8b1b202ffd9edad5a9de29bac100420f4c38bf62ae10231971d6d8bc97ac3ccb",
-      "name": "EmbeddingsBody"
+      "blake3": "24f0dc310f534e411ca643bad26eb60c297ddfca5bb7847668be0b9f7128d198",
+      "name": "ChatBody",
+      "rust_path": "::schematic_definitions::ollama::ChatBody"
     },
     {
-      "blake3": "059964e18970e925ac3275941252190ae331170f1a4e1e3e5b78d6eedb7d19ab",
-      "name": "ShowModelBody"
+      "blake3": "66d1cf704e3545655063fb620c48a99f67a47009fdf57d4cfe41395a8e0c33d6",
+      "name": "Message",
+      "rust_path": "::schematic_definitions::ollama::Message"
     },
     {
-      "blake3": "eac265c2b42b5b6d18a3b105bba932480add5ee6b15473e760fb2a7b0a3f0e36",
-      "name": "PullModelBody"
+      "blake3": "ffe846a56174d23212e8f74bda8d4e9ee437a1bde773339b43411e4a7222bb9e",
+      "name": "EmbeddingsBody",
+      "rust_path": "::schematic_definitions::ollama::EmbeddingsBody"
     },
     {
-      "blake3": "aa13e4097177b683a4eb70a798196f7878c9d190984235817ac2dee3f96d7e51",
-      "name": "PushModelBody"
+      "blake3": "39789d390e91c582a97a851c30a32c0209d6b77ba682bf0b88ece5fa6f0f2a83",
+      "name": "ShowModelBody",
+      "rust_path": "::schematic_definitions::ollama::ShowModelBody"
     },
     {
-      "blake3": "0598f29fcff082fcd148ce11434a505c1c9e81389c0e2794d85510be16729382",
-      "name": "CopyModelBody"
+      "blake3": "f648bd1ea2c709e62d4c4027ecf3b11ad51f28604b1fe24d4b6e9b6c6a88d368",
+      "name": "PullModelBody",
+      "rust_path": "::schematic_definitions::ollama::PullModelBody"
     },
     {
-      "blake3": "dcd3051c01e99e8037089dc5069d61edf7d9c7c18fe3c153785518912734ef1e",
-      "name": "DeleteModelBody"
+      "blake3": "9ea4b79fab4fbfdd6683bac0baa46e8fe56652b1a9064a0285a33582d4d70835",
+      "name": "PushModelBody",
+      "rust_path": "::schematic_definitions::ollama::PushModelBody"
     },
     {
-      "blake3": "737df976665dea964cfad42102bb0265ace98507f5cb9bc9bb75be77223c230b",
-      "name": "CreateModelBody"
+      "blake3": "ae6ba418242949cb3a01ffe25cd7cb87abcce7ac6d374e4a42a78a7ca43088f6",
+      "name": "CopyModelBody",
+      "rust_path": "::schematic_definitions::ollama::CopyModelBody"
     },
     {
-      "blake3": "dc4c04b7ee798cb1ab17598f212e0b28e3d256ee77f6d854890d4b22b7d3c9ae",
-      "name": "Message"
+      "blake3": "de3c50d1a025151d0a106df3229acdbb2ba1a143798d64b77cb3a0d3ec2eb2cf",
+      "name": "DeleteModelBody",
+      "rust_path": "::schematic_definitions::ollama::DeleteModelBody"
     },
     {
-      "blake3": "cf7d2050415f5722288d736bef15dcfb936940de5a9f129c972c368aab2d7d14",
-      "name": "EmbeddingsResponse"
+      "blake3": "23dbbfa95c24115fb8ba15f5e1d6b892c0aac0cb20cab3f5630b77bb58693d26",
+      "name": "CreateModelBody",
+      "rust_path": "::schematic_definitions::ollama::CreateModelBody"
     },
     {
-      "blake3": "c451fe20f2f70aee70b6b382ed6c8c4e112baf57f31938b4f5f8eae000f5fe4d",
-      "name": "ListModelsResponse"
+      "blake3": "a1f3e0d8172cc068aedc8980b97474f60824ef781b4cde9c1d84e4751c4fc4dd",
+      "name": "EmbeddingsResponse",
+      "rust_path": "::schematic_definitions::ollama::EmbeddingsResponse"
     },
     {
-      "blake3": "bb3726361386fa5cc08cfe8b38fb609e4cc4abf54b5604f8fd62db8a33ef5c3f",
-      "name": "ModelInfo"
+      "blake3": "c2b4bb9df6dfe775afc2f4f263558131a5b881da9f6fdb8b52545a50f2bb269a",
+      "name": "ListModelsResponse",
+      "rust_path": "::schematic_definitions::ollama::ListModelsResponse"
     },
     {
-      "blake3": "15fce60cc2fe9c60030827f0713c424f284cbc4bd4585a1ef5eb265de2fb4aa3",
-      "name": "ModelDetails"
+      "blake3": "126c2c47ecbc0483086d1205a11a667e126d68057694bfa2a2a097efd48d0a37",
+      "name": "ModelDetails",
+      "rust_path": "::schematic_definitions::ollama::ModelDetails"
     },
     {
-      "blake3": "ea20dd78df289654cd7f81b0c93ce86acb7a33694ac80a4eaa536dc8f483b384",
-      "name": "ShowModelResponse"
+      "blake3": "0bcb3d76944f385c788db4751e82592fbf017a59f6f46f301c2fd1aa2b23c4e8",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::ollama::ModelInfo"
     },
     {
-      "blake3": "f8d4a0cc22a20c1768a94b84564e136850949f4345bc5b3dc95db5cf663172f4",
-      "name": "ListRunningModelsResponse"
+      "blake3": "0ae9031e2468faaf5138b77d09becd39c60b6de8b0524460adb30557d77cbc6e",
+      "name": "ShowModelResponse",
+      "rust_path": "::schematic_definitions::ollama::ShowModelResponse"
     },
     {
-      "blake3": "8f779b90f7d404be67ae1bfc882be117c728d518b9368c055455e139cb989d92",
-      "name": "RunningModel"
+      "blake3": "e5f89ff65b2b1347889b0fb2bd1597559fb6a9bb68c7da9926879b6a9b37ac88",
+      "name": "ListRunningModelsResponse",
+      "rust_path": "::schematic_definitions::ollama::ListRunningModelsResponse"
     },
     {
-      "blake3": "b2490d687e37cdbea651f09848e0140bee26aa9c8e6cdc7b016c57ea3d860974",
-      "name": "OpenAIChatCompletionRequest"
+      "blake3": "6cde031896040e5880a81d5134f1e6b741afd73dc0fe9b7853f7d9992b40cdfd",
+      "name": "RunningModel",
+      "rust_path": "::schematic_definitions::ollama::RunningModel"
     },
     {
-      "blake3": "4cd81829abc5b5a668ccd6a9a104d49dcf681e2d95d9300f862e74d64867ffff",
-      "name": "OpenAICompletionRequest"
+      "blake3": "1a1f6729582c26a31298cccb8186affc6df009199b5f0606db47d8a9841459e5",
+      "name": "OpenAIChatCompletionRequest",
+      "rust_path": "::schematic_definitions::ollama::OpenAIChatCompletionRequest"
     },
     {
-      "blake3": "6515e502828e64676cae303ce0afac2982dbb9795f63d1c5bf661fcf922b59e3",
-      "name": "OpenAIEmbeddingRequest"
+      "blake3": "a5d5394d268ddaea96b24be3d9bbe8469b7bef16e22dcd87699144ff5fd168a2",
+      "name": "OpenAIMessage",
+      "rust_path": "::schematic_definitions::ollama::OpenAIMessage"
     },
     {
-      "blake3": "bfdf59f0a26c199b312474c61f6d55b6ee6c6dd51656d1094e33eb81de25c137",
-      "name": "OpenAIMessage"
+      "blake3": "334921dc241c9f8e6c719023f427936109e00eefd4b2cbb38dbd37724796d519",
+      "name": "OpenAICompletionRequest",
+      "rust_path": "::schematic_definitions::ollama::OpenAICompletionRequest"
     },
     {
-      "blake3": "46acd67935ca3517ed5115d911e94645d40ebeb3a0bb19092bb613afb79c01bf",
-      "name": "OpenAIEmbeddingResponse"
+      "blake3": "be3f71c2fe952599a4ee03bf3edc793dd1a0e6109a7f3fd55478fc34e68c3390",
+      "name": "OpenAIEmbeddingRequest",
+      "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingRequest"
     },
     {
-      "blake3": "9e34971ede305cdee4ce9c43daafe7305372bb83972d41119aa8e8f6ab1aff30",
-      "name": "OpenAIEmbeddingData"
+      "blake3": "ffb01e193ca70ef2af2b5c8303818deca63559d88855750269e1fb19c51af2fb",
+      "name": "OpenAIEmbeddingResponse",
+      "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingResponse"
     },
     {
-      "blake3": "ef460bc5c8937f5b2dbd21ce5dccab36365312b9db4b5ff835cbe4a78be064a9",
-      "name": "OpenAIUsage"
+      "blake3": "5be7b7d58979a6181df5089fa69d9f06a46b722698ad7f26f8d435254f9da88a",
+      "name": "OpenAIEmbeddingData",
+      "rust_path": "::schematic_definitions::ollama::OpenAIEmbeddingData"
     },
     {
-      "blake3": "aa3e7bc4124872758d4db3820a917120073bcd977877bb3487f1f229d65501d8",
-      "name": "OpenAIListModelsResponse"
+      "blake3": "59e586737c640638d56552bddb7bff5f0a2001bc71e4e369fa72fa80812a0e42",
+      "name": "OpenAIUsage",
+      "rust_path": "::schematic_definitions::ollama::OpenAIUsage"
     },
     {
-      "blake3": "d8969e711d24cbfdbe212a8cd22d70200a5ce492717a80a61a54d7829fb6999c",
-      "name": "OpenAIModel"
+      "blake3": "46f2023b077f887c6a51bc2905adc921bcea3230fe11b8c9075b9c27e113c771",
+      "name": "OpenAIListModelsResponse",
+      "rust_path": "::schematic_definitions::ollama::OpenAIListModelsResponse"
+    },
+    {
+      "blake3": "f7a23707db69e4b7cc7333a7c6e5a0f6c4e0fd4e219bac4714d2661888f2981a",
+      "name": "OpenAIModel",
+      "rust_path": "::schematic_definitions::ollama::OpenAIModel"
     }
   ]
 }

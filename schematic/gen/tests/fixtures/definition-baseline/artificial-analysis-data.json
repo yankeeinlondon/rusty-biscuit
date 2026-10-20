@@ -18,14 +18,12 @@
         "headers": [],
         "id": "ListLlmModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/data/llms/models",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "LlmModelsResponse"
+            "Named": "LlmModelsResponse"
           }
         }
       },
@@ -34,11 +32,9 @@
         "headers": [],
         "id": "ListTextToImageModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Include a breakdown of Elo scores by category.",
@@ -48,15 +44,13 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/data/media/text-to-image",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "MediaModelsResponse"
+            "Named": "MediaModelsResponse"
           }
         }
       },
@@ -65,14 +59,12 @@
         "headers": [],
         "id": "ListImageEditingModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/data/media/image-editing",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "MediaModelsResponse"
+            "Named": "MediaModelsResponse"
           }
         }
       },
@@ -81,14 +73,12 @@
         "headers": [],
         "id": "ListTextToSpeechModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/data/media/text-to-speech",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "MediaModelsResponse"
+            "Named": "MediaModelsResponse"
           }
         }
       },
@@ -97,11 +87,9 @@
         "headers": [],
         "id": "ListTextToVideoModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Include a breakdown of Elo scores by category.",
@@ -111,15 +99,13 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/data/media/text-to-video",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "MediaModelsResponse"
+            "Named": "MediaModelsResponse"
           }
         }
       },
@@ -128,11 +114,9 @@
         "headers": [],
         "id": "ListImageToVideoModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Include a breakdown of Elo scores by category.",
@@ -142,15 +126,13 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/data/media/image-to-video",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "MediaModelsResponse"
+            "Named": "MediaModelsResponse"
           }
         }
       }
@@ -175,37 +157,36 @@
     "headers": [],
     "module_path": "artificial_analysis",
     "name": "ArtificialAnalysisData",
-    "pagination_exceptions": [],
     "request_id_header": null,
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "fc7873b041aba64f822fca06c139b2330d7a07f5d7449bdbf738a60b9c75c58d",
+    "api_metadata": "a7eaa1d4dc6853a6a1d8ef0ac0f14b42bd8b3e8db81e0484faf1a5afbdcf1000",
     "endpoints": [
       {
-        "blake3": "01f5c665e4f8245f4f9a788ba2e6a4894a00b8dc3db6b8f586b62220e157a1cd",
+        "blake3": "c527497040adc797c8de0309083cb142c6e0813151ae21814510f1f3766f6ad0",
         "id": "ListLlmModels"
       },
       {
-        "blake3": "c981f8f18c3765a10cad9a8fb95c8c1fdacaf309aaf34eabd849e3e5d81c0200",
+        "blake3": "3c680498ee6f0f690a8039a19df9e30bc77da384dc32d8f53e342e181d8af297",
         "id": "ListTextToImageModels"
       },
       {
-        "blake3": "6df1d0fc8aaefe4860ed3bfaa3d2e33e4ed3088102ace50c9e2a8be62db6d055",
+        "blake3": "df2d223224de9a9cf5400e38d7b3bdb311a3712155e702c33ae5f6c190652899",
         "id": "ListImageEditingModels"
       },
       {
-        "blake3": "46a6beb38b396beb11a9590754877781075711ab7a6c0df661c5f3f23dc6f256",
+        "blake3": "abe83d313c40dbde9c19c5778593126eef09f45fd1de84c10fe91aeb3a126227",
         "id": "ListTextToSpeechModels"
       },
       {
-        "blake3": "384318ab15cbc3dd015568e273abc0892070c80d3285040d13a518d0e388a888",
+        "blake3": "24363038ec8014d1613a86542e5317718611b2385ce8262615397da625e47102",
         "id": "ListTextToVideoModels"
       },
       {
-        "blake3": "390a9d2e5381f5fb7dbca0bd88e23a63d0eda80ad90e52007ea2209d3f1a333a",
+        "blake3": "e9b71c43bc205b468625228a1cf72f74fb23706e7d3303fd97e4b07c98735956",
         "id": "ListImageToVideoModels"
       }
     ]
@@ -250,56 +231,69 @@
   ],
   "registry": [
     {
-      "blake3": "ceb462d91f8cedf2e187546a61f770b122f6d83b675781bc46cd9255a917f4a6",
-      "name": "ModelCreator"
+      "blake3": "fc25ada9649460aeabd2bd5b14cef1a4b7dae29d1e5f25e4fbc2460eddf2fb06",
+      "name": "ModelCreator",
+      "rust_path": "::schematic_definitions::artificial_analysis::ModelCreator"
     },
     {
-      "blake3": "841385ee2100ecbc3c3deaa1048be607c82abb9bbea541605e202eabdc077762",
-      "name": "CategoryBreakdown"
+      "blake3": "f06cf720a3d599b8f0f714cdd304abcfbcacb5fd1da070c4a3cb43dba6fe2b2a",
+      "name": "CategoryBreakdown",
+      "rust_path": "::schematic_definitions::artificial_analysis::CategoryBreakdown"
     },
     {
-      "blake3": "c98584c4af490b5ca5040b85691cd2a8e1af9400b20769845cd5667754f25247",
-      "name": "LlmEvaluations"
+      "blake3": "e3f60015de298a69d6310da78b205f03ed03d63e3877b993db09cca7a2133680",
+      "name": "LlmEvaluations",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmEvaluations"
     },
     {
-      "blake3": "659cca9b650e0e4b2859a1c27ecd1fd63f950e5c0b0c72bbb76009f0986500ed",
-      "name": "LlmPricing"
+      "blake3": "ba5ced4558af4ba648e3d8bc28c6884ca13b7195d906265c96aac39a2e82a97b",
+      "name": "LlmPricing",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmPricing"
     },
     {
-      "blake3": "5314c32300175de78a7a098b96f5a0ecb41dd7e4c2deb90eae97593e8093509e",
-      "name": "LlmModel"
+      "blake3": "a7360203cc008f1287556f57935d28be3bcd21c9ed0c125a5a9b9e6568110356",
+      "name": "LlmModel",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmModel"
     },
     {
-      "blake3": "31b7208172549d7142d80279ab504d39bfdbceecdbb875f4a7f250a49cf42cf7",
-      "name": "PromptOptions"
+      "blake3": "a27b7a33d6224cd4c29ffa400a24bef1e0986ff1e0712f4ef014118550c21e3b",
+      "name": "PromptOptions",
+      "rust_path": "::schematic_definitions::artificial_analysis::PromptOptions"
     },
     {
-      "blake3": "ea13f8e6f19849d27159dabe5004202dc30ded4dabf170fdb0037ea095e5d6e6",
-      "name": "LlmModelsResponse"
+      "blake3": "e65f1f015a9cc0f1261f43e10b2531a512fb5da52a2a65485a84913c317a6c35",
+      "name": "LlmModelsResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::LlmModelsResponse"
     },
     {
-      "blake3": "a7ea9c6645ded29c4a514025e13aa5c326df20ea5ab623eca8b88121d51461f6",
-      "name": "MediaModel"
+      "blake3": "19cf97d77fdae6343b9b6d3ba73029f487026fbf7f4dfc689c013f04dd52cf11",
+      "name": "MediaModel",
+      "rust_path": "::schematic_definitions::artificial_analysis::MediaModel"
     },
     {
-      "blake3": "cc4b1528cb9ddf1ddd05e142a502f7b19e3918e0b8d801dab5256fdce5bb569b",
-      "name": "MediaModelsResponse"
+      "blake3": "24010320af07636a9b56bd4d72da340717eb2b6db7b9d152a3c91d495716c93a",
+      "name": "MediaModelsResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
     },
     {
-      "blake3": "5d09091b726dfa6f61acce39e7807746248c9f9fdad935e9f3f91b6783e4a097",
-      "name": "CritPtMessage"
+      "blake3": "d5237d155cb4158062e9991bd8e2785ec30d6e23b7085b144561a81c5ea82d14",
+      "name": "CritPtMessage",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtMessage"
     },
     {
-      "blake3": "2a83956c21f89264c31b6db3b4685aec3ed15a4551d293167678b49176bf0f9e",
-      "name": "CritPtSubmission"
+      "blake3": "3424e8b4dffad6e3b907389c3f3de7df9a529e7120fcff907a218b7a3a71c442",
+      "name": "CritPtSubmission",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtSubmission"
     },
     {
-      "blake3": "66fc9d7c9c7928a3ea47388860e99968a9815247adbd675a61fbcb5762d5556d",
-      "name": "CritPtEvaluateBody"
+      "blake3": "66640d274bd34fef32ad5657f73af9687fd412a312c7d03191023143da2bb4b4",
+      "name": "CritPtEvaluateBody",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateBody"
     },
     {
-      "blake3": "927598ccf488398fea67d59b23d1b816ab025ee44f8534afce79c3d370632a75",
-      "name": "CritPtEvaluateResponse"
+      "blake3": "51f1803bad8a7fd631235b94ab676db1049345e95bc624c0a5b8ec8e0c84b174",
+      "name": "CritPtEvaluateResponse",
+      "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateResponse"
     }
   ]
 }

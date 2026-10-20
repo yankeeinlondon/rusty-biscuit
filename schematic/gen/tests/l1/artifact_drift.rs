@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 
 use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
-use schematic_definitions::registry::get_registries_for_module;
 use schematic_gen::export::openapi::{operation_id_diagnostics, write_openapi_grouped};
 use schematic_gen::export::postman::{write_postman, write_postman_grouped};
 use schematic_gen::pipeline::{
@@ -50,12 +49,6 @@ fn generated_openapi_artifacts_are_up_to_date() {
     let grouped = apis_by_module();
 
     for (module_name, apis) in grouped.iter() {
-        let Some(registry) = get_registries_for_module(module_name) else {
-            // Modules without a registry are not exported as OpenAPI; skip.
-            eprintln!("Skipping module '{module_name}' for OpenAPI drift: no registry available");
-            continue;
-        };
-
         // Use the version of the first API as the document version (matches
         // the CLI driver's behavior for the grouped writer).
         let version = apis
@@ -66,7 +59,7 @@ fn generated_openapi_artifacts_are_up_to_date() {
 
         let api_refs: Vec<&_> = apis.iter().collect();
         let generated_path =
-            write_openapi_grouped(&api_refs, module_name, &registry, &options, temp_dir.path())
+            write_openapi_grouped(&api_refs, module_name, &options, temp_dir.path())
                 .unwrap_or_else(|e| {
                     panic!("Failed to generate OpenAPI for module '{module_name}': {e}")
                 });
@@ -313,12 +306,10 @@ fn committed_openapi_filenames_match_modules() {
     let openapi_dir = schematic_root().join("openapi");
     let grouped = apis_by_module();
 
+    // Every module carries its components, so every module is exported.
     let expected: HashSet<String> = grouped
-        .iter()
-        .filter_map(|(module_name, _)| {
-            // Only modules with a registry are exported as OpenAPI.
-            get_registries_for_module(module_name).map(|_| format!("{module_name}.json"))
-        })
+        .keys()
+        .map(|module_name| format!("{module_name}.json"))
         .collect();
 
     let actual: HashSet<String> = fs::read_dir(&openapi_dir)
@@ -381,12 +372,7 @@ fn generated_rust_artifacts_are_up_to_date() {
         no_openapi: true,
         no_postman: true,
     };
-    generate_batch(
-        &resolve_all_apis(),
-        &BatchScope::Complete,
-        &opts,
-        &get_registries_for_module,
-    )
+    generate_batch(&resolve_all_apis(), &BatchScope::Complete, &opts)
     .into_result()
     .unwrap();
 

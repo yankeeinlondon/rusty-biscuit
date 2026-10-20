@@ -299,7 +299,7 @@ impl schematic_define::Registration for CritPtEvaluateResponse {
 /// 429 rate-limit error body.
 ///
 /// **Documentation only.** This struct is intentionally **not** registered in
-/// `openapi_registry()` because no endpoint currently declares it as its
+/// the module group's schemas because no endpoint currently declares it as its
 /// `ApiResponse`. It exists to document the wire shape callers should expect
 /// when a 429 is returned (alongside the `Retry-After` header).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

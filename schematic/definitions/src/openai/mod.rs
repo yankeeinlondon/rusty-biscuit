@@ -7,15 +7,15 @@
 //! Regenerate with `schematic-gen import --input <spec> --api-name OpenAI --definitions-out <dir> --overlay crate::openai_pagination::apply`.
 mod types;
 pub use types::*;
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::*;
 /// Builds the OpenAI REST API definition.
 #[must_use]
 pub fn define_openai_api() -> RestApi {
-    module_group().expect("valid imported API").apis.remove(0)
+    module_group().expect("valid imported API").remove(0)
 }
 /// Assemble the API and its ordered schemas from one registration context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group(
         "::schematic_definitions::openai",
         |ctx| {
@@ -8829,9 +8829,4 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
         .endpoints(endpoints)
         .build()?;
     Ok(crate::openai_pagination::apply(api))
-}
-/// Ordered schemas from the same assembly used by the API factory.
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid imported API").registry
 }

@@ -10,7 +10,6 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use schematic_define::RestApi;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
-use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
 
 use crate::diagnostics::{Output, ValidationDiagnostic, has_errors};
 use crate::errors::GeneratorError;
@@ -20,9 +19,7 @@ use crate::output::{
     MutationPlan, PublicationReport, RustOutputRequest, Selection, expand_selection,
     prepare_export_output, prepare_rust_output,
 };
-use crate::validation::{
-    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
-};
+use crate::validation::{validate_openapi, validate_postman, validate_rust_client};
 
 /// List of available API names for error messages.
 const AVAILABLE_APIS: &str = "anthropic, artificial-analysis-data, artificial-analysis-critpt, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, samsung-smart-tv, unfolded-circle-core-rest, all";
@@ -225,7 +222,7 @@ pub fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Gener
     } else {
         BatchScope::Selection(vec![resolve_api(api_name)?.name])
     };
-    generate_batch(&resolve_all_apis(), &scope, opts, &get_registries_for_module).into_result()
+    generate_batch(&resolve_all_apis(), &scope, opts).into_result()
 }
 
 /// Generates every requested output for `scope` of the registry `apis`.
@@ -238,12 +235,12 @@ pub fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Gener
 /// when its own validation and ownership checks pass, so one output's
 /// failure never stops another. Diagnostics print to stderr as they are
 /// found, and the report names which outputs succeeded and which failed.
-/// `registry_for` supplies the OpenAPI schema registry of a module.
+/// Every API carries its own schema components ([`RestApi::schemas`]), which
+/// the Rust types and OpenAPI `components.schemas` are derived from.
 pub fn generate_batch(
     apis: &[RestApi],
     scope: &BatchScope,
     opts: &GenerateOpts<'_>,
-    registry_for: &dyn Fn(&str) -> Option<SchemaRegistry>,
 ) -> GenerationReport {
     let (openapi_out, postman_out) =
         resolve_export_defaults(opts.output, opts.openapi_out, opts.postman_out);
@@ -319,7 +316,7 @@ pub fn generate_batch(
             if let Some(dir) = openapi_out.as_deref().filter(|_| !opts.no_openapi) {
                 report
                     .outputs
-                    .push(publish_openapi(&exports, complete, dir, opts, registry_for));
+                    .push(publish_openapi(&exports, complete, dir, opts));
             }
             if let Some(dir) = postman_out.as_deref().filter(|_| !opts.no_postman) {
                 report
@@ -473,22 +470,9 @@ fn publish_openapi(
     complete: bool,
     openapi_dir: &str,
     opts: &GenerateOpts<'_>,
-    registry_for: &dyn Fn(&str) -> Option<SchemaRegistry>,
 ) -> OutputReport {
     let groups = export_groups(apis);
-    let mut diagnostics = validate_openapi(apis);
-    let mut registries = Vec::with_capacity(groups.len());
-    for (module_name, members) in &groups {
-        let registry = registry_for(module_name);
-        diagnostics.extend(validate_openapi_registry(
-            module_name,
-            members,
-            registry.as_ref(),
-        ));
-        registries.push(registry);
-    }
-
-    publish(Output::OpenApi, diagnostics, || {
+    publish(Output::OpenApi, validate_openapi(apis), || {
         let extension = match opts.openapi_format {
             OpenApiFormat::Json => "json",
             OpenApiFormat::Yaml => "yaml",
@@ -496,13 +480,9 @@ fn publish_openapi(
         // Build every module's document before writing any, so a merge or
         // operationId failure in one module leaves the whole root untouched.
         let mut files = Vec::with_capacity(groups.len());
-        for ((module_name, members), registry) in groups.iter().zip(registries) {
-            // Validation proved every module has a registry.
-            let Some(registry) = registry else {
-                continue;
-            };
+        for (module_name, members) in &groups {
             let options = openapi_export_options(members, opts.openapi_format, opts.openapi_version);
-            let document = build_openapi_grouped(members, module_name, &registry, &options)?;
+            let document = build_openapi_grouped(members, module_name, &options)?;
             files.push((
                 format!("{module_name}.{extension}"),
                 render_openapi_document(&document, opts.openapi_format.into())?,
@@ -587,18 +567,10 @@ pub fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
         );
     }
 
-    let module_name = crate::export::resolve_module_name(&api);
-    let mut openapi = validate_openapi(&apis);
-    openapi.extend(validate_openapi_registry(
-        &module_name,
-        &apis,
-        get_registries_for_module(&module_name).as_ref(),
-    ));
-
     let mut report = GenerationReport::default();
     for (output, diagnostics) in [
         (Output::Rust, validate_rust_client(&apis)),
-        (Output::OpenApi, openapi),
+        (Output::OpenApi, validate_openapi(&apis)),
         (Output::Postman, validate_postman(&apis)),
     ] {
         report.outputs.push(publish(output, diagnostics, || Ok(())));

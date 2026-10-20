@@ -1,13 +1,13 @@
-//! Cross-list invariants for the API registry dispatch.
+//! Cross-list invariants for the shipped API catalog.
 //!
-//! Several parallel lists must stay in lock-step: `apis_by_module` (the source
-//! of truth for defined APIs), `registry_key_for` (name -> key translation),
-//! and `get_registry` (key -> registry dispatch). This test drives every
-//! defined API through that chain and asserts the registry is present and
-//! complete, endpoint IDs are unique, and the base URL is parseable.
+//! `apis_by_module` is the source of truth for defined APIs and
+//! `registry_key_for` names each one. Every API must carry the schema
+//! components its references name, every API of a module group must carry
+//! the group's identical, complete components, endpoint IDs must be unique,
+//! and the base URL must be parseable.
 
 use schematic_definitions::apis_by_module;
-use schematic_definitions::registry::{get_registry, registry_key_for};
+use schematic_definitions::registry::registry_key_for;
 use std::collections::HashSet;
 
 /// A minimal "parseable URL" check that avoids pulling in a URL crate: require
@@ -21,24 +21,25 @@ fn base_url_is_parseable(base_url: &str) -> bool {
 
 #[test]
 fn every_api_satisfies_registry_invariants() {
+    let mut keys = HashSet::new();
     for (module, apis) in apis_by_module() {
-        for api in apis {
+        for api in &apis {
             let key = registry_key_for(&api.name);
+            assert!(keys.insert(key.clone()), "API {:?} (module {module:?}) reuses key {key:?}", api.name);
 
-            let registry = get_registry(&key).unwrap_or_else(|| {
-                panic!(
-                    "API {:?} (module {module:?}) resolved to key {key:?} but get_registry \
-                     returned None",
-                    api.name
-                )
+            api.validate_references().unwrap_or_else(|error| {
+                panic!("API {:?} has a reference outside api.schemas: {error}", api.name)
             });
-
-            registry.validate_completeness(&api).unwrap_or_else(|missing| {
-                panic!(
-                    "API {:?} registry is missing response types: {missing:?}",
-                    api.name
-                )
-            });
+            for endpoint in &api.endpoints {
+                for reference in endpoint.json_references() {
+                    assert!(
+                        api.rust_type(reference).is_some(),
+                        "API {:?} endpoint {:?} reference {reference:?} has no registered Rust type",
+                        api.name,
+                        endpoint.id
+                    );
+                }
+            }
 
             let mut seen = HashSet::new();
             for endpoint in &api.endpoints {
@@ -55,6 +56,15 @@ fn every_api_satisfies_registry_invariants() {
                 "API {:?} has unparseable base_url {:?}",
                 api.name,
                 api.base_url
+            );
+        }
+
+        for api in &apis[1..] {
+            assert!(
+                api.schemas == apis[0].schemas,
+                "module {module:?}: API {:?} carries different schemas than {:?}",
+                api.name,
+                apis[0].name
             );
         }
     }

@@ -54,18 +54,75 @@
         "headers": [],
         "id": "ListRepositoryTree",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [
+            {
+              "label": "keyset",
+              "strategy": {
+                "constants": [
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "pagination"
+                    },
+                    "value": "keyset"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "order_by"
+                    },
+                    "value": "id"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "sort"
+                    },
+                    "value": "asc"
+                  }
+                ],
+                "follow_up": null,
+                "kind": {
+                  "kind": "next_link",
+                  "next": {
+                    "from": "link_header",
+                    "rel": "next"
+                  },
+                  "prev": null,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "query",
+                      "name": "per_page"
+                    },
+                    "sent_default": null,
+                    "server_default": 20
+                  }
+                },
+                "partition": null,
+                "session": null,
+                "terminal_values": [],
+                "total": null
+              }
+            }
+          ],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -107,15 +164,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/repository/tree",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<TreeItem>"
+            "Array": {
+              "Named": "TreeItem"
+            }
           }
         }
       },
@@ -124,14 +181,26 @@
         "headers": [],
         "id": "GetRepositoryFile",
         "method": "GET",
-        "oauth_scopes": null,
-        "params": null,
-        "path": "/projects/{id}/repository/files/{file_path}?ref={git_ref}",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": null,
+              "explode": false,
+              "name": "ref",
+              "param_type": "String",
+              "required": true,
+              "rust_name": "git_ref",
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/projects/{id}/repository/files/{file_path}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "FileContent"
+            "Named": "FileContent"
           }
         }
       },
@@ -140,14 +209,12 @@
         "headers": [],
         "id": "GetProject",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Project"
+            "Named": "Project"
           }
         }
       },
@@ -156,18 +223,75 @@
         "headers": [],
         "id": "ListGroupProjects",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [
+            {
+              "label": "keyset",
+              "strategy": {
+                "constants": [
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "pagination"
+                    },
+                    "value": "keyset"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "order_by"
+                    },
+                    "value": "id"
+                  },
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "sort"
+                    },
+                    "value": "asc"
+                  }
+                ],
+                "follow_up": null,
+                "kind": {
+                  "kind": "next_link",
+                  "next": {
+                    "from": "link_header",
+                    "rel": "next"
+                  },
+                  "prev": null,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "query",
+                      "name": "per_page"
+                    },
+                    "sent_default": null,
+                    "server_default": 20
+                  }
+                },
+                "partition": null,
+                "session": null,
+                "terminal_values": [],
+                "total": null
+              }
+            }
+          ],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -245,15 +369,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/groups/{id}/projects",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Project>"
+            "Array": {
+              "Named": "Project"
+            }
           }
         }
       },
@@ -262,14 +386,12 @@
         "headers": [],
         "id": "GetBranch",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}/repository/branches/{branch}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Branch"
+            "Named": "Branch"
           }
         }
       },
@@ -278,18 +400,9 @@
         "headers": [],
         "id": "ListMergeRequests",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -322,15 +435,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/merge_requests",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<MergeRequest>"
+            "Array": {
+              "Named": "MergeRequest"
+            }
           }
         }
       },
@@ -339,14 +452,12 @@
         "headers": [],
         "id": "GetMergeRequest",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}/merge_requests/{merge_request_iid}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "MergeRequest"
+            "Named": "MergeRequest"
           }
         }
       },
@@ -355,18 +466,9 @@
         "headers": [],
         "id": "ListMergeRequestCommits",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -384,15 +486,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/merge_requests/{merge_request_iid}/commits",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Commit>"
+            "Array": {
+              "Named": "Commit"
+            }
           }
         }
       },
@@ -401,14 +503,12 @@
         "headers": [],
         "id": "ListMergeRequestChanges",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}/merge_requests/{merge_request_iid}/changes",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "MergeRequestChanges"
+            "Named": "MergeRequestChanges"
           }
         }
       },
@@ -417,18 +517,9 @@
         "headers": [],
         "id": "ListIssues",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -460,15 +551,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/issues",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Issue>"
+            "Array": {
+              "Named": "Issue"
+            }
           }
         }
       },
@@ -477,14 +568,12 @@
         "headers": [],
         "id": "GetIssue",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}/issues/{issue_iid}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Issue"
+            "Named": "Issue"
           }
         }
       },
@@ -493,18 +582,9 @@
         "headers": [],
         "id": "ListIssueNotes",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -522,15 +602,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/issues/{issue_iid}/notes",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Note>"
+            "Array": {
+              "Named": "Note"
+            }
           }
         }
       },
@@ -539,14 +619,27 @@
         "headers": [],
         "id": "ListIssueParticipants",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/projects/{id}/issues/{issue_iid}/participants",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<User>"
+            "Array": {
+              "Named": "User"
+            }
           }
         }
       },
@@ -555,18 +648,9 @@
         "headers": [],
         "id": "ListTags",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -584,15 +668,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/repository/tags",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Tag>"
+            "Array": {
+              "Named": "Tag"
+            }
           }
         }
       },
@@ -601,14 +685,12 @@
         "headers": [],
         "id": "GetTag",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}/repository/tags/{tag_name}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Tag"
+            "Named": "Tag"
           }
         }
       },
@@ -617,18 +699,9 @@
         "headers": [],
         "id": "ListReleases",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -646,15 +719,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/releases",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Release>"
+            "Array": {
+              "Named": "Release"
+            }
           }
         }
       },
@@ -663,14 +736,12 @@
         "headers": [],
         "id": "GetRelease",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}/releases/{tag_name}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Release"
+            "Named": "Release"
           }
         }
       },
@@ -679,14 +750,12 @@
         "headers": [],
         "id": "GetLatestRelease",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/projects/{id}/releases/permalink/latest",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Release"
+            "Named": "Release"
           }
         }
       },
@@ -695,18 +764,9 @@
         "headers": [],
         "id": "ListProjectPipelines",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 100,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "per_page"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -770,15 +830,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/projects/{id}/pipelines",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Pipeline>"
+            "Array": {
+              "Named": "Pipeline"
+            }
           }
         }
       }
@@ -810,244 +870,88 @@
     ],
     "module_path": "gitlab",
     "name": "GitLab",
-    "pagination_exceptions": [
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": null,
-          "items": {
-            "projection": [],
-            "record": [
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListIssueParticipants"
-      },
-      {
-        "collection": {
-          "alternates": [
-            {
-              "label": "keyset",
-              "strategy": {
-                "constants": [
-                  {
-                    "param": {
-                      "in": "query",
-                      "name": "pagination"
-                    },
-                    "value": "keyset"
-                  },
-                  {
-                    "param": {
-                      "in": "query",
-                      "name": "order_by"
-                    },
-                    "value": "id"
-                  },
-                  {
-                    "param": {
-                      "in": "query",
-                      "name": "sort"
-                    },
-                    "value": "asc"
-                  }
-                ],
-                "follow_up": null,
-                "kind": {
-                  "kind": "next_link",
-                  "next": {
-                    "from": "link_header",
-                    "rel": "next"
-                  },
-                  "prev": null,
-                  "size": {
-                    "adjustable": false,
-                    "max": 100,
-                    "min": 1,
-                    "param": {
-                      "in": "query",
-                      "name": "per_page"
-                    },
-                    "sent_default": null,
-                    "server_default": 20
-                  }
-                },
-                "partition": null,
-                "session": null,
-                "terminal_values": [],
-                "total": null
-              }
-            }
-          ],
-          "item_type": null,
-          "items": {
-            "projection": [],
-            "record": [
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "inherit"
-          }
-        },
-        "endpoint": "ListRepositoryTree"
-      },
-      {
-        "collection": {
-          "alternates": [
-            {
-              "label": "keyset",
-              "strategy": {
-                "constants": [
-                  {
-                    "param": {
-                      "in": "query",
-                      "name": "pagination"
-                    },
-                    "value": "keyset"
-                  },
-                  {
-                    "param": {
-                      "in": "query",
-                      "name": "order_by"
-                    },
-                    "value": "id"
-                  },
-                  {
-                    "param": {
-                      "in": "query",
-                      "name": "sort"
-                    },
-                    "value": "asc"
-                  }
-                ],
-                "follow_up": null,
-                "kind": {
-                  "kind": "next_link",
-                  "next": {
-                    "from": "link_header",
-                    "rel": "next"
-                  },
-                  "prev": null,
-                  "size": {
-                    "adjustable": false,
-                    "max": 100,
-                    "min": 1,
-                    "param": {
-                      "in": "query",
-                      "name": "per_page"
-                    },
-                    "sent_default": null,
-                    "server_default": 20
-                  }
-                },
-                "partition": null,
-                "session": null,
-                "terminal_values": [],
-                "total": null
-              }
-            }
-          ],
-          "item_type": null,
-          "items": {
-            "projection": [],
-            "record": [
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "inherit"
-          }
-        },
-        "endpoint": "ListGroupProjects"
-      }
-    ],
     "request_id_header": null,
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "a9ffb9bd7bef2aea4c15c8d0624b1594b79b8312072ac7772ffb399d4fc5328b",
+    "api_metadata": "06cbce7546b61762add14be09d83f8369dc8f8a5e914fd911f736579bb7d23b7",
     "endpoints": [
       {
-        "blake3": "7bca25c02ce21cb596687ad0381705a0f9322b433fd1d7188c8765441c27683a",
+        "blake3": "65fdb6bccc6608b0e83fe295931bab94d7f7888abe939b58c85e17c4b6c4ce11",
         "id": "ListRepositoryTree"
       },
       {
-        "blake3": "b7f491096ced46fd23fcc607600c6e554989fb58f1c7dd3f054c460fbe5d206b",
+        "blake3": "a381ae72320955cf9feb8fd87ecd75f4962523d24e592b9e5855ca7f417686f3",
         "id": "GetRepositoryFile"
       },
       {
-        "blake3": "efb424c97330223271ce92a65b8debf70cb24aea3d9ce2fe6b0fd753803ee96b",
+        "blake3": "62d55e7cc1aaeede3c1db4ccb242108a2957d2917081bcf9bb7a4e75232653d4",
         "id": "GetProject"
       },
       {
-        "blake3": "a8c5ecefa9ec4811d3c7adb77ab4a4298f1bc2a6d58c445d2e3a31f6ba427061",
+        "blake3": "fb4a0e64089c3009726494296a9f9bf1fb3b7d4e2f2d42790f7bf1c5699e76b2",
         "id": "ListGroupProjects"
       },
       {
-        "blake3": "dba9d2e066e162aad8e3b2d4351b54bc529cdde8bfda57bd244a5368d56b7b57",
+        "blake3": "137fc8d4db45637ed6d27d638a7ef5080d7bd211929822cf92ea650dfb4bddf2",
         "id": "GetBranch"
       },
       {
-        "blake3": "f95ae2819b5bf5b62151a54ea77c0de4679e5403e2433428ba2cec3f2b89bb2c",
+        "blake3": "17b12d281e31b7197d5ec466c1ed5a4252183fd5ae66f950a5c08d3983b0656d",
         "id": "ListMergeRequests"
       },
       {
-        "blake3": "b6bc2d4340749e1178543bfb2bb3c1e08c2ea67548ba3285851af4e7fa9d2506",
+        "blake3": "390bc273c842f464ddcd7be57e685c365fe6e181252b19fa82c3411b8f00cca3",
         "id": "GetMergeRequest"
       },
       {
-        "blake3": "5240465df50fce49e15d5a95f99937e1830755f1d2a02e24a9dad3d7ca771c6f",
+        "blake3": "379d5eee4f2b8d41b7188a2a9211c56229b205cb59f91183bf746853052b7da9",
         "id": "ListMergeRequestCommits"
       },
       {
-        "blake3": "bafb961af15ac3f8b39f123fa1bb81a3f5b6e1372de0f47e14e1062ce9fd6b84",
+        "blake3": "1a04bacc900ddd416bcef027c755441ffb1f47a32b3a644787cb5ebe58ea29c9",
         "id": "ListMergeRequestChanges"
       },
       {
-        "blake3": "71aaa6825bf4466815821bd8e754d2d3948de06d628b2174dbb211386f790518",
+        "blake3": "235c99b6f98241edfd5b0a2561e422a9f3d5d8e7568fe74c8d030ac8fd1eccc6",
         "id": "ListIssues"
       },
       {
-        "blake3": "b3f79fd386e971f232960fb33a8a72405b82487eefe18899e1a7e47ff50de6e9",
+        "blake3": "567e64070ace2a02539864c75889ef6033d86722cee89f44e0be769d21da7004",
         "id": "GetIssue"
       },
       {
-        "blake3": "066bd455c6b564d5e4a21ef8da09223a170b7bbe1811b447bd51b93617d8f03f",
+        "blake3": "754c5d843b2ea149ba97ff9175ae557848b7ceff4397f2980ccf593574d9fe5f",
         "id": "ListIssueNotes"
       },
       {
-        "blake3": "e7a364dc5260732d4fa199cad35a0992482843893634272cc63432c8de301390",
+        "blake3": "3ff67e85b330c3cab032d7e6765da1567d977847fdda1167c1c299e62778395e",
         "id": "ListIssueParticipants"
       },
       {
-        "blake3": "4334132ded59539f2f32e4cd0bb580443c578053a9bc58aedccd2426ee562c97",
+        "blake3": "1945b68efffe196d8c6439c15fed470bb94a69d625a5b11f1943c250a0324c47",
         "id": "ListTags"
       },
       {
-        "blake3": "70b96afc8819c5302b3cfda17bbebfd69b1c67cb4261639d356a7fb5468da779",
+        "blake3": "95c80cd14619647f91b8cfd96f08a88b3587fc15fb74dd71b1308b0c0d3df4ac",
         "id": "GetTag"
       },
       {
-        "blake3": "bab53333ef48d612d1ecf45fe93297f3efa2008db6e3549cdcffe8f7db37104e",
+        "blake3": "41b8cdc282d01a371fbce0d7b8846e44ed3c85404483571d298be20adbeeabd8",
         "id": "ListReleases"
       },
       {
-        "blake3": "8f81702d0c205630e6d0e1a2c84e35e9d598d8ce18bea0aa85063838599c6b9a",
+        "blake3": "97639b69f6d381701f2872e996a52619b930eee05c770ccf4ef0d851313b1729",
         "id": "GetRelease"
       },
       {
-        "blake3": "603dca0caee4d030ca13260c4e03e67db87d5868764e483759879c0a3845babb",
+        "blake3": "65259cc7c259d8e5ed66d3abec4d9914d69ec5883d4bdb4c00060b81d0e88d55",
         "id": "GetLatestRelease"
       },
       {
-        "blake3": "23a2c17a48548ef0c4dbb24e05d841302c75c35da1b03bf44307ba3b80045706",
+        "blake3": "b533b6516a074ae61d9e851036fc6e5b6e5e7a50d905d71c41ee707c0fdd8215",
         "id": "ListProjectPipelines"
       }
     ]
@@ -1155,7 +1059,7 @@
             }
           ],
           "list": {
-            "item_type": "TreeItem",
+            "item_type": "::schematic_definitions::gitlab::TreeItem",
             "items": {
               "projection": [],
               "record": [
@@ -1318,7 +1222,7 @@
             }
           ],
           "list": {
-            "item_type": "Project",
+            "item_type": "::schematic_definitions::gitlab::Project",
             "items": {
               "projection": [],
               "record": [
@@ -1422,7 +1326,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "MergeRequest",
+            "item_type": "::schematic_definitions::gitlab::MergeRequest",
             "items": {
               "projection": [],
               "record": [
@@ -1526,7 +1430,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Commit",
+            "item_type": "::schematic_definitions::gitlab::Commit",
             "items": {
               "projection": [],
               "record": [
@@ -1630,7 +1534,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Issue",
+            "item_type": "::schematic_definitions::gitlab::Issue",
             "items": {
               "projection": [],
               "record": [
@@ -1734,7 +1638,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Note",
+            "item_type": "::schematic_definitions::gitlab::Note",
             "items": {
               "projection": [],
               "record": [
@@ -1790,7 +1694,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "User",
+            "item_type": "::schematic_definitions::gitlab::User",
             "items": {
               "projection": [],
               "record": [
@@ -1851,7 +1755,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Tag",
+            "item_type": "::schematic_definitions::gitlab::Tag",
             "items": {
               "projection": [],
               "record": [
@@ -1955,7 +1859,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Release",
+            "item_type": "::schematic_definitions::gitlab::Release",
             "items": {
               "projection": [],
               "record": [
@@ -2065,7 +1969,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Pipeline",
+            "item_type": "::schematic_definitions::gitlab::Pipeline",
             "items": {
               "projection": [],
               "record": [
@@ -2117,96 +2021,139 @@
   ],
   "registry": [
     {
-      "blake3": "b1198c2ae134332f7cdb045e4a386d6bfe39fa40b4d74a5bce7e14bce50554c3",
-      "name": "TreeItem"
+      "blake3": "50c09cc8a50b39d42b25226e59b18b6f78c36d13e60971f635e486b266fabc54",
+      "name": "TreeItem",
+      "rust_path": "::schematic_definitions::gitlab::TreeItem"
     },
     {
-      "blake3": "bc63ff63239289ee978048bd05bb11758b8ed1e2affcc10a345c02e9e57ad88d",
-      "name": "Vec<TreeItem>"
+      "blake3": "44188c9ca85a095acff4c64e3265030469e0d4efb0f17073c404f3b00614671a",
+      "name": "FileContent",
+      "rust_path": "::schematic_definitions::gitlab::FileContent"
     },
     {
-      "blake3": "1dce9ad9ac181e7f798887edda01430d9a53ce1bb60dddbd549105fbb4c1913d",
-      "name": "FileContent"
+      "blake3": "c39b2370f0b5c84818aadd609d752f56f7791ae3d11466626623bdaade054f8c",
+      "name": "MergeRequest",
+      "rust_path": "::schematic_definitions::gitlab::MergeRequest"
     },
     {
-      "blake3": "2a41831b96158b72589ebb00a1016a9405fa103c7c40197fc9292a0f38ccbd7b",
-      "name": "MergeRequest"
+      "blake3": "378eaf50f80b4e259e8718e5d53c39dcad3ff58eb6fdc33fcef5c0bffa3c1b32",
+      "name": "Milestone",
+      "rust_path": null
     },
     {
-      "blake3": "40d529d58ef8b05c34477fc487eec95ad77fc254a1f118a1c1cae509b1b3e1c8",
-      "name": "Vec<MergeRequest>"
+      "blake3": "2e5d84d048d143420aa0514481ecfb8a264d497bb9331fe2fdb9055deb8e2139",
+      "name": "References",
+      "rust_path": null
     },
     {
-      "blake3": "749c4d4e2a746aa0ca895fab25391e8144a7ed1427ec04a53b160afbc0ccc8d4",
-      "name": "Commit"
+      "blake3": "ef6740b96dd4b9d0dd6ab3b16496b059ad0044d45eaf8c26b9e4ee4f0bddb2d7",
+      "name": "TimeStats",
+      "rust_path": null
     },
     {
-      "blake3": "24e6a24a2a43fbcd91760808e3f1ddfe0ddd063e56a68c35c3ac94d037cd9ede",
-      "name": "Vec<Commit>"
+      "blake3": "d3d3978b071ee2fbcecd21901775ea31b0c2191257d3387e22c259206847aa7d",
+      "name": "User",
+      "rust_path": "::schematic_definitions::gitlab::User"
     },
     {
-      "blake3": "ac1d82dc0b5c4b9a1a9e490872eb753908879f9ef4f977b34a9b122e7369708e",
-      "name": "MergeRequestChanges"
+      "blake3": "d88983b987ed7d0f0fcbd1a6b24d1fc8b8f63f28df172be7e7c795486a828aa6",
+      "name": "Commit",
+      "rust_path": "::schematic_definitions::gitlab::Commit"
     },
     {
-      "blake3": "19f6158b8df3a03b2260eb195803b3b6f6872c47ee6a3db4aadbf6dadfe1a3a4",
-      "name": "Issue"
+      "blake3": "7adb05ab7ab34588cefcfa43b716dffcd167a4afe143a5180a55c8a0d569951b",
+      "name": "MergeRequestChanges",
+      "rust_path": "::schematic_definitions::gitlab::MergeRequestChanges"
     },
     {
-      "blake3": "74323cab6ae13167e570d86916fb51fa6ec0c7cea42b3f59f18820aa6666faa4",
-      "name": "Vec<Issue>"
+      "blake3": "e54beb59c3538e882ed66ae9ebe472247439febe445507a31f8d8bda86e91a5f",
+      "name": "Diff",
+      "rust_path": null
     },
     {
-      "blake3": "15a5aea24b81b53fb2e16d0b5a3e75d7fb8ea5d3c566654bb7d72020e07df435",
-      "name": "Note"
+      "blake3": "0374c098794a0d6189c84615f3169f8324c3fde7a37e199717bd4a954b9cb84e",
+      "name": "Issue",
+      "rust_path": "::schematic_definitions::gitlab::Issue"
     },
     {
-      "blake3": "320843b56e3fdda3b59f10d5b37e0909b97929435f6916c117b873d9c83b055e",
-      "name": "Vec<Note>"
+      "blake3": "9f6fb97bbbfde77585bb5a708ee5d57c83caa21f5f895fb828043b3b9ff0fb9b",
+      "name": "TaskCompletionStatus",
+      "rust_path": null
     },
     {
-      "blake3": "3e2a37c1653970fc2baab8901026ec60a6728487c89a72482b35d208cddcdf91",
-      "name": "User"
+      "blake3": "935415cde7c62f525b5b1e75a73daf7d135f6cdf2635795d8d390bc3e3b1c072",
+      "name": "Note",
+      "rust_path": "::schematic_definitions::gitlab::Note"
     },
     {
-      "blake3": "5adc28b5adca662d345619f9d7b17d730668343744f664226813b6247e69b5e4",
-      "name": "Vec<User>"
+      "blake3": "75edd8b87c3a225ea26a5afea67a144ed682015afec29e02982fbcc042277107",
+      "name": "Branch",
+      "rust_path": "::schematic_definitions::gitlab::Branch"
     },
     {
-      "blake3": "8ca43fa7a30a0447b42c8b225e4cca6bb5e8d2cd0c844943a50174ac508fb1fa",
-      "name": "Branch"
+      "blake3": "505d1f6a1ba237de5fbfb61690b4dc465fe8d5f71595211f11e90f4753ac4d42",
+      "name": "Tag",
+      "rust_path": "::schematic_definitions::gitlab::Tag"
     },
     {
-      "blake3": "bbd2e1e63383baca85651c21febdabcb4c17004e8954ad2287e69d9c71bbbc0f",
-      "name": "Tag"
+      "blake3": "7c2dadb214b74d65a8ff4c301588b90ae9ec11e521f2e734e0bd4e434028e0b5",
+      "name": "TagCommit",
+      "rust_path": null
     },
     {
-      "blake3": "01386b6603fe41b17b5f2512bf27a0c716998f3834d26ae897691d50827d04c3",
-      "name": "Vec<Tag>"
+      "blake3": "ae88640fc207b50b0a9d30ed3214a8d2e10f91d26461911b0d3ec77d95f25b14",
+      "name": "TagRelease",
+      "rust_path": null
     },
     {
-      "blake3": "bcc238981d3dc2faf2c9b869cbb8653c840e0d0fafdb49d7ec4fd25d3acc4be9",
-      "name": "Release"
+      "blake3": "0d3b5166e7d75a84d93339f19ca751660fbb94ca799214c00c22280fc1235f7e",
+      "name": "Release",
+      "rust_path": "::schematic_definitions::gitlab::Release"
     },
     {
-      "blake3": "8d0e0efe740fb62cf0087b3abf113a65d3a09905d2bda3855d24347caa1518c0",
-      "name": "Vec<Release>"
+      "blake3": "39ca857c0bc00a37cba5e6d83040234558595f28b0d52ca9724e81adaa7972bf",
+      "name": "ReleaseAssets",
+      "rust_path": null
     },
     {
-      "blake3": "0067ac7f7e3ecd3a861b3b9625f111540eca6590349d265a1733d4f78d3b1171",
-      "name": "Project"
+      "blake3": "fdd7436b8edebeeb06364cc6e2b96f21f470bc12b51ee72ae84337c07e32f824",
+      "name": "ReleaseCommit",
+      "rust_path": null
     },
     {
-      "blake3": "12aa9b743d26d45b1870cddfc741a5fc37e35d55a22083665e38c8eec45e3c13",
-      "name": "Vec<Project>"
+      "blake3": "8dd4fc4856fe45bad99d12a81b1ec3868d0962168af43128b030911aad4a343f",
+      "name": "ReleaseEvidence",
+      "rust_path": null
     },
     {
-      "blake3": "84f19abaeb6255d1fe5ed55262cfa1a131e17c7f178b1065f2394b03d07558eb",
-      "name": "Pipeline"
+      "blake3": "21fb95df00fa72c9c3ec52793a364f0e3c3399e7658f26fb4fe44127b06b2746",
+      "name": "ReleaseLink",
+      "rust_path": null
     },
     {
-      "blake3": "821cbb14dc3f90f374ffc76511dca9951463d7338b7af8bbb010555f06aed151",
-      "name": "Vec<Pipeline>"
+      "blake3": "7fd6df0c2dd66d5fdd927f9dc1f3f0f19cbfd20e439bc9e78b39b6eb2469aab7",
+      "name": "ReleaseLinks",
+      "rust_path": null
+    },
+    {
+      "blake3": "059254e1ffd25928546bfdb8705984c74046f7ad00401847a54bae34e2e45453",
+      "name": "ReleaseSource",
+      "rust_path": null
+    },
+    {
+      "blake3": "af8e31ba8215b13e86da38c5273e82e9fb46ddfa7ef0158ecd168f02e86fc913",
+      "name": "Project",
+      "rust_path": "::schematic_definitions::gitlab::Project"
+    },
+    {
+      "blake3": "3aef71ac813ea96459763384cf46ebd982bc26486f9822d85915ae76163f7a55",
+      "name": "Namespace",
+      "rust_path": null
+    },
+    {
+      "blake3": "7012690b79edb9721b70780816adcb1d3da0e33dcdeeb6eb13c2e943c2fbde0c",
+      "name": "Pipeline",
+      "rust_path": "::schematic_definitions::gitlab::Pipeline"
     }
   ]
 }

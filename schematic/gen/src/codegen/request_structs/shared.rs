@@ -7,15 +7,28 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
-use schematic_define::{EndpointParams, ParamDef, QueryParamType};
+use schematic_define::{EndpointParams, ParamDef, QueryParamType, RestApi, TypeRef};
 
-/// Renders a schema type name as Rust type tokens.
+/// The Rust spelling of a JSON body reference, resolved through the API's
+/// own [`RestApi::schemas`].
 ///
-/// Names arriving from an imported spec are not always bare identifiers: a
-/// schema with no `$ref` maps to the path `serde_json::Value`, and generic
-/// spellings such as `Vec<Model>` also occur. Both are valid input to
-/// [`syn::parse_str`] but panic `format_ident!`, so every site that turns a
-/// `Schema::type_name` into tokens must go through here.
+/// A reference that does not resolve is spelled as a `compile_error!` type
+/// naming it, so generated code that bypassed validation fails to compile at
+/// that type instead of silently naming some other type.
+pub fn json_type_name(api: &RestApi, reference: &TypeRef) -> String {
+    api.rust_type(reference).unwrap_or_else(|| {
+        let message = format!("unresolved schema reference {reference:?} in API {}", api.name);
+        format!("::core::compile_error!({message:?})")
+    })
+}
+
+/// Renders a Rust type spelling as tokens.
+///
+/// Spellings are not always bare identifiers: component paths are
+/// qualified (`crate::types::Model`), free-form JSON is
+/// `::serde_json::Value`, and wrappers are generic (`::std::vec::Vec<..>`).
+/// All are valid input to [`syn::parse_str`] but panic `format_ident!`, so
+/// every site that turns a type spelling into tokens must go through here.
 pub fn type_name_to_tokens(type_name: &str) -> TokenStream {
     match syn::parse_str::<syn::Type>(type_name) {
         Ok(ty) => quote! { #ty },

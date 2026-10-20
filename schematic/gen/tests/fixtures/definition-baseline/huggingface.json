@@ -17,14 +17,14 @@
         "headers": [],
         "id": "ListModels",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/models",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<ModelInfo>"
+            "Array": {
+              "Named": "ModelInfo"
+            }
           }
         }
       },
@@ -33,14 +33,12 @@
         "headers": [],
         "id": "GetModel",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/models/{+repo_id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ModelInfo"
+            "Named": "ModelInfo"
           }
         }
       },
@@ -49,14 +47,14 @@
         "headers": [],
         "id": "ListModelFiles",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/models/{+repo_id}/tree/{revision}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepoFile>"
+            "Array": {
+              "Named": "RepoFile"
+            }
           }
         }
       },
@@ -65,14 +63,12 @@
         "headers": [],
         "id": "GetModelFile",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/models/{+repo_id}/blob/{revision}/{+path}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "FileMetadata"
+            "Named": "FileMetadata"
           }
         }
       },
@@ -81,14 +77,14 @@
         "headers": [],
         "id": "ListModelCommits",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/models/{+repo_id}/commits/{revision}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Commit>"
+            "Array": {
+              "Named": "Commit"
+            }
           }
         }
       },
@@ -97,7 +93,6 @@
         "headers": [],
         "id": "GetModelReadme",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/models/{+repo_id}/resolve/{revision}/README.md",
         "request": null,
@@ -108,14 +103,28 @@
         "headers": [],
         "id": "ListModelDiscussions",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "Discussion",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "discussions"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/models/{+repo_id}/discussions",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "DiscussionList"
+            "Named": "DiscussionList"
           }
         }
       },
@@ -124,7 +133,6 @@
         "headers": [],
         "id": "GetModelCard",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/models/{+repo_id}/resolve/{revision}/model_card.md",
         "request": null,
@@ -135,14 +143,14 @@
         "headers": [],
         "id": "ListDatasets",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/datasets",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<DatasetInfo>"
+            "Array": {
+              "Named": "DatasetInfo"
+            }
           }
         }
       },
@@ -151,14 +159,12 @@
         "headers": [],
         "id": "GetDataset",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/datasets/{+repo_id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "DatasetInfo"
+            "Named": "DatasetInfo"
           }
         }
       },
@@ -167,14 +173,14 @@
         "headers": [],
         "id": "ListDatasetFiles",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/datasets/{+repo_id}/tree/{revision}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepoFile>"
+            "Array": {
+              "Named": "RepoFile"
+            }
           }
         }
       },
@@ -183,14 +189,12 @@
         "headers": [],
         "id": "GetDatasetFile",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/datasets/{+repo_id}/blob/{revision}/{+path}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "FileMetadata"
+            "Named": "FileMetadata"
           }
         }
       },
@@ -199,14 +203,14 @@
         "headers": [],
         "id": "ListDatasetCommits",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/datasets/{+repo_id}/commits/{revision}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Commit>"
+            "Array": {
+              "Named": "Commit"
+            }
           }
         }
       },
@@ -215,7 +219,6 @@
         "headers": [],
         "id": "GetDatasetReadme",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/datasets/{+repo_id}/resolve/{revision}/README.md",
         "request": null,
@@ -226,14 +229,14 @@
         "headers": [],
         "id": "ListSpaces",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/spaces",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<SpaceInfo>"
+            "Array": {
+              "Named": "SpaceInfo"
+            }
           }
         }
       },
@@ -242,14 +245,12 @@
         "headers": [],
         "id": "GetSpace",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/spaces/{+repo_id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "SpaceInfo"
+            "Named": "SpaceInfo"
           }
         }
       },
@@ -258,14 +259,14 @@
         "headers": [],
         "id": "ListSpaceFiles",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/spaces/{+repo_id}/tree/{revision}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepoFile>"
+            "Array": {
+              "Named": "RepoFile"
+            }
           }
         }
       },
@@ -274,14 +275,12 @@
         "headers": [],
         "id": "GetSpaceFile",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/spaces/{+repo_id}/blob/{revision}/{+path}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "FileMetadata"
+            "Named": "FileMetadata"
           }
         }
       },
@@ -290,19 +289,16 @@
         "headers": [],
         "id": "CreateRepo",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/create",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "CreateRepoBody"
+            "Named": "CreateRepoBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "RepoUrl"
+            "Named": "RepoUrl"
           }
         }
       },
@@ -311,19 +307,16 @@
         "headers": [],
         "id": "DeleteRepo",
         "method": "DELETE",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/delete",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "DeleteRepoBody"
+            "Named": "DeleteRepoBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -332,19 +325,16 @@
         "headers": [],
         "id": "UpdateRepoSettings",
         "method": "PUT",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{repo_type}/{+repo_id}/settings",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "UpdateRepoSettingsBody"
+            "Named": "UpdateRepoSettingsBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -353,19 +343,16 @@
         "headers": [],
         "id": "MoveRepo",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/move",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "MoveRepoBody"
+            "Named": "MoveRepoBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -374,14 +361,12 @@
         "headers": [],
         "id": "WhoAmI",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/whoami-v2",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "UserInfo"
+            "Named": "UserInfo"
           }
         }
       },
@@ -390,14 +375,12 @@
         "headers": [],
         "id": "GetUser",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/users/{username}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "UserInfo"
+            "Named": "UserInfo"
           }
         }
       },
@@ -406,14 +389,14 @@
         "headers": [],
         "id": "ListUserRepos",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/users/{username}/repos",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepoInfo>"
+            "Array": {
+              "Named": "RepoInfo"
+            }
           }
         }
       },
@@ -422,14 +405,14 @@
         "headers": [],
         "id": "GetUserCollections",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/users/{username}/collections",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Collection>"
+            "Array": {
+              "Named": "Collection"
+            }
           }
         }
       }
@@ -455,137 +438,116 @@
     "headers": [],
     "module_path": "huggingface",
     "name": "HuggingFaceHub",
-    "pagination_exceptions": [
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "Discussion",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "discussions"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListModelDiscussions"
-      }
-    ],
     "request_id_header": null,
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "7698d0ae5a70e5b3da64462a6f3efe14259be01a5cb7bdad0858258462943424",
+    "api_metadata": "4e2f155527392dd6d1680f5ef8e3cc6220afdcc4b153da75f850c08124726406",
     "endpoints": [
       {
-        "blake3": "264553886269793d3dd504c833ca7169a8e14c0d6abe624603c241f381b65f6e",
+        "blake3": "9edc77953111386e2a14bfc57395df4d5531261161e540a28a76cd41d59ce06b",
         "id": "ListModels"
       },
       {
-        "blake3": "4553e6ad66ab897bde12a54ed536939352c1a44405bb7d6eba281726cb09c2ad",
+        "blake3": "a38001703e0c96ed92bd52c6c88de7d042006286f050807da0aa44270b2deb2b",
         "id": "GetModel"
       },
       {
-        "blake3": "286fed96f916754d9d848dad2b6b7f1abbccc88e0fe69e936378f338e2ecb5ac",
+        "blake3": "363c1b2236d9f86aa93d2d2dbcb7fce6166b2ed345105db965fcfef2f8a75cba",
         "id": "ListModelFiles"
       },
       {
-        "blake3": "fb48b778c60b78c1fff150dc1eb075493f8c3119039acb049d4afd806cd2c029",
+        "blake3": "83d57afdae7f21f74767bb836cea6d959214a5097b044148b321aa9a2fac78ba",
         "id": "GetModelFile"
       },
       {
-        "blake3": "ff0c6cfd89515af5db1830ae5483bf926ca87f9a0ef45b9ebce76ec15db26861",
+        "blake3": "5f0d8410cac7816a67f442fb45f025a748e1685f97b8a8b08be0af1c84479794",
         "id": "ListModelCommits"
       },
       {
-        "blake3": "fca80f34d6f10a3db26556238f5568c240bdbcf1b97a6c9593ba5afef879cf20",
+        "blake3": "06a6d78e79459b5b1665aa33c9194f8baf546c814f4ee7961f3b3abff3ef89e3",
         "id": "GetModelReadme"
       },
       {
-        "blake3": "b26b4005e41a429317e1464df3282bccb8909eb488aa506384412f21f7ff34e8",
+        "blake3": "046143c4bfd81584c3e3275f6919162ec6fdc1ddd35741a6770faad2aac8de21",
         "id": "ListModelDiscussions"
       },
       {
-        "blake3": "61330f50170377593a897c87522119bd07876298acb2d1c2dfb0143ffaa45fdc",
+        "blake3": "177fc6c9b1c5a6edb368f279745b10fede142c1ed56c4e443ba37817935b4ad9",
         "id": "GetModelCard"
       },
       {
-        "blake3": "6c434f88b6fec6bfa3ccff5abb9e1faff24c6105736cb69ec79a57a8052196ec",
+        "blake3": "c4911fecd040ab3358230802208cbb5326b665878bf9a0707ff8b96f71aa16e0",
         "id": "ListDatasets"
       },
       {
-        "blake3": "706321759e48cbcb9cc3434991dcef4342c180128c2e089526f310bc41ea9ee7",
+        "blake3": "19642d3d969f92765b517ccf936e15dcea6421b61af8a3546a6b379a689cc4f4",
         "id": "GetDataset"
       },
       {
-        "blake3": "1514636ad8f85b9c2ccd5d23a4d17968e2e34763398f7292f1b39416d2345709",
+        "blake3": "e23e0235dad5cc61a0f7491cae97e32401feff9a3168c1c620463d6210e433ff",
         "id": "ListDatasetFiles"
       },
       {
-        "blake3": "e53eb030aaa505af60efe50d170f6b1d5881f32afbf4ee724211c24dc7b38367",
+        "blake3": "e7ca48908d95179250f3ca1454b7076fdf3c13ee1683e18df6647a16ad3bf674",
         "id": "GetDatasetFile"
       },
       {
-        "blake3": "dbd56419b8ba8c89e9ea8e97817d053ac353b8c767794112b5b812fb249ae01c",
+        "blake3": "09a69d0ac348b9bc628957a3c801e8af6f32d35e26e0c2889669977b30774ce7",
         "id": "ListDatasetCommits"
       },
       {
-        "blake3": "42381ff5a388b022396b27b7fa6f59fe97788f8c186116da468a10bcbceba306",
+        "blake3": "ffed7f945273e51c94a8db176fd570e8db93e90706d8c826500c9bb8d2999213",
         "id": "GetDatasetReadme"
       },
       {
-        "blake3": "4a92578f6e7c44d0e54b029bb1b333e83aab02653c775eb30e99822c1b0da8a3",
+        "blake3": "8460a3174b93d20be64988f424a502eef669f56ad35bcc37ca23ebb2edeedb71",
         "id": "ListSpaces"
       },
       {
-        "blake3": "35c888af4ebd18f83d266c8b96af9d4b7561cb76ebb3b7d6ab2f92ac19dd3ba3",
+        "blake3": "26133226baedea1c0cfab0f5c9c86d151a8566173f359a94469b7e4276e8665e",
         "id": "GetSpace"
       },
       {
-        "blake3": "2fdbc143e66bb81cf4474baf59179cbc35c525c93a4d59da3b87ece4dd029fc8",
+        "blake3": "32bac85420c1fddc8bbc2a0bf739e8839a156c2f80f499c4e6872d991e37cab2",
         "id": "ListSpaceFiles"
       },
       {
-        "blake3": "7e1ef83b7cb9ab6348bb61e1b8d90db51cbf9e5feeae0b237439fc3c01bd0e57",
+        "blake3": "2f66f1b90aa9100592f883d0c4eaafa9ec3fa30bcb7d75fee7b331032ce45706",
         "id": "GetSpaceFile"
       },
       {
-        "blake3": "3a8f89684df58484867794e83633abe1f8de9390921acc05fceef6159c89aad4",
+        "blake3": "832c1808a7bd15312c56dd8c82afeb8e1d49bfea8b1784f1fa9700362094df7a",
         "id": "CreateRepo"
       },
       {
-        "blake3": "ee087f23c517656123b74b3e03c1d3f80d745304f5db28b274a61196815149c2",
+        "blake3": "06e3abadb70def85df285792c3e5713d2c7e78f27cc93dddd932d4e182583368",
         "id": "DeleteRepo"
       },
       {
-        "blake3": "0536e0f5078bd3111a40352fc43fb90efaf76266a08c49bb7199f65d500c2767",
+        "blake3": "1ed9cd3a5417d574e14b8c78e8342847791638558011c68753c0c76642953e14",
         "id": "UpdateRepoSettings"
       },
       {
-        "blake3": "d270b485fd24c4bcd6550c1bf99b5ed262f9839411ebdda4382c819cc576cae3",
+        "blake3": "21e4503103386c65719efae486e5b103c9bc79a56c21aadec39711eea233181c",
         "id": "MoveRepo"
       },
       {
-        "blake3": "f5673d6df32612a5aee92278dca07760632ada47a2b0c48c22d1b0edc651ce1d",
+        "blake3": "5e094e852f46236229c5e5687d078e5f33fe3e4903907c0de7caedebaaadbdaa",
         "id": "WhoAmI"
       },
       {
-        "blake3": "be0a4306b26fa9fc45af39906dc93b414b20fa0970a9160906a09f63085f6b02",
+        "blake3": "cfb5c8aa0a5751d1b1084ee7747a35c687b3313a9f1f1470257b7887a375556b",
         "id": "GetUser"
       },
       {
-        "blake3": "9c8b8e673e2841494f21386e7b7652d89eb2ad259847fab2269ba3051431c0a1",
+        "blake3": "9a6dac85ec7df7cc0423f90b60d6a665e68f7adaf7f2872e5314bdd7c7b8dad3",
         "id": "ListUserRepos"
       },
       {
-        "blake3": "fdf7d91b6e3f3a7238a2574d3d30722e1c2784fb849801eccf6e80624953f7b6",
+        "blake3": "20757a05b501aeb4f2b977b9689b822ceb5596001670fc417ed99e88dbcbe148",
         "id": "GetUserCollections"
       }
     ]
@@ -598,7 +560,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "ModelInfo",
+            "item_type": "::schematic_definitions::huggingface::ModelInfo",
             "items": {
               "projection": [],
               "record": [
@@ -623,7 +585,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "RepoFile",
+            "item_type": "::schematic_definitions::huggingface::RepoFile",
             "items": {
               "projection": [],
               "record": [
@@ -648,7 +610,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "Commit",
+            "item_type": "schematic_definitions::huggingface::Commit",
             "items": {
               "projection": [],
               "record": [
@@ -701,7 +663,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "DatasetInfo",
+            "item_type": "::schematic_definitions::huggingface::DatasetInfo",
             "items": {
               "projection": [],
               "record": [
@@ -726,7 +688,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "RepoFile",
+            "item_type": "::schematic_definitions::huggingface::RepoFile",
             "items": {
               "projection": [],
               "record": [
@@ -751,7 +713,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "Commit",
+            "item_type": "schematic_definitions::huggingface::Commit",
             "items": {
               "projection": [],
               "record": [
@@ -776,7 +738,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "SpaceInfo",
+            "item_type": "::schematic_definitions::huggingface::SpaceInfo",
             "items": {
               "projection": [],
               "record": [
@@ -801,7 +763,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "RepoFile",
+            "item_type": "::schematic_definitions::huggingface::RepoFile",
             "items": {
               "projection": [],
               "record": [
@@ -862,7 +824,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "RepoInfo",
+            "item_type": "::schematic_definitions::huggingface::RepoInfo",
             "items": {
               "projection": [],
               "record": [
@@ -881,7 +843,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "Collection",
+            "item_type": "::schematic_definitions::huggingface::Collection",
             "items": {
               "projection": [],
               "record": [
@@ -896,80 +858,224 @@
   ],
   "registry": [
     {
-      "blake3": "161d4434d95f405ccf0c3ec0271a989924769c4349243a45f1d3b21926bda688",
-      "name": "CreateRepoBody"
+      "blake3": "232b6981fac0a53db5769603b92afb9be7b7a64211d10737aed74e10619578be",
+      "name": "CreateRepoBody",
+      "rust_path": "::schematic_definitions::huggingface::CreateRepoBody"
     },
     {
-      "blake3": "c1c71266afb5b473c7a94bfc866ceb505a211172931291c80ca7e39a7fcae431",
-      "name": "DeleteRepoBody"
+      "blake3": "f355ddc1bac05c715fdc84db982b9db78069e9bec959886ce22f96b2907d934c",
+      "name": "RepoType",
+      "rust_path": null
     },
     {
-      "blake3": "d4ace44d2e061f7083f4f9cfa45fcf37bceb3b396e23bf92cce2bd341ccf04fe",
-      "name": "MoveRepoBody"
+      "blake3": "a4faf2ce47c1acd63192438e924d16953b73ed3459e89cb513770816283df05f",
+      "name": "SpaceHardware",
+      "rust_path": null
     },
     {
-      "blake3": "dd179f0d47c4c9cbe824f8de35e20c1e05679903a1f5b28f821d0c9916526000",
-      "name": "UpdateRepoSettingsBody"
+      "blake3": "f911042ec67ddf74d8d459469c50a5cd350922df5c7f4376e7f4313f33b94f85",
+      "name": "SpaceSdk",
+      "rust_path": null
     },
     {
-      "blake3": "20458d12449d6ee752a121a6154ec1d7cf20b82739759951cff46bf0b16d132d",
-      "name": "Vec<ModelInfo>"
+      "blake3": "b38d7176f750ce273a8e3f6cae7a9ed99fe9c4aa45ab40f774b3652ff8327f1f",
+      "name": "SpaceSecret",
+      "rust_path": null
     },
     {
-      "blake3": "25b6a50d249f64aa5016c77f0832ccf36595bd8f0c89bae00dd96d63cae1933c",
-      "name": "ModelInfo"
+      "blake3": "456c63cf074f66a2bb5401df563fd4bc1f7782a7f6c38de9bdf25b2da51e3720",
+      "name": "SpaceVariable",
+      "rust_path": null
     },
     {
-      "blake3": "855390323cdd7e27ab1376e816b80659fffba9c4456e3fbd54865bff483ac321",
-      "name": "Vec<RepoFile>"
+      "blake3": "ffabf169ed8d775930c463224a39561f4f310116efd604c0d53110a0da91b77f",
+      "name": "DeleteRepoBody",
+      "rust_path": "::schematic_definitions::huggingface::DeleteRepoBody"
     },
     {
-      "blake3": "05f4891fbe17958bbba7273ad422f50074e6ba4e8a878eac79c0fcf333f8061f",
-      "name": "FileMetadata"
+      "blake3": "c221ea8e2a847b3d7ba248c84268cae59d57ad2ce33cf3fbe999f88b8ba05b79",
+      "name": "MoveRepoBody",
+      "rust_path": "::schematic_definitions::huggingface::MoveRepoBody"
     },
     {
-      "blake3": "ea34f493468ac303a986aac37669e614973da96e58f9acc11d08e0ba10b4a675",
-      "name": "Vec<Commit>"
+      "blake3": "bc7e81cd7ebb052bcb6ae3da78176d597c3c0d61b17060ec6268beb640345f31",
+      "name": "UpdateRepoSettingsBody",
+      "rust_path": "::schematic_definitions::huggingface::UpdateRepoSettingsBody"
     },
     {
-      "blake3": "47dbc32e1c675da722d8ed7509ffee2127f986140c5866af6d1c26599eaec77e",
-      "name": "DiscussionList"
+      "blake3": "29822069f3c3dcddac1426e6709a31217ab6be8febee40a9b76c0cf51f571c79",
+      "name": "GatedStatus",
+      "rust_path": null
     },
     {
-      "blake3": "ac82554e999113c4d8276aeff7294d4e3b334a0b5c01ed59b32fd9d0a460eddb",
-      "name": "Vec<DatasetInfo>"
+      "blake3": "18090245d6b129c7287297440041a22274dd2d5b05a32ed79273d748de4414b3",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::huggingface::ModelInfo"
     },
     {
-      "blake3": "b02b679455564306d822aecdb1a6a5afc4aae82c3b34a89dc4976547b41606bc",
-      "name": "DatasetInfo"
+      "blake3": "76a9266cab83b13cf1f3d4f802743ebb69b29c7acf620538b2d6df95c41ca193",
+      "name": "CardData",
+      "rust_path": null
     },
     {
-      "blake3": "91c33eb53442b36f418bbc9591fb049aafb9fc3791898c354ea81302109f8b93",
-      "name": "Vec<SpaceInfo>"
+      "blake3": "d726e735b30d9da24e6db6dfd5bf4c5a5b589250a3fd8bb642a4d54b6ead3546",
+      "name": "Co2Emissions",
+      "rust_path": null
     },
     {
-      "blake3": "5dc7ed7bc31715a2d1a531f52f18ed8af2207bb93b77806d7a85e5acd770a80b",
-      "name": "SpaceInfo"
+      "blake3": "1dde48c91c8e5f480af06eb15cbb9b228d5de8806700710ab5c0dba2ebc6e842",
+      "name": "DatasetRef",
+      "rust_path": null
     },
     {
-      "blake3": "f8326b6d5b3a2e0fa085a3113531b43d375ec8d80ffd6aa268acdefebeff7a42",
-      "name": "RepoUrl"
+      "blake3": "fb6fbd40ecd48f3f63014aabfc0da640dd4a5aa0d3d7133380effd87672d25f3",
+      "name": "EvaluationResult",
+      "rust_path": null
     },
     {
-      "blake3": "dd5550177739fac0fbac570229ff46235259bb29ebc829fe8080e4240bd6dbdd",
-      "name": "StatusResponse"
+      "blake3": "2213aa98340361ef92d2fcb6d06224435e3ca851bccef85c540d1021604ea172",
+      "name": "InferenceStatus",
+      "rust_path": null
     },
     {
-      "blake3": "d1e552b5b46351a54a889100a0dabe56bce2828468cb0fb7e609186457d2be6b",
-      "name": "UserInfo"
+      "blake3": "ecf16a6f723fe55268f7e145949ad9759ae93d4f153998b35c6393343a17c43b",
+      "name": "LfsInfo",
+      "rust_path": null
     },
     {
-      "blake3": "623ff685c7813260cb18dfe40e1e236c96e3b2684e1168eeee3a055799950581",
-      "name": "Vec<RepoInfo>"
+      "blake3": "b9da5b6ce3587af40436cb302fe16ebde2788eada4b2625fb064520f399a0fdc",
+      "name": "MetricResult",
+      "rust_path": null
     },
     {
-      "blake3": "3bb9427dbfd5fac187d7d8c3bd83c8b6e6f5a77ca28b04bf8a82b831ed4f90ab",
-      "name": "Vec<Collection>"
+      "blake3": "55df54b53b7ab23ceb37752e1a8b8b1f8c2f2adf799aaa717a05a0ddb3e4e448",
+      "name": "ModelIndexEntry",
+      "rust_path": null
+    },
+    {
+      "blake3": "5a98d9b671823912f88f88314d9014294e4b985298a1b212ee485a2536d17baa",
+      "name": "RepoFile",
+      "rust_path": "::schematic_definitions::huggingface::RepoFile"
+    },
+    {
+      "blake3": "18a79474b59a49bd92bb6f07493ef6129ebc54e8a6b9d274de93786b59b76f97",
+      "name": "SafetensorsInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "44efb80aa7c099444b8ad52c5feae58689947408bd207a547e32ace2d69d7c40",
+      "name": "TaskInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "b7f299f6f0a0945d06e702c398a6d65e7f82c4abec888bc665364b1852863f6a",
+      "name": "TransformersInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "b31d8fcc5e38904434f9e4614ce65af4973ad0075ce367310dc31c78ca555a5a",
+      "name": "WidgetConfig",
+      "rust_path": null
+    },
+    {
+      "blake3": "15425756caa0a9079c8a9344a34292edc15e0cd85d69b4c2fc5538e671c8bade",
+      "name": "FileMetadata",
+      "rust_path": "::schematic_definitions::huggingface::FileMetadata"
+    },
+    {
+      "blake3": "0cc5e232ffafb874c63460dad9b3f2e031a534e446f2cf2ddd490cc5f20f8786",
+      "name": "Commit",
+      "rust_path": "schematic_definitions::huggingface::Commit"
+    },
+    {
+      "blake3": "c9ab1217d974bbd7698687b2da5e40f7c836af5f8f421027111137cf54270fda",
+      "name": "DiscussionList",
+      "rust_path": "::schematic_definitions::huggingface::DiscussionList"
+    },
+    {
+      "blake3": "de1294197fbd7844bb4bb1919c54ea246fe5844e2249fc30f00c0a4024caac3a",
+      "name": "Author",
+      "rust_path": null
+    },
+    {
+      "blake3": "167478936f3413997dba243ba041504ed75cb69d9e85fb0beff2cbda9c2ab6c0",
+      "name": "Discussion",
+      "rust_path": null
+    },
+    {
+      "blake3": "2062fced456e7ace542274a213d1b3329cbe2e3f3960b56e2ecc03a03ad978b6",
+      "name": "DiscussionStatus",
+      "rust_path": null
+    },
+    {
+      "blake3": "3932e0ee5587e7cc2764374d084fed3eb8682c2531edf2ad3a1989e945d90980",
+      "name": "DatasetInfo",
+      "rust_path": "::schematic_definitions::huggingface::DatasetInfo"
+    },
+    {
+      "blake3": "7130621ae0c346415f545120d2f0a84965e9da773017c3233c09463aee72b96b",
+      "name": "DatasetCardData",
+      "rust_path": null
+    },
+    {
+      "blake3": "65a8b593c8cb6281affce74ba365bb5fcaba7bae40f816facf042dc686465b49",
+      "name": "DatasetConfig",
+      "rust_path": null
+    },
+    {
+      "blake3": "032fa689ec992bca07ed7d46182d94473f8053551e3776a6596b642d8c783ccd",
+      "name": "DatasetSplit",
+      "rust_path": null
+    },
+    {
+      "blake3": "0d449551112bcecfdb057d0b2e5bfc00a2dc72241f65fe35bbfd9181ae81a173",
+      "name": "SpaceInfo",
+      "rust_path": "::schematic_definitions::huggingface::SpaceInfo"
+    },
+    {
+      "blake3": "964091fb0e32e457259d9f7a44b25b4c60ec9728556b2280c2a020abe9f35d47",
+      "name": "SpaceCardData",
+      "rust_path": null
+    },
+    {
+      "blake3": "1c5af0f818941d5af28506a5b44e7dfda226ce1f8964ae3962787e00f73261db",
+      "name": "SpaceRuntime",
+      "rust_path": null
+    },
+    {
+      "blake3": "bf8031eb0a931820bc28860d06c681afa5a6f5ec21ae62558960af0b91c90861",
+      "name": "SpaceStage",
+      "rust_path": null
+    },
+    {
+      "blake3": "7f06d8000d4dedfb02031ed1cf0ba9a64e47eb0e636946504e4138ba45754eb4",
+      "name": "RepoUrl",
+      "rust_path": "::schematic_definitions::huggingface::RepoUrl"
+    },
+    {
+      "blake3": "4ed56c8b4d65e44bd2269452e6f83279a9cf0fbd0fd8400b635ef4ed6fbf82cf",
+      "name": "StatusResponse",
+      "rust_path": "::schematic_definitions::huggingface::StatusResponse"
+    },
+    {
+      "blake3": "943de48c9624ea212df3fef98ef95fd394311d1851193b58166be3fcf8af53ef",
+      "name": "UserInfo",
+      "rust_path": "::schematic_definitions::huggingface::UserInfo"
+    },
+    {
+      "blake3": "8dc1b9dc253858c2a30536e1642096c12937bbdae38aa25acbc209fad8413bb5",
+      "name": "RepoInfo",
+      "rust_path": "::schematic_definitions::huggingface::RepoInfo"
+    },
+    {
+      "blake3": "a649bb58a730db11014fcfc62822cbc006516964c9de425146de5b07a553c6a0",
+      "name": "Collection",
+      "rust_path": "::schematic_definitions::huggingface::Collection"
+    },
+    {
+      "blake3": "40ce99b4a2902f22fde4d0f6fe6dd5b74cf6e6363f3407bba346cd842f12bb1a",
+      "name": "CollectionItem",
+      "rust_path": null
     }
   ]
 }

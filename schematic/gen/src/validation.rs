@@ -1,12 +1,13 @@
 //! Per-output validation of a batch of API definitions.
 //!
 //! Each generated output has its own validator, and each validator takes the
-//! whole selected batch: [`validate_rust_client`], [`validate_openapi`] (plus
-//! [`validate_openapi_registry`] for schema registries), and
+//! whole selected batch: [`validate_rust_client`], [`validate_openapi`], and
 //! [`validate_postman`]. An output is written only when its validator reports
 //! no [`Severity::Error`]; one output's findings never block another output.
 //! Rust-only rules (identifiers, type syntax, generated-name collisions) are
-//! not applied to the exports, which carry those names as data.
+//! not applied to the exports, which carry those names as data. The Rust
+//! client and OpenAPI validators both resolve every JSON body reference in
+//! the API's own [`RestApi::schemas`]; Postman never reads a schema.
 //!
 //! The behavior is described for users in
 //! `schematic/docs/generation/validation.md`.
@@ -23,13 +24,15 @@
 //!     .describes("List items").returns_empty().build().unwrap();
 //! let mut api = RestApi::builder(&ctx, "TestApi", "https://api.test.com")
 //!     .describes("Test API").no_auth().endpoints([endpoint]).build().unwrap();
-//! // Malformed stored data blocks the Rust client, not the exports.
-//! api.endpoints[0].response = ApiResponse::json_type("Vec<Item");
+//! // A reference to a component the API does not carry blocks the Rust
+//! // client, not the Postman export.
+//! api.endpoints[0].response = ApiResponse::json_type("Item");
 //!
 //! let rust = validate_rust_client(&[&api]);
 //! assert_eq!(rust.len(), 1);
 //! assert_eq!(rust[0].severity, Severity::Error);
-//! assert_eq!(rust[0].feature, Feature::InvalidTypeSyntax);
+//! assert_eq!(rust[0].feature, Feature::InvalidSchemaReference);
+//! assert_eq!(rust[0].endpoint.as_deref(), Some("ListItems"));
 //!
 //! assert!(validate_postman(&[&api]).is_empty());
 //! ```
@@ -38,13 +41,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{
-    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, Endpoint, EnvAuthStrategy, FormFieldKind,
-    ParamDef, QueryParamType, RestApi,
+    ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, DefinitionError, Endpoint,
+    EnvAuthStrategy, FormFieldKind, ParamDef, QueryParamType, RestApi, TypeRef,
 };
 use schematic_define::pagination::{
     PaginationRuleGroup, Resolution, Step, resolve, validate_pagination,
 };
-use schematic_definitions::registry::{SchemaRegistry, get_registry, registry_key_for};
 use serde_json::Value;
 
 use crate::codegen::endpoint_methods::{call_type_name, resolve_names};
@@ -117,6 +119,7 @@ pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
         check_routes(api, Output::Rust, &mut diagnostics);
+        check_schema_references(api, Output::Rust, &mut diagnostics);
         check_rust_api(api, &mut diagnostics);
     }
 
@@ -132,57 +135,17 @@ pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
 
 /// Validates a batch of APIs for OpenAPI export.
 ///
-/// Checks route identity, the `query-in-path` error, and the document file
-/// name. Schema-registry completeness is checked separately by
-/// [`validate_openapi_registry`], because the registry is chosen per module.
+/// Checks route identity, the `query-in-path` error, the document file
+/// name, and that every JSON body reference resolves in the API's own
+/// [`RestApi::schemas`], which become the document's `components.schemas`.
 pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for api in apis {
         check_routes(api, Output::OpenApi, &mut diagnostics);
         check_export_filename(api, Output::OpenApi, &mut diagnostics);
+        check_schema_references(api, Output::OpenApi, &mut diagnostics);
     }
     diagnostics
-}
-
-/// Validates that `registry` can describe every JSON type of a module's APIs.
-///
-/// `registry` is `None` when the module has no registry at all; that is one
-/// error naming every API of the module.
-pub fn validate_openapi_registry(
-    module_name: &str,
-    apis: &[&RestApi],
-    registry: Option<&SchemaRegistry>,
-) -> Vec<ValidationDiagnostic> {
-    let Some(registry) = registry else {
-        return vec![ValidationDiagnostic::for_group(
-            Severity::Error,
-            apis.iter().map(|api| api.name.clone()),
-            Feature::IncompleteSchemaRegistry,
-            Output::OpenApi,
-            format!(
-                "no schema registry for module `{module_name}`; add openapi_registry() to \
-                 schematic-definitions or skip with --no-openapi"
-            ),
-        )];
-    };
-
-    apis.iter()
-        .filter_map(|api| {
-            let missing = registry.validate_completeness(api).err()?;
-            Some(ValidationDiagnostic::new(
-                Severity::Error,
-                &api.name,
-                None,
-                Feature::IncompleteSchemaRegistry,
-                Output::OpenApi,
-                format!(
-                    "module `{module_name}` registry is missing schema(s) {missing:?}; add a \
-                     JsonSchema derive and typed registration in the destination context \
-                     in schematic-definitions, or skip with --no-openapi",
-                ),
-            ))
-        })
-        .collect()
 }
 
 /// Validates a batch of APIs for Postman export.
@@ -266,6 +229,55 @@ fn check_routes(api: &RestApi, output: Output, diagnostics: &mut Vec<ValidationD
                 ),
             ));
         }
+    }
+}
+
+/// Checks that every JSON body reference of `api` resolves in
+/// [`RestApi::schemas`], reporting each dangling name with its endpoint.
+///
+/// When every name resolves, [`RestApi::validate_references`] still runs,
+/// so a malformed component or an unsupported reference form is reported
+/// too.
+fn check_schema_references(api: &RestApi, output: Output, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let before = diagnostics.len();
+    for endpoint in &api.endpoints {
+        for reference in endpoint.json_references() {
+            for name in reference.names() {
+                if api.component(name).is_none_or(|component| component.rust_path.is_none()) {
+                    diagnostics.push(ValidationDiagnostic::new(
+                        Severity::Error,
+                        &api.name,
+                        Some(&endpoint.id),
+                        Feature::InvalidSchemaReference,
+                        output,
+                        format!(
+                            "schema reference `{name}` does not name a registered component of \
+                             API `{}`; register the type in the API's definition context",
+                            api.name
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    if diagnostics.len() > before {
+        return;
+    }
+    if let Err(error) = api.validate_references() {
+        let endpoint = match &error {
+            DefinitionError::UnresolvedReference { endpoint, .. }
+            | DefinitionError::InvalidDefinition { endpoint, .. }
+                if endpoint != "<api>" => Some(endpoint.as_str()),
+            _ => None,
+        };
+        diagnostics.push(ValidationDiagnostic::new(
+            Severity::Error,
+            &api.name,
+            endpoint,
+            Feature::InvalidSchemaReference,
+            output,
+            error.to_string(),
+        ));
     }
 }
 
@@ -363,8 +375,8 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
             ));
         }
 
-        for (role, type_name) in referenced_type_names(endpoint) {
-            if syn::parse_str::<syn::Type>(type_name).is_err() {
+        for (role, type_name) in referenced_type_names(api, endpoint) {
+            if syn::parse_str::<syn::Type>(&type_name).is_err() {
                 diagnostics.push(error(
                     id,
                     Feature::InvalidTypeSyntax,
@@ -385,10 +397,11 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
 /// and item locations the Rust client relies on.
 ///
 /// Item checks run only for paginated lists. A named item type is checked
-/// against the API's schema registry, top-level and nested schemas alike, and
-/// an item location is walked through the response type's registered schema.
-/// Where the registry cannot describe a type (no registry, an unregistered or
-/// qualified type, an unresolvable reference), the check is skipped and the
+/// against the API's [`RestApi::schemas`], top-level and nested components
+/// alike, and an item location is walked through the schema of the
+/// response's named component. Where the components cannot describe a type
+/// (a qualified or primitive item type, a response that is not a single
+/// name, an unresolvable `$ref`, a union), the check is skipped and the
 /// runtime enforces the location instead; nothing is reported as checked.
 fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
     if api.default_pagination.is_none() && api.endpoints.iter().all(|endpoint| endpoint.pagination.is_none()) {
@@ -407,9 +420,6 @@ fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) 
         diagnostics.push(error(diagnostic.endpoint.as_deref(), feature, diagnostic.to_string()));
     }
 
-    // Built on first use: most APIs name no item type the registry could check.
-    let mut registry: Option<Option<SchemaRegistry>> = None;
-    let mut known_names: Option<BTreeSet<String>> = None;
     for endpoint in &api.endpoints {
         let Resolution::Paginated { list, .. } = resolve(api, endpoint) else {
             continue;
@@ -424,44 +434,35 @@ fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) 
                     Feature::PaginationException,
                     format!("invalid-item-type: item type `{item_type}` is not valid Rust type syntax"),
                 ));
-            } else if is_plain_named_type(item_type) {
-                let registry = registry.get_or_insert_with(|| get_registry(&registry_key_for(&api.name)));
-                if let Some(registry) = registry {
-                    let names = known_names.get_or_insert_with(|| {
-                        registry.to_openapi_schemas().into_keys().collect()
-                    });
-                    if !names.contains(item_type) {
-                        diagnostics.push(error(
-                            id,
-                            Feature::PaginationException,
-                            format!(
-                                "unknown-item-type: item type `{item_type}` is not a schema of \
-                                 this API's registry; use a registered type, a primitive, or a \
-                                 qualified path such as `serde_json::Value`"
-                            ),
-                        ));
-                    }
-                }
+            } else if is_plain_named_type(item_type) && api.component(item_type).is_none() {
+                diagnostics.push(error(
+                    id,
+                    Feature::PaginationException,
+                    format!(
+                        "unknown-item-type: item type `{item_type}` is not a schema component of \
+                         this API; use a registered type, a primitive, or a qualified path such \
+                         as `serde_json::Value`"
+                    ),
+                ));
             }
         }
 
-        let ApiResponse::Json(schema) = &endpoint.response else {
+        let ApiResponse::Json(TypeRef::Named(name)) = &endpoint.response else {
             continue;
         };
-        if list.items.is_root_array() || !is_plain_named_type(&schema.type_name) {
+        if list.items.is_root_array() {
             continue;
         }
-        let registry = registry.get_or_insert_with(|| get_registry(&registry_key_for(&api.name)));
-        let Some(root) = registry.as_ref().and_then(|r| r.get(&schema.type_name)) else {
+        let Some(root) = api.component(name) else {
             continue;
         };
-        if item_location_is_array(root.as_value(), &list.items.record) == Some(false) {
+        if item_location_is_array(api, &root.schema, &list.items.record) == Some(false) {
             diagnostics.push(error(
                 id,
                 Feature::PaginationException,
                 format!(
-                    "not-an-array-location: `{}` is not an array in the registered schema of `{}`",
-                    list.items, schema.type_name
+                    "not-an-array-location: `{}` is not an array in the registered schema of `{name}`",
+                    list.items
                 ),
             ));
         }
@@ -469,7 +470,7 @@ fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) 
 }
 
 /// Whether `type_name` is a single identifier naming a non-primitive type,
-/// the only kind a schema registry can know.
+/// the only kind a schema component can name.
 fn is_plain_named_type(type_name: &str) -> bool {
     const PRIMITIVES: &[&str] = &[
         "bool", "char", "str", "String", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
@@ -478,15 +479,15 @@ fn is_plain_named_type(type_name: &str) -> bool {
     syn::parse_str::<syn::Ident>(type_name).is_ok() && !PRIMITIVES.contains(&type_name)
 }
 
-/// Walks a selector's record steps through a JSON schema.
+/// Walks a selector's record steps through a component's JSON schema.
 ///
 /// `Some(false)` means the schema demonstrably has no array at some fan-out;
 /// `Some(true)` that every fan-out is an array; `None` that the schema cannot
 /// tell (a missing property, an unresolved reference, a union).
-fn item_location_is_array(root: &Value, steps: &[Step]) -> Option<bool> {
+fn item_location_is_array(api: &RestApi, root: &Value, steps: &[Step]) -> Option<bool> {
     let mut node = root;
     for step in steps {
-        node = resolve_schema_node(root, node)?;
+        node = resolve_schema_node(api, node)?;
         match step {
             Step::Key(key) => node = node.get("properties")?.get(key)?,
             Step::Each => {
@@ -507,11 +508,19 @@ fn item_location_is_array(root: &Value, steps: &[Step]) -> Option<bool> {
 
 /// Follows `$ref`, a single-member `allOf`, and a nullable `anyOf`/`oneOf`
 /// to the schema node that describes a value.
-fn resolve_schema_node<'a>(root: &'a Value, mut node: &'a Value) -> Option<&'a Value> {
+///
+/// Components are stored with their nested definitions flattened out, so a
+/// `$ref` resolves to another component by name, never into the referring
+/// schema.
+fn resolve_schema_node<'a>(api: &'a RestApi, mut node: &'a Value) -> Option<&'a Value> {
     // A bound against reference cycles; real schemas need a few hops.
     for _ in 0..32 {
         if let Some(reference) = node.get("$ref").and_then(Value::as_str) {
-            node = root.pointer(reference.strip_prefix('#')?)?;
+            let name = ["#/components/schemas/", "#/$defs/", "#/definitions/"]
+                .iter()
+                .find_map(|prefix| reference.strip_prefix(prefix))
+                .filter(|name| !name.contains('/'))?;
+            node = &api.component(name)?.schema;
             continue;
         }
         if let Some([only]) = node.get("allOf").and_then(Value::as_array).map(Vec::as_slice) {
@@ -765,25 +774,29 @@ fn is_header_value(value: &str) -> bool {
         .all(|byte| byte == b'\t' || (0x20..=0x7E).contains(&byte))
 }
 
-/// Lists the type names an endpoint asks the Rust client to spell, with the
-/// role each plays.
-fn referenced_type_names(endpoint: &Endpoint) -> Vec<(&'static str, &str)> {
-    let mut names = Vec::new();
+/// Lists the Rust types an endpoint asks the Rust client to spell, with the
+/// role each plays. A reference that does not resolve is left to
+/// [`check_schema_references`].
+fn referenced_type_names(api: &RestApi, endpoint: &Endpoint) -> Vec<(&'static str, String)> {
+    let mut references: Vec<(&'static str, &TypeRef)> = Vec::new();
     match &endpoint.request {
-        Some(ApiRequest::Json(schema)) => names.push(("request body", schema.type_name.as_str())),
+        Some(ApiRequest::Json(reference)) => references.push(("request body", reference)),
         Some(ApiRequest::FormData { fields }) => {
             for field in fields {
-                if let FormFieldKind::Json(schema) = &field.kind {
-                    names.push(("form field", schema.type_name.as_str()));
+                if let FormFieldKind::Json(reference) = &field.kind {
+                    references.push(("form field", reference));
                 }
             }
         }
         _ => {}
     }
-    if let ApiResponse::Json(schema) = &endpoint.response {
-        names.push(("response", schema.type_name.as_str()));
+    if let ApiResponse::Json(reference) = &endpoint.response {
+        references.push(("response", reference));
     }
-    names
+    references
+        .into_iter()
+        .filter_map(|(role, reference)| Some((role, api.rust_type(reference)?)))
+        .collect()
 }
 
 /// Checks the fields of an endpoint's request struct and form body struct.
@@ -996,8 +1009,8 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
     for api in group {
         let suffix = get_request_suffix(api);
         for endpoint in &api.endpoints {
-            for (role, type_name) in referenced_type_names(endpoint) {
-                let Some(owners) = emitted.get(type_name) else {
+            for (role, type_name) in referenced_type_names(api, endpoint) {
+                let Some(owners) = emitted.get(type_name.as_str()) else {
                     continue;
                 };
                 if owners.is_empty() {
@@ -1114,12 +1127,20 @@ mod tests {
         }
     }
 
+    /// An API with `endpoints` and a component, spelled by its bare name,
+    /// for every name they reference.
     fn api_with(endpoints: Vec<Endpoint>) -> RestApi {
-        {
-            let mut api = make_test_api();
-            api.endpoints = endpoints;
-            api
-        }
+        let mut api = make_test_api();
+        api.endpoints = endpoints;
+        crate::test_utils::with_referenced_components(api)
+    }
+
+    /// [`api_with`], with the component `name` spelled `rust_path`.
+    fn api_spelling(endpoints: Vec<Endpoint>, name: &str, rust_path: &str) -> RestApi {
+        let mut api = api_with(endpoints);
+        api.schemas.iter_mut().find(|c| c.name == name).expect("referenced component").rust_path =
+            Some(rust_path.to_string());
+        api
     }
 
     fn rust(api: &RestApi) -> Vec<ValidationDiagnostic> {
@@ -1153,25 +1174,35 @@ mod tests {
                 ]),
             ),
             (
-                "generic and qualified types",
-                api_with(vec![
-                    {
-                        let mut endpoint = get("ListModels");
-                        endpoint.response = ApiResponse::json_type("Vec<Model>");
-                        endpoint
-                    },
-                    {
-                        let mut endpoint = get("Raw");
-                        endpoint.response = ApiResponse::json_type("serde_json::Value");
-                        endpoint
-                    },
-                    {
-                        let mut endpoint = get("Map");
-                        endpoint.response = ApiResponse::json_type("std::collections::HashMap<String, Vec<Model>>");
-                        endpoint
-                    },
-                    with_body("Patch", "Option<crate::Patch>"),
-                ]),
+                "wrapped, primitive, and qualified types",
+                api_spelling(
+                    vec![
+                        {
+                            let mut endpoint = get("ListModels");
+                            endpoint.response = ApiResponse::json_vec_type("Model");
+                            endpoint
+                        },
+                        {
+                            let mut endpoint = get("Raw");
+                            endpoint.response = ApiResponse::json(TypeRef::Primitive(schematic_define::PrimitiveType::Json));
+                            endpoint
+                        },
+                        {
+                            let mut endpoint = get("Map");
+                            endpoint.response = ApiResponse::json(TypeRef::Map(Box::new(TypeRef::Array(Box::new(
+                                TypeRef::Named("Model".into()),
+                            )))));
+                            endpoint
+                        },
+                        {
+                            let mut endpoint = with_body("Patch", "Patch");
+                            endpoint.request = Some(ApiRequest::json(TypeRef::Optional(Box::new(TypeRef::Named("Patch".into())))));
+                            endpoint
+                        },
+                    ],
+                    "Patch",
+                    "crate::Patch",
+                ),
             ),
             (
                 "a legitimate repeated segment",
@@ -1303,28 +1334,36 @@ mod tests {
                 Some("ListItems"),
             ),
             (
-                "unclosed generic response",
-                api_with(vec![{
-                    let mut endpoint = get("ListModels");
-                    endpoint.response = ApiResponse::json_type("Vec<Model");
-                    endpoint
-                }]),
+                "unclosed generic component path",
+                api_spelling(
+                    vec![{
+                        let mut endpoint = get("ListModels");
+                        endpoint.response = ApiResponse::json_type("Model");
+                        endpoint
+                    }],
+                    "Model",
+                    "Vec<Model",
+                ),
                 Feature::InvalidTypeSyntax,
                 Some("ListModels"),
             ),
             (
-                "body type with a space",
-                api_with(vec![with_body("Create", "Create Body")]),
+                "body component path with a space",
+                api_spelling(vec![with_body("Create", "CreateBody")], "CreateBody", "Create Body"),
                 Feature::InvalidTypeSyntax,
                 Some("Create"),
             ),
             (
-                "form JSON field type",
-                api_with(vec![{
-                    let mut endpoint = endpoint("Upload", RestMethod::Post, "/upload");
-                    endpoint.request = Some(ApiRequest::form_data(vec![FormField::json("meta", schematic_define::Schema::new("Meta>"))]));
-                    endpoint
-                }]),
+                "form JSON field component path",
+                api_spelling(
+                    vec![{
+                        let mut endpoint = endpoint("Upload", RestMethod::Post, "/upload");
+                        endpoint.request = Some(ApiRequest::form_data(vec![FormField::json("meta", TypeRef::Named("Meta".into()))]));
+                        endpoint
+                    }],
+                    "Meta",
+                    "Meta>",
+                ),
                 Feature::InvalidTypeSyntax,
                 Some("Upload"),
             ),
@@ -1856,7 +1895,7 @@ mod tests {
             api.module_path = Some("shared_group".to_string());
             api.request_suffix = suffix.map(str::to_string);
             api.endpoints = endpoints;
-            api
+            crate::test_utils::with_referenced_components(api)
         }
     }
 
@@ -1869,6 +1908,44 @@ mod tests {
         // Raw ids are per-API for the exports as well.
         assert!(validate_openapi(&[&native, &compat]).is_empty());
         assert!(validate_postman(&[&native, &compat]).is_empty());
+    }
+
+    #[test]
+    fn a_dangling_reference_names_the_api_endpoint_and_name_for_rust_and_openapi() {
+        let mut api = api_with(vec![get("ListModels")]);
+        api.schemas.clear();
+
+        for diagnostics in [rust(&api), validate_openapi(&[&api])] {
+            assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!((diagnostic.severity, diagnostic.feature), (Severity::Error, Feature::InvalidSchemaReference));
+            assert_eq!(diagnostic.api, ["TestApi"]);
+            assert_eq!(diagnostic.endpoint.as_deref(), Some("ListModels"));
+            assert!(diagnostic.message.contains("`Response`"), "{diagnostic}");
+        }
+        assert!(validate_postman(&[&api]).is_empty());
+    }
+
+    #[test]
+    fn a_nested_only_component_cannot_be_referenced() {
+        let mut api = api_with(vec![get("ListModels")]);
+        api.schemas[0].rust_path = None;
+
+        let diagnostics = rust(&api);
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::InvalidSchemaReference)]);
+        assert!(diagnostics[0].message.contains("`Response`"), "{}", diagnostics[0]);
+    }
+
+    #[test]
+    fn a_malformed_component_is_reported_for_the_api() {
+        let mut api = api_with(vec![get("ListModels")]);
+        let duplicate = api.schemas[0].clone();
+        api.schemas.push(duplicate);
+
+        let diagnostics = validate_openapi(&[&api]);
+        assert_eq!(features(&diagnostics), [(Severity::Error, Feature::InvalidSchemaReference)]);
+        assert_eq!(diagnostics[0].endpoint, None);
+        assert!(diagnostics[0].message.contains("defined more than once"), "{}", diagnostics[0]);
     }
 
     #[test]

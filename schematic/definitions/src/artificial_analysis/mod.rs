@@ -38,7 +38,7 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::RestMethod;
@@ -48,19 +48,9 @@ use schematic_define::{
     params::{EndpointParams, QueryParamType},
 };
 
-/// Creates a schema registry containing every Artificial Analysis response and
-/// request type registered against both RestApis.
-///
-/// `RateLimitError` is intentionally omitted — it is documentation-only and is
-/// not the typed response of any endpoint.
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid artificial_analysis definitions").registry
-}
-
 /// The free-tier data API: 6 GET endpoints for LLM and media-model benchmarks.
 pub fn define_artificial_analysis_data_api() -> RestApi {
-    module_group().expect("valid artificial_analysis definitions").apis.remove(0)
+    module_group().expect("valid artificial_analysis definitions").remove(0)
 }
 
 fn build_artificial_analysis_data_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -132,7 +122,7 @@ fn build_artificial_analysis_data_api(ctx: &mut DefinitionContext) -> Result<Res
 
 /// The CritPt benchmark evaluation API: a single POST endpoint.
 pub fn define_artificial_analysis_critpt_api() -> RestApi {
-    module_group().expect("valid artificial_analysis definitions").apis.remove(1)
+    module_group().expect("valid artificial_analysis definitions").remove(1)
 }
 
 fn build_artificial_analysis_critpt_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -164,7 +154,7 @@ fn build_artificial_analysis_critpt_api(ctx: &mut DefinitionContext) -> Result<R
 }
 
 /// Assemble sibling APIs and their ordered nominal schemas in one context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::artificial_analysis", |ctx| {
         ctx.register::<ModelCreator>()?;
         ctx.register::<CategoryBreakdown>()?;
@@ -289,33 +279,24 @@ mod tests {
     // -- Registry ----------------------------------------------------------
 
     #[test]
-    fn registry_validates_against_both_apis() {
-        let registry = openapi_registry();
-        registry
-            .validate_completeness(&define_artificial_analysis_data_api())
-            .expect("data API registry should be complete");
-        registry
-            .validate_completeness(&define_artificial_analysis_critpt_api())
-            .expect("critpt API registry should be complete");
-    }
-
-    #[test]
     fn registry_does_not_register_rate_limit_error() {
         // RateLimitError is documentation-only.
-        let registry = openapi_registry();
-        assert!(registry.get("RateLimitError").is_none());
+        for api in module_group().unwrap() {
+            assert!(api.component("RateLimitError").is_none());
+        }
     }
 
     #[test]
     fn module_group_preserves_endpoint_and_registry_inventory() {
         let group = module_group().unwrap();
         assert_eq!(
-            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["ListLlmModels", "ListTextToImageModels", "ListImageEditingModels", "ListTextToSpeechModels", "ListTextToVideoModels", "ListImageToVideoModels", "EvaluateCritPt"]
         );
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["ModelCreator", "CategoryBreakdown", "LlmEvaluations", "LlmPricing", "LlmModel", "PromptOptions", "LlmModelsResponse", "MediaModel", "MediaModelsResponse", "CritPtMessage", "CritPtSubmission", "CritPtEvaluateBody", "CritPtEvaluateResponse"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["ModelCreator", "CategoryBreakdown", "LlmEvaluations", "LlmPricing", "LlmModel", "PromptOptions", "LlmModelsResponse", "MediaModel", "MediaModelsResponse", "CritPtMessage", "CritPtSubmission", "CritPtEvaluateBody", "CritPtEvaluateResponse"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
     }
 

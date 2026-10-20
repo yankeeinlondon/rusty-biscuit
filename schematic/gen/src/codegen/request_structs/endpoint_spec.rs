@@ -2,9 +2,9 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{ApiResponse, Endpoint, RestMethod};
+use schematic_define::{ApiResponse, Endpoint, RestApi, RestMethod};
 
-use crate::codegen::request_structs::shared::type_name_to_tokens;
+use crate::codegen::request_structs::shared::{json_type_name, type_name_to_tokens};
 
 /// Generates the `EndpointSpec` impl that ties `struct_name` to its API,
 /// its success type and codec, and its endpoint id, with `into_parts_body`
@@ -13,6 +13,7 @@ use crate::codegen::request_structs::shared::type_name_to_tokens;
 /// No definition declares an error body, so `Failure` is always
 /// `NoDeclaredError`: every non-2xx reply is reported as undeclared.
 pub(super) fn generate_endpoint_spec_impl(
+    api: &RestApi,
     struct_name: &proc_macro2::Ident,
     api_marker: &str,
     endpoint: &Endpoint,
@@ -22,8 +23,8 @@ pub(super) fn generate_endpoint_spec_impl(
     let endpoint_id = &endpoint.id;
     let method = method_tokens(&endpoint.method);
     let (success, decoder) = match &endpoint.response {
-        ApiResponse::Json(schema) => {
-            let ty = type_name_to_tokens(&schema.type_name);
+        ApiResponse::Json(reference) => {
+            let ty = type_name_to_tokens(&json_type_name(api, reference));
             (ty.clone(), quote! { schematic_runtime::Json<#ty> })
         }
         ApiResponse::Text => (quote! { String }, quote! { schematic_runtime::Text }),

@@ -107,7 +107,7 @@ pub use export::openapi::{
 pub use export::postman::{write_postman, write_postman_grouped};
 
 pub use validation::{
-    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
+    validate_openapi, validate_postman, validate_rust_client,
 };
 
 #[cfg(test)]

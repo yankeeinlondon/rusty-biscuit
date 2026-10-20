@@ -136,8 +136,10 @@ pub enum Feature {
     InvalidModulePath,
     /// An output file name that is not one safe path component.
     InvalidOutputFilename,
-    /// A JSON type with no schema in the module's OpenAPI registry.
-    IncompleteSchemaRegistry,
+    /// A JSON body reference that does not resolve in the API's own
+    /// [`RestApi::schemas`](schematic_define::RestApi::schemas), or a
+    /// malformed schema component.
+    InvalidSchemaReference,
     /// The shape of a pagination strategy, alone or on its endpoint.
     PaginationStrategy,
     /// An endpoint collection: invalid item selectors or item types.
@@ -169,7 +171,7 @@ impl Feature {
             Self::EndpointMethodRename => "endpoint-method-rename",
             Self::InvalidModulePath => "invalid-module-path",
             Self::InvalidOutputFilename => "invalid-output-filename",
-            Self::IncompleteSchemaRegistry => "incomplete-schema-registry",
+            Self::InvalidSchemaReference => "invalid-schema-reference",
             Self::PaginationStrategy => "pagination-strategy",
             Self::PaginationException => "pagination-exception",
             Self::PaginationParameter => "pagination-parameter",
@@ -318,7 +320,7 @@ mod tests {
         let error = ValidationDiagnostic::for_group(
             Severity::Error,
             ["A"],
-            Feature::IncompleteSchemaRegistry,
+            Feature::InvalidSchemaReference,
             Output::Postman,
             "missing",
         );
@@ -337,7 +339,7 @@ mod tests {
         let error_json = serde_json::to_value(&error).unwrap();
         assert_eq!(error_json["severity"], "error");
         assert_eq!(error_json["endpoint"], serde_json::Value::Null);
-        assert_eq!(error_json["feature"], "incomplete-schema-registry");
+        assert_eq!(error_json["feature"], "invalid-schema-reference");
         assert_eq!(error_json["output"], "postman");
     }
 
@@ -361,7 +363,7 @@ mod tests {
             Feature::GeneratedNameCollision,
             Feature::InvalidModulePath,
             Feature::InvalidOutputFilename,
-            Feature::IncompleteSchemaRegistry,
+            Feature::InvalidSchemaReference,
         ];
         for feature in features {
             assert_eq!(

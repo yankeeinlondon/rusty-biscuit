@@ -19,7 +19,8 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{
     ApiKeyLocation, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField,
-    FormFieldKind, ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod,
+    FormFieldKind, ParamDef, ParamStyle, PrimitiveType, QueryParamType, RestApi, RestMethod,
+    TypeRef,
 };
 
 use crate::errors::GeneratorError;
@@ -131,17 +132,17 @@ fn assemble_definition_module(
         #![doc = #regenerate_doc]
         mod types;
         pub use types::*;
-        use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+        use crate::registry::assemble_module_group;
         use schematic_define::*;
 
         #[doc = #fn_doc]
         #[must_use]
         pub fn #fn_name() -> RestApi {
-            module_group().expect("valid imported API").apis.remove(0)
+            module_group().expect("valid imported API").remove(0)
         }
 
         /// Assemble the API and its ordered schemas from one registration context.
-        pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+        pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
             assemble_module_group(#module_path, |ctx| {
                 #(#registrations)*
                 let api = imported_api(ctx)?;
@@ -151,12 +152,6 @@ fn assemble_definition_module(
 
         fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
             #api_expr
-        }
-
-        /// Ordered schemas from the same assembly used by the API factory.
-        #[must_use]
-        pub fn openapi_registry() -> SchemaRegistry {
-            module_group().expect("valid imported API").registry
         }
     }
 }
@@ -215,8 +210,8 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     let description = &endpoint.description;
     let mut builder = quote! { Endpoint::new(#id, #method, #path).describes(#description) };
     builder = match &endpoint.response {
-        ApiResponse::Json(schema) => {
-            let ty: syn::Type = syn::parse_str(&schema.type_name).expect("validated response type");
+        ApiResponse::Json(reference) => {
+            let ty = imported_type(reference);
             quote! { #builder.returns_json::<#ty>(ctx) }
         }
         ApiResponse::Text => quote! { #builder.returns_text() },
@@ -225,8 +220,8 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     };
     if let Some(request) = &endpoint.request {
         builder = match request {
-            ApiRequest::Json(schema) => {
-                let ty: syn::Type = syn::parse_str(&schema.type_name).expect("validated request type");
+            ApiRequest::Json(reference) => {
+                let ty = imported_type(reference);
                 quote! { #builder.request_json::<#ty>(ctx) }
             }
             ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields } => {
@@ -251,6 +246,33 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     }
     for (key, value) in &endpoint.headers { builder = quote! { #builder.header(#key, #value) }; }
     quote! { #builder.build() }
+}
+
+/// The Rust type an emitted builder registers for an imported reference.
+///
+/// Names are the generated models of the same module (`pub use types::*`),
+/// and free-form JSON is spelled `serde_json::Value`, as the importer has
+/// always written it. Wrappers spell their standard-library type.
+///
+/// ## Panics
+///
+/// Panics on a composition or `Unknown`, which the importer never produces
+/// for a body or response.
+fn imported_type(reference: &TypeRef) -> syn::Type {
+    fn spelling(reference: &TypeRef) -> String {
+        match reference {
+            TypeRef::Named(name) => name.clone(),
+            TypeRef::Primitive(PrimitiveType::Json) => "serde_json::Value".to_string(),
+            TypeRef::Primitive(primitive) => primitive.rust_path().to_string(),
+            TypeRef::Array(item) => format!("Vec<{}>", spelling(item)),
+            TypeRef::Optional(inner) => format!("Option<{}>", spelling(inner)),
+            TypeRef::Map(value) => format!("std::collections::HashMap<String, {}>", spelling(value)),
+            TypeRef::KeyedMap { key, value } => format!("std::collections::HashMap<{key}, {}>", spelling(value)),
+            other => panic!("imported schema reference {other:?} has no Rust type"),
+        }
+    }
+    let spelling = spelling(reference);
+    syn::parse_str(&spelling).unwrap_or_else(|error| panic!("imported type `{spelling}` is not a Rust type: {error}"))
 }
 
 fn method_tokens(method: RestMethod) -> TokenStream {
@@ -281,8 +303,8 @@ fn form_field_tokens(field: &FormField) -> TokenStream {
             quote! { FormField::file_accept(#name, #accept) }
         }
         FormFieldKind::Files { .. } => quote! { FormField::files(#name) },
-        FormFieldKind::Json(schema) => {
-            let ty: syn::Type = syn::parse_str(&schema.type_name).expect("validated form type");
+        FormFieldKind::Json(reference) => {
+            let ty = imported_type(reference);
             quote! { FormField::json_desc(#name, ctx.register::<#ty>()?) }
         }
         _ => quote! { FormField::text(#name) },

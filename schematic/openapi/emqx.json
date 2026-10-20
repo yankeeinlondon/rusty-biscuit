@@ -32,17 +32,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListNodesResponse",
-                    "schema_name": "ListNodesResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListNodesResponse"
+              "Named": "ListNodesResponse"
             }
           }
         }
@@ -68,17 +58,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::NodeInfo",
-                    "schema_name": "NodeInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::NodeInfo"
+              "Named": "NodeInfo"
             }
           }
         }
@@ -124,17 +104,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ClusterStatus",
-                    "schema_name": "ClusterStatus"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ClusterStatus"
+              "Named": "ClusterStatus"
             }
           }
         }
@@ -160,17 +130,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListListenersResponse",
-                    "schema_name": "ListListenersResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListListenersResponse"
+              "Named": "ListListenersResponse"
             }
           }
         }
@@ -196,17 +156,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListenerInfo",
-                    "schema_name": "ListenerInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListenerInfo"
+              "Named": "ListenerInfo"
             }
           }
         }
@@ -252,17 +202,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListMetricsResponse",
-                    "schema_name": "ListMetricsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListMetricsResponse"
+              "Named": "ListMetricsResponse"
             }
           }
         }
@@ -288,17 +228,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListStatsResponse",
-                    "schema_name": "ListStatsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListStatsResponse"
+              "Named": "ListStatsResponse"
             }
           }
         }
@@ -346,17 +276,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListAlarmsResponse",
-                    "schema_name": "ListAlarmsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListAlarmsResponse"
+              "Named": "ListAlarmsResponse"
             }
           }
         }
@@ -382,17 +302,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListClientsResponse",
-                    "schema_name": "ListClientsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListClientsResponse"
+              "Named": "ListClientsResponse"
             }
           }
         }
@@ -418,17 +328,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ClientInfo",
-                    "schema_name": "ClientInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ClientInfo"
+              "Named": "ClientInfo"
             }
           }
         }
@@ -490,17 +390,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::SubscribeBody",
-                    "schema_name": "SubscribeBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::SubscribeBody"
+              "Named": "SubscribeBody"
             }
           },
           "response": "Empty"
@@ -550,17 +440,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::SubscribeBody",
-                    "schema_name": "SubscribeBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::SubscribeBody"
+              "Named": "SubscribeBody"
             }
           },
           "response": "Empty"
@@ -607,17 +487,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListSubscriptionsResponse",
-                    "schema_name": "ListSubscriptionsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListSubscriptionsResponse"
+              "Named": "ListSubscriptionsResponse"
             }
           }
         }
@@ -646,17 +516,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::PublishBody",
-                    "schema_name": "PublishBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::PublishBody"
+              "Named": "PublishBody"
             }
           },
           "response": "Empty"
@@ -686,17 +546,7 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::PublishBatchBody",
-                    "schema_name": "PublishBatchBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::PublishBatchBody"
+              "Named": "PublishBatchBody"
             }
           },
           "response": "Empty"
@@ -723,17 +573,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListTopicsResponse",
-                    "schema_name": "ListTopicsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListTopicsResponse"
+              "Named": "ListTopicsResponse"
             }
           }
         }
@@ -759,17 +599,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListRetainedResponse",
-                    "schema_name": "ListRetainedResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListRetainedResponse"
+              "Named": "ListRetainedResponse"
             }
           }
         }
@@ -795,17 +625,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::RetainedMessage",
-                    "schema_name": "RetainedMessage"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::RetainedMessage"
+              "Named": "RetainedMessage"
             }
           }
         }
@@ -864,17 +684,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListRulesResponse",
-                    "schema_name": "ListRulesResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListRulesResponse"
+              "Named": "ListRulesResponse"
             }
           }
         }
@@ -908,32 +718,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::CreateRuleBody",
-                    "schema_name": "CreateRuleBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::CreateRuleBody"
+              "Named": "CreateRuleBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::RuleInfo",
-                    "schema_name": "RuleInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::RuleInfo"
+              "Named": "RuleInfo"
             }
           }
         }
@@ -959,17 +749,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::RuleInfo",
-                    "schema_name": "RuleInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::RuleInfo"
+              "Named": "RuleInfo"
             }
           }
         }
@@ -1003,32 +783,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::CreateRuleBody",
-                    "schema_name": "CreateRuleBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::CreateRuleBody"
+              "Named": "CreateRuleBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::RuleInfo",
-                    "schema_name": "RuleInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::RuleInfo"
+              "Named": "RuleInfo"
             }
           }
         }
@@ -1097,32 +857,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::TestRuleBody",
-                    "schema_name": "TestRuleBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::TestRuleBody"
+              "Named": "TestRuleBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::TestRuleResponse",
-                    "schema_name": "TestRuleResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::TestRuleResponse"
+              "Named": "TestRuleResponse"
             }
           }
         }
@@ -1168,17 +908,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListAuthenticatorsResponse",
-                    "schema_name": "ListAuthenticatorsResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListAuthenticatorsResponse"
+              "Named": "ListAuthenticatorsResponse"
             }
           }
         }
@@ -1204,17 +934,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::AuthenticatorInfo",
-                    "schema_name": "AuthenticatorInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::AuthenticatorInfo"
+              "Named": "AuthenticatorInfo"
             }
           }
         }
@@ -1263,19 +983,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::emqx::AuthUser",
-                      "schema_name": "AuthUser"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::emqx::AuthUser>"
+              "Array": {
+                "Named": "AuthUser"
+              }
             }
           }
         }
@@ -1309,32 +1019,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::CreateAuthUserBody",
-                    "schema_name": "CreateAuthUserBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::CreateAuthUserBody"
+              "Named": "CreateAuthUserBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::AuthUser",
-                    "schema_name": "AuthUser"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::AuthUser"
+              "Named": "AuthUser"
             }
           }
         }
@@ -1433,17 +1123,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListAuthzSourcesResponse",
-                    "schema_name": "ListAuthzSourcesResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListAuthzSourcesResponse"
+              "Named": "ListAuthzSourcesResponse"
             }
           }
         }
@@ -1469,17 +1149,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::ListBannedResponse",
-                    "schema_name": "ListBannedResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::ListBannedResponse"
+              "Named": "ListBannedResponse"
             }
           }
         }
@@ -1513,32 +1183,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::CreateBanBody",
-                    "schema_name": "CreateBanBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::CreateBanBody"
+              "Named": "CreateBanBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::BanInfo",
-                    "schema_name": "BanInfo"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::BanInfo"
+              "Named": "BanInfo"
             }
           }
         }
@@ -1627,32 +1277,12 @@
         "x-schematic": {
           "request": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::LoginBody",
-                    "schema_name": "LoginBody"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::LoginBody"
+              "Named": "LoginBody"
             }
           },
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::emqx::LoginResponse",
-                    "schema_name": "LoginResponse"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::emqx::LoginResponse"
+              "Named": "LoginResponse"
             }
           }
         }

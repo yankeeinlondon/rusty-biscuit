@@ -70,7 +70,7 @@ fn single_query_param_is_collected_apart_from_the_path() {
         vec![("page", QueryParamType::Integer)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -114,7 +114,7 @@ fn multiple_query_params_keep_declaration_order() {
         ],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     let positions: Vec<usize> = ["page", "limit", "sort"]
@@ -143,7 +143,7 @@ fn legacy_path_template_query_stays_in_the_path() {
         vec![("page", QueryParamType::Integer)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -162,7 +162,7 @@ fn legacy_path_template_query_stays_in_the_path() {
 fn endpoint_without_query_params_returns_empty_pairs() {
     let endpoint = make_endpoint_with_query("ListItems", RestMethod::Get, "/items", vec![]);
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -186,7 +186,7 @@ fn boolean_query_param_generates_correctly() {
         vec![("active", QueryParamType::Boolean)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Should have bool field type
@@ -216,7 +216,7 @@ fn enum_query_param_generates_as_string() {
         )],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Enum params are currently generated as String (may change in future)
@@ -236,7 +236,7 @@ fn integer_query_param_generates_correctly() {
         vec![("page", QueryParamType::Integer)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -261,7 +261,7 @@ fn number_query_param_generates_correctly() {
         vec![("score", QueryParamType::Number)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -287,7 +287,7 @@ fn array_query_param_generates_vec_field() {
         )],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -309,7 +309,7 @@ fn array_query_param_generates_loop_for_values() {
         )],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Array params should generate a loop that pushes each value to collector
@@ -339,7 +339,7 @@ fn array_of_integers_generates_vec_i64() {
         )],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -365,7 +365,7 @@ fn query_params_with_path_params_generates_both() {
         ],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Path params
@@ -402,7 +402,7 @@ fn path_is_immutable_when_query_params_present() {
         vec![("page", QueryParamType::Integer)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Query params no longer touch the path
@@ -422,7 +422,7 @@ fn path_is_immutable_when_query_params_present() {
 fn path_immutable_when_no_query_params() {
     let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("User"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Path should NOT be mutable when no query params
@@ -454,7 +454,7 @@ fn query_param_builder_methods_return_self() {
         ],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Builder methods should return Self for chaining
@@ -489,7 +489,7 @@ fn query_param_builder_for_array_accepts_vec() {
         )],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -512,7 +512,7 @@ fn into_parts_returns_result_with_query_params() {
         vec![("page", QueryParamType::Integer)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     let flat = code.split_whitespace().collect::<String>().replace(",)", ")");
@@ -538,7 +538,7 @@ fn query_only_endpoint_has_new_method() {
         vec![("page", QueryParamType::Integer)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Query-only endpoints should have a new() method
@@ -558,7 +558,7 @@ fn query_params_initialized_to_none_in_new() {
         vec![("page", QueryParamType::Integer)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // new() should initialize query params to None
@@ -582,7 +582,7 @@ fn single_path_param_with_query_params_has_from_impls() {
         vec![("version", QueryParamType::String)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Should still have From<&str> and From<String> for single path param
@@ -619,7 +619,7 @@ fn query_values_are_left_unencoded_by_into_parts() {
         vec![("q", QueryParamType::String)],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(
@@ -645,7 +645,7 @@ fn query_params_in_example_use_builder_pattern() {
         ],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     // Example should show builder pattern for query params
@@ -680,7 +680,7 @@ fn special_char_query_params_are_sanitized_with_serde_rename() {
         ],
     );
 
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::common::components::api_for(&endpoint), &endpoint);
     let code = format_tokens(&tokens);
 
     assert!(

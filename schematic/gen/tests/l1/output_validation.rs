@@ -12,8 +12,7 @@ use std::process::Command;
 use biscuit_test_harness::bin_exe;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi};
-use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
+use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, SchemaComponent};
 use schematic_gen::codegen::endpoint_methods::{endpoint_method_renames, resolve_names};
 use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use schematic_gen::errors::GeneratorError;
@@ -22,22 +21,31 @@ use schematic_gen::pipeline::{
     BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis,
 };
 use schematic_gen::validation::{
-    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
+    validate_openapi, validate_postman, validate_rust_client,
 };
 
 use crate::common::fresh_output::{TreeSnapshot, snapshot_tree};
 
-fn fixture_api(name: &str, module: &str, response_type: &str) -> RestApi {
+/// A one-endpoint API in `module` whose response is free-form JSON.
+fn fixture_api(name: &str, module: &str) -> RestApi {
     let mut context = schematic_define::DefinitionContext::types_in("::fixture");
     let endpoint = Endpoint::get("ListThings", "/things").describes("List things")
         .returns_json::<serde_json::Value>(&mut context).build().unwrap();
-    let mut api = RestApi::builder(&context, name, "https://fixture.example/v1")
+    RestApi::builder(&context, name, "https://fixture.example/v1")
         .describes(format!("{name} fixture")).no_auth().module_path(module)
-        .endpoints([endpoint]).build().unwrap();
-    // Stored Rust spelling may be malformed while its inline wire schema is valid.
-    if let ApiResponse::Json(schema) = &mut api.endpoints[0].response {
-        schema.type_name = response_type.into();
-    }
+        .endpoints([endpoint]).build().unwrap()
+}
+
+/// `api` with its response naming a `Thing` component spelled `rust_path`.
+/// The stored Rust path may be malformed while the component's wire schema
+/// is valid, as in a deserialized definition.
+fn with_thing_component(mut api: RestApi, rust_path: &str) -> RestApi {
+    api.schemas.push(SchemaComponent {
+        name: "Thing".into(),
+        rust_path: Some(rust_path.into()),
+        schema: serde_json::json!({"type": "object"}),
+    });
+    api.endpoints[0].response = ApiResponse::json_type("Thing");
     api
 }
 
@@ -93,20 +101,14 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
     std::fs::write(Path::new(&roots.rust).join("old.rs"), "// earlier module\n").unwrap();
     let rust_before = snapshot_tree(roots.schema_dir());
 
-    let valid = fixture_api("Inventory", "inventory", "serde_json::Value");
-    let broken = fixture_api("Broken", "broken", "Vec<Thing");
-    let registry_for = |module: &str| match module {
-        // Value is inline; its malformed stored Rust spelling is export data.
-        "broken" | "inventory" => Some(SchemaRegistry::new()),
-        _ => None,
-    };
+    let valid = fixture_api("Inventory", "inventory");
+    // The component's Rust path is Rust-only data; exports name the component.
+    let broken = with_thing_component(fixture_api("Broken", "broken"), "Vec<Thing");
 
     let report = generate_batch(
         &[valid, broken],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
 
     // Every requested output was attempted; only Rust failed.
     assert_eq!(
@@ -137,10 +139,11 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
     assert_eq!(snapshot_tree(roots.schema_dir()), rust_before);
     assert!(!roots.schema_dir().join("Cargo.toml").exists());
 
-    // Both exports were written for both APIs, the malformed name included.
+    // Both exports were written for both APIs; OpenAPI names the component.
     let openapi_broken =
         std::fs::read_to_string(Path::new(&roots.openapi).join("broken.json")).unwrap();
-    assert!(openapi_broken.contains("Vec<Thing"), "{openapi_broken}");
+    assert!(openapi_broken.contains("#/components/schemas/Thing"), "{openapi_broken}");
+    assert!(!openapi_broken.contains("Vec<Thing"), "{openapi_broken}");
     assert!(Path::new(&roots.openapi).join("inventory.json").is_file());
     for module in ["inventory", "broken"] {
         assert!(
@@ -162,33 +165,31 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
 }
 
 #[test]
-fn incomplete_registry_blocks_only_openapi() {
+fn dangling_reference_blocks_rust_and_openapi_but_not_postman() {
     let roots = Roots::new();
-    let inventory = fixture_api("Inventory", "inventory", "serde_json::Value");
-    let catalog = fixture_api("Catalog", "catalog", "CatalogPage");
-    // `catalog` has no registry, so no OpenAPI document may be written,
-    // not even the valid `inventory` one.
-    let registry_for = |module: &str| (module == "inventory").then(SchemaRegistry::new);
+    let inventory = fixture_api("Inventory", "inventory");
+    let mut catalog = fixture_api("Catalog", "catalog");
+    // `catalog` names a component it does not carry, so neither the Rust
+    // client nor any OpenAPI document may be written, not even the valid
+    // `inventory` ones. Postman never reads a schema.
+    catalog.endpoints[0].response = ApiResponse::json_vec_type("CatalogPage");
 
-    let report = generate_batch(
-        &[inventory, catalog],
-        &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+    let report = generate_batch(&[inventory, catalog], &BatchScope::Complete, &roots.opts());
 
-    assert_eq!(report.failed(), vec![Output::OpenApi]);
-    assert_eq!(report.succeeded(), vec![Output::Rust, Output::Postman]);
-    let openapi = &report.get(Output::OpenApi).unwrap().diagnostics;
-    assert_eq!(openapi.len(), 1, "{openapi:#?}");
-    assert_eq!(openapi[0].feature, Feature::IncompleteSchemaRegistry);
-    assert_eq!(openapi[0].api, vec!["Catalog"]);
-    assert!(openapi[0].message.contains("catalog"), "{}", openapi[0]);
+    assert_eq!(report.failed(), vec![Output::Rust, Output::OpenApi]);
+    assert_eq!(report.succeeded(), vec![Output::Postman]);
+    for output in [Output::Rust, Output::OpenApi] {
+        let diagnostics = &report.get(output).unwrap().diagnostics;
+        assert_eq!(diagnostics.len(), 1, "{output}: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.feature, Feature::InvalidSchemaReference);
+        assert_eq!(diagnostic.api, vec!["Catalog"]);
+        assert_eq!(diagnostic.endpoint.as_deref(), Some("ListThings"));
+        assert!(diagnostic.message.contains("`CatalogPage`"), "{diagnostic}");
+    }
 
     assert_eq!(snapshot_or_absent(Path::new(&roots.openapi)), None);
-    assert!(Path::new(&roots.rust).join("catalog.rs").is_file());
-    assert!(Path::new(&roots.rust).join("inventory.rs").is_file());
-    assert!(roots.schema_dir().join("Cargo.toml").is_file());
+    assert_eq!(snapshot_or_absent(roots.schema_dir()), None);
     assert!(
         Path::new(&roots.postman)
             .join("catalog.postman_collection.json")
@@ -200,8 +201,8 @@ fn incomplete_registry_blocks_only_openapi() {
 /// Two members of module `paired`. `PairedA` declares `ListThings` at
 /// `GET /things`; `PairedB` declares the given id, path, and request suffix.
 fn paired_group(second_id: &str, second_path: &str, second_suffix: Option<&str>) -> [RestApi; 2] {
-    let first = fixture_api("PairedA", "paired", "serde_json::Value");
-    let mut second = fixture_api("PairedB", "paired", "serde_json::Value");
+    let first = fixture_api("PairedA", "paired");
+    let mut second = fixture_api("PairedB", "paired");
     second.endpoints[0].id = second_id.to_string();
     second.endpoints[0].path = second_path.to_string();
     second.request_suffix = second_suffix.map(str::to_string);
@@ -213,16 +214,13 @@ fn incompatible_group_route_blocks_only_openapi_and_writes_no_document() {
     let roots = Roots::new();
     // `inventory` is valid and comes first, so a writer that published module
     // by module would already have written it when `paired` fails.
-    let inventory = fixture_api("Inventory", "inventory", "serde_json::Value");
+    let inventory = fixture_api("Inventory", "inventory");
     let [paired_a, paired_b] = paired_group("FetchThings", "/things", None);
-    let registry_for = |_: &str| Some(SchemaRegistry::new());
 
     let report = generate_batch(
         &[inventory, paired_a, paired_b],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
 
     assert_eq!(report.failed(), vec![Output::OpenApi]);
     assert_eq!(report.succeeded(), vec![Output::Rust, Output::Postman]);
@@ -255,21 +253,18 @@ fn incompatible_group_route_blocks_only_openapi_and_writes_no_document() {
 #[test]
 fn same_api_duplicate_route_blocks_every_output() {
     let roots = Roots::new();
-    let mut routes = fixture_api("Routes", "routes", "serde_json::Value");
+    let mut routes = fixture_api("Routes", "routes");
     routes.endpoints[0].path = "/things/{id}".to_string();
     // Only the path-parameter name differs, so the route is the same.
     let mut twin = routes.endpoints[0].clone();
     twin.id = "FetchThing".to_string();
     twin.path = "/things/{name}".to_string();
     routes.endpoints.push(twin);
-    let registry_for = |_: &str| Some(SchemaRegistry::new());
 
     let report = generate_batch(
         &[routes],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
 
     assert_eq!(
         report.failed(),
@@ -312,7 +307,7 @@ fn located_param(name: &str, required: bool) -> ParamDef {
 /// An API whose one endpoint declares a required and an optional parameter
 /// in both the header and the cookie location.
 fn header_and_cookie_api() -> RestApi {
-    let mut api = fixture_api("Located", "located", "serde_json::Value");
+    let mut api = fixture_api("Located", "located");
     api.endpoints[0].params = Some(EndpointParams {
         header: vec![
             located_param("x-required", true),
@@ -371,7 +366,6 @@ fn header_and_cookie_parameters_reach_every_postman_writer() {
         std::slice::from_ref(&api),
         &BatchScope::Complete,
         &roots.opts(),
-        &|_: &str| Some(SchemaRegistry::new()),
     );
     assert!(report.failed().is_empty(), "{:#?}", report.outputs);
     for output in [Output::Rust, Output::OpenApi, Output::Postman] {
@@ -420,7 +414,7 @@ fn header_and_cookie_parameters_reach_every_postman_writer() {
 
 #[test]
 fn cookie_api_key_rides_a_cookie_header_in_postman() {
-    let mut api = fixture_api("CookieKey", "cookie_key", "serde_json::Value");
+    let mut api = fixture_api("CookieKey", "cookie_key");
     api.auth = AuthStrategy::ApiKeyParam {
         name: "sid".to_string(),
         location: ApiKeyLocation::Cookie,
@@ -455,7 +449,7 @@ fn api_with_located_type(
     place: fn(ParamDef) -> EndpointParams,
     param_type: QueryParamType,
 ) -> RestApi {
-    let mut api = fixture_api("Located", "located", "serde_json::Value");
+    let mut api = fixture_api("Located", "located");
     api.endpoints[0].params = Some(place(ParamDef { rust_name: None, secret: false, pager_managed: false,
         param_type,
         ..located_param("flags", false)
@@ -521,9 +515,8 @@ fn nested_query_array_leaves_earlier_rust_output_untouched() {
     let rust_before = snapshot_tree(roots.schema_dir());
     let (_, _, query) = PLACEMENTS[0];
     let api = api_with_located_type(query, array_of(array_of(QueryParamType::Boolean)));
-    let registry_for = |module: &str| (module == "located").then(SchemaRegistry::new);
 
-    let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts(), &registry_for);
+    let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts());
 
     assert_eq!(report.failed(), vec![Output::Rust]);
     assert_eq!(report.succeeded(), vec![Output::OpenApi, Output::Postman]);
@@ -603,14 +596,11 @@ fn grouped_document_renames_a_shared_raw_id() {
     // The Ollama shape: one raw id in two group members, distinct routes,
     // distinct request suffixes.
     let [paired_a, paired_b] = paired_group("ListThings", "/v2/things", Some("Compat"));
-    let registry_for = |_: &str| Some(SchemaRegistry::new());
 
     let report = generate_batch(
         &[paired_a, paired_b],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
     assert!(report.failed().is_empty(), "{:?}", report.failed());
 
     let written: serde_json::Value = serde_json::from_str(
@@ -637,29 +627,9 @@ fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
     let apis = resolve_all_apis();
     let refs: Vec<&RestApi> = apis.iter().collect();
 
-    let mut openapi = validate_openapi(&refs);
-    let mut modules: Vec<String> = Vec::new();
-    for api in &refs {
-        let module = schematic_gen::export::resolve_module_name(api);
-        if !modules.contains(&module) {
-            modules.push(module);
-        }
-    }
-    for module in &modules {
-        let members: Vec<&RestApi> = refs
-            .iter()
-            .copied()
-            .filter(|api| &schematic_gen::export::resolve_module_name(api) == module)
-            .collect();
-        openapi.extend(validate_openapi_registry(
-            module,
-            &members,
-            get_registries_for_module(module).as_ref(),
-        ));
-    }
     let by_output = [
         (Output::Rust, validate_rust_client(&refs)),
-        (Output::OpenApi, openapi),
+        (Output::OpenApi, validate_openapi(&refs)),
         (Output::Postman, validate_postman(&refs)),
     ];
 

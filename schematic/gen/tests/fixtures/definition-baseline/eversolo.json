@@ -13,14 +13,12 @@
         "headers": [],
         "id": "DeviceGetModel",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ZidooControlCenter/getModel",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "GetModelResponse"
+            "Named": "GetModelResponse"
           }
         }
       },
@@ -29,11 +27,9 @@
         "headers": [],
         "id": "RemoteSendKey",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)",
@@ -43,15 +39,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooControlCenter/RemoteControl/sendkey",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -60,11 +54,9 @@
         "headers": [],
         "id": "RemoteInputText",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Text string to input",
@@ -74,15 +66,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooControlCenter/RemoteControl/inputtext",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -91,14 +81,12 @@
         "headers": [],
         "id": "MusicGetState",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ZidooMusicControl/v2/getState",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "GetStateResponse"
+            "Named": "GetStateResponse"
           }
         }
       },
@@ -107,14 +95,12 @@
         "headers": [],
         "id": "MusicPlayOrPause",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ZidooMusicControl/v2/playOrPause",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -123,14 +109,12 @@
         "headers": [],
         "id": "MusicPlayNext",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ZidooMusicControl/v2/playNext",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -139,14 +123,12 @@
         "headers": [],
         "id": "MusicPlayLast",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ZidooMusicControl/v2/playLast",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -155,11 +137,9 @@
         "headers": [],
         "id": "MusicSeekTo",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Target position in milliseconds",
@@ -169,15 +149,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooMusicControl/v2/seekTo",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -186,14 +164,12 @@
         "headers": [],
         "id": "MusicGetInputOutputList",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ZidooMusicControl/v2/getInputAndOutputList",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "InputOutputListResponse"
+            "Named": "InputOutputListResponse"
           }
         }
       },
@@ -202,11 +178,9 @@
         "headers": [],
         "id": "MusicSetInput",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Input tag from getInputAndOutputList",
@@ -216,15 +190,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooMusicControl/v2/setInputList",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "InputOutputListResponse"
+            "Named": "InputOutputListResponse"
           }
         }
       },
@@ -233,11 +205,9 @@
         "headers": [],
         "id": "MusicSetOutput",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Output tag from getInputAndOutputList",
@@ -247,15 +217,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooMusicControl/v2/setOutInputList",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "InputOutputListResponse"
+            "Named": "InputOutputListResponse"
           }
         }
       },
@@ -264,11 +232,9 @@
         "headers": [],
         "id": "MusicSetVolume",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Volume level (0 to maxVolume)",
@@ -278,15 +244,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooMusicControl/v2/setDevicesVolume",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -295,11 +259,9 @@
         "headers": [],
         "id": "MusicSetMute",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Mute state: 0 = unmuted, 1 = muted",
@@ -309,15 +271,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooMusicControl/v2/setMuteVolume",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -326,14 +286,12 @@
         "headers": [],
         "id": "PowerGetOptions",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ZidooMusicControl/v2/getPowerOption",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "PowerOptionsResponse"
+            "Named": "PowerOptionsResponse"
           }
         }
       },
@@ -342,11 +300,9 @@
         "headers": [],
         "id": "PowerSetOption",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Power option tag (poweroff, reboot, screen, timeshutdown)",
@@ -356,15 +312,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooMusicControl/v2/setPowerOption",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -373,14 +327,12 @@
         "headers": [],
         "id": "SystemGetScreenBrightness",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/SystemSettings/displaySettings/getScreenBrightness",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "BrightnessResponse"
+            "Named": "BrightnessResponse"
           }
         }
       },
@@ -389,11 +341,9 @@
         "headers": [],
         "id": "SystemSetScreenBrightness",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Brightness level index",
@@ -403,15 +353,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/SystemSettings/displaySettings/setScreenBrightness",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -420,14 +368,12 @@
         "headers": [],
         "id": "SystemGetKnobBrightness",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/SystemSettings/displaySettings/getKnobBrightness",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "BrightnessResponse"
+            "Named": "BrightnessResponse"
           }
         }
       },
@@ -436,11 +382,9 @@
         "headers": [],
         "id": "SystemSetKnobBrightness",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Brightness level index",
@@ -450,15 +394,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/SystemSettings/displaySettings/setKnobBrightness",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -467,14 +409,12 @@
         "headers": [],
         "id": "SystemGetVuModeList",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/SystemSettings/displaySettings/getVUModeList",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "DisplayModeListResponse"
+            "Named": "DisplayModeListResponse"
           }
         }
       },
@@ -483,11 +423,9 @@
         "headers": [],
         "id": "SystemSetVuMode",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "VU mode index from getVUModeList",
@@ -497,15 +435,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/SystemSettings/displaySettings/setVUMode",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -514,14 +450,12 @@
         "headers": [],
         "id": "SystemGetSpectrumModeList",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/SystemSettings/displaySettings/getSpPlayModeList",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "DisplayModeListResponse"
+            "Named": "DisplayModeListResponse"
           }
         }
       },
@@ -530,11 +464,9 @@
         "headers": [],
         "id": "SystemSetSpectrumMode",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Spectrum mode index from getSpPlayModeList",
@@ -544,15 +476,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/SystemSettings/displaySettings/setSpPlayModeList",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       },
@@ -561,11 +491,9 @@
         "headers": [],
         "id": "SystemChangeVuDisplay",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": null,
           "query": [
             {
               "description": "Display open type",
@@ -575,15 +503,13 @@
               "required": true,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/ZidooMusicControl/v2/changVUDisplay",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "StatusResponse"
+            "Named": "StatusResponse"
           }
         }
       }
@@ -599,109 +525,108 @@
     "headers": [],
     "module_path": "eversolo",
     "name": "Eversolo",
-    "pagination_exceptions": [],
     "request_id_header": null,
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "87c9cb0dffde935b643d28625395043970710b7522097f4776ae4916a330a504",
+    "api_metadata": "20f25cbd9afdc611e5028c95429a4838c268a71866fdea347d09b517909ab995",
     "endpoints": [
       {
-        "blake3": "1a0e635191b8b0d249e6a2ac8a46bc0703b6692cb89dda8ec5c47be975f86d93",
+        "blake3": "c685bc3aa087814182fa6c650c1af2efbf0e1ecfeede2fef55c71d0b692db6ad",
         "id": "DeviceGetModel"
       },
       {
-        "blake3": "2190feaf80221d9c3d911280761a0faf221a5766e00c55326058e390599e8593",
+        "blake3": "1874b08ada1fc03fb431034a6522348088488a2b5e0013ef2d7f2edd6d71f99d",
         "id": "RemoteSendKey"
       },
       {
-        "blake3": "0c8a4690fa8386cea3b4ca4e76f6f69187437f4d2751cc30412dacf27330d5cc",
+        "blake3": "f50c7af8952dd03b46af69bb7b9294830bfd07fcb25adeda880f3aa90753d1ab",
         "id": "RemoteInputText"
       },
       {
-        "blake3": "5ec5d16c192b9d001c0c7da027ae1f176307e5ce5eaa28382b1e0a83d4b3b5c5",
+        "blake3": "8c032720ff127feec457c3aaa87a6294a9f8fb07c4a73fb6c87489ab428a6105",
         "id": "MusicGetState"
       },
       {
-        "blake3": "29c09498a4a92940cf637f68cc7c5cb56cd47fd9b561774f59844575d03f9c6e",
+        "blake3": "7ddd2a04c23498b0ba91eb742ac996ef1de2b07b2033aae52191d4ecb96547c8",
         "id": "MusicPlayOrPause"
       },
       {
-        "blake3": "569ea7a337cedb5b8b7930ead3ec377ae7bdf06feec8397b1d80d859b5df43b1",
+        "blake3": "9cde4551a06f54f58f9c8b77187a7c0a01675a05bc30d91173645757aafc350c",
         "id": "MusicPlayNext"
       },
       {
-        "blake3": "531258a76e065900718d71636fa2c160ffc7e72897bc5933acea79d645437824",
+        "blake3": "6da2de3c0d12f855c04e423a99bfcfa6f5adbac4e35e412ccaee6ab90793a4bb",
         "id": "MusicPlayLast"
       },
       {
-        "blake3": "71e2d257b7185544d4e33b18b28d6ff899bd030b5c5bc3c393021fdc26bdd319",
+        "blake3": "76a6889e8ae8e20de7c83f3ccbe7bb760f1e21e3e3acc2738317dae8e2c651d4",
         "id": "MusicSeekTo"
       },
       {
-        "blake3": "9b09d295148af7d2c7c4b5d7609d2816552dc552a3da012e889d3547fe62a0e7",
+        "blake3": "4a1e1da2f07670a69c9981d711762be648c2add0b64a7041066a494dc275f4e5",
         "id": "MusicGetInputOutputList"
       },
       {
-        "blake3": "91ae1deec93a9355b4aa132ac5587ae17f4935b413d9e7ec12af7ca3ab373491",
+        "blake3": "668f1e31aff94db9d25d030533975c8728fd55edb5c8b74f60df5f1bb3ea6b7c",
         "id": "MusicSetInput"
       },
       {
-        "blake3": "bfe18f464bb3e98b408ab507e980e86745d2bbd41f9f3c57866f6161f3cca768",
+        "blake3": "f284b700bab7cbd9174350a16acf59654015d35d97fc9fed3746948ea21e8a2b",
         "id": "MusicSetOutput"
       },
       {
-        "blake3": "1eaf321c697991f5dc9c435f7f6a571450e5778802dca3e0de0c401594945ab0",
+        "blake3": "640d0dbd0698d9ee96427626a81da3e674ad1ff84b2b2009d7dcb0a1d9b48a84",
         "id": "MusicSetVolume"
       },
       {
-        "blake3": "6d1c9a76d7a9fc62cfa1fb5c45f9b8b0fd12e34297e38a573b4fdcc32635d0cc",
+        "blake3": "bc92ec6024d015e1339e602f16207458af4795371552f5e21c134d3dec5411fa",
         "id": "MusicSetMute"
       },
       {
-        "blake3": "f896456ad5ad5e60ecea298aadd0acbe5dc7f901454f014b7494e4eada9657cc",
+        "blake3": "450ceab64a2e084f3c938e2ed3ce6775a47cd39bbf0ad5f48a212cf5bdaf5955",
         "id": "PowerGetOptions"
       },
       {
-        "blake3": "88a0eada149eb12aa0ffc42e729b7b43cb312dd2261ec01e7220e0e53fc7ad07",
+        "blake3": "c07be15f5fe2276b73e29c424e89f20fec4f12dd4f19638eb6bb5204fa2c8c54",
         "id": "PowerSetOption"
       },
       {
-        "blake3": "3e0953e4a2b05ef44100cf37f9ec851c8d9123caf663b3d40890c4ee9ad2ebb4",
+        "blake3": "426be165897eb952e4e930c3b95079a0b45a9b81e3d49ef1bda5bfc07e176b70",
         "id": "SystemGetScreenBrightness"
       },
       {
-        "blake3": "068ca9fcf83e2e72daa222cfa0b3bff722fc746d490c946ab24f1ec43056e105",
+        "blake3": "949f1818dd7304860241dcd81b10daaa6cbf24168f994ce042bdf80f0e087b77",
         "id": "SystemSetScreenBrightness"
       },
       {
-        "blake3": "bbe8762df3c66f40300d7c21eaeb7afc41a74998f8a556fd5e3570ca52725138",
+        "blake3": "ee687992eef88ae52b4eb7ddb0eca218f5762662eadf0c1608f2ab76b4a47386",
         "id": "SystemGetKnobBrightness"
       },
       {
-        "blake3": "135825866004183c54d50971bc874b4f98465ef44dd26364ce2d9d2ab59e7b10",
+        "blake3": "3ac31189dab09a9307edae73de93fa29484b0427d03b429e6875bc4bd3737115",
         "id": "SystemSetKnobBrightness"
       },
       {
-        "blake3": "893264b34d7d21993ee55aedb73b5a1911d93840eefc98d4445ec077b093483e",
+        "blake3": "fab9f65500a03040e26f4eb008161ccd6b674fe50890e8b73e88998a0a17739c",
         "id": "SystemGetVuModeList"
       },
       {
-        "blake3": "05d8b46c68423b75804d900c39d296dd70b81d071b722443df3646272a9ef161",
+        "blake3": "76574305ee0c83d308d3ef4d56b4a3266867101508654ef7a70f41d3a1a72adc",
         "id": "SystemSetVuMode"
       },
       {
-        "blake3": "5701555be14b0033c2e285fe94459a2ce79fcdc4e04b8f9af6784bb4e216e0e5",
+        "blake3": "8ca54db944d57ce2411fe422ed5aa6dbf86e0069c7e5d732f42b11916934f94d",
         "id": "SystemGetSpectrumModeList"
       },
       {
-        "blake3": "29ff6bde39a32ea543f90610fc65810f02ee6f18fd6fc1bef0a423284cd44cc0",
+        "blake3": "e4fe67b78e258b052b0ef1a9f75c64daf8aedabefab5e750fc4ef023759a26cd",
         "id": "SystemSetSpectrumMode"
       },
       {
-        "blake3": "38777bbd13923ac5b434226e0e53fa615ac1add946e0e21710967ef36035fa35",
+        "blake3": "66ace94ca52464178ad62d337004ee62afa28e016a5346659d629b34b5f40dfc",
         "id": "SystemChangeVuDisplay"
       }
     ]
@@ -854,32 +779,69 @@
   ],
   "registry": [
     {
-      "blake3": "4a01635cebde258d560f713b56aaf0307d79153c19c01dcc09987be2159eaf80",
-      "name": "StatusResponse"
+      "blake3": "e00edb27338de6860a0baba3522ea39a6c51f5ae0b2559d78e7399f3d8992c95",
+      "name": "StatusResponse",
+      "rust_path": "::schematic_definitions::eversolo::StatusResponse"
     },
     {
-      "blake3": "2d47ba0c6895da9fe9159587b8bb9859b5527c994c1a82be92937b113fead8b3",
-      "name": "GetModelResponse"
+      "blake3": "a527b57c17f5c4d5a7eb17e08547595376425398f2b898847f337653f6a87ba5",
+      "name": "GetModelResponse",
+      "rust_path": "::schematic_definitions::eversolo::GetModelResponse"
     },
     {
-      "blake3": "ed01e089b91d8423393c47dbf5aff86c02d5f89d63f50eca2f65a98d5f8a9ab1",
-      "name": "GetStateResponse"
+      "blake3": "2aee21f05a10948f059abf1a7cf10569ee8dafb101fd715a5fff63d0aedc5fdb",
+      "name": "GetStateResponse",
+      "rust_path": "::schematic_definitions::eversolo::GetStateResponse"
     },
     {
-      "blake3": "f561b05361aa25880ac36fa244a01003e118d40e9b54f252bf6ebef74623250b",
-      "name": "InputOutputListResponse"
+      "blake3": "09e6500f1c7179f1ac05119fdee2bfaa3d5c0068aa4bc62132ef9ec8b6bd27be",
+      "name": "PlayingMusic",
+      "rust_path": null
     },
     {
-      "blake3": "29a6b6948e4f598e96666f4f95fb14eb631ebe185c6869216a624b8d413beea5",
-      "name": "PowerOptionsResponse"
+      "blake3": "3c8bc9863acaec91665e8a39f9ca718dd3089826cfd08d2f202b907be1739cd1",
+      "name": "VolumeData",
+      "rust_path": null
     },
     {
-      "blake3": "7382eb93afc15cf7d37db53c5cd1e4f8b55a5169e73875a904114e1d664db217",
-      "name": "BrightnessResponse"
+      "blake3": "ad79cd1e79ddf292ac81bfd5fd5f5504da763ecc4b5c55ee8e337706a5d2bb95",
+      "name": "InputOutputListResponse",
+      "rust_path": "::schematic_definitions::eversolo::InputOutputListResponse"
     },
     {
-      "blake3": "40a05ac317fdcf80cd72b0fd3124ed3761e938d4ff2d0c8f2f5bc1875f5db5c3",
-      "name": "DisplayModeListResponse"
+      "blake3": "a5ca54413ee661ae7964a2dec600cb11b3ff547063f2419c087b8e0184c1a538",
+      "name": "InputItem",
+      "rust_path": null
+    },
+    {
+      "blake3": "2383a24656f86048f1de7c8085644201e257a9e60421a5380a87b8ffc9da7211",
+      "name": "OutputItem",
+      "rust_path": null
+    },
+    {
+      "blake3": "4c27953fa827ce53cbf1f0115936780f643e745ae6069cc7f3446999176e64a3",
+      "name": "PowerOptionsResponse",
+      "rust_path": "::schematic_definitions::eversolo::PowerOptionsResponse"
+    },
+    {
+      "blake3": "d165ee38a2e14cb978aadd2c9953de455d07f958c2132f09dc93334509ce4142",
+      "name": "PowerOption",
+      "rust_path": null
+    },
+    {
+      "blake3": "0c339fc57626845ffa2834b99929e02a5cf2eac2c1a01478c730b65e6cd999c0",
+      "name": "BrightnessResponse",
+      "rust_path": "::schematic_definitions::eversolo::BrightnessResponse"
+    },
+    {
+      "blake3": "f38c0f6f50ee8c88b573045819a9a88fe0bacba5a1cbd6b62dd559b89edde785",
+      "name": "DisplayModeListResponse",
+      "rust_path": "::schematic_definitions::eversolo::DisplayModeListResponse"
+    },
+    {
+      "blake3": "d29b71375b50e1f4fafa004974a1073983688d8032e7071be80ebc858538031a",
+      "name": "DisplayMode",
+      "rust_path": null
     }
   ]
 }

@@ -51,46 +51,55 @@
         "headers": [],
         "id": "GetRepository",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "RepositoryInfo"
+            "Named": "RepositoryInfo"
           }
         }
       },
       {
-        "description": "Get a Git tree (non-recursive, single level)",
+        "description": "Get a Git tree; set recursive to include nested entries",
         "headers": [],
         "id": "GetGitTree",
         "method": "GET",
-        "oauth_scopes": null,
-        "params": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "GitTreeEntry",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "tree"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": null,
+              "explode": false,
+              "name": "recursive",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
         "path": "/repos/{owner}/{repo}/git/trees/{sha}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "GitTreeResponse"
-          }
-        }
-      },
-      {
-        "description": "Get a Git tree recursively (may be paginated for large repos)",
-        "headers": [],
-        "id": "GetGitTreeRecursive",
-        "method": "GET",
-        "oauth_scopes": null,
-        "params": null,
-        "path": "/repos/{owner}/{repo}/git/trees/{sha}?recursive=true",
-        "request": null,
-        "response": {
-          "Json": {
-            "module_path": null,
-            "type_name": "GitTreeResponse"
+            "Named": "GitTreeResponse"
           }
         }
       },
@@ -99,7 +108,6 @@
         "headers": [],
         "id": "GetRepositoryContentRaw",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/raw/{+filepath}",
         "request": null,
@@ -110,18 +118,9 @@
         "headers": [],
         "id": "ListPullRequests",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -170,15 +169,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/pulls",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<PullRequestSummary>"
+            "Array": {
+              "Named": "PullRequestSummary"
+            }
           }
         }
       },
@@ -187,18 +186,9 @@
         "headers": [],
         "id": "ListPullRequestFiles",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -216,15 +206,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/pulls/{index}/files",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<PullRequestFile>"
+            "Array": {
+              "Named": "PullRequestFile"
+            }
           }
         }
       },
@@ -233,18 +223,9 @@
         "headers": [],
         "id": "ListIssues",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -290,15 +271,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/issues",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<IssueSummary>"
+            "Array": {
+              "Named": "IssueSummary"
+            }
           }
         }
       },
@@ -307,14 +288,12 @@
         "headers": [],
         "id": "GetIssue",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/issues/{index}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "IssueSummary"
+            "Named": "IssueSummary"
           }
         }
       },
@@ -323,18 +302,9 @@
         "headers": [],
         "id": "ListIssueComments",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -352,15 +322,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/issues/{index}/comments",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<IssueComment>"
+            "Array": {
+              "Named": "IssueComment"
+            }
           }
         }
       },
@@ -369,18 +339,9 @@
         "headers": [],
         "id": "ListIssueTimeline",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -398,15 +359,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/issues/{index}/timeline",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<TimelineEvent>"
+            "Array": {
+              "Named": "TimelineEvent"
+            }
           }
         }
       },
@@ -415,18 +376,9 @@
         "headers": [],
         "id": "ListTags",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -444,15 +396,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/tags",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepoTag>"
+            "Array": {
+              "Named": "RepoTag"
+            }
           }
         }
       },
@@ -461,18 +413,9 @@
         "headers": [],
         "id": "ListReleases",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -506,15 +449,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/repos/{owner}/{repo}/releases",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<Release>"
+            "Array": {
+              "Named": "Release"
+            }
           }
         }
       },
@@ -523,14 +466,12 @@
         "headers": [],
         "id": "GetBranch",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/branches/{branch}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Branch"
+            "Named": "Branch"
           }
         }
       },
@@ -539,14 +480,27 @@
         "headers": [],
         "id": "GetTagReference",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/repos/{owner}/{repo}/git/refs/{git_ref}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<GitRef>"
+            "Array": {
+              "Named": "GitRef"
+            }
           }
         }
       },
@@ -555,14 +509,12 @@
         "headers": [],
         "id": "GetAnnotatedTag",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/repos/{owner}/{repo}/git/tags/{sha}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "AnnotatedTagObject"
+            "Named": "AnnotatedTagObject"
           }
         }
       },
@@ -571,18 +523,9 @@
         "headers": [],
         "id": "ListOrgRepos",
         "method": "GET",
-        "oauth_scopes": null,
         "params": {
           "cookie": [],
           "header": [],
-          "pagination": {
-            "PageNumber": {
-              "default_per_page": 50,
-              "max_per_page": 100,
-              "page_param": "page",
-              "per_page_param": "limit"
-            }
-          },
           "query": [
             {
               "description": "Page number (1-indexed, default: 1)",
@@ -600,15 +543,15 @@
               "required": false,
               "style": "Form"
             }
-          ],
-          "response_pagination": null
+          ]
         },
         "path": "/orgs/{org}/repos",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<RepositoryInfo>"
+            "Array": {
+              "Named": "RepositoryInfo"
+            }
           }
         }
       }
@@ -626,132 +569,72 @@
     ],
     "module_path": "gitea",
     "name": "Gitea",
-    "pagination_exceptions": [
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "GitTreeEntry",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "tree"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "GetGitTree"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "GitTreeEntry",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "tree"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "GetGitTreeRecursive"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": null,
-          "items": {
-            "projection": [],
-            "record": [
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "GetTagReference"
-      }
-    ],
     "request_id_header": null,
     "request_suffix": null,
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "158f790339445d406ac5e3957f7fcf396721db92e9b8963de7f66d9a33314271",
+    "api_metadata": "ca8a44d53dc680dfa3fc76a292d1a29effabef1b3bd27522f4e4688c0dfcd944",
     "endpoints": [
       {
-        "blake3": "1cb507b25e95f0ee298cbd1ab33cc27d76168753eba0fdd055504f863d600caa",
+        "blake3": "0fcc165d650229cce2654ce5ac8994aad66634a2f258d1c2b718311a1aa83552",
         "id": "GetRepository"
       },
       {
-        "blake3": "4d53f3cbbc84603d7a62445a07d745244c08096a98823a6d6b8df5c3695760f9",
+        "blake3": "2b01d81c350af464d4d2005c186743a7402a3e1e96429dc68b8dd8f0147ee362",
         "id": "GetGitTree"
       },
       {
-        "blake3": "2bc085eaf9d3ae347db4d528d5f4da321f73b8ebead023c3e4c443f6bc2d615f",
-        "id": "GetGitTreeRecursive"
-      },
-      {
-        "blake3": "3e5f846e008cf7f5e627b32b8b27609b0c742484c38c40a62ebeae7d645700b6",
+        "blake3": "d9517b1a4f3d5ee9defea0535c8899be4c1600a3ed3bbf2c5d26b1ebb4957edd",
         "id": "GetRepositoryContentRaw"
       },
       {
-        "blake3": "4176e3e46c46eb41d178ad4d037f9325e3a61b0d94d8c9946f1062d8d4e6e3d2",
+        "blake3": "767442fa3c8f5eac856393572a3054a2c09b5deaff8f0153a0f527795468c6cf",
         "id": "ListPullRequests"
       },
       {
-        "blake3": "0d48d129a3d228a27bc13df3a039db21b3806d9229e98b32be95298a99c86a77",
+        "blake3": "d6df22110e2c1d1a551fa3e7d17fd9564e4cbd2e67e3628eda2b2a3d7953adf0",
         "id": "ListPullRequestFiles"
       },
       {
-        "blake3": "2bc0de3809b0bd603e419d21c37430c42362b36fcd7a7b5b758ea351c3dff255",
+        "blake3": "72b4303d539dc2f12b59b217a5a01fbef671f820da40c2cea9a7276bf5cecaa9",
         "id": "ListIssues"
       },
       {
-        "blake3": "be70b41eb8578965fb98551539c977c9f39577d1ad2cf3f6ee01ad4f401e4366",
+        "blake3": "63dd83e094821f5148d21dcda47f7d3d051e10cc34068fab69979535c36692dc",
         "id": "GetIssue"
       },
       {
-        "blake3": "26d4c38c0166a7d5079491c25b497e988fe138092464336a9d92052b05cbf3b3",
+        "blake3": "e1b8c147d2f3ba733f78f5404714265e1817a02c3a06151e5d01e4911bf0e37e",
         "id": "ListIssueComments"
       },
       {
-        "blake3": "c56fde3460ae001c4eee250038305257c05a858f5c2666af272600a1a8707d4d",
+        "blake3": "b19f5461daf57eb003e5891f9b3d7018aecc56f154cf2458dcd1eae6dec0a940",
         "id": "ListIssueTimeline"
       },
       {
-        "blake3": "cf6772bbdbafd8a721223f166f60aa54f77a9ac20bef31d87b7c7670275f40f0",
+        "blake3": "f13f63ab08cb4b3e812c6bebf25df1d36fda5e6b3c6cc90eca3216dbc6c28fa3",
         "id": "ListTags"
       },
       {
-        "blake3": "259da2c0be4a6999bceb7ab9082203c20c5cef9253f004e17013ca1066013d57",
+        "blake3": "80ef3d0e2eab6a48f2f027cd45205f39dab3fc95cf5def9d7a3dc585230f9eea",
         "id": "ListReleases"
       },
       {
-        "blake3": "5426745f16c017a46a2453306b4b3de842effa83f441f5a7061c20a83f7c1cfc",
+        "blake3": "dc50cfe9a659eb4fb38a9466b0cf917c597f32ccee5ef237c8ac15b96fd95e48",
         "id": "GetBranch"
       },
       {
-        "blake3": "c07d156dd7c2ed9d0846af186265bef935265740b80bb6d337629aeb3a25f800",
+        "blake3": "78249bd0eabd231bd46446d283717e82627bbe6f8aba3cdee5f348d9bafc57db",
         "id": "GetTagReference"
       },
       {
-        "blake3": "9bc1704ac3c4ba859f1172f45e6a4aeff44b39c7d276c8e995187d93d366f421",
+        "blake3": "d5b1c4d3f2883ec038d06abd01ebc7488863e6f93006f6ab26ec3e278fd9014e",
         "id": "GetAnnotatedTag"
       },
       {
-        "blake3": "409e49e0819c1e210c683f845db417b19897784bffeb284678654f6180aed21b",
+        "blake3": "14b92068e1b74cb6150e875ba509003741c5b08bff31fcc9aed6738804253675",
         "id": "ListOrgRepos"
       }
     ]
@@ -766,28 +649,6 @@
     {
       "caller_knobs": [],
       "endpoint": "GetGitTree",
-      "param_adoptions": [],
-      "resolution": {
-        "Unpaginated": {
-          "list": {
-            "item_type": "GitTreeEntry",
-            "items": {
-              "projection": [],
-              "record": [
-                {
-                  "key": "tree"
-                },
-                "each"
-              ]
-            }
-          },
-          "origin": "Exception"
-        }
-      }
-    },
-    {
-      "caller_knobs": [],
-      "endpoint": "GetGitTreeRecursive",
       "param_adoptions": [],
       "resolution": {
         "Unpaginated": {
@@ -862,7 +723,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "PullRequestSummary",
+            "item_type": "::schematic_definitions::gitea::PullRequestSummary",
             "items": {
               "projection": [],
               "record": [
@@ -957,7 +818,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "PullRequestFile",
+            "item_type": "::schematic_definitions::gitea::PullRequestFile",
             "items": {
               "projection": [],
               "record": [
@@ -1052,7 +913,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "IssueSummary",
+            "item_type": "::schematic_definitions::gitea::IssueSummary",
             "items": {
               "projection": [],
               "record": [
@@ -1153,7 +1014,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "IssueComment",
+            "item_type": "::schematic_definitions::gitea::IssueComment",
             "items": {
               "projection": [],
               "record": [
@@ -1248,7 +1109,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "TimelineEvent",
+            "item_type": "::schematic_definitions::gitea::TimelineEvent",
             "items": {
               "projection": [],
               "record": [
@@ -1343,7 +1204,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "RepoTag",
+            "item_type": "::schematic_definitions::gitea::RepoTag",
             "items": {
               "projection": [],
               "record": [
@@ -1438,7 +1299,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "Release",
+            "item_type": "::schematic_definitions::gitea::Release",
             "items": {
               "projection": [],
               "record": [
@@ -1497,7 +1358,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "GitRef",
+            "item_type": "::schematic_definitions::gitea::GitRef",
             "items": {
               "projection": [],
               "record": [
@@ -1564,7 +1425,7 @@
         "Paginated": {
           "alternates": [],
           "list": {
-            "item_type": "RepositoryInfo",
+            "item_type": "::schematic_definitions::gitea::RepositoryInfo",
             "items": {
               "projection": [],
               "record": [
@@ -1613,92 +1474,99 @@
   ],
   "registry": [
     {
-      "blake3": "4a6e9f8ba884f1cc6998caa807dff2f5318c880b4a494c63dfd623003c6a3202",
-      "name": "RepositoryInfo"
+      "blake3": "25639af632aa047c9e6f381eb35003386e1bd46d689183bc79b421ecf55a3ea7",
+      "name": "RepositoryInfo",
+      "rust_path": "::schematic_definitions::gitea::RepositoryInfo"
     },
     {
-      "blake3": "61605cd5e2bece1f016587121e8099b578b093d898e651f58caee0ac342638e4",
-      "name": "GitTreeResponse"
+      "blake3": "2ad096587bb15e2fac9801a9704cf90e8047eedecf4f84fd10dc20d3531fbffa",
+      "name": "UserSummary",
+      "rust_path": null
     },
     {
-      "blake3": "ac2f7150c83fe1cb649e8107d3a69983d4ac9222bfad93a0d7630cc58d6331d8",
-      "name": "PullRequestSummary"
+      "blake3": "a66dee5ec68db348d2c793fdacda9809485098d34609ef683dcdc088169e2452",
+      "name": "GitTreeResponse",
+      "rust_path": "::schematic_definitions::gitea::GitTreeResponse"
     },
     {
-      "blake3": "baec913ba4754e64c2eb41072accd85eebb25ce435f86301e6935754bcbc77ca",
-      "name": "Vec<PullRequestSummary>"
+      "blake3": "3f5c55aa22b04b5fc08d5fa8c9ce8c970fefe248c0e7d7fe35ecbba757ca536f",
+      "name": "GitTreeEntry",
+      "rust_path": null
     },
     {
-      "blake3": "15136f695f87086224e100a3ab1096ad35bd752b145bdc3e8d6148f3550bc5dc",
-      "name": "PullRequestFile"
+      "blake3": "ea1113f281ac65611b6cd2775bd9f8a823c0fbf20f1098cd55ac338c5d387568",
+      "name": "PullRequestSummary",
+      "rust_path": "::schematic_definitions::gitea::PullRequestSummary"
     },
     {
-      "blake3": "a967d61e790a2829f400c78054c7290e4fec8799c68aab2ed9fcfcb423fdfa77",
-      "name": "Vec<PullRequestFile>"
+      "blake3": "dc22017a106dd6967a46be36de5ab27af09b5a47155c036bdd3b0fc39a55ee77",
+      "name": "Label",
+      "rust_path": "::schematic_definitions::gitea::Label"
     },
     {
-      "blake3": "e58b6a189cd056083fe0dca37a5c83736c365ba533262c87c522aa9bd7794fde",
-      "name": "IssueSummary"
+      "blake3": "911d42510770771c1e0f54f997f0ec0c8a97022b9b9381e6dc8482eccfbb8dc7",
+      "name": "PullRef",
+      "rust_path": null
     },
     {
-      "blake3": "d78dfd85ad3945fc677583065bfc2f85fa3361dceaede52599bc6c35a02f771e",
-      "name": "Vec<IssueSummary>"
+      "blake3": "36f84b16ca7526fbc29307262ed5fe9b34fb1e9bef3f916f7039090df8ea57f8",
+      "name": "PullRequestFile",
+      "rust_path": "::schematic_definitions::gitea::PullRequestFile"
     },
     {
-      "blake3": "e3e62e42dba0fb9491769e83c0e78d307e2e326414ff2fdc1bde6864bae5a605",
-      "name": "IssueComment"
+      "blake3": "fa5003705f33cbe7f6845e367b7131101784759d086718942b8894a28f1e2ab3",
+      "name": "IssueSummary",
+      "rust_path": "::schematic_definitions::gitea::IssueSummary"
     },
     {
-      "blake3": "c0925cc91eb8eb60138129e09abd6ca7deeba8220ff93f92a0504e9ca95c6a9a",
-      "name": "Vec<IssueComment>"
+      "blake3": "e677a59bfb0b37ecb99dffe73eafb6ca1f914ac497d9754df60d54e3350da1a2",
+      "name": "IssueComment",
+      "rust_path": "::schematic_definitions::gitea::IssueComment"
     },
     {
-      "blake3": "a0dbc29707365a424612b51317083ee2aa19a7ff38d306a2ec9b708d0a19c73d",
-      "name": "TimelineEvent"
+      "blake3": "7626869af7f223c7c08c4d46e49c6699e4a2f4237fcb27d46ee14b167f628e1f",
+      "name": "TimelineEvent",
+      "rust_path": "::schematic_definitions::gitea::TimelineEvent"
     },
     {
-      "blake3": "c8fa99ea146d185f6f31143593ac44fa3a4dc6ff02fc6bdad39f29ca78e06fd1",
-      "name": "Vec<TimelineEvent>"
+      "blake3": "21f6b3440a7561308d6d007a944dc44e141e4c883cfee0e55d05c54d03f41349",
+      "name": "RepoTag",
+      "rust_path": "::schematic_definitions::gitea::RepoTag"
     },
     {
-      "blake3": "80c0c5ba13d1ca765f54216a3e6b7849cfc6a800ef7cf0d91b6acb0ef3840486",
-      "name": "Label"
+      "blake3": "e553a5419317d21243d518e5742b4d487de9fb32bdd1eb0d94bb3d5acf930308",
+      "name": "TagCommit",
+      "rust_path": null
     },
     {
-      "blake3": "653c20ae9b992baf6451a6a78d8a24aa575014645995b1484d59af1ea75c3892",
-      "name": "RepoTag"
+      "blake3": "a5704959493703856f51da79f4e8639faf269fa741a2a091e15dd87395f5ae0e",
+      "name": "Release",
+      "rust_path": "::schematic_definitions::gitea::Release"
     },
     {
-      "blake3": "68d638f281eb474837a2cae80f0df3b9657ad7ba2d1bbba9ebd0925e7a7e9217",
-      "name": "Vec<RepoTag>"
+      "blake3": "1ff769676ecf25e5d4408037a8ab457944c7548551c94b0fa98f0fc0e3ac068f",
+      "name": "Branch",
+      "rust_path": "::schematic_definitions::gitea::Branch"
     },
     {
-      "blake3": "f71b1fe53bfe08e6c8ced4d923bf3b796b7ddfcb1ce23045bdadff6fceb19ab2",
-      "name": "Release"
+      "blake3": "9da77f12732384a63a5cdc16986df315cef52fb98694f1c6d58ec5d671eb7403",
+      "name": "BranchCommit",
+      "rust_path": null
     },
     {
-      "blake3": "4839d926ce187161560b5cee32d3e6e9b4324828be2cbb8dab00c95c256c5aac",
-      "name": "Vec<Release>"
+      "blake3": "8cc7a0606941c2498a494be295ad23696d2af8070cdeb919d9025091a494b835",
+      "name": "GitRef",
+      "rust_path": "::schematic_definitions::gitea::GitRef"
     },
     {
-      "blake3": "6cbbb8ff4fb45255f82f85e4a7eb373a39f81ae427732b6fd6b9809e4e8501b3",
-      "name": "Branch"
+      "blake3": "75722c75e82faca54cc3a357513c5898e0e3d6d962f09a62e4c15f9590681b94",
+      "name": "GitRefObject",
+      "rust_path": null
     },
     {
-      "blake3": "988e10947a4bd9d952e41dba1a37f1b11eaf3501f2557d13e7c71e7c92e7f699",
-      "name": "GitRef"
-    },
-    {
-      "blake3": "1e5a1bedc69eb1fea6f69f422dfb2ba5e6d826fd3178920ef4f809f6c07ca300",
-      "name": "Vec<GitRef>"
-    },
-    {
-      "blake3": "ac5e4245656bb9927926f255136a40268b71e9d5cf5b1e954a2bd9eafe09db99",
-      "name": "AnnotatedTagObject"
-    },
-    {
-      "blake3": "c135a2545b49ef70ae5c8ba622361583677e4b9f5524903b8df25f276a16e1f8",
-      "name": "Vec<RepositoryInfo>"
+      "blake3": "d3ee8afa7724716db741efb5d22b628a35b4279c1ab9e178105941d2bc76bb0a",
+      "name": "AnnotatedTagObject",
+      "rust_path": "::schematic_definitions::gitea::AnnotatedTagObject"
     }
   ]
 }

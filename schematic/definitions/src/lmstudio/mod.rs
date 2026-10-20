@@ -26,38 +26,13 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::{ApiResponse, RestMethod};
 use schematic_define::{
     AuthStrategy, Endpoint, EnvMapping, RestApi,
 };
-
-/// Creates a schema registry containing all LM Studio response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the LM Studio API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::lmstudio::{openapi_registry, define_lmstudio_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_lmstudio_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("ListModelsResponse").is_some());
-/// assert!(registry.get("LoadModelResponse").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid lmstudio definitions").registry
-}
 
 /// Creates the LM Studio v1 native API definition.
 ///
@@ -91,7 +66,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 6);
 /// ```
 pub fn define_lmstudio_api() -> RestApi {
-    module_group().expect("valid lmstudio definitions").apis.remove(0)
+    module_group().expect("valid lmstudio definitions").remove(0)
 }
 
 fn build_lmstudio_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -142,7 +117,7 @@ fn build_lmstudio_api(ctx: &mut DefinitionContext) -> Result<RestApi, Definition
 }
 
 /// Assemble sibling APIs and their ordered nominal schemas in one context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::lmstudio", |ctx| {
         ctx.register::<ChatBody>()?;
         ctx.register::<LoadModelBody>()?;
@@ -297,12 +272,13 @@ mod tests {
     fn module_group_preserves_endpoint_and_registry_inventory() {
         let group = module_group().unwrap();
         assert_eq!(
-            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["Chat", "ListModels", "LoadModel", "UnloadModel", "DownloadModel", "GetDownloadStatus"]
         );
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["ChatBody", "LoadModelBody", "UnloadModelBody", "DownloadModelBody", "DownloadStatusBody", "ListModelsResponse", "ModelInfo", "Quantization", "Capabilities", "LoadedInstance", "Stats", "LoadModelResponse", "UnloadModelResponse", "DownloadStatusResponse", "OutputItem"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["ChatBody", "LoadModelBody", "UnloadModelBody", "DownloadModelBody", "DownloadStatusBody", "ListModelsResponse", "Capabilities", "LoadedInstance", "ModelInfo", "Quantization", "Stats", "LoadModelResponse", "UnloadModelResponse", "DownloadStatusResponse", "OutputItem"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
     }
 

@@ -67,6 +67,7 @@ fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
     for (endpoint, original) in api.endpoints.iter().zip(&declared.endpoints) {
         let endpoint = with_api_cookies(endpoint, &api_cookies);
         tokens.extend(generate_request_struct_with_defaults(
+            api,
             &endpoint,
             &suffix,
             Some(module_path),
@@ -250,18 +251,12 @@ fn split_parts(
         .collect();
     let api_structs = apis.iter().map(|api| generate_api_struct(api));
     let requests = apis.iter().map(|api| api_requests(api, module_path));
+    // JSON bodies are spelled by their components' qualified Rust paths, so
+    // only an unqualified pager item type names something in `responses`.
     let needs_response_import = apis.iter().any(|api| api.endpoints.iter().any(|endpoint| {
-        let untyped_response = matches!(&endpoint.response, schematic_define::ApiResponse::Json(schema) if schema.descriptor.is_none());
-        let untyped_request = match &endpoint.request {
-            Some(schematic_define::ApiRequest::Json(schema)) => schema.descriptor.is_none(),
-            Some(schematic_define::ApiRequest::FormData { fields } | schematic_define::ApiRequest::UrlEncoded { fields }) => fields.iter().any(|field|
-                matches!(&field.kind, schematic_define::FormFieldKind::Json(schema) if schema.descriptor.is_none())),
-            _ => false,
-        };
         let resolution = schematic_define::pagination::resolve(api, endpoint);
-        let local_pager_item = resolution.strategy().is_some()
-            && resolution.list().and_then(|list| list.item_type.as_deref()).is_some_and(|name| !name.contains("::"));
-        untyped_response || untyped_request || local_pager_item
+        resolution.strategy().is_some()
+            && resolution.list().and_then(|list| list.item_type.as_deref()).is_some_and(|name| !name.contains("::"))
     }));
     let response_import = needs_response_import.then(|| quote! { use super::responses::*; });
 

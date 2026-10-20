@@ -13,14 +13,12 @@
         "headers": [],
         "id": "ListNodes",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/nodes",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListNodesResponse"
+            "Named": "ListNodesResponse"
           }
         }
       },
@@ -29,14 +27,12 @@
         "headers": [],
         "id": "GetNode",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/nodes/{node}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "NodeInfo"
+            "Named": "NodeInfo"
           }
         }
       },
@@ -45,14 +41,12 @@
         "headers": [],
         "id": "GetCluster",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/cluster",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ClusterStatus"
+            "Named": "ClusterStatus"
           }
         }
       },
@@ -61,14 +55,12 @@
         "headers": [],
         "id": "ListListeners",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/listeners",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListListenersResponse"
+            "Named": "ListListenersResponse"
           }
         }
       },
@@ -77,14 +69,12 @@
         "headers": [],
         "id": "GetListener",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/listeners/{id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListenerInfo"
+            "Named": "ListenerInfo"
           }
         }
       },
@@ -93,14 +83,12 @@
         "headers": [],
         "id": "ListMetrics",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/metrics",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListMetricsResponse"
+            "Named": "ListMetricsResponse"
           }
         }
       },
@@ -109,14 +97,12 @@
         "headers": [],
         "id": "ListStats",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/stats",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListStatsResponse"
+            "Named": "ListStatsResponse"
           }
         }
       },
@@ -125,7 +111,6 @@
         "headers": [],
         "id": "GetPrometheus",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/prometheus/stats",
         "request": null,
@@ -136,14 +121,28 @@
         "headers": [],
         "id": "ListAlarms",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "AlarmInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/alarms",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListAlarmsResponse"
+            "Named": "ListAlarmsResponse"
           }
         }
       },
@@ -152,14 +151,28 @@
         "headers": [],
         "id": "ListClients",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "ClientInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/clients",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListClientsResponse"
+            "Named": "ListClientsResponse"
           }
         }
       },
@@ -168,14 +181,12 @@
         "headers": [],
         "id": "GetClient",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/clients/{clientid}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ClientInfo"
+            "Named": "ClientInfo"
           }
         }
       },
@@ -184,7 +195,6 @@
         "headers": [],
         "id": "DisconnectClient",
         "method": "DELETE",
-        "oauth_scopes": null,
         "params": null,
         "path": "/clients/{clientid}",
         "request": null,
@@ -195,13 +205,11 @@
         "headers": [],
         "id": "SubscribeClient",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/clients/{clientid}/subscribe",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "SubscribeBody"
+            "Named": "SubscribeBody"
           }
         },
         "response": "Empty"
@@ -211,13 +219,11 @@
         "headers": [],
         "id": "UnsubscribeClient",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/clients/{clientid}/unsubscribe",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "SubscribeBody"
+            "Named": "SubscribeBody"
           }
         },
         "response": "Empty"
@@ -227,14 +233,28 @@
         "headers": [],
         "id": "ListSubscriptions",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "SubscriptionInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/subscriptions",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListSubscriptionsResponse"
+            "Named": "ListSubscriptionsResponse"
           }
         }
       },
@@ -243,13 +263,11 @@
         "headers": [],
         "id": "Publish",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/publish",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "PublishBody"
+            "Named": "PublishBody"
           }
         },
         "response": "Empty"
@@ -259,13 +277,11 @@
         "headers": [],
         "id": "PublishBulk",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/publish/bulk",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "PublishBatchBody"
+            "Named": "PublishBatchBody"
           }
         },
         "response": "Empty"
@@ -275,14 +291,28 @@
         "headers": [],
         "id": "ListTopics",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "TopicInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/topics",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListTopicsResponse"
+            "Named": "ListTopicsResponse"
           }
         }
       },
@@ -291,14 +321,28 @@
         "headers": [],
         "id": "ListRetained",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "RetainedMessage",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/retainer/messages",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListRetainedResponse"
+            "Named": "ListRetainedResponse"
           }
         }
       },
@@ -307,14 +351,12 @@
         "headers": [],
         "id": "GetRetained",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/retainer/messages/{topic}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "RetainedMessage"
+            "Named": "RetainedMessage"
           }
         }
       },
@@ -323,7 +365,6 @@
         "headers": [],
         "id": "DeleteRetained",
         "method": "DELETE",
-        "oauth_scopes": null,
         "params": null,
         "path": "/retainer/messages/{topic}",
         "request": null,
@@ -334,14 +375,28 @@
         "headers": [],
         "id": "ListRules",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "RuleInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/rules",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListRulesResponse"
+            "Named": "ListRulesResponse"
           }
         }
       },
@@ -350,19 +405,16 @@
         "headers": [],
         "id": "CreateRule",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/rules",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "CreateRuleBody"
+            "Named": "CreateRuleBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "RuleInfo"
+            "Named": "RuleInfo"
           }
         }
       },
@@ -371,14 +423,12 @@
         "headers": [],
         "id": "GetRule",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/rules/{id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "RuleInfo"
+            "Named": "RuleInfo"
           }
         }
       },
@@ -387,19 +437,16 @@
         "headers": [],
         "id": "UpdateRule",
         "method": "PUT",
-        "oauth_scopes": null,
         "params": null,
         "path": "/rules/{id}",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "CreateRuleBody"
+            "Named": "CreateRuleBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "RuleInfo"
+            "Named": "RuleInfo"
           }
         }
       },
@@ -408,7 +455,6 @@
         "headers": [],
         "id": "DeleteRule",
         "method": "DELETE",
-        "oauth_scopes": null,
         "params": null,
         "path": "/rules/{id}",
         "request": null,
@@ -419,19 +465,16 @@
         "headers": [],
         "id": "TestRule",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/rules/{id}/test",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "TestRuleBody"
+            "Named": "TestRuleBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "TestRuleResponse"
+            "Named": "TestRuleResponse"
           }
         }
       },
@@ -440,14 +483,12 @@
         "headers": [],
         "id": "ListAuthenticators",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/authentication",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListAuthenticatorsResponse"
+            "Named": "ListAuthenticatorsResponse"
           }
         }
       },
@@ -456,14 +497,12 @@
         "headers": [],
         "id": "GetAuthenticator",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/authentication/{id}",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "AuthenticatorInfo"
+            "Named": "AuthenticatorInfo"
           }
         }
       },
@@ -472,14 +511,14 @@
         "headers": [],
         "id": "ListAuthUsers",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/authentication/{id}/users",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "Vec<AuthUser>"
+            "Array": {
+              "Named": "AuthUser"
+            }
           }
         }
       },
@@ -488,19 +527,16 @@
         "headers": [],
         "id": "CreateAuthUser",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/authentication/{id}/users",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "CreateAuthUserBody"
+            "Named": "CreateAuthUserBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "AuthUser"
+            "Named": "AuthUser"
           }
         }
       },
@@ -509,7 +545,6 @@
         "headers": [],
         "id": "DeleteAuthUser",
         "method": "DELETE",
-        "oauth_scopes": null,
         "params": null,
         "path": "/authentication/{id}/users/{user_id}",
         "request": null,
@@ -520,14 +555,12 @@
         "headers": [],
         "id": "ListAuthzSources",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/authorization/sources",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListAuthzSourcesResponse"
+            "Named": "ListAuthzSourcesResponse"
           }
         }
       },
@@ -536,14 +569,28 @@
         "headers": [],
         "id": "ListBanned",
         "method": "GET",
-        "oauth_scopes": null,
+        "pagination": {
+          "alternates": [],
+          "item_type": "BanInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
         "params": null,
         "path": "/banned",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ListBannedResponse"
+            "Named": "ListBannedResponse"
           }
         }
       },
@@ -552,19 +599,16 @@
         "headers": [],
         "id": "CreateBan",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/banned",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "CreateBanBody"
+            "Named": "CreateBanBody"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "BanInfo"
+            "Named": "BanInfo"
           }
         }
       },
@@ -573,7 +617,6 @@
         "headers": [],
         "id": "DeleteBan",
         "method": "DELETE",
-        "oauth_scopes": null,
         "params": null,
         "path": "/banned/{ban_type}/{who}",
         "request": null,
@@ -601,291 +644,156 @@
     "headers": [],
     "module_path": "emqx",
     "name": "EmqxBasic",
-    "pagination_exceptions": [
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "AlarmInfo",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "data"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListAlarms"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "ClientInfo",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "data"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListClients"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "SubscriptionInfo",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "data"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListSubscriptions"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "TopicInfo",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "data"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListTopics"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "RetainedMessage",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "data"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListRetained"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "RuleInfo",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "data"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListRules"
-      },
-      {
-        "collection": {
-          "alternates": [],
-          "item_type": "BanInfo",
-          "items": {
-            "projection": [],
-            "record": [
-              {
-                "key": "data"
-              },
-              "each"
-            ]
-          },
-          "pagination": {
-            "policy": "unpaginated"
-          }
-        },
-        "endpoint": "ListBanned"
-      }
-    ],
     "request_id_header": null,
     "request_suffix": "BasicRequest",
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "b5a3b01266e835f73ec14cf268cd7c11091432ae6d2703b2347a1b4345a5c120",
+    "api_metadata": "674d42316f6d93d972dfe18361e97a0f8db62a2751d961a08b322f1f5f3c1bf9",
     "endpoints": [
       {
-        "blake3": "59d6604d9d525d491cb801c31e82e97a6287f8af15051da5555b97f738f81547",
+        "blake3": "cbde1832b1e527b33ed7a1998df33ac958a1c7a5b9378e9e9aee2c559096c1d4",
         "id": "ListNodes"
       },
       {
-        "blake3": "9cfef30ad74a2be99d15538e5b3b23176d66217e0c20fad6e3e08bb22d680352",
+        "blake3": "2797b92c505a0a98fff1743b041ad5f435e96c616fc6229e4ff725323560fa37",
         "id": "GetNode"
       },
       {
-        "blake3": "f2ff8de7472064cbfcd820d0c33c9895a7ce4a606122b352650c8a2c08cbdde1",
+        "blake3": "64e08a86e2364ee8801f6c84cecddc5c007fa1adccd6abb2b13ef8268b3d78d3",
         "id": "GetCluster"
       },
       {
-        "blake3": "d418512c5164e8f99624064e3c8d555df20287898e4ec655d2c7fb1a503db401",
+        "blake3": "e1549d6c9d580cfbe5664c187b198a8ec38d470c87e5820d5232316b7c95597e",
         "id": "ListListeners"
       },
       {
-        "blake3": "8d4984b72ff969159fedc9ee902768c23251491d74195c2a82afd37b689abfd5",
+        "blake3": "60fb8febc22cd30d41408ef86768568e6f0f8c9e32e4b2b8710b2f4a85d1e82e",
         "id": "GetListener"
       },
       {
-        "blake3": "35efc0f759153a831b1c8b991dc29d3c4231c73ee5e65f1b706e82a64e654eb2",
+        "blake3": "f0ca61ffafd327bdb9fe26d0848d51f750d8b7c9be6fb692ea1b9916d691e57b",
         "id": "ListMetrics"
       },
       {
-        "blake3": "72eb59bf6542425afa273deca7c55441832dd0a71cb5de96f24e48760bc881df",
+        "blake3": "55998d95cd6d79efe39fe33adbffc3f3e9d6f5347e855f6674bdddc507193d16",
         "id": "ListStats"
       },
       {
-        "blake3": "fea1b8052e9967d28cb28087a0e04cfbbb44c94352d07b3b08ba2b37b8b204db",
+        "blake3": "6e9b109bef0bf60b7970778f9f26e578bc245b417500c7f5a5256a92f9b831c2",
         "id": "GetPrometheus"
       },
       {
-        "blake3": "5d58c45fc9be541f63d693a7a1279ea34ea2db340366efee755c4b5a1c1f8431",
+        "blake3": "c3578edfe2420333782ea49f8cc0b795ab9766cc64e29d895b68d32c5de65dcb",
         "id": "ListAlarms"
       },
       {
-        "blake3": "d40a4c9843ac452f420a88866bed0fa08b14747b764114c75d5ba3ffa74d5b17",
+        "blake3": "272ee50dbb2929711bd2209fd33237f5c283309dc92cd76e1d0771776c7660f1",
         "id": "ListClients"
       },
       {
-        "blake3": "f3b32c9e220691aba134061061567649b7aa0a2a52f1ad258d5aaa68bcc30638",
+        "blake3": "25fa0a085d9767b30f41af46d543fb62c322bdbf2b45e1bee0cc975e6fa461c6",
         "id": "GetClient"
       },
       {
-        "blake3": "8097f15bd8ce357c1fc513736787dd4d32112ff0acdd8904d1fc7a0440e59056",
+        "blake3": "4b6acdb222e5fdd88053d4801c14f260099fa674708d22e0073d323e6f752c10",
         "id": "DisconnectClient"
       },
       {
-        "blake3": "9178bc3fb6972972a49dbc9745ce4bd7f7c4d15ee8d38abe0b20c5098fb25832",
+        "blake3": "e117f2bd94a3587892c53eb92e7d6c64e91c6989bd7292636a70bafff27f00ec",
         "id": "SubscribeClient"
       },
       {
-        "blake3": "ca32e1d87dd28d88d4ac93d7e2748ec179a0efa97d4624e4d93d0154a5049832",
+        "blake3": "cffee7a7654245a511ced72665f3d0f366eb6ebebe317f954dbb9949a96a32c5",
         "id": "UnsubscribeClient"
       },
       {
-        "blake3": "c471dc1fd9fff17e58144583555356e9e6d0d7ee05caae898b1b0be3756fef36",
+        "blake3": "5636048368675f5cb55fc747414b2e7ab298007823ac2f9ae56ffa5885670480",
         "id": "ListSubscriptions"
       },
       {
-        "blake3": "8400f9d2caabd058571f0efbb1176d7ca98a58ac7b682b32974dab9af828fe0b",
+        "blake3": "a21b8ece16ecb5577856302091da668b99216d5b54d71a68a8604cf993ebb820",
         "id": "Publish"
       },
       {
-        "blake3": "cbe059476bde1995f030559ac9d8b1a03a13a7dadf3ebacb12356ae3df9a2b39",
+        "blake3": "f791cec19f3c7793ca101fee72318b5d57de5ca6a7abea94ebc850781e2bc2d9",
         "id": "PublishBulk"
       },
       {
-        "blake3": "33fa4c9c673d564458c415daaa8798cd1d68220d87440fc19a2cbf72bddc1127",
+        "blake3": "92713061d1f1a6fd4c0b868f7da9a99f08c39a4faf53047db51a56c10067a10e",
         "id": "ListTopics"
       },
       {
-        "blake3": "6e307b7694a77b2729b6d00287e035a0c1f7d4d83ec76a64876e3cb7f35a1255",
+        "blake3": "0bb9c9238980e2ea4dd721e058fefa8c8dd117ab8708c4774d975420c463891b",
         "id": "ListRetained"
       },
       {
-        "blake3": "41cc5d3ced0b889a8a74e7b1ae372ca2454b5dcb62b7d6e22d928c8b0bc4ccc8",
+        "blake3": "9a2caeeecdfff4c0f797c4c9bfdb96565e1ab4165ac72760a960607ef79fda26",
         "id": "GetRetained"
       },
       {
-        "blake3": "e36c2c39bf21895f2b886dbe3f314e619e130e9ce2ce1ff26095479273ea6aa4",
+        "blake3": "57249cee3f8acf99c97175acb8c412aaaecef1c4b8a6faf8e3dd0b9ee5b8515a",
         "id": "DeleteRetained"
       },
       {
-        "blake3": "3e770fef93c2f4423e83d7abdf59070b39ba6752f92e83a44120503d6be3b5e3",
+        "blake3": "8ca4361070a1a61e85042e9dc13fa5ebb83e5a4a0580da49bef9a0bd3434abd9",
         "id": "ListRules"
       },
       {
-        "blake3": "2b8bbffd1264975f17dbe5a1f6eeef2f3c27ac00923ca53e2ea21d2550d9b733",
+        "blake3": "911a4c98f5456bab54b5281c054758938ea968a07f897675b8c1c9fed74a1eb1",
         "id": "CreateRule"
       },
       {
-        "blake3": "32649d8dde92db0c36be6e503cf7a552b4db78684ed94b4f213541aaf972caae",
+        "blake3": "ef131b7938b65a419fa30839db10856725da76333b429fe9e423e53b1dcc7ad8",
         "id": "GetRule"
       },
       {
-        "blake3": "c2370df4a225898623916d3450fee300c5fe86a31d2e9249592fe38f42b40a99",
+        "blake3": "51d71d181a075979240dca861d1d0ba8cbe728223340094daaac26ef50bb3381",
         "id": "UpdateRule"
       },
       {
-        "blake3": "06a44391f445fb8f1418fefb205873c4419b51f99a847727652030976f9c3faa",
+        "blake3": "ba9aa557a2756a4236ef35123e0be0c23b5e00dead5b77586d1dabf16d9371c1",
         "id": "DeleteRule"
       },
       {
-        "blake3": "cb387b5782c7fe8db849e38d5801ce65181555365bf4919521ff096c4d087513",
+        "blake3": "77e76a70533e7f5c33c371217f8977ecc3c14ba288bd4546efd6efe523fa9788",
         "id": "TestRule"
       },
       {
-        "blake3": "ee2a0d2ae2fd41a94a4f10e661be7c9f5ac05a78863b34b6fb4b536a62b64d60",
+        "blake3": "0be0bc664b5bade1d19712da8ac8b2ee5744f5979be366107d111ed92a1f7c77",
         "id": "ListAuthenticators"
       },
       {
-        "blake3": "4e109cf75f56b6b562107c1fde884cdfacaf60c4989b2791e03ed42d25b6cc04",
+        "blake3": "15aded6f6a99262247ecc582b1146075441d86c35d18706e08cbb8ca89937022",
         "id": "GetAuthenticator"
       },
       {
-        "blake3": "e47ed2c08322f6f85bff2c0dc437cbb753e6a9aabba10bbf91c3f810e9ed8626",
+        "blake3": "ee2c1c920fd3d4f13749e20c6c51a919e27df304c22978c5728b9547974c9fdc",
         "id": "ListAuthUsers"
       },
       {
-        "blake3": "6033aaa0ab90121b2c2036d7cea6a6533560f07beef18d23d3d61fbec97f1632",
+        "blake3": "7f35cb43b053ff44daa35392291366600779c32c944071110ed74a7827365380",
         "id": "CreateAuthUser"
       },
       {
-        "blake3": "a9df220e61a02639a1e4d2c31dff706b7ce204d3a5f9df382a57d72c0873fa9d",
+        "blake3": "2ba5614cb805ed78ef9864c08d2ffd207c22a7df6185dd6ae0c6dabd03803d38",
         "id": "DeleteAuthUser"
       },
       {
-        "blake3": "b18a1c87929bcd5b42c2e9ef9a23075ab5054e6c948566edcd0b70efe387f55b",
+        "blake3": "f958fc9e2224bce9d65b1ef654c63f603f3efc302088c39274cc995db71d03d8",
         "id": "ListAuthzSources"
       },
       {
-        "blake3": "0e95121fbf60237a9488537ab34e1245d147ab9aefd38be001bf42316e6b914e",
+        "blake3": "331daeb85d7220892d2df18333f8890abf4ebb2ad4593e35bf5c3cf267a87269",
         "id": "ListBanned"
       },
       {
-        "blake3": "e8690778fbdf4c98a65e54f6ba8f3c8ec023c456f77115f225c6243213054896",
+        "blake3": "159ec135d76868f736eb627fa298417ee8f660ae1757637d2a9bd0c70707fd50",
         "id": "CreateBan"
       },
       {
-        "blake3": "f87a47927b547e4eb0c6e5af9684b369b619980e546bfacbdf45c234bf5580de",
+        "blake3": "8bb30ce2af4e5ee113405f06a265d7590f94b4bd9ef7d42a26ca7b2fc9bfcdb0",
         "id": "DeleteBan"
       }
     ]
@@ -1168,7 +1076,7 @@
       "resolution": {
         "Unpaginated": {
           "list": {
-            "item_type": "AuthUser",
+            "item_type": "::schematic_definitions::emqx::AuthUser",
             "items": {
               "projection": [],
               "record": [
@@ -1235,168 +1143,204 @@
   ],
   "registry": [
     {
-      "blake3": "a687d04f5944d0aea8b250d27ffc41e6981ac5bd684b9a670fcedb613f2a0a28",
-      "name": "LoginBody"
+      "blake3": "12182996167233b6bc8f86e29698d5020facf005468e3e25c1593f639d729747",
+      "name": "LoginBody",
+      "rust_path": "::schematic_definitions::emqx::LoginBody"
     },
     {
-      "blake3": "e71b67f3650aa880b34cf923e3244541bcaf672cf9542394ed8052b9d1cbc48e",
-      "name": "LoginResponse"
+      "blake3": "8832e4f58a31a85efcb29069a23b3f0eb117e6276178cb6675aaf8d0b5f563e6",
+      "name": "LoginResponse",
+      "rust_path": "::schematic_definitions::emqx::LoginResponse"
     },
     {
-      "blake3": "e05c5d22347b05f3dc9cd17396d2cbf400327fcd78a188ca7556d111f2784690",
-      "name": "SubscribeBody"
+      "blake3": "6bb56994f6fc9c3981410c2444f0165125f9d1fbdf952d24b2e116c714a34652",
+      "name": "SubscribeBody",
+      "rust_path": "::schematic_definitions::emqx::SubscribeBody"
     },
     {
-      "blake3": "bfd7a712e4bbb9a323e58477b97a1b44c3d36aabebc5af126d20c04d945db813",
-      "name": "PublishBody"
+      "blake3": "92e44fcdba5c3e2a860bd4c09f5fb5cb90e8e05eb94f0a146b4c899b95aff6bc",
+      "name": "PublishBody",
+      "rust_path": "::schematic_definitions::emqx::PublishBody"
     },
     {
-      "blake3": "f1cf2f5f40910dd0f0bcd64ff9adf620f982980c8a179f38370f098194dfe1ba",
-      "name": "PublishBatchBody"
+      "blake3": "69eb4ba688b09c924c828bf3dbe9232747ea4e15e90fe0c5bbf790a196a5f39f",
+      "name": "PublishBatchBody",
+      "rust_path": "::schematic_definitions::emqx::PublishBatchBody"
     },
     {
-      "blake3": "04e6041eb904254cae0149ef4d8237208f7a710d92c5568bfc4fbd9d8001b56b",
-      "name": "CreateRuleBody"
+      "blake3": "4caab8e23f8ba94431898af31d14af58e4e0654258acafd231f83f509a0e0561",
+      "name": "CreateRuleBody",
+      "rust_path": "::schematic_definitions::emqx::CreateRuleBody"
     },
     {
-      "blake3": "b09151b1e18e0c72bfb0c092e0a8d941f0571b688dc8e1aae32d8313bca855c5",
-      "name": "TestRuleBody"
+      "blake3": "1034ed962e0b3b435c1821c046a41638bf6fee0ce9d0e07e035932f74537745c",
+      "name": "RuleAction",
+      "rust_path": "::schematic_definitions::emqx::RuleAction"
     },
     {
-      "blake3": "b3d962cba8a1509f3e8e1356f7889e583cd93c80c420e0ce5857ce9f5343427d",
-      "name": "CreateAuthUserBody"
+      "blake3": "e5e4066015ffce3c3921efd2bc61c9cd1c630416e7004b11176ea9ffa0e86602",
+      "name": "TestRuleBody",
+      "rust_path": "::schematic_definitions::emqx::TestRuleBody"
     },
     {
-      "blake3": "4b1588afc23ed59680070ec5443094a806570100dcd2231d960dc6f165adb707",
-      "name": "CreateBanBody"
+      "blake3": "62cc9fd61a9186e51707604ebdd9ec93c14c9246e4af78ad8387bcb734fd5cd2",
+      "name": "CreateAuthUserBody",
+      "rust_path": "::schematic_definitions::emqx::CreateAuthUserBody"
     },
     {
-      "blake3": "0eb53ef90a5128c91097aa5cb359e1815d9661a730e3e699f1ba0de2ee12b7a9",
-      "name": "NodeInfo"
+      "blake3": "cad99fa8e5f3f54eb2edf52eb4460de84681dae72a0adf3133c8ce0ae0edb60c",
+      "name": "CreateBanBody",
+      "rust_path": "::schematic_definitions::emqx::CreateBanBody"
     },
     {
-      "blake3": "c1bb1d15ebe87fe1f191759b3549851c9c01a506f6301b68e54b08e373854c51",
-      "name": "ListNodesResponse"
+      "blake3": "7d5bd772b8977b6f50a7e715b19f2dbd0a9cb4a780ab70a1b1181ac9d126962f",
+      "name": "NodeInfo",
+      "rust_path": "::schematic_definitions::emqx::NodeInfo"
     },
     {
-      "blake3": "8d9471b1b0d0963403cc9be6b45ecf35e3500e56ca0a496f31a73e910d8f6e93",
-      "name": "ClusterStatus"
+      "blake3": "1409fd8922720bbcb01a6894dda42e6802673e59f1f33fb9d93a480e2741fe72",
+      "name": "ListNodesResponse",
+      "rust_path": "::schematic_definitions::emqx::ListNodesResponse"
     },
     {
-      "blake3": "316b6ad5f1bc1d730cef2c074efa05f566978ef75e42ae924c898339c98d518f",
-      "name": "ClientInfo"
+      "blake3": "fd8e8f9aa3040bad2e106a918930ffe87abe33bce9c6c4282a857669245d748f",
+      "name": "ClusterStatus",
+      "rust_path": "::schematic_definitions::emqx::ClusterStatus"
     },
     {
-      "blake3": "b071c9e2b4f214b44f3789c68fc0a7c411735549d435e42b717ed480a4b14a62",
-      "name": "ListClientsResponse"
+      "blake3": "4437a0bc22c6306ed6025f8961e52e55a4ca10e5b820be1c8ebe54df7c601f60",
+      "name": "ClientInfo",
+      "rust_path": "::schematic_definitions::emqx::ClientInfo"
     },
     {
-      "blake3": "f10af209d12a0e011f08b4aa52acf89275c905818fd348c31bf70dbec613a299",
-      "name": "SubscriptionInfo"
+      "blake3": "23a21d309c51adb6c89619305366d378eb391615458d7a76efc5f397dd29a219",
+      "name": "ListClientsResponse",
+      "rust_path": "::schematic_definitions::emqx::ListClientsResponse"
     },
     {
-      "blake3": "b2d7e77e7a78f724a4681e0e8abec352e2094cfac640bdeee24ae06ee5230700",
-      "name": "ListSubscriptionsResponse"
+      "blake3": "202d10624798847bebb7c35c570aba95b23cf0a1e0807fb4289513688591c1f7",
+      "name": "PaginationMeta",
+      "rust_path": "::schematic_definitions::emqx::PaginationMeta"
     },
     {
-      "blake3": "edcbb3170e882d71f0b518328b19e196de2095ec0c7c282e01b3bd28ca82333f",
-      "name": "RuleInfo"
+      "blake3": "d48f05bfd412629d420db541dbdcdd2cd9e742342d4f609975e74f525151077c",
+      "name": "SubscriptionInfo",
+      "rust_path": "::schematic_definitions::emqx::SubscriptionInfo"
     },
     {
-      "blake3": "08256db4f91372fa078dbc34b0fa0ff7d99d1a522a464e0e102723ca8576e96d",
-      "name": "RuleAction"
+      "blake3": "42528301064d230407b8dbd11f6f392966ebc85c41987adbe471dde3a50d7e76",
+      "name": "ListSubscriptionsResponse",
+      "rust_path": "::schematic_definitions::emqx::ListSubscriptionsResponse"
     },
     {
-      "blake3": "edd6f8aa98ac2a7773493a14ed03184cf7f47d1f3c0a3e9b8afc26062763ac57",
-      "name": "ListRulesResponse"
+      "blake3": "185d7827f5e755ec01add82df47c7c2e4cdde832a3f101517a4c3e9f94f2d257",
+      "name": "RuleInfo",
+      "rust_path": "::schematic_definitions::emqx::RuleInfo"
     },
     {
-      "blake3": "e269b29e2f397d32339444d4bd50ba0e2de91b946b7529dbf4d8a6a5e45fa7c1",
-      "name": "TestRuleResponse"
+      "blake3": "d599a6e25a03fd18df0b78f24b1514caecdecec09f0bc8358594377654fedccf",
+      "name": "ListRulesResponse",
+      "rust_path": "::schematic_definitions::emqx::ListRulesResponse"
     },
     {
-      "blake3": "291dcf4b02bf96fa35dc6724bd33302eaa227ef5d34b4ae33137c5e66fb5cd54",
-      "name": "AuthUser"
+      "blake3": "9ba48fd2f9b11c6917b63221d79b30608dcee6daacfb0146a7823ecdb8dd47d3",
+      "name": "TestRuleResponse",
+      "rust_path": "::schematic_definitions::emqx::TestRuleResponse"
     },
     {
-      "blake3": "f05019d5f58a7ef8be43c2cefeae54f8ecb92791a87ba8ca2b2940230df11b8b",
-      "name": "Vec<AuthUser>"
+      "blake3": "36e967cd2e64b0d59db66a580745594f80e2801e0e6a70a9a6f98a7fc405f0d7",
+      "name": "AuthUser",
+      "rust_path": "::schematic_definitions::emqx::AuthUser"
     },
     {
-      "blake3": "2591898eeec1430af063d65bc78f13be7bd8d7ba3c5dac4b2e490e39728d7878",
-      "name": "AuthenticatorInfo"
+      "blake3": "eb34db8ac1b272b313d77d5abc60a131b5bd954f2c987514491e4cc389da711c",
+      "name": "AuthenticatorInfo",
+      "rust_path": "::schematic_definitions::emqx::AuthenticatorInfo"
     },
     {
-      "blake3": "d7d6300684986e69aca6b7b525617bfc5dc563ca952e05b54091621c5ff5cf43",
-      "name": "ListAuthenticatorsResponse"
+      "blake3": "b51baba5b2a72b694a3998c413073fe822fec26a2a8d2846e74e7bf77a692711",
+      "name": "ListAuthenticatorsResponse",
+      "rust_path": "::schematic_definitions::emqx::ListAuthenticatorsResponse"
     },
     {
-      "blake3": "81c03e6868c251f745cbebc34eff797f705f99bbb10eff2b6502e0496973a33e",
-      "name": "AuthzSourceInfo"
+      "blake3": "98771fc59bbfb69e5c6e410978018df8caf6b8fe56ac4cc26773f6477639f3a0",
+      "name": "AuthzSourceInfo",
+      "rust_path": "::schematic_definitions::emqx::AuthzSourceInfo"
     },
     {
-      "blake3": "2e3c76a604e9ef50814b8f7dcb859a9cb54d9f68dcccc7dd9887ddd394e08561",
-      "name": "ListAuthzSourcesResponse"
+      "blake3": "9ff57c5c0a2bc7d02e202b83cd7e17256178afb8ab3e4bea04e989c172dca71d",
+      "name": "ListAuthzSourcesResponse",
+      "rust_path": "::schematic_definitions::emqx::ListAuthzSourcesResponse"
     },
     {
-      "blake3": "6ef4187a15d1a14428626ca8ca5f206a7fba231c705aabebf899aa724f6200ce",
-      "name": "ListenerInfo"
+      "blake3": "c3a1dfdb429b98752bcdd35c353ceefa98cbe021f5040b2d3bcd36e26facc49a",
+      "name": "ListenerInfo",
+      "rust_path": "::schematic_definitions::emqx::ListenerInfo"
     },
     {
-      "blake3": "9676a9654edae7a3003635455eb5e5ae0d41a8c3484f8f87071eb431f5639d2f",
-      "name": "ListListenersResponse"
+      "blake3": "fae47d9d20101b5209f8c5e2bc3b32bb1eb1f60b1e61ae24cea383538c57422d",
+      "name": "ListListenersResponse",
+      "rust_path": "::schematic_definitions::emqx::ListListenersResponse"
     },
     {
-      "blake3": "86cc72a31cf2407f1f3d19c2ea808f8c4539a096efe192051ea094f8ae03977b",
-      "name": "MetricsInfo"
+      "blake3": "7e8f92b7446e04b6b605b924ef8b92739330f4e6912cf00fa8da3c9b23d2a5a0",
+      "name": "MetricsInfo",
+      "rust_path": "::schematic_definitions::emqx::MetricsInfo"
     },
     {
-      "blake3": "625833825c1274e6f51939a8559ae97c5d7575bb188bac59ae260c3364020efe",
-      "name": "ListMetricsResponse"
+      "blake3": "c1bda8af845162853a95cb4ab0feef25c896327ac5606cc8bdf469997d06a646",
+      "name": "ListMetricsResponse",
+      "rust_path": "::schematic_definitions::emqx::ListMetricsResponse"
     },
     {
-      "blake3": "fa127dcd33d60ae07471e687044b2b44303afda0a6f26f8049b5d8d69d577c79",
-      "name": "StatsInfo"
+      "blake3": "eb5e6ac7a1a7c9f7d20ef5c78c9734a28b9fe3a1f5d0e962cadcbe997b67f30f",
+      "name": "StatsInfo",
+      "rust_path": "::schematic_definitions::emqx::StatsInfo"
     },
     {
-      "blake3": "ba1d853659c6c76191110fa0b3321a7666fc3296ce5294cf0b43794e46f7e633",
-      "name": "ListStatsResponse"
+      "blake3": "0471ff6d41ce5b16368a0a2b74089ae13df7691cc429214dae1a720ed0466631",
+      "name": "ListStatsResponse",
+      "rust_path": "::schematic_definitions::emqx::ListStatsResponse"
     },
     {
-      "blake3": "f833bc3e9978724d7f84905b91e5b9a4186286ce597552fe863dc2d458320b06",
-      "name": "TopicInfo"
+      "blake3": "28b524f3486eeef3738aa2e25e9fa9f4ab4e49de0649fe927165351c16be9f7a",
+      "name": "TopicInfo",
+      "rust_path": "::schematic_definitions::emqx::TopicInfo"
     },
     {
-      "blake3": "d2e3fd50bc7c7fdb3da43c266fad6e7f89806db2f4da7f1ab9889074942a8721",
-      "name": "ListTopicsResponse"
+      "blake3": "feb95dc62d9a55eddb435dc70b3da0315cf87134b5cc62a4e3cafbc1b6025de7",
+      "name": "ListTopicsResponse",
+      "rust_path": "::schematic_definitions::emqx::ListTopicsResponse"
     },
     {
-      "blake3": "19f7c7b87077ef761073b830a10c67e21c9761d72b0c18cdc77ad7fa5463c800",
-      "name": "RetainedMessage"
+      "blake3": "e5293c0ce04b9ee48d6585c274e522d8bb05315188645bf5ce9936424f0e051a",
+      "name": "RetainedMessage",
+      "rust_path": "::schematic_definitions::emqx::RetainedMessage"
     },
     {
-      "blake3": "d389f2a9fd81f80cab0b42bd26267e851170fbb642abfd375343064250576145",
-      "name": "ListRetainedResponse"
+      "blake3": "3cb7ddfaa1f54de322de5e1a74c82932d21f0fe6267b2f303c1eb47d7062d169",
+      "name": "ListRetainedResponse",
+      "rust_path": "::schematic_definitions::emqx::ListRetainedResponse"
     },
     {
-      "blake3": "373a61cfb7c00a04810786202cccdbd1266029ede2d2ea12373ae9bbff3eff7b",
-      "name": "AlarmInfo"
+      "blake3": "20ea3e64b399ea3bc9ca5c58bf9a395c6f5de0084ee83e308e4cae4b36a5a9b3",
+      "name": "AlarmInfo",
+      "rust_path": "::schematic_definitions::emqx::AlarmInfo"
     },
     {
-      "blake3": "77639319d2dc291104851bf2d35b8a4c6eb7c3a69fb2179ebbcd3005b2c9419b",
-      "name": "ListAlarmsResponse"
+      "blake3": "540ab0b63577e7a484ef71bca6b368fc9f04a3cbeef9e44e352c12e3fa5197a9",
+      "name": "ListAlarmsResponse",
+      "rust_path": "::schematic_definitions::emqx::ListAlarmsResponse"
     },
     {
-      "blake3": "9ffd5551b873eb69f92236f545ad507700652e8fbbc61615aca8c8186242480e",
-      "name": "BanInfo"
+      "blake3": "bd13273f3c5fe98b904949bd95c45cd5da78331f3cfe41795b6cea56e3e3069f",
+      "name": "BanInfo",
+      "rust_path": "::schematic_definitions::emqx::BanInfo"
     },
     {
-      "blake3": "787319ac2508d222cc8405bfc9279ced6ae82a0984f2e94ddbaf10ac47f89a65",
-      "name": "ListBannedResponse"
-    },
-    {
-      "blake3": "2dec872ee47e92710e84ca4010de52507ca8ebfdfd1c513787997c4ab35576df",
-      "name": "PaginationMeta"
+      "blake3": "dfc7fd95bb608a8fb2581501193d7b81c167d53e3b04cfb3ae5b480d6fa69f1f",
+      "name": "ListBannedResponse",
+      "rust_path": "::schematic_definitions::emqx::ListBannedResponse"
     }
   ]
 }

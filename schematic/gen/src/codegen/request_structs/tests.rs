@@ -13,7 +13,7 @@ fn make_endpoint(
 #[test]
 fn generate_get_no_params() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -38,7 +38,7 @@ fn generate_get_no_params() {
 #[test]
 fn generate_get_with_path_param() {
     let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -58,7 +58,7 @@ fn reserved_path_param_is_emitted_without_encoding() {
     // `{+repo_id}` opts out of percent-encoding so a slash-bearing value like
     // `meta-llama/Llama-3` keeps its separators in the built URL.
     let endpoint = make_endpoint("GetModel", RestMethod::Get, "/models/{+repo_id}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -81,7 +81,7 @@ fn reserved_path_param_is_emitted_without_encoding() {
 #[test]
 fn plain_path_param_is_still_encoded() {
     let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -99,7 +99,7 @@ fn generate_get_with_multiple_path_params() {
         "/threads/{thread_id}/messages/{message_id}",
         None,
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -125,7 +125,7 @@ fn generate_post_with_body() {
         "/completions",
         Some(ApiRequest::json_type("CreateCompletionRequest")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -152,7 +152,7 @@ fn generate_post_with_path_param_and_body() {
         "/threads/{thread_id}/messages",
         Some(ApiRequest::json_type("CreateMessageRequest")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -165,7 +165,7 @@ fn generate_post_with_path_param_and_body() {
 #[test]
 fn generate_delete_with_path_param() {
     let endpoint = make_endpoint("DeleteModel", RestMethod::Delete, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -183,7 +183,7 @@ fn generate_patch_with_body() {
         "/threads/{thread_id}",
         Some(ApiRequest::json_type("UpdateThreadRequest")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -196,7 +196,7 @@ fn generate_patch_with_body() {
 #[test]
 fn validate_generated_code_passes() {
     let endpoint = make_endpoint("TestEndpoint", RestMethod::Get, "/test/{id}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     assert!(validate_generated_code(&tokens).is_ok());
 }
@@ -209,7 +209,7 @@ fn format_generated_code_produces_valid_rust() {
         "/orgs/{org}/repos/{repo}/issues",
         Some(ApiRequest::json_type("CreateIssueRequest")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
 
     let formatted = format_generated_code(&tokens);
     assert!(formatted.is_ok());
@@ -234,7 +234,7 @@ fn all_http_methods_generate_correct_string() {
 
     for (method, expected_str) in methods {
         let endpoint = make_endpoint("Test", method, "/test", None);
-        let tokens = generate_request_struct(&endpoint);
+        let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(
@@ -254,7 +254,7 @@ fn all_http_methods_generate_correct_string() {
 #[test]
 fn generates_new_for_path_param_only() {
     let endpoint = make_endpoint("GetModel", RestMethod::Get, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(
@@ -277,7 +277,7 @@ fn generates_new_for_path_param_and_body() {
         "/threads/{thread_id}/messages",
         Some(ApiRequest::json_type("CreateMessageBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(
@@ -300,7 +300,7 @@ fn generates_new_for_body_only() {
         "/completions",
         Some(ApiRequest::json_type("CreateCompletionBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(
@@ -313,7 +313,7 @@ fn generates_new_for_body_only() {
 #[test]
 fn skips_new_for_empty_request() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // No new() needed - Default suffices
@@ -332,7 +332,7 @@ fn generates_new_with_multiple_path_params() {
         "/threads/{thread_id}/messages/{message_id}",
         None,
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(
@@ -349,7 +349,7 @@ fn generates_new_with_multiple_path_params() {
 #[test]
 fn generates_example_with_default_for_no_required_fields() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should have example section
@@ -375,7 +375,7 @@ fn generates_example_with_default_for_no_required_fields() {
 #[test]
 fn generates_example_with_new_for_path_params() {
     let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should have example section
@@ -406,7 +406,7 @@ fn generates_example_with_body_construction() {
         "/completions",
         Some(ApiRequest::json_type("CreateCompletionBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should have example section
@@ -449,7 +449,7 @@ fn generates_example_with_path_params_and_body() {
         "/threads/{thread_id}/messages",
         Some(ApiRequest::json_type("CreateMessageBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should use new() with path param and body
@@ -463,7 +463,7 @@ fn generates_example_with_path_params_and_body() {
 #[test]
 fn generates_example_with_custom_module_path() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let tokens = generate_request_struct_with_options(&endpoint, "Request", Some("openai"), "OpenAI");
+    let tokens = generate_request_struct_with_options(&crate::test_utils::api_for(&endpoint), &endpoint, "Request", Some("openai"), "OpenAI");
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should use custom module path
@@ -482,7 +482,7 @@ fn generates_example_with_multiple_path_params() {
         "/threads/{thread_id}/messages/{message_id}",
         None,
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should show both path param values
@@ -514,7 +514,7 @@ fn generates_from_body_for_body_only_request() {
         "/completions",
         Some(ApiRequest::json_type("CreateCompletionBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should have From<Body> impl for body-only request
@@ -543,7 +543,7 @@ fn skips_from_body_for_request_with_path_params() {
         "/threads/{thread_id}/messages",
         Some(ApiRequest::json_type("CreateMessageBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should NOT have From<Body> impl for request with path params
@@ -559,7 +559,7 @@ fn skips_from_body_for_request_with_path_params() {
 #[test]
 fn generates_from_str_for_single_path_param_no_body() {
     let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should generate From<&str>
@@ -578,7 +578,7 @@ fn generates_from_str_for_single_path_param_no_body() {
 #[test]
 fn generates_from_string_for_single_path_param_no_body() {
     let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should generate From<String>
@@ -603,7 +603,7 @@ fn skips_from_string_impls_for_multi_param_requests() {
         "/threads/{thread_id}/messages/{message_id}",
         None,
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should NOT generate From impls for multi-param
@@ -627,7 +627,7 @@ fn skips_from_string_impls_for_requests_with_body() {
         "/completions",
         Some(ApiRequest::json_type("CreateCompletionBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should NOT generate From<&str>/From<String> impls for body requests
@@ -651,7 +651,7 @@ fn skips_from_string_impls_for_single_param_with_body() {
         "/models/{model}",
         Some(ApiRequest::json_type("UpdateModelBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should NOT generate From<&str>/From<String> impls - has body
@@ -670,7 +670,7 @@ fn skips_from_string_impls_for_single_param_with_body() {
 #[test]
 fn skips_from_string_impls_for_no_params() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Should NOT generate From<&str>/From<String> impls - no params
@@ -692,7 +692,7 @@ fn skips_from_string_impls_for_no_params() {
 fn one_inherent_impl_and_one_endpoint_spec_impl_for_path_param_request() {
     // A path param request has `new()` inherently and `into_parts()` on the trait
     let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Count occurrences of "impl RetrieveModelRequest" (non-From impls)
@@ -729,7 +729,7 @@ fn single_impl_block_with_body_and_both_methods() {
         "/completions",
         Some(ApiRequest::json_type("CreateCompletionBody")),
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Count occurrences of "impl CreateCompletionRequest" (non-From impls)
@@ -746,7 +746,7 @@ fn single_impl_block_with_body_and_both_methods() {
 fn no_inherent_impl_for_no_param_request() {
     // A request with no params has no `new()`, so only the EndpointSpec impl remains
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert_eq!(
@@ -818,7 +818,7 @@ fn generates_query_param_fields() {
             ),
         ],
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(code.contains("pub page: Option<i64>"));
@@ -836,7 +836,7 @@ fn generates_query_param_builder_methods() {
         None,
         vec![("page", false, None, QueryParamType::Integer)],
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(
@@ -858,7 +858,7 @@ fn generates_query_param_in_into_parts() {
             ("limit", false, None, QueryParamType::Integer),
         ],
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Pairs are collected apart from the path and returned unencoded
@@ -908,7 +908,7 @@ fn generates_different_query_param_types() {
             ("flag", false, None, QueryParamType::Boolean),
         ],
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(code.contains("pub q: Option<String>"));
@@ -931,7 +931,7 @@ fn generates_array_query_param() {
             QueryParamType::Array(Box::new(QueryParamType::String)),
         )],
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(code.contains("pub tags: Option<Vec<String>>"));
@@ -960,7 +960,7 @@ fn query_params_with_path_params() {
             ("page", false, None, QueryParamType::Integer),
         ],
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Both path and query params
@@ -990,7 +990,7 @@ fn generates_snake_case_query_param_fields_from_camel_case() {
             ("openType", false, None, QueryParamType::String),
         ],
     );
-    let tokens = generate_request_struct(&endpoint);
+    let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     // Rust fields should be snake_case
@@ -1045,7 +1045,7 @@ mod pagination_doc_tests {
     fn github_pagination_docs_include_default_and_max_values() {
         let endpoint =
             make_endpoint_with_pagination("ListRepos", "/repos", EndpointParams::new().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)")).with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")));
-        let tokens = generate_request_struct(&endpoint);
+        let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Verify page param has default 1
@@ -1069,7 +1069,7 @@ mod pagination_doc_tests {
             "/pullrequests",
             EndpointParams::new().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)")).with_query_param("pagelen", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")),
         );
-        let tokens = generate_request_struct(&endpoint);
+        let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Verify page param has default 1
@@ -1096,7 +1096,7 @@ mod pagination_doc_tests {
     fn gitea_pagination_docs_have_limit_param() {
         let endpoint =
             make_endpoint_with_pagination("ListIssues", "/issues", EndpointParams::new().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)")).with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")));
-        let tokens = generate_request_struct(&endpoint);
+        let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Verify limit param (Gitea-style) has default 50, max 100
@@ -1120,7 +1120,7 @@ mod pagination_doc_tests {
             "/items",
             EndpointParams::new().with_query_param("offset", QueryParamType::Integer, false, Some("Number of items to skip")).with_query_param("limit", QueryParamType::Integer, false, Some("Maximum items to return (default: 25, max: 200)")),
         );
-        let tokens = generate_request_struct(&endpoint);
+        let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Verify offset param description
@@ -1144,7 +1144,7 @@ mod pagination_doc_tests {
             "/events",
             EndpointParams::new().with_query_param("after", QueryParamType::String, false, Some("Pagination cursor from previous response")).with_query_param("limit", QueryParamType::Integer, false, Some("Maximum items to return (default: 20)")),
         );
-        let tokens = generate_request_struct(&endpoint);
+        let tokens = generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Verify cursor param description
@@ -1174,7 +1174,7 @@ fn text_body_is_a_string_field_sent_as_raw_bytes_under_its_content_type() {
             content_type: "text/plain; charset=utf-8".to_string(),
         }),
     );
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
 
     assert!(code.contains("pub body: String,"), "{code}");
     assert!(code.contains("pub fn new(body: String) -> Self"), "{code}");
@@ -1199,7 +1199,7 @@ fn binary_body_is_a_byte_vector_sent_as_raw_bytes_under_its_content_type() {
             content_type: "application/octet-stream".to_string(),
         }),
     );
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
 
     assert!(code.contains("pub body: Vec<u8>,"), "{code}");
     assert!(code.contains("pub fn new(name: impl Into<String>, body: Vec<u8>) -> Self"), "{code}");
@@ -1209,7 +1209,7 @@ fn binary_body_is_a_byte_vector_sent_as_raw_bytes_under_its_content_type() {
     );
     // `Vec<u8>` converts into the runtime's byte buffer without copying.
     assert!(code.contains("bytes: self.body.into(),"), "{code}");
-    assert!(validate_generated_code(&generate_request_struct(&endpoint)).is_ok());
+    assert!(validate_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).is_ok());
 }
 
 // ---- header and cookie parameters (R25, R26) ----
@@ -1252,7 +1252,7 @@ fn header_parameters_become_optional_fields_sent_under_their_wire_names() {
         ],
         vec![],
     );
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
     let flat = squash(&code);
 
     // `required` is not enforced: every parameter is an `Option` with a builder.
@@ -1286,7 +1286,7 @@ fn cookie_parameters_are_encoded_and_folded_into_one_cookie_header() {
             named_param("prefs", QueryParamType::Array(Box::new(QueryParamType::String))),
         ],
     );
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
     let flat = squash(&code);
 
     assert!(code.contains("pub session: Option<String>,"), "{code}");
@@ -1316,18 +1316,18 @@ fn named_parameters_start_unset_in_every_constructor() {
             vec![named_param("X-Trace-Id", QueryParamType::String)],
             vec![named_param("session", QueryParamType::String)],
         ); fixture.path = "/search/{scope}".to_string(); fixture };
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
 
     assert!(code.contains("x_trace_id: None"), "{code}");
     assert!(code.contains("session: None"), "{code}");
     assert!(code.contains("impl From<&str> for SearchRequest"), "{code}");
-    assert!(validate_generated_code(&generate_request_struct(&endpoint)).is_ok());
+    assert!(validate_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).is_ok());
 }
 
 #[test]
 fn endpoints_without_named_parameters_keep_their_inline_headers() {
     let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
 
     assert!(code.contains("let headers: Vec<(String, String)> = vec![];"), "{code}");
     assert!(!code.contains("let mut headers"), "{code}");
@@ -1342,7 +1342,7 @@ fn explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters() {
         query: vec![reference, named_param("recursive", QueryParamType::Boolean), named_param("beta", QueryParamType::Boolean)],
         ..Default::default()
     });
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
     assert!(code.contains("pub git_ref: Option<String>"), "{code}");
     assert!(code.contains("#[serde(rename = \"ref\")]"), "{code}");
     assert!(code.contains("fn with_git_ref("), "{code}");
@@ -1352,7 +1352,7 @@ fn explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters() {
     assert!(code.contains("fn with_beta("), "{code}");
     assert!(!code.contains("query.push((\"git_ref\""), "{code}");
     endpoint.params.as_mut().unwrap().query[0].rust_name = Some("GitRef".into());
-    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    let code = format_generated_code(&generate_request_struct(&crate::test_utils::api_for(&endpoint), &endpoint)).unwrap();
     assert!(code.contains("pub GitRef: Option<String>"), "explicit identifiers keep their spelling: {code}");
     assert!(code.contains("self.GitRef"), "{code}");
 }
@@ -1367,4 +1367,73 @@ fn qualified_and_container_body_examples_are_valid_rust() {
             .unwrap_or_else(|error| panic!("invalid example for {body}: {error}\n{source}"));
         assert!(!source.contains("::{CreateResponseRequest, ::"), "{source}");
     }
+}
+
+/// An API whose `Model` component is spelled `crate::types::Model`, with one
+/// POST endpoint sending and returning `reference`.
+fn wrapped_api(reference: schematic_define::TypeRef) -> (RestApi, Endpoint) {
+    let mut endpoint = make_endpoint("Wrap", RestMethod::Post, "/wrap", Some(ApiRequest::json(reference.clone())));
+    endpoint.response = ApiResponse::json(reference);
+    let mut api = crate::test_utils::api_for(&endpoint);
+    if let Some(model) = api.schemas.iter_mut().find(|c| c.name == "Model") {
+        model.rust_path = Some("crate::types::Model".into());
+    }
+    (api, endpoint)
+}
+
+#[test]
+fn wrapper_references_spell_their_rust_types_through_the_components() {
+    use schematic_define::{PrimitiveType, TypeRef};
+    let model = || Box::new(TypeRef::Named("Model".into()));
+    let cases = [
+        (TypeRef::Named("Model".into()), "crate::types::Model"),
+        (TypeRef::Array(model()), "::std::vec::Vec<crate::types::Model>"),
+        (TypeRef::Optional(model()), "::std::option::Option<crate::types::Model>"),
+        (TypeRef::Map(model()), "::std::collections::HashMap<::std::string::String, crate::types::Model>"),
+        (
+            TypeRef::KeyedMap { key: "crate::types::Key".into(), value: Box::new(TypeRef::Primitive(PrimitiveType::U32)) },
+            "::std::collections::HashMap<crate::types::Key, u32>",
+        ),
+        (TypeRef::Optional(Box::new(TypeRef::Array(model()))), "::std::option::Option<::std::vec::Vec<crate::types::Model>>"),
+        (TypeRef::Primitive(PrimitiveType::Json), "::serde_json::Value"),
+        (TypeRef::Primitive(PrimitiveType::String), "::std::string::String"),
+        (TypeRef::Primitive(PrimitiveType::Unit), "()"),
+    ];
+    for (reference, expected) in cases {
+        let (api, endpoint) = wrapped_api(reference.clone());
+        // prettyplease may break a long generic list with a trailing comma.
+        let code = squash(&format_generated_code(&generate_request_struct(&api, &endpoint)).expect("parses"))
+            .replace(",>", ">");
+        assert!(code.contains(&squash(&format!("type Success = {expected};"))), "{reference:?}: {code}");
+        assert!(code.contains(&squash(&format!("pub body: {expected},"))), "{reference:?}: {code}");
+    }
+}
+
+#[test]
+fn a_json_form_part_spells_its_rust_type_through_the_components() {
+    use schematic_define::{FormField, TypeRef};
+    let reference = TypeRef::Optional(Box::new(TypeRef::Named("Model".into())));
+    let mut endpoint = make_endpoint(
+        "Upload",
+        RestMethod::Post,
+        "/upload",
+        Some(ApiRequest::form_data(vec![FormField::json("meta", reference)])),
+    );
+    endpoint.response = ApiResponse::Empty;
+    let mut api = crate::test_utils::api_for(&endpoint);
+    api.schemas[0].rust_path = Some("crate::types::Model".into());
+
+    let code = squash(&format_generated_code(&generate_request_struct(&api, &endpoint)).expect("parses"));
+    assert!(code.contains(&squash("pub meta: ::std::option::Option<crate::types::Model>,")), "{code}");
+}
+
+#[test]
+fn an_unresolved_reference_is_spelled_as_a_compile_error() {
+    let endpoint = make_endpoint("Get", RestMethod::Get, "/get", None);
+    let mut api = crate::test_utils::api_for(&endpoint);
+    api.schemas.clear();
+
+    let code = format_generated_code(&generate_request_struct(&api, &endpoint)).expect("parses");
+    assert!(code.contains("::core::compile_error!"), "{code}");
+    assert!(code.contains("TestResponse"), "{code}");
 }

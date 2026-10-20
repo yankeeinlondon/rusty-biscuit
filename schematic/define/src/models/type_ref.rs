@@ -232,7 +232,7 @@ impl TypeRef {
     }
 
     /// Every component name this reference mentions, in encounter order.
-    pub(crate) fn names(&self) -> Vec<&str> {
+    pub fn names(&self) -> Vec<&str> {
         match self {
             Self::Named(name) => vec![name.as_str()],
             Self::Array(inner) | Self::Optional(inner) | Self::Map(inner) | Self::KeyedMap { value: inner, .. } => inner.names(),

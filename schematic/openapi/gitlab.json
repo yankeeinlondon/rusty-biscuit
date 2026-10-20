@@ -87,19 +87,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::TreeItem",
-                      "schema_name": "TreeItem"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::TreeItem>"
+              "Array": {
+                "Named": "TreeItem"
+              }
             }
           }
         }
@@ -148,17 +138,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::FileContent",
-                    "schema_name": "FileContent"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::FileContent"
+              "Named": "FileContent"
             }
           }
         }
@@ -204,17 +184,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::Project",
-                    "schema_name": "Project"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::Project"
+              "Named": "Project"
             }
           }
         }
@@ -343,19 +313,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::Project",
-                      "schema_name": "Project"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::Project>"
+              "Array": {
+                "Named": "Project"
+              }
             }
           }
         }
@@ -392,17 +352,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::Branch",
-                    "schema_name": "Branch"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::Branch"
+              "Named": "Branch"
             }
           }
         }
@@ -489,19 +439,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::MergeRequest",
-                      "schema_name": "MergeRequest"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::MergeRequest>"
+              "Array": {
+                "Named": "MergeRequest"
+              }
             }
           }
         }
@@ -538,17 +478,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::MergeRequest",
-                    "schema_name": "MergeRequest"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::MergeRequest"
+              "Named": "MergeRequest"
             }
           }
         }
@@ -619,19 +549,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::Commit",
-                      "schema_name": "Commit"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::Commit>"
+              "Array": {
+                "Named": "Commit"
+              }
             }
           }
         }
@@ -677,17 +597,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::MergeRequestChanges",
-                    "schema_name": "MergeRequestChanges"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::MergeRequestChanges"
+              "Named": "MergeRequestChanges"
             }
           }
         }
@@ -773,19 +683,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::Issue",
-                      "schema_name": "Issue"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::Issue>"
+              "Array": {
+                "Named": "Issue"
+              }
             }
           }
         }
@@ -822,17 +722,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::Issue",
-                    "schema_name": "Issue"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::Issue"
+              "Named": "Issue"
             }
           }
         }
@@ -903,19 +793,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::Note",
-                      "schema_name": "Note"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::Note>"
+              "Array": {
+                "Named": "Note"
+              }
             }
           }
         }
@@ -964,19 +844,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::User",
-                      "schema_name": "User"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::User>"
+              "Array": {
+                "Named": "User"
+              }
             }
           }
         }
@@ -1047,19 +917,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::Tag",
-                      "schema_name": "Tag"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::Tag>"
+              "Array": {
+                "Named": "Tag"
+              }
             }
           }
         }
@@ -1096,17 +956,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::Tag",
-                    "schema_name": "Tag"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::Tag"
+              "Named": "Tag"
             }
           }
         }
@@ -1177,19 +1027,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::Release",
-                      "schema_name": "Release"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::Release>"
+              "Array": {
+                "Named": "Release"
+              }
             }
           }
         }
@@ -1226,17 +1066,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::Release",
-                    "schema_name": "Release"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::Release"
+              "Named": "Release"
             }
           }
         }
@@ -1282,17 +1112,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Named": {
-                    "rust_path": "::schematic_definitions::gitlab::Release",
-                    "schema_name": "Release"
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::schematic_definitions::gitlab::Release"
+              "Named": "Release"
             }
           }
         }
@@ -1407,19 +1227,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "descriptor": {
-                "shape": {
-                  "Vec": {
-                    "Named": {
-                      "rust_path": "::schematic_definitions::gitlab::Pipeline",
-                      "schema_name": "Pipeline"
-                    }
-                  }
-                },
-                "structure": null
-              },
-              "module_path": null,
-              "type_name": "::std::vec::Vec<::schematic_definitions::gitlab::Pipeline>"
+              "Array": {
+                "Named": "Pipeline"
+              }
             }
           }
         }

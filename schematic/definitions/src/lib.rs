@@ -240,8 +240,9 @@ pub fn apis_by_module() -> IndexMap<String, Vec<RestApi>> {
     grouped
 }
 
-/// All shipped REST APIs in catalog order, assembled with their module registries.
+/// All shipped REST APIs in catalog order, each assembled with its module
+/// group's schema components.
 pub fn all_apis() -> Vec<RestApi> {
-    registry::MODULES.iter().flat_map(|(_, assemble)|
-        assemble().expect("valid shipped module group").apis).collect()
+    registry::MODULES.iter().flat_map(|assemble|
+        assemble().expect("valid shipped module group")).collect()
 }

@@ -2598,7 +2598,6 @@ name = "schematic-definitions"
 version = "0.1.0"
 dependencies = [
  "indexmap",
- "openapiv3",
  "schemars",
  "schematic-define",
  "serde",

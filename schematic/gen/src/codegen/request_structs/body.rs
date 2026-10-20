@@ -6,16 +6,16 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{ApiRequest, Endpoint};
+use schematic_define::{ApiRequest, Endpoint, RestApi};
 
 use crate::codegen::request_structs::shared::{
-    QueryParamInfo, type_name_to_tokens,
+    QueryParamInfo, json_type_name, type_name_to_tokens,
 };
 
 /// Generates the body field if the endpoint has a request schema.
-pub fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
+pub fn generate_body_field(api: &RestApi, endpoint: &Endpoint) -> TokenStream {
     let type_name = match &endpoint.request {
-        Some(ApiRequest::Json(schema)) => type_name_to_tokens(&schema.type_name),
+        Some(ApiRequest::Json(reference)) => type_name_to_tokens(&json_type_name(api, reference)),
         // Form bodies carry a generated `{EndpointId}Form` struct; see `form.rs`.
         Some(ApiRequest::FormData { .. }) | Some(ApiRequest::UrlEncoded { .. }) => {
             match super::form::form_body_type_name(endpoint) {

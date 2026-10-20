@@ -59,7 +59,7 @@ pub use types::*;
 use crate as schematic_definitions;
 #[cfg(test)]
 use schematic_define::ApiResponse;
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError, rust_path};
 use schematic_define::{
     AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
@@ -67,34 +67,8 @@ use schematic_define::{
     pagination::{Collection as ListCollection},
 };
 
-/// Creates a schema registry containing all Hugging Face response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Hugging Face Hub API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::huggingface::{openapi_registry, define_huggingface_hub_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_huggingface_hub_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("ModelInfo").is_some());
-/// assert!(registry.get("DatasetInfo").is_some());
-/// assert!(registry.get("SpaceInfo").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid shipped API").registry
-}
-
 /// Assemble the APIs and ordered schemas in one destination context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::huggingface", |ctx| {
         ctx.register::<CreateRepoBody>()?;
         ctx.register::<DeleteRepoBody>()?;
@@ -143,7 +117,7 @@ pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
 /// assert_eq!(api.base_url, "https://huggingface.co/api");
 /// ```
 pub fn define_huggingface_hub_api() -> RestApi {
-    module_group().expect("valid shipped API").apis.remove(0)
+    module_group().expect("valid shipped API").remove(0)
 }
 
 fn build_huggingface_hub_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -304,7 +278,7 @@ fn build_huggingface_hub_api(ctx: &mut DefinitionContext) -> Result<RestApi, Def
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::RestMethod;
+    use schematic_define::{RestMethod, TypeRef};
 
     // =========================================================================
     // REST API Tests
@@ -563,17 +537,18 @@ mod tests {
     fn typed_module_group_preserves_endpoint_order_and_inline_components() {
         let group = module_group().unwrap();
         let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&group.apis[0]), ["ListModels", "GetModel", "ListModelFiles", "GetModelFile", "ListModelCommits", "GetModelReadme", "ListModelDiscussions", "GetModelCard", "ListDatasets", "GetDataset", "ListDatasetFiles", "GetDatasetFile", "ListDatasetCommits", "GetDatasetReadme", "ListSpaces", "GetSpace", "ListSpaceFiles", "GetSpaceFile", "CreateRepo", "DeleteRepo", "UpdateRepoSettings", "MoveRepo", "WhoAmI", "GetUser", "ListUserRepos", "GetUserCollections"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(ids(&group[0]), ["ListModels", "GetModel", "ListModelFiles", "GetModelFile", "ListModelCommits", "GetModelReadme", "ListModelDiscussions", "GetModelCard", "ListDatasets", "GetDataset", "ListDatasetFiles", "GetDatasetFile", "ListDatasetCommits", "GetDatasetReadme", "ListSpaces", "GetSpace", "ListSpaceFiles", "GetSpaceFile", "CreateRepo", "DeleteRepo", "UpdateRepoSettings", "MoveRepo", "WhoAmI", "GetUser", "ListUserRepos", "GetUserCollections"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
         for name in ["Vec<ModelInfo>", "Vec<RepoFile>", "Vec<Commit>", "Vec<DatasetInfo>", "Vec<SpaceInfo>", "Vec<RepoInfo>", "Vec<Collection>"] {
-            assert!(group.registry.get(name).is_none(), "container component {name} must be inline");
+            assert!(group[0].component(name).is_none(), "container component {name} must be inline");
         }
-        assert!(group.registry.get("Commit").is_some());
-        let commits = group.apis[0].endpoints.iter().find(|ep| ep.id == "ListModelCommits").unwrap();
+        assert!(group[0].component("Commit").is_some());
+        let commits = group[0].endpoints.iter().find(|ep| ep.id == "ListModelCommits").unwrap();
         let schematic_define::ApiResponse::Json(schema) = &commits.response else { panic!("JSON commits"); };
-        assert!(schema.type_name.ends_with("::Commit>"));
+        assert!(*schema == TypeRef::Array(Box::new(TypeRef::Named("Commit".into()))));
     }
 
 }

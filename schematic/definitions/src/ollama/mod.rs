@@ -26,41 +26,13 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::{ApiResponse, AuthStrategy, RestMethod};
 use schematic_define::{
     Endpoint, EnvMapping, RestApi,
 };
-
-/// Creates a schema registry containing all Ollama response types.
-///
-/// This registry can be used to generate OpenAPI schemas for both the native
-/// and OpenAI-compatible Ollama APIs. All response types used by both API
-/// variants are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::ollama::{openapi_registry, define_ollama_native_api, define_ollama_openai_api};
-///
-/// let registry = openapi_registry();
-/// let native_api = define_ollama_native_api();
-/// let openai_api = define_ollama_openai_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("ListModelsResponse").is_some());
-/// assert!(registry.get("OpenAIEmbeddingResponse").is_some());
-///
-/// // Registry is complete for both APIs
-/// assert!(registry.validate_completeness(&native_api).is_ok());
-/// assert!(registry.validate_completeness(&openai_api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid ollama definitions").registry
-}
 
 /// Creates the native Ollama API definition.
 ///
@@ -93,7 +65,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 11);
 /// ```
 pub fn define_ollama_native_api() -> RestApi {
-    module_group().expect("valid ollama definitions").apis.remove(0)
+    module_group().expect("valid ollama definitions").remove(0)
 }
 
 fn build_ollama_native_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -189,7 +161,7 @@ fn build_ollama_native_api(ctx: &mut DefinitionContext) -> Result<RestApi, Defin
 /// assert_eq!(api.endpoints.len(), 4);
 /// ```
 pub fn define_ollama_openai_api() -> RestApi {
-    module_group().expect("valid ollama definitions").apis.remove(1)
+    module_group().expect("valid ollama definitions").remove(1)
 }
 
 fn build_ollama_openai_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -226,7 +198,7 @@ fn build_ollama_openai_api(ctx: &mut DefinitionContext) -> Result<RestApi, Defin
 }
 
 /// Assemble sibling APIs and their ordered nominal schemas in one context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::ollama", |ctx| {
         ctx.register::<GenerateBody>()?;
         ctx.register::<ChatBody>()?;
@@ -565,12 +537,13 @@ mod tests {
     fn module_group_preserves_endpoint_and_registry_inventory() {
         let group = module_group().unwrap();
         assert_eq!(
-            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
             vec!["Generate", "Chat", "Embeddings", "ListModels", "ShowModel", "PullModel", "PushModel", "CopyModel", "DeleteModel", "CreateModel", "ListRunningModels", "ChatCompletions", "Completions", "Embeddings", "ListModels"]
         );
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["GenerateBody", "ChatBody", "EmbeddingsBody", "ShowModelBody", "PullModelBody", "PushModelBody", "CopyModelBody", "DeleteModelBody", "CreateModelBody", "Message", "EmbeddingsResponse", "ListModelsResponse", "ModelInfo", "ModelDetails", "ShowModelResponse", "ListRunningModelsResponse", "RunningModel", "OpenAIChatCompletionRequest", "OpenAICompletionRequest", "OpenAIEmbeddingRequest", "OpenAIMessage", "OpenAIEmbeddingResponse", "OpenAIEmbeddingData", "OpenAIUsage", "OpenAIListModelsResponse", "OpenAIModel"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["GenerateBody", "ChatBody", "Message", "EmbeddingsBody", "ShowModelBody", "PullModelBody", "PushModelBody", "CopyModelBody", "DeleteModelBody", "CreateModelBody", "EmbeddingsResponse", "ListModelsResponse", "ModelDetails", "ModelInfo", "ShowModelResponse", "ListRunningModelsResponse", "RunningModel", "OpenAIChatCompletionRequest", "OpenAIMessage", "OpenAICompletionRequest", "OpenAIEmbeddingRequest", "OpenAIEmbeddingResponse", "OpenAIEmbeddingData", "OpenAIUsage", "OpenAIListModelsResponse", "OpenAIModel"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
     }
 

@@ -17,19 +17,16 @@
         "headers": [],
         "id": "Login",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/pub/login",
         "request": {
           "Json": {
-            "module_path": null,
-            "type_name": "LoginRequest"
+            "Named": "LoginRequest"
           }
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ApiResponseMessage"
+            "Named": "ApiResponseMessage"
           }
         }
       },
@@ -38,7 +35,6 @@
         "headers": [],
         "id": "Logout",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/pub/logout",
         "request": null,
@@ -49,14 +45,12 @@
         "headers": [],
         "id": "GetSystemInfo",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/system",
         "request": null,
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "SystemInfo"
+            "Named": "SystemInfo"
           }
         }
       },
@@ -65,7 +59,6 @@
         "headers": [],
         "id": "ExportBackup",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/system/backup/export",
         "request": null,
@@ -76,7 +69,6 @@
         "headers": [],
         "id": "RestoreBackup",
         "method": "PUT",
-        "oauth_scopes": null,
         "params": null,
         "path": "/system/backup/restore",
         "request": {
@@ -97,8 +89,9 @@
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "BackupRestoreReportItems"
+            "Array": {
+              "Named": "BackupRestoreReportItem"
+            }
           }
         }
       },
@@ -107,7 +100,6 @@
         "headers": [],
         "id": "UploadResource",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/resources/{resource_type}",
         "request": {
@@ -128,8 +120,9 @@
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "ResourceItems"
+            "Array": {
+              "Named": "ResourceItem"
+            }
           }
         }
       },
@@ -138,7 +131,6 @@
         "headers": [],
         "id": "GetResource",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/resources/{resource_type}/{resource_id}",
         "request": null,
@@ -149,7 +141,6 @@
         "headers": [],
         "id": "InstallCustomIntegration",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/intg/install",
         "request": {
@@ -170,8 +161,7 @@
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "IntegrationDriverInfo"
+            "Named": "IntegrationDriverInfo"
           }
         }
       },
@@ -180,7 +170,6 @@
         "headers": [],
         "id": "UploadCustomIrCodeSet",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/ir/codes/custom/{code_set_id}",
         "request": {
@@ -201,8 +190,7 @@
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "CodeSetUploadResult"
+            "Named": "CodeSetUploadResult"
           }
         }
       },
@@ -211,7 +199,6 @@
         "headers": [],
         "id": "InstallCustomComponent",
         "method": "POST",
-        "oauth_scopes": null,
         "params": null,
         "path": "/system/install/{custom_component}",
         "request": {
@@ -232,8 +219,7 @@
         },
         "response": {
           "Json": {
-            "module_path": null,
-            "type_name": "CustomInstall"
+            "Named": "CustomInstall"
           }
         }
       },
@@ -242,7 +228,6 @@
         "headers": [],
         "id": "QueryLogsText",
         "method": "GET",
-        "oauth_scopes": null,
         "params": null,
         "path": "/system/logs",
         "request": null,
@@ -276,57 +261,56 @@
     "headers": [],
     "module_path": "unfolded_circle_core_rest",
     "name": "UnfoldedCircleCoreRest",
-    "pagination_exceptions": [],
     "request_id_header": null,
     "request_suffix": "CoreRestRequest",
     "secret_names": [],
     "version": null
   },
   "fingerprints": {
-    "api_metadata": "9b4b1ad9249d377b7633d89b7b0e9f30dccf2129157aea3307583542b8f2f2cc",
+    "api_metadata": "8bffd84acaebf0f9a0c50c59dc6b233442652adac4b37414186bab0b2ada7e9f",
     "endpoints": [
       {
-        "blake3": "8552992dac5a73c4124d340069a4b59e02fbc6cd7c40c6590962b60cfd8a444f",
+        "blake3": "8525f098e36ca5a62908ec897bc25690357abefc7b606a3d4b0415b9cd62874d",
         "id": "Login"
       },
       {
-        "blake3": "f0be19b88b3f3b06b25a2d0742e50949b9e7ffb3172d72c3ac77303cfb573eda",
+        "blake3": "a60b26ae3d9cd44050a004a49a4b239a3e4ae6792167ebe2d914c5df59030826",
         "id": "Logout"
       },
       {
-        "blake3": "d6a3a623aa793f36b3ba058fd6a53fd45c987a0697083e4329127d9a6f30a782",
+        "blake3": "a441aef03849853df8d296cdfdd2cd0e883e1685aa8ee55a5872e5f7f2824f63",
         "id": "GetSystemInfo"
       },
       {
-        "blake3": "b616095f703218999acf5603018308767bec82918da6e4e68296e58edd7fea04",
+        "blake3": "0e8be91e6e4f0d6d3681ae96bdd0bcf23734f4ff2c0560436d456e4d11852701",
         "id": "ExportBackup"
       },
       {
-        "blake3": "2e0c39a7a073c3d76fc3515a022c35779c96485e615e14eab5fe6d3546d5c279",
+        "blake3": "d51cc590b0a73721d55fab343927265dbf7640c700fd28cec6ddabd06a319da1",
         "id": "RestoreBackup"
       },
       {
-        "blake3": "ebcd4e74cb8403fe0e73118ec3c9a90cef2099a0caab0037208f159e680337ce",
+        "blake3": "78d0f04a43a004ac2d0dd02af00063c9d9db8a12aa799c571ace3113249b45ab",
         "id": "UploadResource"
       },
       {
-        "blake3": "2fad665ed558077b45f7b6ea3ae9190d248da1b03147e2662837575fcda62425",
+        "blake3": "5cafa82613e3473fe646fc315344101890a4648dc72559097c3adf7017010fdc",
         "id": "GetResource"
       },
       {
-        "blake3": "ca6dad900a7012bbee5d5296d8b8c549fe9f9adb89589589e6e581484fc9201d",
+        "blake3": "43d8a620542df935a5ed1e29871ea2ed2982c61d68b5c02064d723e6a1109eec",
         "id": "InstallCustomIntegration"
       },
       {
-        "blake3": "756509bdb65fa624b8ed9c8a9b67aee1ad0df137567b6525243b1ad7dfb50fa3",
+        "blake3": "52935546ede83e6df60c5ff0ac99c8967f35ff65977623ed7af4cacdbb34d224",
         "id": "UploadCustomIrCodeSet"
       },
       {
-        "blake3": "55f0ee89d7ee5d6c68af0cd7c9e559532153a96479697229bc11ecc1ffdc38ea",
+        "blake3": "ca9f4efc4ffada1ce6337bbfff0c53d4c6320384b8c68e930ea89b9dd6c428f4",
         "id": "InstallCustomComponent"
       },
       {
-        "blake3": "a2646062cba453470c904e65497478ed7efb84a542d026bfc35ba8d26162e093",
+        "blake3": "3b8b523894f22c0a8de92185dce1f2e0a42486c5cdb3c96c4d52ab5a20875682",
         "id": "QueryLogsText"
       }
     ]
@@ -401,36 +385,64 @@
   ],
   "registry": [
     {
-      "blake3": "3cfbcfa309d592677310df41700b475e2fd13b9f7c4f656b098b13f1c2f42197",
-      "name": "LoginRequest"
+      "blake3": "df59fd1c14843f854c069857ebc8e5dcf7286f688687c420e474c4df005eba64",
+      "name": "LoginRequest",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::LoginRequest"
     },
     {
-      "blake3": "455a7ff36dc06a458c82e4fe2f167d72c23eda9060577f4a014dcfd1f137ae9e",
-      "name": "ApiResponseMessage"
+      "blake3": "3507da8268f41b5e60cb23931837b6f9a0639eb095229010708583dfac562687",
+      "name": "ApiResponseMessage",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage"
     },
     {
-      "blake3": "66e3846ec8f1e87cbeef9ff087ca53e776d3b32dad5863828f17de43bd7378e5",
-      "name": "SystemInfo"
+      "blake3": "7205ba0762880b112fc62bd04ed1f90f3e3073370b3efd0fda521b63339c8b51",
+      "name": "SystemInfo",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::SystemInfo"
     },
     {
-      "blake3": "fd99602f84ce7fc1878d426fd7a9472d8d9f78c7ae0ec5d6f7f6f64968a960cd",
-      "name": "BackupRestoreReportItems"
+      "blake3": "acdfa02d5c5441247c87f5e6865254d078ec8a2db4435b629ef025d21e4bfacc",
+      "name": "BackupRestoreReportItem",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem"
     },
     {
-      "blake3": "8f29ad30dca4dfd9894426ce2a7439561b8363f4bba9d225b8e3fcf9164649b3",
-      "name": "ResourceItems"
+      "blake3": "c6ced9d158f081cae9521e1949eb6df359f38f43758924871c74ad1ee801039a",
+      "name": "BackupRestoreItem",
+      "rust_path": null
     },
     {
-      "blake3": "1b3772512a95838a677eefb2d467db111fae35cdfb45a68665d25492bcba882d",
-      "name": "IntegrationDriverInfo"
+      "blake3": "a27b0296a611d056fa4599816d848c16a5f4dbd6d9ed13d2e8b619634a7e2981",
+      "name": "ResourceItem",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::ResourceItem"
     },
     {
-      "blake3": "0f584b8f3287ccda19b5c876a03baa75a8039ce4676e8499ffc68ab4639a3336",
-      "name": "CodeSetUploadResult"
+      "blake3": "b41c9a21ee938623dea5a9e6dba62a3c275097a54516d872d6ac1f2a1eb268c4",
+      "name": "IntegrationDriverInfo",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo"
     },
     {
-      "blake3": "ad1b54104f0399a751645ba3bffe15980d373daa56e79d9a93404facb4f9fdac",
-      "name": "CustomInstall"
+      "blake3": "d8a248f79a507e4c78b7657b80a67a7978b417e50152a5423f7799bcaf097cce",
+      "name": "DriverState",
+      "rust_path": null
+    },
+    {
+      "blake3": "bdd56370874e1e1e57599a9ffe3d80fedd2c4e0e5c33e1a04da648aaf7bf67b3",
+      "name": "IntegrationDriverType",
+      "rust_path": null
+    },
+    {
+      "blake3": "5dfb267b8cac0316a5908341366f0191f78388f70b41657140a9870d19392fd6",
+      "name": "CodeSetUploadResult",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult"
+    },
+    {
+      "blake3": "6a1ee1b75240ebfc12f331f82df170649593abc5ae3994b0465f899b792de7ae",
+      "name": "CustomInstall",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::CustomInstall"
+    },
+    {
+      "blake3": "590be236ce1de03e0882c8207313d072b88bffdb6da8d1c3371967ccc85e51e6",
+      "name": "CustomComponent",
+      "rust_path": null
     }
   ]
 }

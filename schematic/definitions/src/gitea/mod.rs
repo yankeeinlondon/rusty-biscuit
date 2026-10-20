@@ -52,38 +52,12 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{
     AuthStrategy, DefinitionError, Endpoint, EndpointParams, ParamDef,
     RestApi, QueryParamType,
     pagination::{Collection, MoreSignal, PageSize, Strategy, ValueSource},
 };
-
-/// Creates a schema registry containing all Gitea response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Gitea API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::gitea::{openapi_registry, define_gitea_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_gitea_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("RepositoryInfo").is_some());
-/// assert!(registry.get("PullRequestSummary").is_some());
-/// assert!(registry.get("IssueSummary").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid gitea definition").registry
-}
 
 /// Gitea's page-number pagination: a 1-based `page`, a `limit` size the
 /// server caps at 50, a `Link` header whose `next` relation marks a further
@@ -144,11 +118,11 @@ fn gitea_page_number() -> Strategy {
 /// assert_eq!(api.endpoints.len(), 15);
 /// ```
 pub fn define_gitea_api() -> RestApi {
-    module_group().expect("valid gitea definition").apis.remove(0)
+    module_group().expect("valid gitea definition").remove(0)
 }
 
 /// Assemble the API and its schemas from one ordered registration context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::gitea", |ctx| {
         ctx.register::<RepositoryInfo>()?;
         ctx.register::<GitTreeResponse>()?;
@@ -330,42 +304,41 @@ pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, RestMethod};
+    use schematic_define::{ApiResponse, RestMethod, TypeRef};
     use schematic_define::pagination::{resolve, Resolution};
 
     // =============================================
-    // openapi_registry() tests
+    // api.schemas tests
     // =============================================
 
     #[test]
-    fn openapi_registry_contains_all_response_types() {
-        let registry = openapi_registry();
-
-        assert!(registry.get("RepositoryInfo").is_some());
-        assert!(registry.get("GitTreeResponse").is_some());
-        assert!(registry.get("PullRequestSummary").is_some());
-        assert!(!registry.get("Vec<PullRequestSummary>").is_some());
-        assert!(registry.get("IssueSummary").is_some());
-        assert!(!registry.get("Vec<IssueSummary>").is_some());
-        assert!(registry.get("Label").is_some());
-        assert!(registry.get("RepoTag").is_some());
-        assert!(registry.get("Release").is_some());
-        assert_eq!(registry.len(), 13);
-    }
-
-    #[test]
-    fn openapi_registry_validates_against_api() {
-        let registry = openapi_registry();
+    fn schemas_contain_all_response_types() {
         let api = define_gitea_api();
 
-        let result = registry.validate_completeness(&api);
-        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+        assert!(api.component("RepositoryInfo").is_some());
+        assert!(api.component("GitTreeResponse").is_some());
+        assert!(api.component("PullRequestSummary").is_some());
+        assert!(api.component("Vec<PullRequestSummary>").is_none());
+        assert!(api.component("IssueSummary").is_some());
+        assert!(api.component("Vec<IssueSummary>").is_none());
+        assert!(api.component("Label").is_some());
+        assert!(api.component("RepoTag").is_some());
+        assert!(api.component("Release").is_some());
+        assert_eq!(crate::registry::registered_names(&api).len(), 13);
     }
 
     #[test]
-    fn openapi_registry_converts_to_openapi_schemas() {
-        let registry = openapi_registry();
-        let openapi_schemas = registry.to_openapi_schemas();
+    fn references_resolve_in_api_schemas() {
+        let api = define_gitea_api();
+
+        api.validate_references().expect("every reference resolves in api.schemas");
+    }
+
+    #[test]
+    fn openapi_export_includes_api_schemas() {
+        let api = define_gitea_api();
+        let openapi_schemas = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
+            .expect("export succeeds").components.expect("components").schemas;
 
         assert!(
             openapi_schemas.len() >= 13,
@@ -613,9 +586,9 @@ mod tests {
         match &endpoint.response {
             ApiResponse::Json(schema) => {
                 assert!(
-                    schema.type_name.starts_with("::std::vec::Vec<"),
-                    "GetTagReference should return Vec<GitRef>, got {}",
-                    schema.type_name
+                    matches!(schema, TypeRef::Array(_)),
+                    "GetTagReference should return Vec<GitRef>, got {:?}",
+                    schema
                 );
             }
             _ => panic!("Expected JSON response"),
@@ -635,7 +608,7 @@ mod tests {
         assert_eq!(endpoint.path, "/repos/{owner}/{repo}/branches/{branch}");
         assert!(endpoint.request.is_none());
         match &endpoint.response {
-            ApiResponse::Json(schema) => assert!(schema.type_name.ends_with("::Branch")),
+            ApiResponse::Json(schema) => assert!(*schema == TypeRef::Named("Branch".into())),
             _ => panic!("Expected JSON response"),
         }
         assert!(matches!(api.auth, AuthStrategy::ApiKey { .. }));
@@ -675,10 +648,10 @@ mod tests {
             match &endpoint.response {
                 ApiResponse::Json(schema) => {
                     assert!(
-                        schema.type_name.starts_with("::std::vec::Vec<"),
-                        "Endpoint {} should return Vec type, got {}",
+                        matches!(schema, TypeRef::Array(_)),
+                        "Endpoint {} should return Vec type, got {:?}",
                         id,
-                        schema.type_name
+                        schema
                     );
                 }
                 _ => panic!("Endpoint {} should return JSON", id),
@@ -704,7 +677,7 @@ mod tests {
             // assert single-item shape for JSON responses.
             if let ApiResponse::Json(schema) = &endpoint.response {
                 assert!(
-                    !schema.type_name.starts_with("::std::vec::Vec<"),
+                    !matches!(schema, TypeRef::Array(_)),
                     "Endpoint {} should return single item, not Vec",
                     id
                 );
@@ -773,9 +746,9 @@ mod tests {
         match &endpoint.response {
             ApiResponse::Json(schema) => {
                 assert!(
-                    schema.type_name.starts_with("::std::vec::Vec<"),
-                    "ListOrgRepos should return Vec type, got {}",
-                    schema.type_name
+                    matches!(schema, TypeRef::Array(_)),
+                    "ListOrgRepos should return Vec type, got {:?}",
+                    schema
                 );
             }
             _ => panic!("Expected JSON response"),
@@ -802,11 +775,11 @@ mod tests {
     #[test]
     fn typed_module_group_preserves_endpoint_order_and_completeness() {
         let group = module_group().unwrap();
-        assert_eq!(group.apis.len(), 1);
-        let api = &group.apis[0];
+        assert_eq!(group.len(), 1);
+        let api = &group[0];
         assert_eq!(api.endpoints.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["GetRepository", "GetGitTree", "GetRepositoryContentRaw", "ListPullRequests", "ListPullRequestFiles", "ListIssues", "GetIssue", "ListIssueComments", "ListIssueTimeline", "ListTags", "ListReleases", "GetBranch", "GetTagReference", "GetAnnotatedTag", "ListOrgRepos"]);
-        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["RepositoryInfo", "GitTreeResponse", "PullRequestSummary", "PullRequestFile", "IssueSummary", "IssueComment", "TimelineEvent", "Label", "RepoTag", "Release", "Branch", "GitRef", "AnnotatedTagObject"]);
-        group.registry.validate_completeness(api).unwrap();
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["RepositoryInfo", "GitTreeResponse", "PullRequestSummary", "Label", "PullRequestFile", "IssueSummary", "IssueComment", "TimelineEvent", "RepoTag", "Release", "Branch", "GitRef", "AnnotatedTagObject"]);
+        api.validate_references().unwrap();
         assert!(api.endpoints.iter().all(|e| !e.path.contains('?')));
     }
 

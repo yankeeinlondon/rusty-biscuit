@@ -14,7 +14,6 @@ use std::process::Command;
 
 use biscuit_test_harness::bin_exe;
 use schematic_define::{DefinitionContext, Endpoint, RestApi};
-use schematic_definitions::registry::SchemaRegistry;
 use schematic_gen::diagnostics::Output;
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::output::{
@@ -648,10 +647,6 @@ impl Roots {
     }
 }
 
-fn any_registry(_: &str) -> Option<SchemaRegistry> {
-    Some(SchemaRegistry::new())
-}
-
 fn selection(name: &str) -> BatchScope {
     BatchScope::Selection(vec![name.to_string()])
 }
@@ -660,7 +655,7 @@ fn selection(name: &str) -> BatchScope {
 fn exports_rewrite_only_the_selected_groups() {
     let apis = registry();
     let roots = Roots::new();
-    let report = generate_batch(&apis, &BatchScope::Complete, &roots.opts(false), &any_registry);
+    let report = generate_batch(&apis, &BatchScope::Complete, &roots.opts(false));
     assert!(report.failed().is_empty(), "{:?}", report.outputs);
     let openapi = Path::new(&roots.openapi);
     let postman = Path::new(&roots.postman);
@@ -677,7 +672,7 @@ fn exports_rewrite_only_the_selected_groups() {
     fs::write(openapi.join("old.json"), "{}").unwrap();
     fs::write(openapi.join("README.md"), "notes").unwrap();
 
-    let report = generate_batch(&apis, &selection("AlphaTwo"), &roots.opts(false), &any_registry);
+    let report = generate_batch(&apis, &selection("AlphaTwo"), &roots.opts(false));
     assert!(report.failed().is_empty(), "{:?}", report.outputs);
     assert_eq!(fs::read(openapi.join("alpha.json")).unwrap(), full_openapi["alpha.json"].clone().unwrap());
     assert_eq!(fs::read_to_string(openapi.join("beta.json")).unwrap(), "{}", "unselected kept");
@@ -685,7 +680,7 @@ fn exports_rewrite_only_the_selected_groups() {
     assert!(openapi.join("old.json").exists(), "a partial run deletes nothing");
 
     // A complete run removes the stale artifact but not unrelated files.
-    let report = generate_batch(&apis, &BatchScope::Complete, &roots.opts(false), &any_registry);
+    let report = generate_batch(&apis, &BatchScope::Complete, &roots.opts(false));
     assert!(report.failed().is_empty(), "{:?}", report.outputs);
     assert!(!openapi.join("old.json").exists());
     assert!(openapi.join("README.md").exists());
@@ -702,7 +697,7 @@ fn each_root_establishes_its_own_safety() {
     fs::create_dir_all(Path::new(&roots.openapi).join("alpha.json")).unwrap();
     let openapi_before = snapshot_tree(Path::new(&roots.openapi));
 
-    let report = generate_batch(&apis, &selection("AlphaOne"), &roots.opts(false), &any_registry);
+    let report = generate_batch(&apis, &selection("AlphaOne"), &roots.opts(false));
     assert_eq!(report.failed(), vec![Output::OpenApi]);
     assert_eq!(report.succeeded(), vec![Output::Rust, Output::Postman]);
     let err = report.get(Output::OpenApi).unwrap().result.as_ref().unwrap_err();
@@ -719,7 +714,7 @@ fn dry_run_plans_every_root_and_creates_nothing() {
     let apis = registry();
     let roots = Roots::new();
     for scope in [BatchScope::Complete, selection("Gamma")] {
-        let report = generate_batch(&apis, &scope, &roots.opts(true), &any_registry);
+        let report = generate_batch(&apis, &scope, &roots.opts(true));
         assert!(report.failed().is_empty(), "{:?}", report.outputs);
         for root in [&roots.rust, &roots.openapi, &roots.postman] {
             let schema_dir = Path::new(root).parent().unwrap();

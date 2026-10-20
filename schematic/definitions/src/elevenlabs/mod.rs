@@ -33,7 +33,7 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::ApiResponse;
@@ -42,34 +42,8 @@ use schematic_define::{
     pagination::{Collection, CursorSource, MoreSignal, PageSize, Strategy},
 };
 
-/// Creates a schema registry containing all ElevenLabs response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the ElevenLabs API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::elevenlabs::{openapi_registry, define_elevenlabs_rest_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_elevenlabs_rest_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("SpeechWithTimestampsResponse").is_some());
-/// assert!(registry.get("ListVoicesResponse").is_some());
-/// assert!(registry.get("VoiceResponseModel").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid shipped API").registry
-}
-
 /// Assemble the APIs and ordered schemas in one destination context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::elevenlabs", |ctx| {
         ctx.register::<CreateSpeechBody>()?;
         ctx.register::<AddSharedVoiceBody>()?;
@@ -161,7 +135,7 @@ fn voices_collection() -> Collection {
 /// assert_eq!(api.base_url, "https://api.elevenlabs.io");
 /// ```
 pub fn define_elevenlabs_rest_api() -> RestApi {
-    module_group().expect("valid shipped API").apis.remove(0)
+    module_group().expect("valid shipped API").remove(0)
 }
 
 fn build_elevenlabs_rest_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -621,13 +595,14 @@ mod tests {
     fn typed_module_group_preserves_endpoint_order_and_inline_components() {
         let group = module_group().unwrap();
         let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&group.apis[0]), ["CreateSpeech", "StreamSpeech", "CreateSpeechWithTimestamps", "StreamSpeechWithTimestamps", "ListVoices", "GetVoice", "DeleteVoice", "GetDefaultVoiceSettings", "GetVoiceSettings", "UpdateVoiceSettings", "GetVoiceSampleAudio", "DeleteVoiceSample", "AddVoiceSample", "ListSharedVoices", "AddSharedVoice", "CreatePvcVoice", "UpdatePvcVoice", "TrainPvcVoice", "CreateSoundEffect", "ListModels", "CreateSingleUseToken", "GetHistory", "GetHistoryItem", "DeleteHistoryItem", "GetHistoryItemAudio", "DownloadHistoryItems", "GetUsageStats", "GetUser", "GetUserSubscription", "GetResource", "ShareResource", "UnshareResource", "CopyResourceToWorkspace", "ListServiceAccounts", "ListServiceAccountApiKeys", "CreateApiKey", "UpdateApiKey", "DeleteApiKey", "ListWebhooks", "CreateWebhook", "UpdateWebhook", "DeleteWebhook"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(ids(&group[0]), ["CreateSpeech", "StreamSpeech", "CreateSpeechWithTimestamps", "StreamSpeechWithTimestamps", "ListVoices", "GetVoice", "DeleteVoice", "GetDefaultVoiceSettings", "GetVoiceSettings", "UpdateVoiceSettings", "GetVoiceSampleAudio", "DeleteVoiceSample", "AddVoiceSample", "ListSharedVoices", "AddSharedVoice", "CreatePvcVoice", "UpdatePvcVoice", "TrainPvcVoice", "CreateSoundEffect", "ListModels", "CreateSingleUseToken", "GetHistory", "GetHistoryItem", "DeleteHistoryItem", "GetHistoryItemAudio", "DownloadHistoryItems", "GetUsageStats", "GetUser", "GetUserSubscription", "GetResource", "ShareResource", "UnshareResource", "CopyResourceToWorkspace", "ListServiceAccounts", "ListServiceAccountApiKeys", "CreateApiKey", "UpdateApiKey", "DeleteApiKey", "ListWebhooks", "CreateWebhook", "UpdateWebhook", "DeleteWebhook"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
-        assert!(group.registry.get("Vec<ModelInfo>").is_none(), "container component must be inline");
+        assert!(group[0].component("Vec<ModelInfo>").is_none(), "container component must be inline");
         for id in ["GetHistory", "ListSharedVoices", "ListVoices"] {
-            assert!(group.apis[0].endpoints.iter().find(|ep| ep.id == id).unwrap().pagination.is_some());
+            assert!(group[0].endpoints.iter().find(|ep| ep.id == id).unwrap().pagination.is_some());
         }
     }
 

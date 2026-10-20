@@ -182,6 +182,7 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
             }
 
             // Generate client code using standalone mode (no schematic_definitions imports)
+            with_model_components(&mut api, &models);
             generate_and_write_standalone(&api, output_dir, options.dry_run, has_types)?;
         }
     }
@@ -194,12 +195,31 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     })
 }
 
+/// Gives a standalone import one component per generated model, so its
+/// references resolve when the client is generated.
+///
+/// An imported API carries no components: the models exist only as the
+/// source this run writes, with no JSON Schema to register. The standalone
+/// API module re-exports `crate::types::*`, so each component's Rust path is
+/// the bare model name; its schema is the unconstrained `{}`, because the
+/// standalone client never exports OpenAPI.
+fn with_model_components(api: &mut schematic_define::RestApi, models: &schematic_define::models::ModelCatalog) {
+    api.schemas = model_type_names(models)
+        .into_iter()
+        .map(|name| schematic_define::SchemaComponent {
+            rust_path: Some(name.clone()),
+            name,
+            schema: serde_json::json!({}),
+        })
+        .collect();
+}
+
 /// Collects the names of every model the catalog defines.
 ///
 /// Aliases are included: an endpoint can name one as its body or response type,
-/// and `validate_completeness` requires every such name to be registered. A
-/// combinator alias emits a real enum or struct rather than a `type` item, so
-/// most of them are not aliases in the generated source at all.
+/// and every such name must resolve to a registered model. A combinator alias
+/// emits a real enum or struct rather than a `type` item, so most of them are
+/// not aliases in the generated source at all.
 fn model_type_names(models: &schematic_define::models::ModelCatalog) -> Vec<String> {
     use schematic_define::models::ModelDef;
 

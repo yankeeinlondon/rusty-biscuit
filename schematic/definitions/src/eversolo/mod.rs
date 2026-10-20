@@ -21,41 +21,15 @@ pub use types::*;
 
 #[cfg(test)]
 use schematic_define::{ApiResponse, AuthStrategy};
-use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use crate::registry::assemble_module_group;
 use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
     CrossOrigin, Endpoint, EndpointParams, EnvMapping, QueryParamType,
     RestApi, RestMethod,
 };
 
-/// Creates a schema registry containing all Eversolo response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Eversolo API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::eversolo::{openapi_registry, define_eversolo_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_eversolo_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("StatusResponse").is_some());
-/// assert!(registry.get("GetModelResponse").is_some());
-/// assert!(registry.get("GetStateResponse").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    module_group().expect("valid shipped API").registry
-}
-
 /// Assemble the APIs and ordered schemas in one destination context.
-pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
     assemble_module_group("::schematic_definitions::eversolo", |ctx| {
         ctx.register::<StatusResponse>()?;
         ctx.register::<GetModelResponse>()?;
@@ -83,7 +57,7 @@ pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
 /// assert_eq!(api.endpoints.len(), 24);
 /// ```
 pub fn define_eversolo_api() -> RestApi {
-    module_group().expect("valid shipped API").apis.remove(0)
+    module_group().expect("valid shipped API").remove(0)
 }
 
 fn build_eversolo_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
@@ -652,9 +626,10 @@ mod tests {
     fn typed_module_group_preserves_endpoint_order_and_inline_components() {
         let group = module_group().unwrap();
         let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
-        assert_eq!(ids(&group.apis[0]), ["DeviceGetModel", "RemoteSendKey", "RemoteInputText", "MusicGetState", "MusicPlayOrPause", "MusicPlayNext", "MusicPlayLast", "MusicSeekTo", "MusicGetInputOutputList", "MusicSetInput", "MusicSetOutput", "MusicSetVolume", "MusicSetMute", "PowerGetOptions", "PowerSetOption", "SystemGetScreenBrightness", "SystemSetScreenBrightness", "SystemGetKnobBrightness", "SystemSetKnobBrightness", "SystemGetVuModeList", "SystemSetVuMode", "SystemGetSpectrumModeList", "SystemSetSpectrumMode", "SystemChangeVuDisplay"]);
-        for api in &group.apis {
-            assert!(group.registry.validate_completeness(api).is_ok());
+        assert_eq!(ids(&group[0]), ["DeviceGetModel", "RemoteSendKey", "RemoteInputText", "MusicGetState", "MusicPlayOrPause", "MusicPlayNext", "MusicPlayLast", "MusicSeekTo", "MusicGetInputOutputList", "MusicSetInput", "MusicSetOutput", "MusicSetVolume", "MusicSetMute", "PowerGetOptions", "PowerSetOption", "SystemGetScreenBrightness", "SystemSetScreenBrightness", "SystemGetKnobBrightness", "SystemSetKnobBrightness", "SystemGetVuModeList", "SystemSetVuMode", "SystemGetSpectrumModeList", "SystemSetSpectrumMode", "SystemChangeVuDisplay"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
         }
     }
 
