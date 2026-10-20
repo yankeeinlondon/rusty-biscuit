@@ -7,24 +7,57 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - darkmatter
+    - claudine
 human_review: false
 message_to_agent: |-
-    Phase 1 changed no code. The migration worksheet is in this log under
-    "## Phase 1 > Migration audit worksheet"; Phase 5 executes it, and its
-    "Rust tests that assert the old contract" list is the starting point for
-    Phases 2-4 (conditions.rs null_equal_null_is_false / null_not_equal_null_is_false,
-    interpolation/evaluator.rs `items == '["a","b"]'`, expression_type_scope.rs,
-    type_scope_cases.rs, directive_target_analysis.rs, semantics.rs operator
-    description, claudine dispatch/runner/tests.rs `ctx.today != ''`, claudine
-    looping/expression/tests.rs `env.PATH != ""`).
-    Baseline: darkmatter and claudine `just test`/`just lint` are green. Two dmls
-    timing tests (searched_candidates::a_watched_nearer_candidate_reselects_the_import_and_its_removal_falls_back,
-    registry_observability::a_cancelled_request_reports_its_parked_time) are
-    load-sensitive and pre-existing: they fail under load and pass alone; do not
-    attribute them to the equality change.
-    Behavior to watch: `prompts/code-comment-quality.md:15`
-    (`ctx.area == ctx.package || null`) flips when both are null.
+    Phase 3 rebuilt the guard analysis on `equality::values_equal`:
+    `scope/shape.rs` now has `Shape::equal_to(value)` / `Shape::differs_from(value)`
+    (the text_* helpers are gone), and `scope/facts.rs` feeds them literal operands,
+    `Container(Family)` operands (array/object literals -> `of_family`), and finite
+    other-side values including a lone `null` (no both-null routes remain). Literal
+    numbers come from the evaluator's own `expression/mod.rs::number_literal`.
+    darkmatter `just test` (10793) and claudine `just test` (10600) are fully green;
+    both lints are clean.
+    Behavior change for Phase 4 consumers: an UNDECLARED value compared with a
+    scalar literal now narrows to that literal (`mode == 'release'` ->
+    `literal(release)`, `x == ''` -> `literal('')`, `x == null` -> null only),
+    where it used to be `unknown(present)`. That changes the shell TemplateShape
+    discovered under such guards. Claudine's `assert_runs_only_when_selected`
+    helper (lifecycle scope_site_conformance.rs) was rebuilding the approval from
+    an unguarded scope; it now approves the discovered site's shape. Look for the
+    same unguarded-approval pattern in any consumer test you extend.
+    The shared rows in darkmatter/lib/tests/common/type_scope_cases.rs (read by the
+    lib and DMLS conformance suites) already assert `x != ''` / `x == null` do NOT
+    prove presence while `x != null`, `!(x == null)`, `x == ''` do. Phase 4 still owns
+    the per-consumer proofs (shell preflight messages, `::file` targets, absence
+    warnings, DMLS hover/diagnostics, Claudine lifecycle/sequence).
+    The two claudine-cli tests Phase 2 called pre-existing failures passed in the
+    full claudine `just test` this phase; treat them as load-sensitive.
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/expression/equality.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/tests/l1/expression_strict_equality.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/common/type_scope_cases.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Implementation Log for 2026-10-20-strict-equality (6 phases)
@@ -263,3 +296,248 @@ is the intended behavior.
 - The darkmatter skill needs no update for this phase; its stale equality
   prose (`.claude/skills/darkmatter/expressions.md:86,107-108`) is a Phase 6
   worksheet row.
+
+## Phase 2
+
+- Started 2026-10-20. Scope: the shared typed comparator, the evaluator's
+  comparison branch, the semantics catalog, and the acceptance-pair suite.
+  The guard analysis (`scope/facts.rs`, `scope/shape.rs`) is Phase 3 and was
+  not touched.
+
+### What changed
+
+- **New `lib/src/markdown/compose/expression/equality.rs`** with
+  `pub(crate) fn values_equal(&Value, &Value) -> bool`. Same runtime type and
+  value, recursive through arrays and objects; objects compare by equal size
+  plus per-key lookup, so key order is irrelevant and a missing key never
+  equals a `null` entry. Numbers: integer storage (`i64`/`u64`) is widened to
+  `i128` and compared exactly; an integer/float pair is equal only when the
+  float has no fraction, lies inside `(-2^127, 2^127)`, and converts to that
+  exact integer; float/float uses IEEE `==` (so `0.0 == -0.0`). Nothing goes
+  through `to_string`, serialization, or an intermediate collection. No
+  `arbitrary_precision` feature is enabled for `serde_json` in this
+  workspace, so `Number` storage is only `i64`/`u64`/`f64`.
+- **`expression/mod.rs`**: `ComparisonOp::Equal` → `values_equal`,
+  `NotEqual` → `!values_equal`; the `both_null` exception and its comment are
+  gone. Operand evaluation order and `?` error propagation are unchanged;
+  ordering arms still use `to_number_coerce`. `scalar_string` remains for
+  rendering and for the functions that use it (`contains`, `as_json`, …),
+  which are out of scope.
+- **`expression/semantics.rs`**: the `Comparison` operator description now
+  says equality is strict; `COMPARISON_OPERATOR_DESCRIPTORS` was rewritten to
+  five rows, each with an executable example the catalog test verifies:
+  `5 == "5"` → `false`, `5 == number("5")` → `true`, `"10" > 2` → `true`,
+  `missing_a == missing_b` → `true`, `"" != missing` → `true`. (`null` is not
+  a lexer keyword; it reads as a missing variable, so the catalog uses
+  missing variables.) These render through `claudine context --expressions`;
+  its CLI test asserts only the section heading.
+
+### Tests
+
+New L1 file `lib/tests/l1/expression_strict_equality.rs` (declared in
+`tests/l1/main.rs`), all through public `parse` + `evaluate` with a typed
+`EvaluationLookup`; every expected result is hand-written. `assert_pair`
+checks `==` and `!=` in both operand orders.
+
+| Requirement | Test |
+| --- | --- |
+| Spec's motivating table (`5 == "5"`, `null == ''`, `null == null`, `[] == '[]'`, `true == "true"`) | `the_motivating_table_now_compares_type_and_value` |
+| Spec's decision table (all 13 rows) | `the_decision_table_holds` |
+| Missing vs explicit `null`; null vs `0`/`false`/`[]`/`{}`/`''`/`'null'` | `a_missing_value_is_null_and_null_equals_only_null` |
+| Booleans, strings (no trim/case-fold), numbers vs text, explicit `number(...)` | `scalars_compare_only_within_their_runtime_type` |
+| Empty/nested containers, key order, missing key vs `null`, array vs JSON text | `containers_compare_recursively` |
+| `2^53` vs `2^53+1` as typed values, int/float pairs, `i64::MIN`/`MAX`, `u64` above `i64::MAX`, negative zero | `numbers_compare_by_exact_value_across_storage` |
+| Ordering unchanged: `5 <= "5"` and `5 >= "5"` hold while `5 == "5"` is false | `ordering_still_coerces_while_equality_does_not` |
+| Operand failure stays an error (`1 / 0`, `5 % 0`, unknown function) | `an_operand_failure_stays_an_error_not_an_unequal_result` |
+| Reflexivity, symmetry, `!=` complement, and the full expected-equal set over a 27-entry corpus | `equality_is_reflexive_symmetric_and_complemented_over_the_sample_corpus` |
+
+Comparator unit tests in `equality.rs` cover the same numeric boundaries at
+the module level. Tier: L1 (pure in-process evaluation, F1; no crate, CLI,
+filesystem, or terminal boundary is crossed by this phase's change, and
+Phase 4 owns the consumer surfaces).
+
+Old-contract tests updated:
+
+- `conditions.rs` `null_equal_null_is_false` → `null_equal_null_is_true`
+  (asserts `true`); `null_not_equal_null_is_false` still holds unchanged.
+- `expression/mod.rs` `parity::comparison_behavior_is_consistent`: two
+  missing values now compare equal.
+- `interpolation/evaluator.rs`
+  `equality_comparison_unaffected_by_line_separated_output`: the array
+  equals an array literal, and no longer equals its JSON text or its
+  line-separated rendering.
+- `claudine/lib/src/composition/looping/expression/tests.rs`: the
+  `env.PATH != ""` expectation now treats an unset `PATH` (read as `null`) as
+  unequal to `""`. On this host `PATH` is set, so the observed result is
+  unchanged; the expectation was wrong only for the unset case.
+
+### Gates
+
+- `darkmatter/` `just test`: **10781/10789 passed, 8 failed** (run once
+  fail-fast, then with `--no-fail-fast` to exercise the CLI and DMLS suites;
+  both runs failed on the same 8 tests and nothing else). The 8 are all in
+  `lib/tests/l1/expression_type_scope.rs`:
+  `two_nulls_are_neither_equal_nor_unequal` and the
+  `every_guard_side_admits_every_value_the_evaluator_sends_there::{booleans,
+  literals, containers, optional_strings, undeclared, container_unions,
+  scalar_unions}` differential rows. They compare the still-text-based guard
+  analysis with the now-strict evaluator, which is exactly the
+  disagreement the plan's Phase 2 checkpoint predicts ("shows only Phase 3
+  analysis failures") and Phase 3 exists to remove; the plan states that
+  landing either half alone leaves these shared tests red. They were not
+  silenced, skipped, or edited.
+- `darkmatter/` `just lint`: clean. `just check-tier-coverage darkmatter`:
+  0 stranded.
+- Claudine (downstream, >200 tests, so targeted): `cargo nextest run -p
+  claudine -p claudine-cli -E 'test(/looping|condition|sequence|lifecycle|dispatch|context_command|expression|frozen|implement|commit|until|guard|when|agent_text_is_data|hook/)'`
+  → 3680/3682 passed. The two failures,
+  `document_environment_routes::successive_sequence_steps_each_read_the_map_they_captured`
+  (steps read `env=launch` instead of their captured maps) and
+  `lifecycle_message_drain::stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown`
+  (11 s, drain-budget assertion), **also fail with the baseline evaluator
+  restored** (`mod.rs` temporarily reset to `HEAD`, rerun alone, then
+  restored), so they are pre-existing and not caused by this change.
+  `claudine/` `just lint`: clean.
+- Gate-skip check: `git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` →
+  `packages: ['claudine', 'darkmatter', 'test-toolkit']`,
+  `change_class: package`; gates were therefore required and were run.
+- No cross-OS check: the change is pure in-memory value comparison with no
+  path, process, or platform-specific code.
+
+### Notes for later phases
+
+- `scope/facts.rs` (`comparison` doc comment, `compare_with`,
+  `against_values`' `both_null_route`) and `scope/shape.rs` (`text_equal`,
+  `text_differs`, `number_with_text`, `arm_text_*`) still describe and
+  implement the old text contract; they are Phase 3's rewrite and should call
+  `equality::values_equal` (a `pub(crate)` sibling module of `scope`).
+- `facts.rs::number_operand` builds the literal with `Number::from_f64`
+  while the evaluator produces `Number::from(n as i64)` for integral literals
+  (plan task "Literal value modeling"). Under `values_equal` the two storage
+  forms compare equal, but shape pinning by `literal(4)` may still differ.
+- Docs and the darkmatter skill still teach the old rules
+  (`.claude/skills/darkmatter/expressions.md:86,107-108`,
+  `docs/topics/darkmatter-expressions.md:575,587-594`); those are Phase 6
+  rows and were left alone here.
+
+## Phase 3
+
+- Started 2026-10-20. Scope: the guard analysis (`scope/facts.rs`,
+  `scope/shape.rs`) rebuilt on the Phase 2 comparator, plus its tests. No
+  consumer code, docs, or skills changed (Phases 4 and 6).
+
+### What changed
+
+- **`scope/shape.rs`**: `text_equal`, `text_differs`, `number_with_text`,
+  `arm_text_equal`, and `arm_text_differs` are gone. Two strict primitives
+  replace them, both deciding by `equality::values_equal`:
+    - `Shape::equal_to(value)` (true side of `x == value`): against `null`,
+      only `null`; otherwise `null` is removed, alternatives of another
+      runtime family are dropped (a number never equals text, a container
+      never equals its JSON text), literal arms stay only when strictly
+      equal, an unconstrained `string`/`boolean`/`enum` pins to the literal,
+      constrained arms and container arms keep their arm. An unknown shape
+      pins the same way (`x == 'a'` → `literal(a)`, `x == ''` → `literal('')`,
+      `x == null` → `null`), matching the spec's table "for an otherwise
+      unconstrained `x`".
+    - `Shape::differs_from(value)` (true side of `x != value`): against
+      `null`, `without_null`; otherwise strictly equal literals, the matching
+      `enum` member, and the matching `boolean` are removed, and `null` stays.
+    - Numbers pin to `literal(n)` only when `alternative_accepts` admits every
+      `i64`/`u64`/`f64` storage strictly equal to `n` (`pinned_number` /
+      `equal_storages`), else the plain `number` arm is kept, as the Phase 1
+      ruling requires. In practice `literal(4)` admits `4.0`, so `count == 4`
+      still pins.
+- **`scope/facts.rs`**: `comparison` folds operator and polarity into one
+  "are the operands equal on this side" flag. Literal operands call
+  `equal_to`/`differs_from`; array and object literals are a
+  `Container(Family)` operand whose equal side is `of_family` (present and of
+  that family; elements may be computed, so no value is pinned) and whose
+  unequal side learns nothing. Subject-vs-subject comparison joins
+  `equal_to` over every finite other-side value, `null` included; the
+  unequal side narrows against a single value, now also a lone `null`. The
+  `both_null_route` and the null-specific `compare_with` table are removed.
+- **Literal value modeling**: the evaluator's integral-literal conversion
+  moved into `expression/mod.rs::number_literal` (private, so the descendant
+  `scope` module can call it), used by both `Expr::NumberLiteral` evaluation
+  and `facts.rs::literal_operand`. Unary minus mirrors the evaluator: the
+  literal's value, as `f64`, negated through the same `json_number`. So
+  `9007199254740993` is analyzed as the `i64` `2^53` and
+  `99999999999999999999` as the saturated `i64::MAX`, exactly what the
+  evaluator compares. Evaluator behavior is unchanged (a pure extraction).
+
+### Tests
+
+All L1 (pure in-process analysis plus the real evaluator, F1). No crate,
+CLI, filesystem, or terminal boundary changed in this phase; the consumer
+surfaces that read these facts (shell preflight, `::file` targets, DMLS)
+are exercised through the shared rows below and are Phase 4's to extend.
+
+| Requirement | Test |
+| --- | --- |
+| Spec guard table: `x == null` / `x != null` / `x == ''` / `x != ''` / `x == 'a'` / `x != 'a'` both sides, reversed operands, negation | `expression_type_scope::equality_narrows_to_literals_of_every_scalar_family` (new rows: `either == 4`, `flag != true`, `optional != ''`, `optional == 'a'`, `optional != 'a'`, `null == optional`, `'' != optional`, `!(optional == null)`) |
+| Unknown subject facts; container never equals JSON text; container-family refinement (`x == []` → `unknown[]`, `x == {}` → `object`, union narrowed to its array/object arm, reversed, `!=` and false side learn nothing) | `equality_pins_an_unknown_value_and_a_container_to_its_family` (renamed from `equality_against_unknown_or_a_container_proves_no_scalar_family`) |
+| Constraints kept; numbers never equal text; `4.0`/`-0`/`-4.5` literals | `equality_keeps_constraints_and_numeric_families_it_cannot_pin` |
+| Literal modeling mirrors the evaluator (`…993` → `2^53`, saturation to `i64::MAX`), with the evaluator result asserted alongside | `literal_numbers_narrow_to_the_value_the_evaluator_compares` (new) |
+| Singleton `null` other side is usable | `equality_with_a_null_only_subject_narrows_the_other_side` (new) |
+| `null == null` | `two_nulls_are_equal` (inverted from `two_nulls_are_neither_equal_nor_unequal`) |
+| Every runtime branch admits what the evaluator sends (acceptance 2) | `every_guard_side_admits_every_value_the_evaluator_sends_there::*`, now 12 declarations (new `null_other_side`, `large_integers`) × 58 guards (new: `x == 4.0`, `x == 0`, `x == -0`, `x == 9007199254740992`, `x != 9007199254740992`, `x == 'null'`, `x == []`, `x != []`, `x == ['a']`, `x == {}`, `{'k': 'v'} == x`, `null != x`, `!(x == null)`, `y == null`, `y == / != 9007199254740992`, `x == y && y == null`) over 28 samples (new: `4.0`, `0.0`, `-0.0`, typed `u64` `2^53` and `2^53+1`, `["a", ["b"]]`, `{"k": null}`, `{"j": "v"}`, `"null"`) |
+| Shared consumer rows (shell, shell-block, `::file` target, DMLS): `x != ''` and `x == null` no longer prove presence; `x != null`, `!(x == null)`, `x == ''` do | `tests/common/type_scope_cases.rs` `NotNull` rows, read by `scope_site_conformance.rs` and `dmls/tests/l1/expression_scopes.rs` |
+| `::block when` target narrowing agrees with the evaluator | `directive_target_analysis::block_guards_narrow_targets_through_the_shared_type_scope` (`x != ''` / `x == null` now narrow nothing; `x == ''`, `!(x == null)` narrow `x`) |
+
+The 8 tests left red by Phase 2 are green. The in-module `scope/tests.rs`
+holds no equality rows and needed no change. Contradictory guards still keep
+the incoming type (`pair == 'z'`, `items == '[]'`, `big == '4'`).
+
+Expected results are hand-written; the differential cases decide branches
+with the real evaluator, so a shared-comparator bug would surface in the
+hand-written evaluator tests of `expression_strict_equality.rs` (Phase 2),
+not be masked here.
+
+Grep checkpoint: no `scalar_string` use remains under `scope/`; no
+`both_null` route remains anywhere (the only `both_null` hits are two
+unrelated shell-pipeline test names in `shell_expansion/tokenize.rs`).
+
+### Downstream effect found in Claudine
+
+Pinning an undeclared value to its literal (`mode == 'release'` →
+`literal(release)`, previously `unknown(present)`) changes the
+`TemplateShape` that shell pre-flight discovers for a site under that guard.
+Two Claudine conformance cells failed with "pre-flight never approved as its
+bytes or its shape":
+`composition::lifecycle::executor::tests::scope_site_conformance::{lifecycle_inline_guard_equality, lifecycle_shell_equality}`.
+The fault was in the test helper, not in production. `assert_runs_only_when_selected`
+approved a shape rebuilt from an **unguarded** scope (`shape_of`), whereas
+production approves what discovery reports for the guarded site. The helper
+now approves `TemplateShape::from_template(site.template())` of the one
+discovered site. Other `shape_of` callers use guards that do not pin a
+value (truthiness, `!= null`, `file_exists`) and are unchanged. Approvals
+stored before this change, for a guarded site whose guard compares an
+undeclared value with a literal, no longer match and must be approved again.
+There are no users yet, so no migration was added.
+
+### Gates
+
+- `darkmatter/` `just test`: **10793/10793 passed** (10 skipped), the 8
+  Phase 2 reds included. `just lint`: clean. `just check-tier-coverage
+  darkmatter`: 0 stranded.
+- Claudine (downstream; edited directly in one test file):
+  the Phase 2 targeted filter widened with `preflight|scope|narrow` ran
+  3867 tests. It failed only the two cells above (since fixed) and the two
+  tests Phase 2 called pre-existing (`document_environment_routes::successive_sequence_steps_each_read_the_map_they_captured`,
+  `lifecycle_message_drain::stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown`).
+  After the fix, `claudine/` `just test` passed **10600/10600** (9 skipped),
+  **including both of those tests**, so in this run they behaved as
+  load-sensitive rather than as deterministic failures. `claudine/`
+  `just lint`: clean.
+- Gate-skip check: `git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` →
+  `packages: ['claudine', 'darkmatter', 'test-toolkit', 'dmls']`,
+  `change_class: package`. The working tree still holds Phase 2's
+  uncommitted work too. Gates were required, and they were run.
+- No cross-OS check: the change is in-memory type analysis with no path,
+  process, or platform code.
+- Skill: no darkmatter skill edit in this phase. The stale equality prose in
+  `.claude/skills/darkmatter/expressions.md:86,107-108` belongs to Phase 6
+  (worksheet row), together with the docs that teach the old guard table.

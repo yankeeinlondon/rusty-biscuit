@@ -8,7 +8,32 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - darkmatter
+    - claudine
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/expression/equality.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/tests/l1/expression_strict_equality.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/common/type_scope_cases.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Implementation Plan — Strict equality for `==` and `!=`
@@ -153,7 +178,7 @@ comparator.
 
 ### Wave 2 — Shared comparator (blocking)
 
-- [ ] **Comparator module**
+- [x] **Comparator module**
     - Create `equality.rs` under
       `lib/src/markdown/compose/expression/` exposing one shared
       `values_equal(&Value, &Value) -> bool` (early-exit, allocation-free).
@@ -175,7 +200,7 @@ comparator.
 
 ### Wave 3 — Evaluator, catalog, tests (concurrent)
 
-- [ ] **Comparison branch rewire**
+- [x] **Comparison branch rewire**
     - In `mod.rs` (`Expr::Comparison`, lines ~599-623): `Equal` →
       `values_equal(&left, &right)`; `NotEqual` → `!values_equal(...)`; delete
       the `both_null` exception. Ordering arms keep `to_number_coerce`
@@ -185,7 +210,7 @@ comparator.
       remains an error, never a value).
     - Update the inline evaluator tests (~lines 1275-1340) and any
       `expression_regression.rs` rows that assert text equality.
-- [ ] **Semantics catalog update**
+- [x] **Semantics catalog update**
     - `semantics.rs`: rewrite the `COMPARISON_OPERATOR_DESCRIPTORS` rows
       ("compare scalar string representations", the `"5" == 5` example, the
       both-null and one-side-missing rows) and the comparison row's description
@@ -194,7 +219,7 @@ comparator.
       `5 == number("5")` → `true`). These descriptors are user-facing via
       `claudine context --expressions`; their example-verification tests must
       pass.
-- [ ] **Acceptance-pair test suite**
+- [x] **Acceptance-pair test suite**
     - New/extended tests at L1 asserting the spec's decision tables verbatim
       through the public `parse` + `evaluate` API, with expected results
       hard-coded (never computed via `values_equal`): both operand orders;
@@ -224,7 +249,7 @@ shared tests red.
 
 ### Wave 4 — Facts and shapes (single chain)
 
-- [ ] **Equality narrowing rewrite**
+- [x] **Equality narrowing rewrite**
     - `scope/facts.rs` `comparison`/`compare_with`/`against_operand`/
       `against_values`: implement the spec's fact table — `x == null` true →
       null only, false → present (non-null); `x != null` mirrored; `x == ''`
@@ -247,7 +272,7 @@ shared tests red.
       booleans narrowed by typed membership, numbers pinned only when the
       pinned shape admits equivalent storage (else the broader number arm is
       retained per the Phase 1 ruling), containers pinning family + presence.
-- [ ] **Literal value modeling**
+- [x] **Literal value modeling**
     - `literal_operand`/`number_operand` in `facts.rs` must mirror the
       evaluator's actual literal production, including the integral-to-i64
       conversion (`mod.rs` ~line 516), so the analyzer models the value the
@@ -255,7 +280,7 @@ shared tests red.
 
 ### Wave 5 — Analysis tests (concurrent)
 
-- [ ] **Scope test rows**
+- [x] **Scope test rows**
     - Update `scope/tests.rs` (in-module) and
       `lib/tests/l1/expression_type_scope.rs` rows to the new facts — e.g.
       `optional == null` true side becomes `null` (not `literal('')`),
@@ -263,11 +288,11 @@ shared tests red.
       numeric arm, and `two_nulls_are_neither_equal_nor_unequal` inverts
       (`null == null` true; `x != y` false side admits both nulls). Keep the
       contradictory-guard conservatism (no dead-code elimination).
-- [ ] **Shared guard cases**
+- [x] **Shared guard cases**
     - Update `lib/tests/common/type_scope_cases.rs` and
       `lib/tests/l1/scope_site_conformance.rs` (and the DMLS ownership-guard
       twins if allowlists shift) for the new equality facts.
-- [ ] **Differential extension**
+- [x] **Differential extension**
     - Extend `samples()` and `GUARDS` in `expression_type_scope.rs` with
       container deep-equality pairs, int/float equivalent pairs, `-0`, large
       typed integers, and null-vs-'' pairs, and add container-family
