@@ -81,16 +81,13 @@ fn full(
 }
 
 fn shell_commands(lifecycle: &LifecycleConfig, signal: LifecycleSignal) -> Vec<Expr> {
-    lifecycle
-        .stack(signal)
-        .into_iter()
-        .flatten()
-        .flat_map(|item| &item.actions)
-        .filter_map(|action| match &action.kind {
-            LifecycleActionKind::Shell(shell) => Some(shell.command.clone()),
-            _ => None,
-        })
-        .collect()
+    let mut commands = Vec::new();
+    crate::composition::lifecycle::actions::for_each_action(lifecycle.stack(signal), &mut |action| {
+        if let LifecycleActionKind::Shell(shell) = &action.kind {
+            commands.push(shell.command.clone());
+        }
+    });
+    commands
 }
 
 /// The reproduction's target: `log` derives from the caller's `spec` with
@@ -102,9 +99,7 @@ spec: \"\"
 phase: 1
 log: \"{{ dirname(spec) + '/implementation-log.md' }}\"
 initialize:
-  stack:
-    - action:
-        - ensure_file: \"{{log}}\"
+  - ensure_file: \"{{log}}\"
 ---
 Implement phase {{phase}}.
 
@@ -175,9 +170,7 @@ prompt: |-
 
   ::file {{log}}
 initialize:
-  stack:
-    - action:
-        - ensure_file: \"{{log}}\"
+  - ensure_file: \"{{log}}\"
 ---
 Body the agent rewrites, including ::file ./not-yet-written.md
 
@@ -193,7 +186,7 @@ Body the agent rewrites, including ::file ./not-yet-written.md
     .expect("inline bootstrap never composes the prompt's includes");
     assert_eq!(staged.mode, CompositionMode::InlineFrontmatterPrompt);
     assert_eq!(staged.effective_frontmatter["log"], LOG);
-    assert!(staged.lifecycle.stack(LifecycleSignal::Initialize).is_some());
+    assert!(!staged.lifecycle.stack(LifecycleSignal::Initialize).is_empty());
 
     let err = full(
         CompositionMode::InlineFrontmatterPrompt,
@@ -229,7 +222,7 @@ impl ShellApprovalHandler for CountingHandler {
 fn approval_options(
     policy_root: &Path,
     handler: Option<Arc<dyn ShellApprovalHandler>>,
-    cache: &Arc<Mutex<HashMap<String, crate::harness::shell::CachedApprovalDecision>>>,
+    cache: &Arc<Mutex<HashMap<darkmatter::markdown::compose::shell_expansion::template::ApprovalKey, crate::harness::shell::CachedApprovalDecision>>>,
 ) -> ShellApprovalOptions {
     ShellApprovalOptions {
         policy_root: Some(policy_root.to_path_buf()),
@@ -244,14 +237,14 @@ fn bootstrap_rejects_shell_actions_even_with_cached_approval() {
     let dir = TempDir::new().unwrap();
     for action in [
         serde_json::json!({"shell": "echo ready"}),
-        serde_json::json!({"action": "shell", "command": "echo ready", "no_error": true}),
+        serde_json::json!({"shell": {"command": "echo ready", "no_error": true}}),
     ] {
         let source = source_at(dir.path(), &format!(
-            "---\ninitialize:\n  stack:\n    - when: 'false'\n      action: {}\n---\n::file ./missing.md\n",
+            "---\ninitialize:\n  - when: 'false'\n    then:\n      - {}\n---\n::file ./missing.md\n",
             action,
         ));
         let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
-            pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+            pre_approved_commands: Some(HashSet::from(["echo ready".to_string()]).into()),
             ..PrepareOptions::new(crate::test_support::context())
         }).unwrap_err();
         assert!(matches!(error, CompositionError::LifecycleActionPlacement { ref action, ref event, .. }
@@ -267,10 +260,10 @@ fn bootstrap_frontmatter_shells_ignore_approval_handlers_and_cached_commands() {
     let handler = Arc::new(CountingHandler(Mutex::new(Vec::new())));
     let cache = Arc::new(Mutex::new(HashMap::new()));
     fs::write(policy.path().join(".darkmatter-shell-whitelist"), "prefix echo\n").unwrap();
-    cache.lock().unwrap().insert("echo ready".to_string(), crate::harness::shell::CachedApprovalDecision::Allowed);
+    cache.lock().unwrap().insert(darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact(Some(policy.path()), "echo ready"), crate::harness::shell::CachedApprovalDecision::Allowed);
     let gate = approval_options(policy.path(), Some(handler.clone()), &cache);
     let options = PrepareOptions {
-        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()]).into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let error = preflight_bootstrap_shell(
@@ -289,11 +282,11 @@ fn a_malformed_lifecycle_fails_bootstrap_and_full_preparation_identically() {
     let dir = TempDir::new().unwrap();
     let say_conflict = source_at(
         dir.path(),
-        "---\nstart:\n  say: Hello\n  say_first: Also hello\n---\nbody\n",
+        "---\nstart:\n  say: Hello\n  speak: Also hello\n---\nbody\n",
     );
     let late_binding = source_at(
         dir.path(),
-        "---\nstart:\n  stack:\n    - action:\n        - shell: \"rm {{err.msg}}\"\n---\nbody\n",
+        "---\nstart:\n  - shell: \"rm {{err.msg}}\"\n---\nbody\n",
     );
 
     for mode in [CompositionMode::ChainedDocument, CompositionMode::InlineFrontmatterPrompt] {
@@ -312,7 +305,7 @@ fn a_malformed_lifecycle_fails_bootstrap_and_full_preparation_identically() {
         for err in [staged, prepared] {
             match err {
                 CompositionError::LifecycleShellResolution { property, raw, .. } => {
-                    assert_eq!(property, "start.stack[0].action[0].command");
+                    assert_eq!(property, "start[0].shell.command");
                     assert_eq!(raw, "rm {{err.msg}}");
                 }
                 other => panic!("expected LifecycleShellResolution, got {other:?}"),
@@ -342,10 +335,9 @@ $schema:
 log: \"{{ dirname(spec) + '/implementation-log.md' }}\"
 prompt: \"Implement phase {{phase}}\"
 initialize:
-  stack:
-    - when: \"phase > 1\"
-      action:
-        - ensure_file: \"{{log}}\"
+  - when: \"phase > 1\"
+    then:
+      - ensure_file: \"{{log}}\"
 success:
   message: \"done {{phase}}\"
 ---
@@ -452,7 +444,7 @@ fn bootstrap_overrides_cannot_enable_shell_expansion() {
     let source = source_at(dir.path(), "---\ninitialize: {}\n---\n::file ./missing.md\n");
     let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
         set_overrides: Some(serde_json::json!({"stamp": "$(echo ready)"})),
-        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
+        pre_approved_commands: Some(HashSet::from(["echo ready".to_string()]).into()),
         ..PrepareOptions::new(crate::test_support::context())
     }).unwrap_err();
     assert!(matches!(error, CompositionError::ShellExpansionFailed { .. }), "{error:?}");

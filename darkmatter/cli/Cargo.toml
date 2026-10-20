@@ -18,8 +18,18 @@ path = "src/lib.rs"
 name = "md"
 path = "src/main.rs"
 
+# Test-only native executable that records its argv, for the shell template
+# tests (`tests/l1/compose_shell_template.rs`). A built target because an
+# archived CI run has no compiler to build one at test time; gated so `md`'s
+# install never ships it.
+[[bin]]
+name = "darkmatter-argv-recorder"
+path = "tests/bin/argv_recorder/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 terminal-tests = ["dep:biscuit-test-harness"]
+test-fixtures = ["dep:test-toolkit"]
 
 [dependencies]
 darkmatter = { path = "../lib" }
@@ -42,6 +52,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -81,14 +92,19 @@ required-features = ["terminal-tests"]
 # (render-tree terminal) tier tests.
 [package.metadata.ci.tests]
 # The entry-point parity runner and the clean parity suite include
-# darkmatter's shared matrices by `#[path]` and spell them in their tests.
+# darkmatter's shared matrices, the union-reference suites its union fixtures,
+# and the diagnostic-position suite its position fixtures, by `#[path]`; each
+# test spells the file it reads.
 source-inputs = [
     "darkmatter/lib/tests/common/clean_parity/mod.rs",
     "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+    "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
+    "darkmatter/lib/tests/position_fixtures/mod.rs",
+    "darkmatter/lib/tests/union_fixtures/mod.rs",
 ]
 tiers = ["L1", "L2"]
-features = ["terminal-tests"]
-local-features = []
+features = ["terminal-tests", "test-fixtures"]
+local-features = ["test-fixtures"]
 l2-backends = ["tmux", "wezterm"]
 # The L2 tier spawns one shared terminal pane through the harness broker.
 # It is a compile-time binary of another package, so the producer builds it

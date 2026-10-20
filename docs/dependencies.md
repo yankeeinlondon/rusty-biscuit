@@ -7,6 +7,34 @@
 
 ## Recent Dependency Notes
 
+- Generated REST clients send through `schematic-runtime` (2026-10-12):
+  the regenerated `schematic-schema` depends on `schematic-runtime` and no
+  longer on `reqwest`, and re-exports the runtime, so its dependents need no
+  direct runtime dependency. `homelab`, `eversolo-integration`, and
+  `biscuit-speaks` add `wiremock` 0.6 as a **dev-dependency** for local HTTP
+  mocks of their generated-client paths; it was already in the graph, so the
+  lockfile gains edges and no package. `model-citizen` drops its unused
+  `schematic-schema` dependency (it uses `schematic-definitions` only).
+- `schematic-runtime` joins the workspace at `schematic/runtime/`
+  (2026-10-12): the hand-written request runtime that generated REST clients
+  will share. Its dependencies (`bytes`, `futures-core`, `http`, `tokio` with
+  `time`, `url`) and dev-dependencies (`futures-util`, `trybuild`, and
+  `tokio`'s `test-util`) were already in the graph, so the lockfile gains no
+  package. See `schematic/docs/dependencies.md`.
+- `schematic-runtime` adds managed sends (2026-10-12): production
+  dependencies `reqwest` 0.13 (`rustls` only), `rustls` 0.23 (error type
+  only), `base64` 0.22, `futures-util`, `serde`, and `serde_json`, and
+  dev-dependencies `wiremock`, `rcgen`, and `tokio-rustls` for local HTTP and
+  TLS mocks. All were already in the workspace graph and in
+  `schematic/schema/Cargo.lock`; the lockfile gains no package.
+- `darkmatter` adds `content-policy` as a normal dependency with
+  `default-features = false` (2026-10-12). It is a workspace member, so the
+  lockfile gains one edge and no package. The runtime baseline imports its
+  `EDITOR_SCHEMA` to type `content_policy`, and Darkmatter's tests compare
+  Content Policy's declaration parser with that typing. The edge runs from
+  Darkmatter to Content Policy only; Content Policy's `just deps-check` still
+  forbids the reverse, and `file-adapter` stays off.
+
 - `tree-hugger-cli` adds a direct local `renderable` edge for the render-tree
   node types of biscuit-terminal's `InlineProse::to_render_nodes`, which its
   Markdown and plain Prose exports read. biscuit-terminal already depends on
@@ -90,8 +118,8 @@
   `reqwest` should copy this shape rather than take the defaults.
 - `claudine-cli` adds a direct `sysinfo = "0.38.2"` edge (2026-09-17, research
   metadata pipeline Phase 5). The crate was already in the graph through
-  `sniff`, so the lockfile gains one edge and no package. Budget-ledger crash
-  recovery uses it to check a recorded worker's process start time before
+  `sniff`, so the lockfile gains one edge and no package. Process-start
+  identity uses it to check a recorded worker's process start time before
   signaling that PID. See [`claudine/docs/dependencies.md`](claudine/docs/dependencies.md).
 - `scripts/` (package `repo-deps`) is a **root Cargo workspace member**. It
   carried a nested `[workspace]` stanza and its own `scripts/Cargo.lock` until
@@ -243,6 +271,11 @@
   `research` also enables the library's existing optional `sniff` dependency
   (already used by `desktop`), whose Git work-tree discovery lets `prepare`
   refuse a research root below the Git top level; no crate was added.
+- `messenger/lib` adds an optional `sysinfo = "0.38.2"` edge through its
+  `research` feature (and as a development dependency): the research runner
+  finds and kills a stopped sequence's descendant processes, checking each
+  PID's start time before signaling it. The crate was already in the graph
+  through `sniff`, so the lockfile gains one edge and no package.
 - `messenger/lib` also uses the workspace `biscuit-test-harness` as a
   development dependency for `manifest_dir!()`, so its research fixture tests
   resolve the corpus at run time and still find it on the WSL2 nextest-archive
@@ -402,7 +435,8 @@
   `unicode-normalization` for NFC so a vault resolves identically across OSes.
   Semantic authorities: `darkmatter` (lib),
   `biscuit-file` (`file-reference` feature, default features off), and
-  `biscuit-hash` (xxHash content-hash identity for graph invalidation). See
+  `biscuit-hash` (xxHash content-hash identity for graph invalidation).
+  `rusqlite` (`bundled`) holds the persistent per-file facts store. See
   [`darkmatter/docs/dependencies.md`](./darkmatter/docs/dependencies.md).
 - `darkmatter/dmls/zed-dmls-cli` (`zed-dmls-cli`) stages the Zed extension in
   a stable per-user data directory and diagnoses the native binary, dev
@@ -432,7 +466,7 @@ This is a Rust workspace with the following modules:
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
-- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`darkmatter-lsp`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
+- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`darkmatter-lsp`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash, rusqlite bundled)
 - `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
@@ -448,6 +482,7 @@ This is a Rust workspace with the following modules:
 - `schematic/define/Cargo.toml` - REST API definition primitives
 - `schematic/definitions/Cargo.toml` - Pre-built API definitions
 - `schematic/gen/Cargo.toml` - REST API code generator CLI (`schematic-gen`)
+- `schematic/runtime/Cargo.toml` - Request runtime shared by generated REST clients
 - `schematic/schema/Cargo.toml` - Generated REST API clients (auto-generated)
 - `sniff/lib/Cargo.toml` - System discovery (OS, hardware, network, programs)
 - `sniff/cli/Cargo.toml` - System discovery CLI (`sniff`)
@@ -672,6 +707,12 @@ This is a Rust workspace with the following modules:
     _Code generator for REST API client code from schematic definitions._
 
     _Tags: workspace, cli, codegen_
+
+- [schematic-runtime](./schematic/runtime) _v0.1.0_
+
+    _Request runtime shared by generated REST clients: managed client and typed send, response envelope, errors, redaction, credentials, deadline, codecs._
+
+    _Tags: workspace, library, api, http_
 
 - [schematic-schema](./schematic/schema) _v0.1.0_
 
@@ -1406,7 +1447,7 @@ This is a Rust workspace with the following modules:
 
 - [rusqlite](https://github.com/rusqlite/rusqlite) _v0.31_ [📄](https://docs.rs/rusqlite)
 
-    _Ergonomic SQLite bindings for Rust used by Claudine's local reporting index._
+    _Ergonomic SQLite bindings for Rust used by Claudine's local reporting index, biscuit-icon's icon cache, and DMLS's per-file facts store._
 
     _Tags: database, sqlite, embedded_
 

@@ -1,270 +1,171 @@
 # Windows: Path Spelling
 
+Part of the `os` skill; [SKILL.md](SKILL.md) is the index.
+
 Load before touching `#[cfg(windows)]` path code, path comparison or
 containment, `file://` URIs, or a test that is red only on `windows-latest`
 with a path in the message. Processes and the environment are in
-[windows.md](windows.md); consoles and terminals in
-[windows-console.md](windows-console.md).
+[windows.md](windows.md); consoles in [windows-console.md](windows-console.md);
+the path APIs themselves in the `biscuit-file` skill.
+
+Contract to test against: `ctx.repo_root`, `package_root`,
+`package_area_root`, and `area_root` are portable `/`-separated strings with no
+verbatim prefix on every OS (`biscuit_file::to_portable_string`). Compare
+against that, never against `to_string_lossy()`.
 
 ## Path spelling
 
-1. **`std::fs::canonicalize` returns a verbatim `\\?\C:\...` path with long
-   names.** Any such value that crosses a comparison, containment, or
-   reference-grammar boundary breaks: the `?` becomes an extra lexical
-   segment and the finalized reference grammar rejects device-prefix
-   spellings outright. Route through `biscuit_file::canonicalize_simplified`
-   (dunce-backed). Raw `canonicalize` is only safe inside a closed key space
-   that never leaves the process.
-   In biscuit-file, Claudine, and Darkmatter a source guard
-   (`darkmatter/cli/tests/common/path_lookup_guard.rs`) fails on a new direct
-   call; a private comparison stays only as a listed exception naming its
-   invariant. The same guard rejects direct `dirs::home_dir` /
-   `std::env::home_dir` in Claudine (trap 2).
+### Verbatim `\\?\` paths
 
-   Two concrete instances live in `cargo nextest`'s own argument grammar
-   (found 2026-09-14, `scripts/ci-build-archive.rs`): `--tool-config-file` is
-   split on the colon after the tool name, and `--workspace-remap` is compared
-   against ordinary paths. A verbatim value breaks both. `repo-deps` is the one
-   place that may not reach for `biscuit_file` — the planner calls `ci-build`
-   on every scope calculation, so that binary is deliberately kept to
-   `biscuit-hash` plus `biscuit-terminal` — so it carries a six-line
-   `canonical_path` that strips the prefix for a drive-qualified path under 260
-   characters and leaves a long or UNC one alone. Anywhere else, use
-   `biscuit_file`.
+1. **`std::fs::canonicalize` returns `\\?\C:\...`.** Any such value that
+   crosses a comparison, containment, printed output, or reference-grammar
+   boundary breaks (`?` becomes a lexical segment; the reference grammar
+   rejects device prefixes). Use `biscuit_file::canonicalize_simplified`. Raw
+   `canonicalize` is safe only in a key space that never leaves the process
+   *and is never printed* (graph node ids and printed paths have leaked
+   `\\?\C:` on Windows only). In biscuit-file, Claudine, and Darkmatter,
+   `darkmatter/cli/tests/common/path_lookup_guard.rs` fails on a new direct
+   call (and on direct home lookups, trap 5).
+   - External tools reject it too: `cargo nextest`'s `--tool-config-file`
+     (split on the colon) and `--workspace-remap`, and Git for Windows'
+     `ls-files --exclude-from=`. `scripts/ci-build-archive.rs` cannot depend
+     on `biscuit_file` (it runs on every scope calculation), so it carries its
+     own `fn canonical_path`; everywhere else use `biscuit_file`.
+   - trybuild (1.0.122) canonicalizes path dependencies this way, so its
+     `$<DEPENDENCY>` rewrite never matches the `C:/…` path rustc prints: a
+     `.stderr` snapshot naming another crate's source keeps the raw path and
+     mismatches on Windows only (`$DIR` is unaffected).
+     `schematic/schema/tests/compile_fail.rs` leaves those cases out on
+     Windows.
+2. **Test expectations built from raw `canonicalize` fail against simplified
+   production output** (left `C:\…`, right `\\?\C:\…`). Build the expected
+   value with `canonicalize_simplified`.
+3. **`PathBuf::push` drops `.` and `..` pushed onto a verbatim buffer**, and
+   `collect::<PathBuf>()` pushes, so rebuilding `\\?\C:\a\..\b` yields
+   `\\?\C:\b` (under `\\?\` the dots are literal names). A lexical normalizer
+   that must keep them assembles text (`normalize_native` in biscuit-file).
+   Never write a `..` loop that `Vec::pop`s components: it pops the root or
+   drive prefix.
+4. **Anything that scans verbatim text breaks on its `?` or its literal
+   separators.**
+   - A suffix splitter that cuts at the first `?` turns every verbatim path
+     into `\\`. Skip the `\\?\` / `//?/` prefix before looking for `#`, `?`,
+     or `:` (`link_normalization::split_suffix`).
+   - `{{VAR}}` interpolation concatenates text, so `{{ROOT}}/x.md` with a
+     verbatim `ROOT` is one bogus component. A test that sets a variable from
+     `canonicalize` stores `to_portable_string(&path)`.
+   - A `\\?\` path built from `root.join("a/b")` fails every probe with OS
+     error 123, and `cmd /C mklink /J` refuses it. Join name by name
+     (`rel.split('/').fold(root, |p, n| p.join(n))`).
 
-   Git for Windows also rejects a verbatim absolute path passed to
-   `ls-files --exclude-from=`. The include resolver uses
-   `biscuit_file::canonicalize_simplified` for that argument. Raw canonical
-   paths remain inside the copy record's identity comparison.
-   A "closed key space" is not one whose values are ever printed: Darkmatter's
-   reference-graph node ids (`source_to_id`) and `md edit`'s printed path used
-   raw `canonicalize`, so `md validate refs --graph mermaid` node ids and
-   `md edit` output carried `\\?\C:` on Windows only (found 2026-10-02 by
-   the `md` route parity matrix). Both now use `canonicalize_simplified`.
-   `reflink-copy` reports an unsupported block clone on NTFS as an HRESULT
-   shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw error 1.
-   The worktree copy fallback recognizes that form and byte-copies instead.
-2. **`dirs::home_dir()` on Windows uses the known-folder API and ignores
-   `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
-   a Windows test reads the machine's real `~/.claudine`. In biscuit-file,
-   Claudine, and Darkmatter use `biscuit_file::home_dir()`, which is
-   `std::env::home_dir()` (un-deprecated, environment-first on Rust ≥ 1.97:
-   `USERPROFILE`, then the profile API; never `HOME`) filtered to absolute
-   paths. A Windows fixture relocates home with `USERPROFILE`.
-   Python's `Path.home()` is environment-first but reads `USERPROFILE` on
-   Windows and ignores `HOME` (which native Windows does not set outside Git
-   Bash), so a fixture that relocates the home for a Python tool such as
-   `scripts/ci/constraints.py` must set both `HOME` and `USERPROFILE`; a
-   shell `$HOME` literal is a Unix-only spelling.
-   Since 2026-10-03 every home read in Claudine and Darkmatter, including
-   `RequestSnapshot::from_process()` and Claudine's overlays, config, logs,
-   and MCP state, goes through `biscuit_file::home_dir()`, so a
-   `CliProcessFixture` child's `USERPROFILE` is its `~`, its `@` home tier,
-   and its `~/.claudine`. Tests once gated `cfg(unix)` / `cfg(not(windows))`
-   "because the fixture home cannot replace the known folder" were re-enabled
-   then; do not add that gate again. A test helper that spawns a child with
-   only `HOME` set (no `USERPROFILE`) still reaches the real profile on
-   Windows: set both. Before that date, `biscuit_file::home_dir()` asked the
-   known folder, which is why older notes and logs report Windows-only
-   real-profile reads (2026-10-01, 11 CLI tests on build-win-native).
-   `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
-   so a Windows test that seeds a cache file writes to the real per-user
-   path, keyed by its temporary repository, and deletes what it seeded
-   (`worktree/cli/tests/perf_support`'s `pr_store`, 2026-09-25).
-3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); a
-   developer machine usually does not.** `current_dir()` reports the spelling
-   it was given; `canonicalize` re-spells to long names. Model "what the child
-   reports": the `launched_spelling` test helper canonicalizes on Unix (for
-   the macOS `/var` symlink) and keeps the raw path on Windows. A test that
-   mixes a canonical path with a fixture's raw one passes locally and fails on
-   CI. To reproduce locally, create a long-named directory under TEMP, read its
-   short name (`for %I in ("<dir>") do @echo %~sI` in `cmd`), and run the test
-   from PowerShell with `$env:TEMP` and `$env:TMP` set to that short spelling
-   (2026-10-09, darkmatter `link_normalization`).
-3a. **`windows-latest` fails at 260 characters where a dev host may not.**
-   `link.exe` on the runner failed with `LNK1104: cannot open file` on a
-   266-character path. The `B:` dev host has `LongPathsEnabled=1` and linked a
-   301-character path fine, so the failure cannot be reproduced there. It came
-   from a test building a fixture crate beside its binary inside an extracted
-   nextest archive (`%TEMP%\nextest-archive-…\target\…`), which nests a second
-   `target\…\deps\rustc*\`. Keep nested builds under a short `%TEMP%` directory
-   and count the deepest path against 260 (`repo-deps` `ci-build` archive
-   tests, 2026-10-09).
-4. **`Path::join("a/b")` keeps the literal `/`.** A native-spelling needle
-   built from it has mixed separators and matches nothing. Re-join through
-   `.components().collect::<PathBuf>()` to normalize. A context's
-   `package_root()` from the repository scope catalog arrives this way
-   (`C:\…\cwd\area/pkg`), so a path printed to a user from it needs the same
-   re-join (`darkmatter` schema roots, 2026-10-02).
-5. **Windows temp dirs contain a dot-initial segment (`\.tmpXXXX`).** Any
-   Markdown round-trip that resolves CommonMark backslash escapes will eat
-   the `\` before `.`, `-`, or `_`. Darkmatter's compose Cleanup phase now
-   preserves them; when a Windows-only failure shows a path missing one
-   backslash, suspect Markdown escape handling, not path resolution.
+### Home and cache directories
 
-   Windows rejects C0 controls (including TAB and ESC) in filenames before
-   an output writer can observe them (`InvalidFilename`, error 123). For a
-   cross-platform filesystem fixture exercising control neutralization or
-   rejection, use a C1 control such as U+009B; test TAB/ESC cells directly at
-   the writer boundary without creating those filenames. Found in the
-   tree-hugger TSV/ctags export tests on the native Windows rig, 2026-10-08.
+5. **`dirs::home_dir()` and `dirs::cache_dir()` use the Windows known-folder
+   API and ignore `USERPROFILE` and `HOME`**, so a hermetic test home silently
+   does not apply and the test touches the real profile. Use
+   `biscuit_file::home_dir()` (`std::env::home_dir()`, environment-first:
+   `USERPROFILE`, never `HOME`). A Windows fixture relocates home with
+   `USERPROFILE`; a child spawned with only `HOME` still reaches the real
+   profile, so set both. Python's `Path.home()` likewise reads `USERPROFILE`
+   on Windows. Do not gate a home-relocating test `cfg(not(windows))`; the
+   fixture works there now. A test that must seed `dirs::cache_dir()` writes
+   the real per-user path, so key it uniquely and delete what it seeded.
 
-6. **`$PWD` in a `shell: bash` step is an MSYS path; `$RUNNER_TEMP` in the
-   same shell is a Windows one.** Git Bash answers `/d/a/repo/repo` for the
-   checkout and `D:\a\_temp` for the temp directory, and a CI step routinely
-   hands both to native programs. `cargo-nextest`'s `--workspace-remap`,
-   `INSTA_WORKSPACE_ROOT`, and `BISCUIT_JUNIT_*` cannot open the first; MSYS
-   `test`/`mkdir` cope with the second only by conversion. `just _native_path`
-   (`just/devops.just`) answers the one spelling both layers accept —
-   `cygpath -m`, drive-qualified with forward slashes, no verbatim prefix.
-   Measured 2026-09-14 on `build-win-native`: `/w/…/rusty-biscuit` →
-   `W:/…/rusty-biscuit`, `D:\a\_temp/build` → `D:/a/_temp/build`. In CI,
-   `_ci_build_verify` computes it once and publishes it as its `workspace`
-   step output.
-7. **Backslashes do not survive a `just` recipe's `*args` list.** A recipe
-   pastes `{{ args }}` raw into `forwarded=({{ args }})`, so bash word-splits
-   it *and* processes backslash escapes:
-   `--archive-file=C:\Users\ken\…\x.tar.zst` reaches the command as
-   `C:Usersken…x.tar.zst`, and the tool reports a missing file for a path
-   nobody typed. Pass what `just _native_path` answers. A recipe parameter
-   interpolated inside **single quotes** (`'{{ path }}'`) is safe, which is why
-   `_native_path` itself can be handed a native spelling; an array literal is
-   not. `_archive_file_check` refuses an unreadable `--archive-file` and names
-   this hazard rather than letting the mangled value reach nextest.
-8. **A `file://` URI must carry neither the verbatim prefix nor a `\`.**
-   Percent-encoding a canonicalized Windows path yields
-   `file://%5C%5C%3F%5CC:/…`, which no terminal opens, and a drive-absolute
-   path still needs the extra leading `/` that makes `file:///C:/…`. Normalize
-   separators to `/`, strip `\\?\` (mapping `\\?\UNC\server\share` to the URI
-   authority `server/share`), then prefix. Test the spellings as string
-   literals so the macOS and Linux cells cover them too — `fs::canonicalize`
-   only produces the verbatim form on Windows, so a fixture built from it is
-   dead code everywhere else. Found 2026-09-14 in `scripts/drift.rs::file_uri`.
-9. **On Unix `\` is a file-name character, and `to_portable_string` turns it
-   into `/`.** `back\slash.rs` becomes `back/slash.rs`, a different and
-   usually missing file. A test's expected path for such a file must keep
-   the native spelling on Unix (`cfg!(unix)` → `to_string_lossy`). A
-   `PathIdentity` route (`tree_hugger::portable_relative`) keeps each
-   component verbatim, so a scan-root-relative record path still holds the
-   literal `\`. Found 2026-10-08 in tree-hugger's ctags reader test.
+### Separators and spellings
 
-Contract to test against: `ctx.repo_root`, `package_root`,
-`package_area_root`, and `area_root` are portable `/`-separated strings
-without verbatim prefixes on every OS (`biscuit_file::to_portable_string`).
-Compare against that, never against `to_string_lossy()`.
+6. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); a dev
+   machine usually does not.** `current_dir()` reports the spelling it was
+   given; `canonicalize` re-spells to long names. A test that mixes a
+   canonical path with a fixture's raw one passes locally and fails in CI.
+   Model what the child reports (`launched_spelling` in
+   `claudine/cli/tests/l1/ctx_launch_anchor.rs`). To reproduce, read a TEMP
+   directory's short name (`for %I in ("<dir>") do @echo %~sI` in `cmd`) and
+   run from PowerShell with `$env:TEMP`/`$env:TMP` set to it.
+7. **`windows-latest` fails at 260 characters where a dev host may not**
+   (`LNK1104: cannot open file`); a host with `LongPathsEnabled=1` cannot
+   reproduce it. Nested builds inside an extracted nextest archive
+   (`%TEMP%\nextest-archive-…\target\…`) hit it fast. Keep nested builds under
+   a short `%TEMP%` directory and count the deepest path against 260.
+8. **`Path::join("a/b")` keeps the literal `/`**, so a native-spelling needle
+   has mixed separators and matches nothing. Normalize with
+   `.components().collect::<PathBuf>()`. Values such as a scope catalog's
+   `package_root()` arrive this way (`C:\…\cwd\area/pkg`).
+9. **A user-typed fragment never matches walker output by raw text.**
+   `ignore::Walk` yields `\`; the user typed `/`. Compare both sides through
+   `to_portable_string` (`path_matches_query` in
+   `claudine/cli/src/completion/scopes.rs`). Non-interactive tests can miss
+   it when "zero candidates" and "interaction denied" print the same
+   diagnostic.
+10. **`$PWD` in a `shell: bash` step is an MSYS path (`/d/a/repo/repo`);
+    `$RUNNER_TEMP` is a Windows one (`D:\a\_temp`).** Native programs
+    (`--workspace-remap`, `INSTA_WORKSPACE_ROOT`, `BISCUIT_JUNIT_*`) cannot
+    open the first. `just _native_path` (`just/devops.just`) answers the one
+    spelling both layers accept: `cygpath -m`, drive-qualified, forward
+    slashes. In CI `_ci_build_verify` publishes it as its `workspace` output.
+11. **Backslashes do not survive a `just` recipe's `*args` list.**
+    `forwarded=({{ args }})` word-splits and processes escapes, so
+    `C:\Users\ken\x.tar.zst` arrives as `C:Usersken…`. Pass what
+    `just _native_path` answers. A parameter inside single quotes
+    (`'{{ path }}'`) is safe; an array literal is not. `_archive_file_check`
+    refuses an unreadable `--archive-file` and names this hazard.
+12. **A `file://` URI must carry neither `\\?\` nor `\`.** Normalize
+    separators to `/`, strip `\\?\` (mapping `\\?\UNC\server\share` to the
+    authority `server/share`), and prefix `file:///` for a drive path. Test
+    the spellings as string literals so Unix cells cover them; a fixture built
+    from `canonicalize` is dead code off Windows.
+13. **A rootless `/x` path is relative (or current-drive) on Windows.** A
+    `FileResolutionContext` over `/w/...` fails `validate()` with
+    `RelativeContextDirectory`; a reference `/review-2.md` is
+    `ForeignAbsolutePath`; a fixture `/repo/x.md` renders as
+    `file:///B:/repo/x.md`. Give unit-test paths a drive
+    (`context::test_support::abs` in `darkmatter/dmls/src/context.rs` maps
+    `/w/x` to `C:/w/x`) or use a real temp dir. When a test passes only on
+    Unix, assert the exact path, not a loose `ends_with`.
+14. **On Unix `\` is a filename character, and `to_portable_string` turns it
+    into `/`** (`back\slash.rs` becomes a different file). Expected paths for
+    such files keep native spelling on Unix; a `PathIdentity` route
+    (`portable_relative` in `tree-hugger/lib/src/file/naming.rs`) keeps the
+    literal `\`.
+15. **Markdown escape handling eats a backslash.** Windows temp dirs contain
+    `\.tmpXXXX`, and CommonMark resolves `\.`, `\-`, `\_`. A Windows-only path
+    missing one backslash is a Markdown round-trip, not path resolution.
 
-9. **A user-typed path fragment never matches walker output by raw text.**
-   `ignore::Walk` yields native `\` paths; the fragment is whatever was typed,
-   `/` on every platform. Claudine's partial-file and operation-file
-   autocomplete compared them raw and found zero candidates on Windows for
-   every `/`-spelled partial, so the typed "no existing file matched" failure
-   fired where macOS offered the confirmation (found 2026-09-10 by the first
-   native-Windows Level 2 run; `claudine/cli/src/completion/scopes.rs`
-   `path_matches_query`). Compare both sides through `to_portable_string`
-   and normalize `\` in the fragment. The non-interactive Windows tests had
-   passed the whole time — the zero-candidate path and the interaction-denied
-   path produce the same diagnostic — which is why only a real-terminal run
-   on Windows could see it.
-10. **A fixture joined as `root.join("a/b/x.md")` keeps the `/` in the native
-    text.** Ordinary Win32 calls accept it, so most tests pass, but it breaks
-    the two places where `/` is not a separator: a `\\?\` path built from it
-    fails every probe with os error 123 ("filename, directory name, or volume
-    label syntax is incorrect"), and `cmd /C mklink /J` refuses the link.
-    Join name by name (`rel.split('/').fold(root, |p, n| p.join(n))`) in any
-    fixture that feeds a verbatim spelling or `mklink`. Found 2026-10-01 by the
-    `biscuit-file` `portable_path::platform` tests on `build-win-native`.
-11. **A `{{VAR}}` reference whose value is a verbatim path does not resolve.**
-    `FileReference` interpolation concatenates text, so `{{ROOT}}/x.md` with
-    `ROOT=\\?\C:\r` becomes `\\?\C:\r/x.md`, one component under the
-    verbatim prefix. `PortablePath` therefore never writes `{{ROOT}}/…` for
-    such a value (verification rejects it) and falls through to `~` or the
-    absolute path. A test that sets a variable from `fs::canonicalize` must
-    store `to_portable_string(&path)`, the spelling a user would export.
-    Found 2026-10-01 by the Darkmatter `link_normalization` tests.
-12. **A suffix splitter that cuts at `?` cuts a verbatim path at its prefix.**
-    `\\?\C:\…` contains `?`, so treating the first `?` as a URL query turns
-    every verbatim destination into `\\` (not absolute) and silently skips
-    it. Skip the `\\?\` / `//?/` prefix before looking for `#`, `?`, or `:`.
-    Darkmatter's `link_normalization::split_suffix` does; the macOS and Linux
-    legs cannot see it. Found 2026-10-01 on `build-win-native`.
-13. **`PathBuf::push` drops `.` and `..` pushed onto a verbatim buffer**, and
-    `collect::<PathBuf>()` pushes, so rebuilding `\\?\C:\a\..\b` from its
-    components yields `\\?\C:\b`, a different directory (under `\\?\` the
-    dots are literal names). A lexical normalizer that must keep them, such
-    as `biscuit-file`'s `normalize_native`, assembles the result as text.
-    Likewise, never write a `..` loop that calls `Vec::pop` on components:
-    it pops the `RootDir` or drive prefix and makes `/../a` relative.
-    Confirmed 2026-10-01 on `build-win-native`.
-14. **A rootless `/w/...` test path is relative on Windows**, so a
-    `FileResolutionContext` built over it fails `validate()` with
-    `RelativeContextDirectory` and resolves nothing. Lexical unit tests that
-    used `/w` paths with a hand-rolled join pass everywhere; the same tests
-    moved onto a context fail only on Windows, silently, as "no target".
-    Give such tests a drive (DMLS's `context::test_support::abs` maps `/w/x`
-    to `C:/w/x`) or use a real temporary directory. Found 2026-10-01 on
-    `build-win-native` (DMLS frontmatter navigation tests).
-15. **A `/`-rooted file *reference* is `ForeignAbsolutePath` on Windows**,
-    not a lookup. A Darkmatter expression that concatenates onto an empty
-    `dirname(…)` (a bare `spec.md` that no schema stage made absolute)
-    builds `/review-2.md`; on Unix that is a real, wrong path a loose
-    `ends_with` assertion accepts, and on Windows the read-side function
-    fails as `Malformed`. When a test passes only on Unix, print the value
-    and assert the exact path. Found 2026-10-01 on `build-win-native`
-    (`schema_number_increment_survives_quoted_persistence_round_trips`).
-16. **`metadata`/`symlink_metadata` on a name holding `*` or `?` fails with
+### Invalid names and error kinds
+
+16. **`metadata` on a name holding `*` or `?` fails with
     `ErrorKind::InvalidFilename` (OS error 123), not `NotFound`.** Code that
-    treats only `NotFound` as "absent" turns a plain miss into an `Io`
-    failure on Windows alone. biscuit-file's candidate probe and
-    `deepest_existing_ancestor` treat `InvalidFilename` as absent, so
-    `FileReference::new("docs/*.md")` is a `NoMatch` on every OS. Found
-    2026-10-02 on `build-win-native`
-    (`glob_reference::literal::a_literal_miss_that_looks_like_a_glob_hints_at_glob_references`).
-17. **Test expectations built from raw `fs::canonicalize` fail against
-    production output that is already simplified** (left `C:\…`, right
-    `\\?\C:\…`): build the expected value with
-    `biscuit_file::canonicalize_simplified`. Likewise a fixture path `"/repo/x.md"`
-    is rootless on Windows and renders as `file:///B:/repo/x.md` (current
-    drive); use `C:/repo/x.md` and expect `file:///C:/repo/x.md` there.
-    Found 2026-10-09 in Darkmatter `resolves_repo_root_reference`,
-    `meta_schema_reference_graph`, and the two `file://` diagnostic tests.
-
-14. **Native Windows filenames need not be valid Unicode.** A filename or
-    directory created with `OsStringExt::from_wide` can contain an unpaired
-    UTF-16 surrogate (U+D800 was created and read on the native Windows host,
-    2026-10-08). `to_string_lossy()` substitutes U+FFFD, naming a different
-    file. Treat that conversion as display only; a UTF-8 navigation export
-    must validate its native relative route before discarding code units.
-    Invalid code units confined to the scan root do not make the remaining
-    relative route invalid. Tree-hugger's public source/query APIs read these
-    files; an isolated tags-writer probe emitted eight nonexistent paths for
-    both a surrogate filename and a surrogate directory, while its root-only
-    control retained eight correct relative paths. Use native Windows `cfg`
-    tests and `OsStringExt::from_wide`, rather than assuming this input class
-    exists only on Linux. A surrogate-named directory also works as a child
-    process's `current_dir`, including `hug`'s Git discovery from it
-    (`symbols::export_ctags_paths::windows`, 2026-10-08), so a root-only
-    control can run through the real CLI.
-
+    treats only `NotFound` as absent turns a miss into an I/O failure on
+    Windows alone; biscuit-file's probes (`deepest_existing_ancestor`) treat
+    both as absent.
+17. **Windows rejects C0 controls (TAB, ESC) in filenames** before a writer
+    sees them (error 123). For a cross-platform fixture exercising control
+    neutralization, use a C1 control such as U+009B; test TAB/ESC at the
+    writer boundary without creating files.
+18. **Windows filenames need not be valid Unicode.** `OsStringExt::from_wide`
+    can create an unpaired surrogate (U+D800) name or directory, including a
+    child's `current_dir`. `to_string_lossy()` substitutes U+FFFD and names a
+    different file: treat it as display only, and validate a native relative
+    route before a UTF-8 export (invalid units confined to the scan root do
+    not invalidate the relative route). Test with native Windows `cfg` tests,
+    not only on Linux.
+19. **`reflink-copy` reports an unsupported NTFS block clone as an
+    HRESULT-shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw
+    error 1.** Match that form to fall back to a byte copy
+    (`unsupported_clone` in `worktree/lib/src/include/copy.rs`).
 
 ## Worktree include links and junctions
 
-For `.worktreeinclude` traversal, treat any directory with
-`FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`) as a boundary. A native Windows probe
-created a junction whose attributes were `Directory, ReparsePoint`; Git for
-Windows **traversed it** during `ls-files` and returned a file underneath.
-Check every candidate ancestor, not only the final file. A file
-symlink reported `Archive, ReparsePoint`. `std::os::windows::fs::FileTypeExt`
-distinguishes file and directory symlinks, while
-`std::os::windows::fs::MetadataExt::file_attributes()` exposes the reparse bit
-needed to catch junctions too. Check `symlink_metadata` before entering an
-ancestor. The stable Windows metadata API does not expose file index; do not
-use it as a copy-record registration ID.
-
-The native build host allowed `mklink` to create a file symlink, so it does
-not exercise the denial path. A machine without symlink privilege can return
-Win32 `ERROR_PRIVILEGE_NOT_HELD` (1314); match `raw_os_error() == Some(1314)`
-for the warning-and-skip path instead of assuming a particular Rust
-`ErrorKind`. Developer Mode can permit unprivileged creation. Git reused the
-same worktree admin-directory name after remove, prune, and re-add, but removed
-a marker stored inside the old admin directory. See the runnable
-`worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1` probe.
+- Treat any directory with `FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`) as a
+  traversal boundary. Git for Windows' `ls-files` **traverses junctions**, so
+  check every candidate ancestor with `symlink_metadata` and
+  `MetadataExt::file_attributes()`, not only the final file. `FileTypeExt`
+  distinguishes file and directory symlinks but not junctions.
+- The stable metadata API does not expose a file index; do not use it as a
+  copy-record ID.
+- Symlink creation without privilege fails with `ERROR_PRIVILEGE_NOT_HELD`;
+  match `raw_os_error() == Some(1314)`, not an `ErrorKind`
+  (`worktree/lib/src/include/copy.rs`). The native build host can create
+  symlinks, so it does not exercise the denial path; Developer Mode also
+  permits it.
+- Git reuses a worktree admin-directory name after remove, prune, and re-add,
+  but deletes anything stored inside the old one.

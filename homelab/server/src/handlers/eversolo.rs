@@ -531,7 +531,7 @@ async fn create_eversolo_by_name(state: &AppState, name: &str) -> Result<Eversol
         .get_eversolo(name)
         .await
         .ok_or_else(|| ServerError::DeviceNotFound(name.to_string()))?;
-    Ok(Eversolo::new(host, port))
+    Ok(Eversolo::new(host, port)?)
 }
 
 async fn with_timeout<T, E>(

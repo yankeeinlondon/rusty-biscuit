@@ -23,7 +23,7 @@ use claudine::composition::{
     LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
     PrepareOptions, PreparedComposition, ProxyHandoff, ResolvedCompositionSource,
     ResolvedExecutionTarget, RunLedger, SharedApprovalCache, SharedRunLedger, SurfacedHandoff,
-    SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy,
+    build_loop_seed_with_lifecycle, commit_proxy,
     resolve_loop_config,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
@@ -110,8 +110,8 @@ impl ActiveDocumentOutcome {
 /// What a `sequence` step owns that a handoff inside it must keep.
 ///
 /// A handoff changes the step's document, never the step (R8). The target reads
-/// the step's caller layers (the user's setters, a task's evaluated `params`,
-/// the reserved `state`/`previous`/`next` overlay, earlier steps' runtime
+/// the step's caller layers (the user's setters, a task's evaluated `with`,
+/// the lexical `seq` binding, earlier steps' runtime
 /// values) at the precedence the source read them, sees the step's environment
 /// and `operation`, writes `set` and `outputs` into the step's runtime cell, and
 /// a `prompt:` task's target still withholds its output for the task executor
@@ -120,18 +120,23 @@ impl ActiveDocumentOutcome {
 /// command's own setters.
 #[derive(Clone)]
 pub(crate) struct StepScope {
+    pub(crate) shell_approvals: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// The step's caller layers, origin kept: only the user's setters are
     /// authored, every run-produced value is data.
     pub(crate) caller_overrides: claudine::composition::LayeredOverrides,
+    pub(crate) lifecycle_group: Option<serde_json::Map<String, serde_json::Value>>,
     pub(crate) runtime_state: Arc<claudine::composition::RuntimeState>,
     pub(crate) suppress_output_commit: bool,
     pub(crate) task_frame_writer: Option<claudine::render::TaskFrameWriter>,
     /// Environment the step sets for whatever document it runs
-    /// (`CLAUDINE_FAIL_FAST`, a task's `OPERATION`). Never the source's
+    /// (a task's `OPERATION`). Never the source's
     /// `AGENT`/`MODEL`/`YOLO`: the target installs its own over this.
     pub(crate) env_overrides: BTreeMap<String, String>,
     /// A task's own `operation`, which outranks the command's `--operation`.
     pub(crate) operation: Option<String>,
+    /// Where every document the step runs, a handoff target included,
+    /// records the provider each attempt spawned.
+    pub(crate) launch_log: Option<claudine::composition::LaunchLog>,
 }
 
 /// The operation a document's run reports: the step's, inside a sequence task
@@ -196,7 +201,14 @@ pub(crate) fn run_composition_inner(
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
-    let invocation = InvocationContext::capture(crate::request::snapshot())?;
+    // The caller's document reads the launch map; each `proxy` target below
+    // replaces this with the view it captures for itself.
+    // One TTS pre-warm worker for the whole command, shared by every document
+    // a handoff adopts; dropping it on return cancels unfinished preparation.
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
+    let mut invocation = InvocationContext::capture(crate::request::snapshot())?
+        .with_environment_source(crate::request::document_environment_source())
+        .with_prewarm(prewarm.handle());
     let provisional_context = invocation.launch_file_resolution_context().clone();
     let source = resolve_composition_source(&file, kind, &shared, &provisional_context)?;
     // Derive the definitive source bundle from the same owner so a
@@ -222,11 +234,8 @@ pub(crate) fn run_composition_inner(
         parsed.shorthand_setters,
         parsed.positionals,
     )?;
-    let mut caller_input_records = claudine::composition::CallerInputLayers::from_caller_overrides(
-        set_overrides.clone(),
-        provisional_context.clone(),
-    )
-    .caller_input_records;
+    let mut caller_input_records =
+        super::caller_input_records(&shared, set_overrides.clone(), provisional_context.clone());
     record_prep_substage(
         &mut prep_substages,
         perf_enabled,
@@ -257,6 +266,12 @@ pub(crate) fn run_composition_inner(
     // withheld (pipe/CI/NO_COLOR).
     let stderr_is_tty =
         std::io::stderr().is_terminal() || std::env::var_os("FORCE_COLOR").is_some();
+
+    // The keys of an authored `loop:` block are checked before the schema
+    // verdict, so a removed key or a misspelling gets the loop parser's typed
+    // diagnostic and its suggestion rather than the schema's generic one.
+    claudine::composition::check_loop_config_keys(&source)
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
 
     // Supplied eager files must be usable before initialize can dereference
     // them. Missing-value collection and the full verdict still wait for a
@@ -294,13 +309,10 @@ pub(crate) fn run_composition_inner(
         emit_dropped_optional_warnings(&pre.dropped_optionals);
         // Pre-validation may have supplied a missing value or dropped an
         // invalid optional; the caller records must carry the same values,
-        // still anchored at the launch origin.
+        // each still anchored where it was authored (a `prep` overlay value
+        // at its `prep`'s document, every other value at the launch origin).
         caller_input_records =
-            claudine::composition::CallerInputLayers::from_caller_overrides(
-                pre.set_overrides.clone(),
-                provisional_context.clone(),
-            )
-            .caller_input_records;
+            super::caller_input_records(&shared, pre.set_overrides.clone(), provisional_context.clone());
         (pre.source, pre.set_overrides)
     };
     // The inline `prompt` verdict comes after eager collection so a collected
@@ -369,8 +381,7 @@ pub(crate) fn run_composition_inner(
     // matching the pre-schema handoff input exactly as canonical preparation left
     // it (AC26). Replaced — never merged — on each handoff: forwarding is
     // explicit, so a downstream hop that omits `with:` starts from empty.
-    let mut current_overlay: indexmap::IndexMap<String, serde_json::Value> =
-        indexmap::IndexMap::new();
+    let mut current_overlay = claudine::composition::AnchoredOverlay::default();
     // The already-committed handoff the *next* active document adopts for its
     // staged bootstrap. `None` for the caller's document; set to each committed
     // handoff below so the target re-runs its own `initialize`/reread/audit (R4)
@@ -441,6 +452,12 @@ pub(crate) fn run_composition_inner(
                     handoff.overlay(),
                 );
                 source = target_source;
+                // The source's map selected the target: the commit above
+                // resolved it in the source's file context. The target is a
+                // document of its own, so it captures its own map here, before
+                // its bootstrap and `initialize`, and every stage of its
+                // lifecycle reads that map.
+                invocation = invocation.capture_document();
                 source_context = invocation.derive_source(&source.resolved_path)?;
                 file_resolution_context = source_context.file_resolution_context().clone();
                 current_file = handoff.authored_target().to_string();
@@ -449,7 +466,12 @@ pub(crate) fn run_composition_inner(
                 // (retry/resume), not just baked once into the first prepared
                 // composition. Replaced, not merged: an omitted downstream `with:`
                 // starts the next target from empty (forwarding is explicit).
-                current_overlay = handoff.overlay().clone();
+                // Each value keeps the source document's context: a relative
+                // file value resolves from the file that authored the `with`.
+                current_overlay = claudine::composition::AnchoredOverlay::new(
+                    handoff.overlay().clone(),
+                    &active_file_resolution_context,
+                );
                 // The target adopts this committed handoff for its staged
                 // bootstrap on the next iteration.
                 adopted_handoff = Some(Box::new(handoff));
@@ -481,7 +503,7 @@ pub(crate) fn prepare_and_run_active_document(
     kind: CompositionKind,
     source: ResolvedCompositionSource,
     current_file: &str,
-    current_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    current_overlay: &claudine::composition::AnchoredOverlay,
     adopted_handoff: Option<Box<ProxyHandoff>>,
     first: bool,
     inline_state: &mut Option<crate::commands::compose::InlinePromptState>,
@@ -615,7 +637,7 @@ pub(crate) fn prepare_and_run_active_document(
         .map(|scope| scope.env_overrides.clone())
         .unwrap_or_default();
     if let Some(ref target) = resolved_target {
-        install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
+        install_agent_env_for_composition(target, raw_hints.yolo_enabled(shared.yolo), &mut env_overrides);
     }
 
     // Render the execution line the moment the agent is known. Eager
@@ -637,7 +659,7 @@ pub(crate) fn prepare_and_run_active_document(
     let header_emitted = match (shared.silent, resolved_target.as_ref()) {
         (false, Some(target)) => emit_execution_header(
             target.provider,
-            shared.yolo,
+            raw_hints.yolo_enabled(shared.yolo),
             header_interactive,
             verbose > 0,
             shared.repo,
@@ -706,6 +728,12 @@ pub(crate) fn prepare_and_run_active_document(
         shared.yolo,
     );
 
+    let mut approval_options = approval_options;
+    if let Some(approved) = step_scope.and_then(|scope| scope.shell_approvals.clone()) {
+        approval_options.closed_approvals = Some(approved);
+        approval_options.approval_handler = None;
+    }
+
     let boot = if staged {
         DocumentBoot::Staged(approval_options)
     } else {
@@ -720,7 +748,7 @@ pub(crate) fn prepare_and_run_active_document(
             &claudine::composition::LayeredOverrides::from_parts(
                 set_overrides.as_ref(),
                 &caller_data_keys(step_scope),
-            ),
+            ).with_sequence_value(step_scope.and_then(|scope| scope.caller_overrides.sequence_value().cloned())),
             &caller_input_records,
             &approval_options,
             &mut prep_substages,
@@ -794,7 +822,7 @@ fn eager_shell_preflight(
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
     document_epoch: &claudine::invocation_context::DocumentEpoch,
     file_resolution_context: &biscuit_file::FileResolutionContext,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     caller_overrides: &claudine::composition::LayeredOverrides,
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     approval_options: &claudine::harness::ShellApprovalOptions,
@@ -932,18 +960,24 @@ pub(crate) fn resolve_composition_source(
     }
 }
 
-/// Build the loop execution options from CLI flags and environment.
-fn build_loop_options(shared: &SharedComposeArgs) -> LoopExecutionOptions {
+/// Build the loop execution options from CLI flags and the document's
+/// captured environment.
+///
+/// The cap here is the `--max-iterations` flag alone; a looping document
+/// adds the `CLAUDINE_MAX_ITERATIONS` fallback once its loop is known
+/// ([`build_and_run_loop`]), so only a loop can be refused for an invalid
+/// value.
+fn build_loop_options(
+    shared: &SharedComposeArgs,
+    environment: &claudine::invocation_context::DocumentEnvironment,
+) -> LoopExecutionOptions {
     LoopExecutionOptions {
-        max_iterations: shared
-            .max_iterations
-            .or(claudine::composition::resolve_max_iterations_from_env()),
-        fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+        max_iterations: shared.max_iterations,
         on_rate_limit: shared.on_rate_limit.map(Into::into),
         // Engine polls this during rate-limit pause sleeps so Ctrl+C
         // surfaces as `LoopInterrupted` instead of waiting out the timer.
         interrupt_check: Some(crate::output::user_interrupt_observed),
-        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(),
+        pause_reset_margin: claudine::composition::resolve_pause_reset_margin_from_env(environment),
     }
 }
 
@@ -985,14 +1019,25 @@ fn build_and_run_loop(
     document_epoch: &claudine::invocation_context::DocumentEpoch,
     verbose: u8,
     shared: &SharedComposeArgs,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     handoff_ledger: &SharedRunLedger,
     step_scope: Option<&StepScope>,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
     let config = resolve_loop_config(source)?;
-    let Some(config) = config else {
+    let Some(mut config) = config else {
         return Ok(None);
     };
+    // Cap precedence: `--max-iterations`, then `CLAUDINE_MAX_ITERATIONS`, then
+    // the authored `max`, then the engine default. The variable is read only
+    // when the flag is absent, so a mistyped value fails exactly the runs that
+    // would use it.
+    let mut loop_options = loop_options;
+    if loop_options.max_iterations.is_none() {
+        loop_options.max_iterations = claudine::composition::resolve_max_iterations_from_env(
+            document_epoch.environment(),
+            &source.resolved_path,
+        )?;
+    }
     document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::LoopCondition,
     );
@@ -1016,12 +1061,43 @@ fn build_and_run_loop(
             kind.mode(),
         )?,
     };
+    // A templated `max` resolves once, here, against the values the
+    // document's frontmatter resolved with: its defaults under the caller's
+    // setters.
+    {
+        let ambient = claudine::composition::LoopAmbient::new(1, true, false, "", 0);
+        let lookup = claudine::composition::LoopExpressionLookup::new(
+            &loop_seed.initialize_frontmatter,
+            &ambient,
+            &loop_prepare_options.file_resolution_context,
+            &source.resolved_path,
+        )
+        .with_prepared_context(Some(prepared_context));
+        claudine::composition::resolve_templated_loop_max(
+            &mut config,
+            &lookup,
+            &claudine::composition::LoopLocation::document_root(&source.resolved_path),
+        )?;
+    }
     let initial_frontmatter = loop_seed.seed;
     let lifecycle_config = loop_seed.lifecycle;
 
     let effective_repo_root = prep_context.source_repo_root.as_deref();
     let (lifecycle_settings, lifecycle_messaging) =
         staged_boot::lifecycle_settings(&lifecycle_config, effective_repo_root);
+    // The loop's bootstrap walk, before the engine fires `initialize`; every
+    // iteration's own preparation submits again with its live values.
+    claudine::composition::lifecycle::prewarm::collect_and_submit(
+        document_epoch.prewarm(),
+        &lifecycle_settings,
+        &lifecycle_config,
+        || {
+            claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                &serde_json::Value::Object(loop_seed.initialize_frontmatter.clone()),
+                prepared_context.clone(),
+            )
+        },
+    );
 
     let term = wrap_terminal();
     let lifecycle_ctx = LifecycleRuntimeContext {
@@ -1040,7 +1116,8 @@ fn build_and_run_loop(
         .mutation_root(lifecycle_mutation_root)
         .auto_rehash(false)
         .build();
-    let shell_runner = SystemShellRunner;
+    // This document's `shell` actions start from its own environment.
+    let shell_runner = prep_context.invocation.shell_runner().clone();
     let emitter = DefaultLifecycleEmitter;
     // One cell for the whole `--loop` run: a `set` written in iteration 1 and
     // every committed `outputs` entry stay visible to later iterations. Inside a
@@ -1048,12 +1125,9 @@ fn build_and_run_loop(
     let runtime_state = runtime_cell(step_scope);
     // A staged document's stabilized reread and the approvals it earned. Later
     // iterations compose from it, never from the pre-`initialize` snapshot.
-    let mut stabilized: Option<(ResolvedCompositionSource, std::collections::HashSet<String>)> =
+    let mut stabilized: Option<(ResolvedCompositionSource, darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals)> =
         None;
     let staged_start = std::time::Instant::now();
-    // A halting loop renders the failed iteration's error in its final block;
-    // a continuing one never does, so the iteration reports its own.
-    let loop_fail_fast = loop_options.fail_fast.or(config.fail_fast).unwrap_or(true);
 
     run_loop_with_overrides(
         source,
@@ -1106,6 +1180,10 @@ fn build_and_run_loop(
                         None,
                     ),
                 );
+                // The `loop` global for this iteration's body, compose-time
+                // frontmatter, shell audit, and — carried on the prepared
+                // input layers — every lifecycle event it fires.
+                iteration_options.loop_values = Some(ctx.ambient.clone());
                 // Every iteration after the first is a composition run of its
                 // own: its epoch observes Git working state as the previous
                 // iterations left it, while stable launch evidence is reused.
@@ -1241,6 +1319,8 @@ fn build_and_run_loop(
             // executor returns, so swapping here keeps both the per-iteration
             // terminal events and the post-finalize gate on live state.
             guard.set_config(prepared.lifecycle.clone());
+            // The gate after this pass reads the frontmatter it composed with.
+            let pass_frontmatter = prepared.effective_frontmatter.as_object().cloned();
 
             let request = build_execution_request(
                 shared,
@@ -1274,12 +1354,10 @@ fn build_and_run_loop(
                     .chain()
                     .find_map(|cause| cause.downcast_ref::<UnrecoveredLifecycleDowngrade>())
             {
-                if !loop_fail_fast && !shared.silent {
-                    claudine::harness::report::report_unhandled_failure(&downgrade.message, &term);
-                }
                 let mut output =
                     downgraded_loop_iteration_output(ctx.iteration, &source.resolved_path, downgrade);
                 output.context = run_context;
+                output.frontmatter = pass_frontmatter;
                 return Ok(output);
             }
             let outcome = attempt.map_err(|e| {
@@ -1308,22 +1386,12 @@ fn build_and_run_loop(
                         snapshot: DiagnosticSnapshot::select(other.as_ref()).map(Box::new),
                     },
                 }
-            })
-            .inspect_err(|error| {
-                // Under `fail_fast: false` the engine continues past an
-                // iteration that could not complete and drops its error, so a
-                // refused hand-off or a preparation failure would otherwise
-                // never be shown.
-                if !loop_fail_fast && !shared.silent && !error.is_already_emitted() {
-                    crate::log::message(&biscuit_terminal::errors::BlockError::report_block_error(
-                        error, &term,
-                    ));
-                }
             })?;
 
             let mut output =
                 build_loop_iteration_output(ctx.iteration, &source.resolved_path, outcome);
             output.context = run_context;
+            output.frontmatter = pass_frontmatter;
             Ok(output)
         },
     )
@@ -1347,7 +1415,7 @@ fn build_execution_request(
     mode: CompositionMode,
     prep_context: &CompositionPrepContext,
     runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     handoff_ledger: SharedRunLedger,
     adopted_handoff: Option<Box<ProxyHandoff>>,
     step_scope: Option<&StepScope>,
@@ -1381,6 +1449,7 @@ fn build_execution_request(
         silent: shared.silent,
         env_overrides: env_overrides.clone(),
         shared_approval_cache,
+        closed_shell_approvals: step_scope.and_then(|scope| scope.shell_approvals.clone()),
         // Inside a step the sequence owns preflight messaging and the header.
         sequence: step_scope.is_some(),
         installed_snapshot: Some(prep_context.installed_snapshot.clone()),
@@ -1407,6 +1476,8 @@ fn build_execution_request(
         // The already-committed handoff a proxied target adopts for its staged
         // bootstrap (R4), or `None` for the caller's own document.
         adopted_handoff,
+        // A step or task reports what its documents' attempts spawned.
+        launch_log: step_scope.and_then(|scope| scope.launch_log.clone()),
     }
 }
 
@@ -1450,7 +1521,7 @@ fn execute_loop_or_single(
     // The immediate proxy overlay for this active document (empty for the
     // caller's document), re-applied on every re-materialization of a proxied
     // target so a retry/resume keeps the pre-schema handoff input (AC26).
-    proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: claudine::composition::AnchoredOverlay,
     // The already-committed handoff a proxied target adopts for the harness's
     // staged bootstrap on the eager single (non-loop) path, or `None` for the
     // caller's document. A looping target routes its `initialize` through the
@@ -1466,7 +1537,7 @@ fn execute_loop_or_single(
     document_epoch: claudine::invocation_context::DocumentEpoch,
     step_scope: Option<&StepScope>,
 ) -> Result<ActiveDocumentOutcome> {
-    let loop_options = build_loop_options(shared);
+    let loop_options = build_loop_options(shared, document_epoch.environment());
 
     // Captured once for frontmatter-excerpt enrichment of any error rendered
     // below; gates whether the YAML block is shown (TTY or FORCE_COLOR) or
@@ -1493,11 +1564,16 @@ fn execute_loop_or_single(
         DocumentBoot::Eager(_, options) | DocumentBoot::Staged(options) => options.clone(),
     };
     let loop_prepare_options = PrepareOptions {
+        sequence_binding: step_scope.and_then(|scope| scope.caller_overrides.sequence_value().cloned()),
+        lifecycle_group: step_scope.and_then(|scope| scope.lifecycle_group.clone()),
         invocation_context: Some(prep_context.invocation.clone()),
         document_epoch: Some(document_epoch.clone()),
         set_overrides: set_overrides.clone(),
         caller_input_records: caller_input_records.clone(),
         pre_approved_commands: eager_approved.clone(),
+        deferred_shell_roots: Default::default(),
+        validate_deferred_shell_values: false,
+        document_shell_values: None,
         env_overrides: env_overrides.clone(),
         perf_enabled: shared.perf,
         source_repo_root: prep_context.source_repo_root.clone(),
@@ -1505,8 +1581,6 @@ fn execute_loop_or_single(
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
         file_resolution_context: file_resolution_context.clone(),
-        // Name coercion is a sequence-only concern; standalone compose/loop
-        // prep injects no `state` object, so there is nothing to coerce.
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
         // R4 applies to a looping document exactly as it does to a single one.
@@ -1520,6 +1594,8 @@ fn execute_loop_or_single(
             == claudine::composition::SchemaStage::DeferToStabilizedReread,
         data_override_keys: caller_data_keys(step_scope),
         proxy_overlay: proxy_overlay.clone(),
+        // Each iteration supplies its own (`run_loop_with_overrides` below).
+        loop_values: None,
     };
 
     let is_proxy_target = adopted_handoff.is_some();
@@ -1614,9 +1690,21 @@ fn execute_loop_or_single(
             if let Some(handoff) = loop_result.handoff {
                 return Ok(ActiveDocumentOutcome::Handoff(handoff));
             }
+            // A `break`'s code is the process exit code only for the root
+            // invocation's loop; a document looping inside a sequence step
+            // records it in the summary and the run continues.
+            let mut exit_code = loop_result.final_exit_code;
+            if let Some(broken) = &loop_result.broken {
+                use claudine::composition::lifecycle::LifecycleEmitter as _;
+                claudine::composition::DefaultLifecycleEmitter.emit_info(&broken.summary(), &wrap_terminal());
+                if step_scope.is_none() {
+                    exit_code = i32::from(broken.code);
+                }
+            }
             return Ok(ActiveDocumentOutcome::Done {
-                exit_code: loop_result.final_exit_code,
-                final_output: Some(loop_result.last_output),
+                exit_code,
+                // A loop a `break` ended before any pass ran published nothing.
+                final_output: (loop_result.iteration_count > 0).then_some(loop_result.last_output),
             });
         }
     }
@@ -1715,7 +1803,7 @@ fn execute_loop_or_single(
 /// Discover and approve the template shell commands one loop iteration will
 /// execute, and add them to the set it prepares with.
 ///
-/// The iteration composes against loop state (`_loop_*`, carried values,
+/// The iteration composes against loop state (carried values,
 /// lifecycle `set`) that the document-level audit never saw, so its commands
 /// are discovered through the same canonical options and state its
 /// preparation uses. Iteration 1 may still prompt, as nothing has launched;
@@ -1755,7 +1843,7 @@ fn frozen_loop_approvals(
 struct StagedBoot {
     bootstrap: claudine::composition::BootstrapPreparation,
     /// The approvals granted so far: the bootstrap's frontmatter commands.
-    approved: std::collections::HashSet<String>,
+    approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     approval_options: claudine::harness::ShellApprovalOptions,
 }
 
@@ -1790,13 +1878,18 @@ fn prepare_collecting_missing(
                         .and_then(serde_json::Value::as_object)
                         .cloned()
                         .unwrap_or_default();
+                    // Collected values were typed in the launch area; the values
+                    // already supplied keep the origin they were captured with.
+                    let mut records = options.caller_input_records.clone();
+                    records.extend(
+                        claudine::composition::CallerInputLayers::from_caller_overrides(
+                            Some(serde_json::Value::Object(collected.clone())),
+                            prep_context.invocation.launch_file_resolution_context().clone(),
+                        )
+                        .caller_input_records,
+                    );
                     merged.extend(collected);
                     let merged = serde_json::Value::Object(merged);
-                    let records = claudine::composition::CallerInputLayers::from_caller_overrides(
-                        Some(merged.clone()),
-                        prep_context.invocation.launch_file_resolution_context().clone(),
-                    )
-                    .caller_input_records;
                     kind.prepare_staged(
                         source,
                         PrepareOptions {
@@ -1829,7 +1922,7 @@ fn run_staged_single(
     staged: StagedBoot,
     entry: claudine::composition::DocumentEntryReason,
     options: PrepareOptions,
-    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    proxy_overlay: &claudine::composition::AnchoredOverlay,
     prep_context: &CompositionPrepContext,
     resolved_target: Option<ResolvedExecutionTarget>,
     env_overrides: &BTreeMap<String, String>,
@@ -1906,6 +1999,9 @@ fn run_staged_single(
         &handoff_ledger,
     )? {
         staged_boot::StagedInitialize::Skipped => return Ok(ActiveDocumentOutcome::done(0)),
+        staged_boot::StagedInitialize::Cancelled => {
+            return Ok(ActiveDocumentOutcome::done(USER_INTERRUPT_EXIT_CODE));
+        }
         staged_boot::StagedInitialize::Handoff(handoff) => {
             return Ok(ActiveDocumentOutcome::Handoff(handoff));
         }
@@ -1936,8 +2032,12 @@ fn run_staged_single(
                 prep_context,
             )
         })
-        .map_err(|error| staged_boot::route_stabilized_failure(&mut guard, &document, error))?
     };
+    if staged_boot::cancel_staged_before_start(&mut guard, &document) {
+        return Ok(ActiveDocumentOutcome::done(USER_INTERRUPT_EXIT_CODE));
+    }
+    let prepared = prepared
+        .map_err(|error| staged_boot::route_stabilized_failure(&mut guard, &document, error))?;
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, shared.silent);
     guard.set_config(prepared.lifecycle.clone());

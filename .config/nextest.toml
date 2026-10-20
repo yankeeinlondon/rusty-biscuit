@@ -40,6 +40,10 @@ claudine-l1 = { max-threads = 4 }
 # full network detections overlap, so CI runs them one process at a time. Local
 # Windows development retains Nextest's normal scheduler.
 sniff-windows-l1 = { max-threads = 1 }
+# Schematic's fresh-output guard compiles generated client crates in one shared
+# child target directory. One at a time keeps them from queuing on Cargo's lock
+# inside each other's timeouts.
+schematic-fresh-output = { max-threads = 1 }
 # Apple Terminal has no background mode: each L2 test opens a visible window on
 # the developer's desktop. Parallel L2 runs them one at a time so at most one
 # window is open, while the rest of the tier keeps its parallel workers.
@@ -213,6 +217,24 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 [[profile.default.overrides]]
 filter = 'package(git-wt-cli) & binary(level2_graph_in_kitty)'
 success-output = "final"
+
+# Every `slow_` test in schematic-gen's L1 binary generates a client crate and
+# compiles it offline with a child Cargo (`tests/common/fresh_output.rs`). A
+# cold compile of all 18 APIs takes minutes; the 60s x 15 = 15 min ceiling
+# bounds a hang. Nextest kills the test's process group at the ceiling, which
+# also ends the child build.
+[[profile.default.overrides]]
+filter = 'binary_id(schematic-gen::l1) & test(/(^|::)slow_/)'
+test-group = 'schematic-fresh-output'
+slow-timeout = { period = "60s", terminate-after = 15 }
+
+# schematic-runtime's `slow_` L1 test is its trybuild suite, which builds the
+# crate and every compile-fail case with a child Cargo. Cold, that takes about
+# 17s on build-linux and passed the default 30s kill on native Windows; the
+# 60s x 5 = 5 min ceiling bounds a hang.
+[[profile.default.overrides]]
+filter = 'binary_id(schematic-runtime::l1) & test(/(^|::)slow_/)'
+slow-timeout = { period = "60s", terminate-after = 5 }
 
 [profile.local-evidence]
 # Evidence needs Nextest's machine-readable report without CI's runner-specific

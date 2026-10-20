@@ -115,12 +115,17 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// Parses `frontmatter` and fixes its lifecycle shell bytes, as canonical
-/// preparation does.
+/// preparation does, then approves every resolved command as its bytes.
 fn prepared(repo: &Repo, frontmatter: &Value) -> LifecycleConfig {
     let mut config = parse_lifecycle_config(frontmatter, &repo.source()).unwrap();
     let context = ComposeContext::capture_for_content(repo.dir.path(), "");
-    resolve_lifecycle_shell_commands(&mut config, frontmatter, &context, &repo.source(), crate::test_support::process_context(), None)
+    resolve_lifecycle_shell_commands(&mut config, frontmatter, &context, &repo.source(), crate::test_support::process_context(), None, crate::composition::lifecycle::bindings::EnclosingLoop::Outside, None)
         .unwrap();
+    let approved = collect_lifecycle_shell_commands(&config)
+        .into_iter()
+        .map(|(command, _)| command)
+        .collect();
+    crate::composition::preflight::settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &approved, None);
     config
 }
 
@@ -164,15 +169,15 @@ fn run(
 }
 
 fn start(actions: Value) -> Value {
-    json!({ "start": { "stack": actions } })
+    json!({ "start": actions })
 }
 
 #[test]
 fn a_start_set_runs_its_command_and_gates_the_next_item() {
     let repo = Repo::new();
     let frontmatter = start(json!([
-        { "action": [ { "set": { "clean": format!("$({})::ok", repo.git("diff --quiet")) } } ] },
-        { "when": "clean", "action": [ { "message": "tree is clean" } ] },
+        { "set": { "clean": format!("$({})::ok", repo.git("diff --quiet")) } },
+        { "when": "clean", "then": [{ "message": "tree is clean" }] },
     ]));
     let config = prepared(&repo, &frontmatter);
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
@@ -185,10 +190,15 @@ fn a_start_set_runs_its_command_and_gates_the_next_item() {
 fn a_result_object_reaches_a_later_when_through_dotted_access() {
     let repo = Repo::new();
     let frontmatter = start(json!([
-        { "action": [ { "set": { "diff": format!("$({})::result", repo.git("rev-parse --verify nope")) } } ] },
-        { "when": "!diff.ok && diff.code == 128", "action": [
-            { "message": "stdout=[{{ diff.stdout }}] fatal={{ starts_with(diff.stderr, 'fatal:') }}" }
-        ] },
+        { "set": { "diff": format!("$({})::result", repo.git("rev-parse --verify nope")) } },
+        {
+            "when": "!diff.ok && diff.code == 128",
+            "then": [
+                {
+                    "message": "stdout=[{{ diff.stdout }}] fatal={{ starts_with(diff.stderr, 'fatal:') }}",
+                },
+            ],
+        },
     ]));
     let config = prepared(&repo, &frontmatter);
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
@@ -204,16 +214,14 @@ fn a_result_object_reaches_a_later_when_through_dotted_access() {
 #[test]
 fn preflight_approves_the_bare_command_under_its_property() {
     let repo = Repo::new();
-    let frontmatter = start(json!([
-        { "action": [ { "set": { "clean": format!("$({})::ok::timeout:30", repo.git("diff --quiet")) } } ] },
-    ]));
+    let frontmatter = start(json!([{ "set": { "clean": format!("$({})::ok::timeout:30", repo.git("diff --quiet")) } }]));
     let config = prepared(&repo, &frontmatter);
     let commands = collect_lifecycle_shell_commands(&config);
     assert_eq!(commands.len(), 1, "{commands:?}");
     let (command, property) = &commands[0];
     assert!(command.ends_with("diff --quiet"), "{command}");
     assert!(!command.contains("::"), "the suffix is never approved bytes: {command}");
-    assert_eq!(property, "start.stack[0].action[0].set.clean");
+    assert_eq!(property, "start[0].set.clean");
 }
 
 #[test]
@@ -227,7 +235,7 @@ fn approval_applies_shell_policy_to_a_set_command() {
         ("$(rm -rf scratch)::ok", "blacklisted"),
         ("$(git status)::ok", "approval"),
     ] {
-        let config = prepared(&repo, &start(json!([{ "action": [{ "set": { "v": value } }] }])));
+        let config = prepared(&repo, &start(json!([{ "set": { "v": value } }])));
         let error = resolve_lifecycle_shell_approvals(
             &config,
             &repo.source(),
@@ -244,18 +252,14 @@ fn approval_applies_shell_policy_to_a_set_command() {
 #[test]
 fn a_false_guard_and_an_unresolved_value_run_nothing() {
     let repo = Repo::new();
-    let guarded = start(json!([
-        { "when": "false", "action": [ { "set": { "v": format!("$({})::ok", repo.counter()) } } ] },
-    ]));
+    let guarded = start(json!([{ "when": "false", "then": [{ "set": { "v": format!("$({})::ok", repo.counter()) } }] }]));
     let result = run(&prepared(&repo, &guarded), &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
     assert_eq!(result.outcome, LifecycleEventOutcome::default());
     assert_eq!(repo.runs(), 0);
     assert!(!result.mutations.contains_key("v"));
 
     // Parsed but never resolved at preflight: refused, never run.
-    let unresolved = start(json!([
-        { "action": [ { "set": { "v": format!("$({})::ok", repo.counter()) } } ] },
-    ]));
+    let unresolved = start(json!([{ "set": { "v": format!("$({})::ok", repo.counter()) } }]));
     let config = parse_lifecycle_config(&unresolved, &repo.source()).unwrap();
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
     let error = result.outcome.evaluation_error.expect("an unresolved value is refused");
@@ -266,9 +270,7 @@ fn a_false_guard_and_an_unresolved_value_run_nothing() {
 #[test]
 fn a_disabled_runner_refuses_the_set_before_anything_runs() {
     let repo = Repo::new();
-    let frontmatter = start(json!([
-        { "action": [ { "set": { "v": format!("$({})::ok", repo.counter()) }, "no_error": true } ] },
-    ]));
+    let frontmatter = start(json!([{ "set": { "v": format!("$({})::ok", repo.counter()) } }]));
     let config = prepared(&repo, &frontmatter);
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &DisabledShellRunner);
     let error = result.outcome.evaluation_error.expect("the early-route prohibition holds");
@@ -281,11 +283,13 @@ fn a_disabled_runner_refuses_the_set_before_anything_runs() {
 fn a_failed_mapping_writes_no_destination() {
     let repo = Repo::new();
     let frontmatter = start(json!([
-        { "action": [ { "set": {
-            "plain": "kept?",
-            "ran": format!("$({})::ok", repo.counter()),
-            "failed": format!("$({})", repo.git("rev-parse --verify nope")),
-        } } ] },
+        {
+            "set": {
+                "plain": "kept?",
+                "ran": format!("$({})::ok", repo.counter()),
+                "failed": format!("$({})", repo.git("rev-parse --verify nope")),
+            },
+        },
     ]));
     let config = prepared(&repo, &frontmatter);
     let base = map(json!({ "plain": "before" }));
@@ -301,10 +305,7 @@ fn a_failed_mapping_writes_no_destination() {
 fn each_executed_assignment_has_a_fresh_result_cache() {
     let repo = Repo::new();
     let value = format!("$({})::ok", repo.counter());
-    let frontmatter = json!({
-        "start": { "stack": [ { "action": [ { "set": { "a": value, "b": value } } ] } ] },
-        "success": { "stack": [ { "action": [ { "set": { "c": value } } ] } ] },
-    });
+    let frontmatter = json!({ "start": [{ "set": { "a": value, "b": value } }], "success": [{ "set": { "c": value } }] });
     let config = prepared(&repo, &frontmatter);
     run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
     assert_eq!(repo.runs(), 1, "values of one assignment share one run");
@@ -321,8 +322,8 @@ fn a_later_event_recaptures_a_changed_result() {
         helper(&format!("first-ok:{}", repo.dir.path().join("ran-once").display()))
     );
     let frontmatter = json!({
-        "start": { "stack": [ { "action": [ { "set": { "at_start": value } } ] } ] },
-        "success": { "stack": [ { "action": [ { "set": { "at_success": value } } ] } ] },
+        "start": [{ "set": { "at_start": value } }],
+        "success": [{ "set": { "at_success": value } }],
     });
     let config = prepared(&repo, &frontmatter);
     let result = run(&config, &[LifecycleSignal::Start, LifecycleSignal::Success], &map(json!({})), &MockShell::new(0));
@@ -341,10 +342,13 @@ fn an_interruption_while_a_set_command_runs_fails_the_set() {
     let dir = repo.dir.path().to_path_buf();
     let config = prepared(
         &repo,
-        &start(json!([{ "action": [{
-            "set": { "v": format!("$({})::ok::timeout:60", helper(&format!("await-stop:{}", dir.display()))) },
-            "no_error": true,
-        }] }])),
+        &start(json!([
+            {
+                "set": {
+                    "v": format!("$({})::ok::timeout:60", helper(&format!("await-stop:{}", dir.display()))),
+                },
+            },
+        ])),
     );
 
     // Stands in for the user's Ctrl+C: Claudine records the interruption, and
@@ -366,7 +370,7 @@ fn an_interruption_while_a_set_command_runs_fails_the_set() {
     crate::interrupt::clear_for_tests();
 
     assert!(result.outcome.action_error.is_none(), "{:?}", result.outcome);
-    let error = result.outcome.evaluation_error.expect("`no_error` cannot forgive an interruption");
+    let error = result.outcome.evaluation_error.expect("an interruption fails the set");
     assert!(error.msg.contains("interrupted"), "{}", error.msg);
     assert!(!result.mutations.contains_key("v"), "the command exited 0, yet nothing is written");
     assert!(elapsed < std::time::Duration::from_secs(30), "returned after {elapsed:?}");
@@ -377,10 +381,12 @@ fn approved_bytes_do_not_follow_a_later_runtime_write() {
     let repo = Repo::new();
     let frontmatter = json!({
         "target": "HEAD",
-        "start": { "stack": [
-            { "action": [ { "set": { "target": "nope" } } ] },
-            { "action": [ { "set": { "found": format!("$({})::ok", repo.git("rev-parse --verify {{ target }}")) } } ] },
-        ] },
+        "start": [
+            { "set": { "target": "nope" } },
+            {
+                "set": { "found": format!("$({})::ok", repo.git("rev-parse --verify {{ target }}")) },
+            },
+        ],
     });
     let config = prepared(&repo, &frontmatter);
     let base = map(json!({ "target": "HEAD" }));
@@ -394,10 +400,12 @@ fn approved_bytes_do_not_follow_a_later_runtime_write() {
 fn every_value_reads_the_pre_write_state() {
     let repo = Repo::new();
     let frontmatter = start(json!([
-        { "action": [ { "set": {
-            "flag": false,
-            "picked": format!("$( flag ? {} : 'was false' )::result", repo.git("rev-parse --is-inside-work-tree")),
-        } } ] },
+        {
+            "set": {
+                "flag": false,
+                "picked": format!("$( flag ? {} : 'was false' )::result", repo.git("rev-parse --is-inside-work-tree")),
+            },
+        },
     ]));
     let config = prepared(&repo, &frontmatter);
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({ "flag": true })), &MockShell::new(0));
@@ -408,7 +416,7 @@ fn every_value_reads_the_pre_write_state() {
 
 /// Runs `value` as the only `set` value and asserts it fails the action.
 fn assert_set_fails(repo: &Repo, value: &str, fragment: &str) {
-    let config = prepared(repo, &start(json!([{ "action": [{ "set": { "v": value } }] }])));
+    let config = prepared(repo, &start(json!([{ "set": { "v": value } }])));
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
     let error = result.outcome.action_error.unwrap_or_else(|| panic!("{value}"));
     assert!(error.msg.to_lowercase().contains(fragment), "{value}: {}", error.msg);
@@ -426,11 +434,11 @@ fn missing_and_interrupted_commands_fail_the_set() {
     let repo = Repo::new();
     assert_set_fails(&repo, "$(claudine-no-such-command-r9 run)::ok", "not found");
 
-    // A user interruption keeps its cancellation outcome: `no_error` cannot
-    // turn it into a recoverable value.
+    // A user interruption keeps its cancellation outcome rather than turning
+    // into a recoverable value.
     let config = prepared(
         &repo,
-        &start(json!([{ "action": [{ "set": { "v": format!("$({})::ok", repo.git("diff --quiet")) }, "no_error": true }] }])),
+        &start(json!([{ "set": { "v": format!("$({})::ok", repo.git("diff --quiet")) } }])),
     );
     crate::interrupt::mark_interrupted();
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
@@ -443,11 +451,13 @@ fn missing_and_interrupted_commands_fail_the_set() {
 fn nested_and_mixed_values_stay_data() {
     let repo = Repo::new();
     let frontmatter = start(json!([
-        { "action": [ { "set": {
-            "nested": { "sha": format!("$({})", repo.counter()) },
-            "listed": [ format!("$({})", repo.counter()) ],
-            "mixed": format!("sha $({})", repo.counter()),
-        } } ] },
+        {
+            "set": {
+                "nested": { "sha": format!("$({})", repo.counter()) },
+                "listed": [format!("$({})", repo.counter())],
+                "mixed": format!("sha $({})", repo.counter()),
+            },
+        },
     ]));
     let config = prepared(&repo, &frontmatter);
     let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
@@ -460,21 +470,23 @@ fn nested_and_mixed_values_stay_data() {
 #[test]
 fn initialize_refuses_a_shell_assignment_in_any_item() {
     for guard in ["true", "false"] {
-        let frontmatter = json!({ "initialize": { "stack": [
-            { "action": [ { "message": "first" } ] },
-            { "when": guard, "action": [ { "set": { "v": "$(git status)::ok" } } ] },
-        ] } });
+        let frontmatter = json!({
+            "initialize": [
+                { "message": "first" },
+                { "when": guard, "then": [{ "set": { "v": "$(git status)::ok" } }] },
+            ],
+        });
         let error = parse_lifecycle_config(&frontmatter, Path::new("t.md")).unwrap_err();
         assert!(
             matches!(&error, CompositionError::LifecycleActionPlacement { property, action, .. }
-                if property == "initialize.stack[1].action" && action == "shell"),
+                if property == "initialize[1].then[0].set" && action == "shell"),
             "{guard}: {error:?}"
         );
     }
     // A `start` assignment is legal beside an `initialize` block.
     let legal = json!({
-        "initialize": { "stack": [ { "action": [ { "set": { "phase": "boot" } } ] } ] },
-        "start": { "stack": [ { "action": [ { "set": { "v": "$(git status)::ok" } } ] } ] },
+        "initialize": [{ "set": { "phase": "boot" } }],
+        "start": [{ "set": { "v": "$(git status)::ok" } }],
     });
     parse_lifecycle_config(&legal, Path::new("t.md")).unwrap();
 }
@@ -508,7 +520,7 @@ fn set_shell_value_reader_robustness_matrix() {
         ("mixed value is data", json!(format!("sha $({command})")), Cell::Value(json!(format!("sha $({command})")))),
     ];
     for (name, value, cell) in cells {
-        let frontmatter = start(json!([{ "action": [{ "set": { "v": value } }] }]));
+        let frontmatter = start(json!([{ "set": { "v": value } }]));
         match cell {
             Cell::Value(expected) => {
                 let config = prepared(&repo, &frontmatter);
@@ -528,7 +540,7 @@ fn set_shell_value_reader_robustness_matrix() {
     }
 
     // A duplicate destination key is a frontmatter parse error, never last-wins.
-    let text = "---\nstart:\n  stack:\n    - action:\n        - set:\n            v: \"$(git status)::ok\"\n            v: \"$(git status)::ok\"\n---\n".to_string();
+    let text = "---\nstart:\n  - set:\n      v: \"$(git status)::ok\"\n      v: \"$(git status)::ok\"\n---\n".to_string();
     let error = darkmatter::markdown::Markdown::try_from_content(text).expect_err("duplicate key");
     assert!(error.to_string().contains("duplicate"), "{error}");
 }

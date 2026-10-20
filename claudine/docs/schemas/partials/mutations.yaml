@@ -9,4 +9,4 @@ types:
             returns(object);
             category(Frontmatter);
             fallible;
-        ) -> Sets a top-level key in the `doc` namespace; no external mutation
+        ) -> Sets a top-level key in the `fm` namespace; no external mutation

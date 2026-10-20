@@ -17,6 +17,10 @@
 //!   arm's declared globs lower to `x-darkmatter-match` on its file fragment
 //!   and rule that arm out for an existing file outside them (see
 //!   [`crate::markdown::schemas::file_match`]).
+//! - **Repeated constraints on one atom never overwrite a keyword.** Patterns
+//!   (including `not-empty`) are conjunctive, bounds keep the stricter value
+//!   per kind, `scheme(...)` lists intersect, and repeated `default(...)`
+//!   values must agree. Contradictions are [`SchemaError::Convert`].
 //! - **`file` existence posture** is carried by the emitted `format`: bare
 //!   `file` lowers to the lazy `darkmatter-file-reference` (syntax-only),
 //!   `file(eager)` lowers to the eager `darkmatter-file` (resolve + exists).
@@ -30,16 +34,18 @@
 
 use serde_json::{Map, Value, json};
 
+use super::alphanumeric::AlphanumericOptions;
 use super::types::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
     SimplifiedType, TypeExpr,
 };
 use crate::markdown::compose::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
-use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, file_match_patterns};
+use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, file_match_groups};
 use crate::markdown::schemas::format::{
     DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
     DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD,
+    DARKMATTER_SHELL_FORMAT, DARKMATTER_TYPE_ANNOTATION,
     DARKMATTER_TIME_FORMAT, DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
 };
 
@@ -93,7 +99,8 @@ fn shape_to_object_schema(shape: &SchemaShape) -> Result<Map<String, Value>, Sch
     // Root shapes default to open (`additionalProperties: true`); a pattern-keyed
     // root switches to closed-object semantics inside `object_body_from_shape`.
     let mut obj = object_body_from_shape("<root>", shape, Value::Bool(true))?;
-    apply_object_arity(&mut obj, &shape.constraints);
+    reject_block_constraints("<root>", shape, ObjectScope::Root)?;
+    apply_object_arity("<root>", &mut obj, shape.constraints.iter())?;
     Ok(obj)
 }
 
@@ -124,34 +131,44 @@ fn union_to_root_schema(arms: &[SchemaArm]) -> Result<Map<String, Value>, Schema
 
 /// Emits a root-union arm's declared file globs onto its converted fragments.
 /// Called for each simplified arm even when other arms use raw JSON Schema.
+///
+/// Every `match(...)` group is emitted in one keyword: a single group keeps
+/// the flat pattern array, several become an array of pattern arrays (see
+/// [`crate::markdown::schemas::file_match`], "Keyword encoding"). One keyword,
+/// not an `allOf` of keywords, because root-union arm selection recognizes a
+/// glob rejection by a schema path that ends in the keyword.
 pub(crate) fn attach_root_union_match(arm_schema: &mut Value, shape: &SchemaShape) {
     let Some(Value::Object(properties)) = arm_schema.get_mut("properties") else {
         return;
     };
     for (name, fragment) in properties.iter_mut() {
-        if let Some(patterns) = shape.properties.get(name).and_then(file_match_patterns) {
-            attach_match_keyword(fragment, patterns);
+        if let Some(groups) = shape.properties.get(name).and_then(file_match_groups) {
+            let keyword = match groups.as_slice() {
+                [only] => json!(only),
+                several => json!(several),
+            };
+            attach_match_keyword(fragment, &keyword);
         }
     }
 }
 
-fn attach_match_keyword(fragment: &mut Value, patterns: &[String]) {
+fn attach_match_keyword(fragment: &mut Value, keyword: &Value) {
     match fragment {
         Value::Object(map) => {
             if map.get("format").and_then(Value::as_str).is_some_and(|format| {
                 format == DARKMATTER_FILE_FORMAT || format == DARKMATTER_FILE_REFERENCE_FORMAT
             }) {
-                map.insert(DARKMATTER_MATCH_KEYWORD.into(), json!(patterns));
+                map.insert(DARKMATTER_MATCH_KEYWORD.into(), keyword.clone());
             }
             for key in ["items", "anyOf", "oneOf", "allOf"] {
                 if let Some(nested) = map.get_mut(key) {
-                    attach_match_keyword(nested, patterns);
+                    attach_match_keyword(nested, keyword);
                 }
             }
         }
         Value::Array(items) => {
             for item in items {
-                attach_match_keyword(item, patterns);
+                attach_match_keyword(item, keyword);
             }
         }
         _ => {}
@@ -162,62 +179,59 @@ fn attach_match_keyword(fragment: &mut Value, patterns: &[String]) {
 
 fn property_def_to_schema(name: &str, def: &PropertyDef) -> Result<(Value, bool), SchemaError> {
     match def {
-        PropertyDef::Single(atom) => atom_to_schema(name, atom),
-        PropertyDef::Union(arms) => union_property_to_schema(name, arms),
+        // A postfixed union reference without `[]` (`U(required)`, `U -> text`),
+        // or a union whose flattened postfixed arm hoisted its markers
+        // (`[U(required), T]`), is a property union whose markers and
+        // description sit on `atom`.
+        PropertyDef::Single(atom) => match atom.union_arms() {
+            Some(arms) if !atom.is_array => union_property_to_schema(name, arms, Some(atom)),
+            _ => atom_to_schema(name, atom),
+        },
+        PropertyDef::Union(arms) => union_property_to_schema(name, arms, None),
     }
 }
 
+/// Lowers a property-level union. `container` is the atom of a postfixed
+/// union reference, whose markers apply to the property as a whole and whose
+/// description describes the union rather than any arm.
 fn union_property_to_schema(
     name: &str,
     arms: &[PropertyAtom],
+    container: Option<&PropertyAtom>,
 ) -> Result<(Value, bool), SchemaError> {
     // Union requiredness must be known *before* building arms: a required
-    // union (any arm carries `required`) gets neither the property-level
-    // `null` arm nor the optional-`file` empty-string tolerance. Deciding
-    // this up front lets each arm be built with empty-`file` suppression so a
-    // required union containing an otherwise-optional `file` arm still rejects
-    // the `""` sentinel.
-    let required = arms.iter().any(PropertyAtom::is_required);
+    // union (any arm carries `required`, and no arm admits null) gets neither
+    // the property-level `null` arm nor the optional-`file` empty-string
+    // tolerance. Deciding this up front lets each arm be built with
+    // empty-`file` suppression so a required union containing an
+    // otherwise-optional `file` arm still rejects the `""` sentinel.
+    let admits_null = container.map_or_else(
+        || arms.iter().any(PropertyAtom::admits_null),
+        PropertyAtom::admits_null,
+    );
+    let required = !admits_null
+        && container.map_or_else(
+            || arms.iter().any(PropertyAtom::marks_required),
+            PropertyAtom::marks_required,
+        );
     // `generated` is a property-level ownership semantic: if any arm is
     // host-supplied, the static `required` entry is suppressed (spec point 1).
-    let any_generated = arms.iter().any(atom_is_generated);
+    let any_generated = container.map_or_else(
+        || arms.iter().any(PropertyAtom::is_generated),
+        PropertyAtom::is_generated,
+    );
 
-    let mut any_of = Vec::with_capacity(arms.len());
-    let mut hoisted_default: Option<Value> = None;
-
-    for atom in arms {
-        // Use the bare fragment builder so the optional `null` wrapper is
-        // applied once at the property level, not per arm. The optional-`file`
-        // empty-string arm is allowed only when the union itself is optional.
-        let (arm_value, _arm_required) =
-            atom_fragment_without_null_wrap(name, atom, !required)?;
-        // Hoist any `default` key off the arm. `atom_fragment_without_null_wrap`
-        // always returns a `Value::Object` for the converted fragment.
-        let mut arm_value = arm_value;
-        if let Value::Object(map) = &mut arm_value
-            && let Some(arm_default) = map.remove("default")
-        {
-            match &hoisted_default {
-                Some(existing) if existing != &arm_default => {
-                    return Err(SchemaError::Convert {
-                        property: name.to_string(),
-                        message: format!(
-                            "conflicting `default(...)` values across union arms: \
-                             {existing} vs {arm_default}"
-                        ),
-                    });
-                }
-                Some(_) => { /* identical default — collapse silently */ }
-                None => hoisted_default = Some(arm_default),
-            }
-        }
-        any_of.push(arm_value);
-    }
+    // The optional-`file` empty-string arm is allowed only when the union
+    // itself is optional.
+    let (any_of, hoisted_default) = union_arm_fragments(name, arms, !required)?;
 
     let mut union_schema = Map::new();
     union_schema.insert("anyOf".into(), Value::Array(any_of));
     if let Some(default_val) = hoisted_default {
         union_schema.insert("default".into(), default_val);
+    }
+    if let Some(description) = container.and_then(|atom| atom.description.as_ref()) {
+        union_schema.insert("description".into(), Value::String(description.clone()));
     }
     // Surface the ownership semantic on the property's schema object so
     // downstream tooling (LSP, completion, runtime validators) discovers it
@@ -226,7 +240,9 @@ fn union_property_to_schema(
         union_schema.insert("x-darkmatter-generated".into(), Value::Bool(true));
     }
 
-    let schema = if required {
+    // A union with a `null` or `unknown` arm already accepts null, so it needs
+    // no extra `null` arm.
+    let schema = if required || admits_null {
         Value::Object(union_schema)
     } else {
         // Lift the null arm into the existing anyOf array so the output
@@ -251,6 +267,45 @@ fn union_property_to_schema(
     Ok((schema, static_required))
 }
 
+/// Builds one fragment per union arm and hoists the arms' `default` values,
+/// which must agree, off them.
+///
+/// Each arm uses the bare fragment builder, so an optional `null` wrapper is
+/// applied once by the caller, never per arm.
+fn union_arm_fragments(
+    name: &str,
+    arms: &[PropertyAtom],
+    allow_optional_empty_file: bool,
+) -> Result<(Vec<Value>, Option<Value>), SchemaError> {
+    let mut any_of = Vec::with_capacity(arms.len());
+    let mut hoisted_default: Option<Value> = None;
+
+    for atom in arms {
+        let (mut arm_value, _arm_required) =
+            atom_fragment_without_null_wrap(name, atom, allow_optional_empty_file)?;
+        // `atom_fragment_without_null_wrap` always returns a `Value::Object`.
+        if let Value::Object(map) = &mut arm_value
+            && let Some(arm_default) = map.remove("default")
+        {
+            match &hoisted_default {
+                Some(existing) if existing != &arm_default => {
+                    return Err(SchemaError::Convert {
+                        property: name.to_string(),
+                        message: format!(
+                            "conflicting `default(...)` values across union arms: \
+                             {existing} vs {arm_default}"
+                        ),
+                    });
+                }
+                Some(_) => { /* identical default — collapse silently */ }
+                None => hoisted_default = Some(arm_default),
+            }
+        }
+        any_of.push(arm_value);
+    }
+    Ok((any_of, hoisted_default))
+}
+
 // ── Atom → JSON Schema fragment ──────────────────────────────────────────
 
 /// Wraps a finished typed fragment so an optional property also accepts
@@ -261,7 +316,13 @@ fn wrap_optional_null(inner: Value) -> Value {
 
 fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), SchemaError> {
     let (mut fragment, non_nullable) = atom_fragment_without_null_wrap(name, atom, true)?;
-    let generated = atom_is_generated(atom);
+    let generated = atom.is_generated();
+
+    // `null` and `unknown` already accept null and are never required, so they
+    // lower bare: `{"type": "null"}` and `{}`.
+    if atom.admits_null() {
+        return Ok((fragment, false));
+    }
 
     // Non-nullable atoms (those carrying `Required`) are emitted unchanged.
     // Optional atoms are wrapped so that JSON `null` validates as "absent".
@@ -331,15 +392,6 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     Ok((schema, false))
 }
 
-/// Reports whether an atom carries the `generated` constraint at either the
-/// value or array level. Used to suppress the static `required` entry for
-/// host-supplied properties (spec semantics point 1) while preserving the
-/// non-nullable type semantics of `required` (point 4).
-fn atom_is_generated(atom: &PropertyAtom) -> bool {
-    atom.property_constraints()
-        .any(|c| matches!(c, Constraint::Generated))
-}
-
 /// Builds the bare atom fragment without the general optional `null` wrapper.
 ///
 /// The returned fragment carries `default`/`description` annotations so that
@@ -356,12 +408,12 @@ fn atom_fragment_without_null_wrap(
     allow_optional_empty_file: bool,
 ) -> Result<(Value, bool), SchemaError> {
     // Required is hoisted out; default may appear on either constraints
-    // (single/value-level) or array_constraints (array-level). The last write
-    // wins, mirroring how a user reading left-to-right would expect.
+    // (single/value-level) or array_constraints (array-level). Repeated
+    // defaults must agree after number normalization (`3` == `3.0`).
     // `Generated` is similarly hoisted: it only surfaces as the
     // `x-darkmatter-generated: true` annotation, never as a typed fragment key.
-    let mut required = false;
-    let mut generated = false;
+    let required = atom.is_required();
+    let generated = atom.is_generated();
     let mut default_val: Option<Value> = None;
     // `example(...)` is documentation, not validation: the raw authored
     // reference strings are hoisted onto the `x-darkmatter-example` annotation
@@ -370,9 +422,21 @@ fn atom_fragment_without_null_wrap(
     let mut examples: Vec<String> = Vec::new();
     for c in atom.property_constraints() {
         match c {
-            Constraint::Required => required = true,
-            Constraint::Generated => generated = true,
-            Constraint::Default(v) => default_val = Some(normalize_json_number(v.clone())),
+            Constraint::Default(v) => {
+                let value = normalize_json_number(v.clone());
+                match &default_val {
+                    Some(existing) if existing != &value => {
+                        return Err(SchemaError::Convert {
+                            property: name.to_string(),
+                            message: format!(
+                                "conflicting `default(...)` values: {existing} vs {value}"
+                            ),
+                        });
+                    }
+                    Some(_) => {}
+                    None => default_val = Some(value),
+                }
+            }
             Constraint::Example(refs) => examples.extend(refs.iter().cloned()),
             _ => {}
         }
@@ -381,6 +445,42 @@ fn atom_fragment_without_null_wrap(
     let inner = match &atom.ty {
         TypeExpr::Primitive(ty) => type_fragment(name, *ty, &atom.constraints)?,
         TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
+        // The alternatives of each item (with `is_array`) or of a union
+        // nested as an arm. Items get no `null` wrapper or empty-file arm,
+        // like the items of any array.
+        TypeExpr::Union(arms) => {
+            let (any_of, arm_default) = union_arm_fragments(
+                name,
+                arms,
+                allow_optional_empty_file && !atom.is_array && !required,
+            )?;
+            if let Some(value) = arm_default {
+                // The resolver lifts an array-compatible arm default to the
+                // container of `U[]` and rejects any other.
+                if atom.is_array {
+                    return Err(SchemaError::Convert {
+                        property: name.to_string(),
+                        message: format!(
+                            "an item alternative carries `default({value})`, which cannot \
+                             default the array"
+                        ),
+                    });
+                }
+                match &default_val {
+                    Some(existing) if existing != &value => {
+                        return Err(SchemaError::Convert {
+                            property: name.to_string(),
+                            message: format!(
+                                "conflicting `default(...)` values: {existing} vs {value}"
+                            ),
+                        });
+                    }
+                    Some(_) => {}
+                    None => default_val = Some(value),
+                }
+            }
+            json!({ "anyOf": any_of })
+        }
         // An imported type must be inline-expanded by the resolver before
         // conversion, just as a root-union `FileRef` arm is. Reaching the
         // converter with one unresolved is a hard error (resolution lands in
@@ -515,12 +615,42 @@ fn inline_object_fragment(
     }
 
     let mut obj = object_body_from_shape(name, shape, Value::Bool(false))?;
-    // Object arity from both authoring surfaces desugars to the same emitted
-    // keys: the reserved `$constraints` block (`shape.constraints`) and the
-    // postfix `{ … }(min-keys(1))` form (`atom_constraints`).
-    apply_object_arity(&mut obj, &shape.constraints);
-    apply_object_arity(&mut obj, atom_constraints);
+    reject_block_constraints(name, shape, ObjectScope::Inline)?;
+    apply_object_arity(name, &mut obj, shape.constraints.iter().chain(atom_constraints))?;
     Ok(Value::Object(obj))
+}
+
+/// Where a `$constraints` block sits, which decides the keys it may hold.
+#[derive(Clone, Copy)]
+enum ObjectScope {
+    /// The block of an object-typed property. Its `required` / `generated`
+    /// were moved onto the property's atom by the parser.
+    Inline,
+    /// The root shape (or a root-union arm), which has no enclosing property.
+    Root,
+}
+
+/// Rejects `$constraints` keys that have no meaning on the block's object.
+/// The block parser accepts every key the grammar knows; only `min-keys` /
+/// `max-keys` lower here.
+fn reject_block_constraints(
+    name: &str,
+    shape: &SchemaShape,
+    scope: ObjectScope,
+) -> Result<(), SchemaError> {
+    for c in &shape.constraints {
+        if !matches!(c, Constraint::MinKeys(_) | Constraint::MaxKeys(_)) {
+            let place = match scope {
+                ObjectScope::Inline => "an inline object",
+                ObjectScope::Root => "the root object",
+            };
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!("`$constraints` key `{}` is not valid on {place}", block_key(c)),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Builds the `type` / `additionalProperties` / `properties` /
@@ -721,21 +851,111 @@ pub(in crate::markdown::schemas) fn has_lookaround(pattern: &str) -> bool {
 }
 
 /// Emits `minProperties` / `maxProperties` from `min-keys` / `max-keys` object
-/// arity constraints (Feature C / O-C3). Other constraints are ignored here:
-/// they are hoisted (`required` / `default` / `generated`) or rejected on the
-/// per-type / array-level paths.
-fn apply_object_arity(obj: &mut Map<String, Value>, constraints: &[Constraint]) {
+/// arity constraints (Feature C / O-C3). The `$constraints` block and the
+/// postfix form are one scope, so repeated bounds from either surface merge
+/// as [`Bounds`] do. Other constraints are ignored here: they are hoisted
+/// (`required` / `default` / `generated`) or rejected elsewhere.
+fn apply_object_arity<'c>(
+    name: &str,
+    obj: &mut Map<String, Value>,
+    constraints: impl Iterator<Item = &'c Constraint>,
+) -> Result<(), SchemaError> {
+    let mut keys = Bounds::default();
     for c in constraints {
         match c {
-            Constraint::MinKeys(n) => {
-                obj.insert("minProperties".into(), json!(*n));
-            }
-            Constraint::MaxKeys(n) => {
-                obj.insert("maxProperties".into(), json!(*n));
-            }
+            Constraint::MinKeys(n) => keys.lower(*n, c),
+            Constraint::MaxKeys(n) => keys.upper(*n, c),
             _ => {}
         }
     }
+    keys.emit(name, obj, "minProperties", "maxProperties", |n| json!(n))
+}
+
+/// Repeated bounds of one kind on one scope (string length, number, item
+/// count, or key count). The larger lower bound and the smaller upper bound
+/// win; equal bounds are valid; a lower bound above the upper bound is a
+/// [`SchemaError::Convert`] naming both constraints.
+///
+/// This is the backstop for repeats authored on one atom. Bounds merged from
+/// a reused named type are checked earlier by the resolver, which knows
+/// where each one came from.
+struct Bounds<'c, T> {
+    lower: Option<(T, &'c Constraint)>,
+    upper: Option<(T, &'c Constraint)>,
+}
+
+impl<T> Default for Bounds<'_, T> {
+    fn default() -> Self {
+        Self { lower: None, upper: None }
+    }
+}
+
+impl<'c, T: PartialOrd + Copy> Bounds<'c, T> {
+    fn lower(&mut self, value: T, constraint: &'c Constraint) {
+        if self.lower.is_none_or(|(current, _)| value > current) {
+            self.lower = Some((value, constraint));
+        }
+    }
+
+    fn upper(&mut self, value: T, constraint: &'c Constraint) {
+        if self.upper.is_none_or(|(current, _)| value < current) {
+            self.upper = Some((value, constraint));
+        }
+    }
+
+    fn emit(
+        self,
+        name: &str,
+        map: &mut Map<String, Value>,
+        lower_key: &str,
+        upper_key: &str,
+        to_json: impl Fn(T) -> Value,
+    ) -> Result<(), SchemaError> {
+        if let (Some((low, low_c)), Some((high, high_c))) = (self.lower, self.upper)
+            && low > high
+        {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!(
+                    "contradictory bounds: `{}` is greater than `{}`",
+                    bound_display(low_c),
+                    bound_display(high_c)
+                ),
+            });
+        }
+        if let Some((low, _)) = self.lower {
+            map.insert(lower_key.into(), to_json(low));
+        }
+        if let Some((high, _)) = self.upper {
+            map.insert(upper_key.into(), to_json(high));
+        }
+        Ok(())
+    }
+}
+
+/// A `$constraints` entry's key as authored; the item-count variants share
+/// the `min` / `max` grammar keyword with other bounds.
+fn block_key(c: &Constraint) -> &'static str {
+    match c {
+        Constraint::MinItems(_) => "min-items",
+        Constraint::MaxItems(_) => "max-items",
+        other => other.keyword(),
+    }
+}
+
+/// A bound constraint as authored, for contradiction messages.
+fn bound_display(c: &Constraint) -> String {
+    let value = match c {
+        Constraint::Min(n) | Constraint::Max(n) => number_to_json(*n).to_string(),
+        Constraint::MinLen(n)
+        | Constraint::MaxLen(n)
+        | Constraint::MinItems(n)
+        | Constraint::MaxItems(n)
+        | Constraint::MinKeys(n)
+        | Constraint::MaxKeys(n) => n.to_string(),
+        other => return other.keyword().to_string(),
+    };
+    format!("{}({value})", c.keyword())
 }
 
 fn apply_array_constraints(
@@ -743,6 +963,7 @@ fn apply_array_constraints(
     arr: &mut Map<String, Value>,
     constraints: &[Constraint],
 ) -> Result<(), SchemaError> {
+    let mut items = Bounds::default();
     for c in constraints {
         match c {
             Constraint::Required
@@ -752,12 +973,8 @@ fn apply_array_constraints(
             | Constraint::Eager => {
                 // Hoisted to the property level by `atom_to_schema`.
             }
-            Constraint::MinItems(n) => {
-                arr.insert("minItems".into(), json!(*n));
-            }
-            Constraint::MaxItems(n) => {
-                arr.insert("maxItems".into(), json!(*n));
-            }
+            Constraint::MinItems(n) => items.lower(*n, c),
+            Constraint::MaxItems(n) => items.upper(*n, c),
             Constraint::Unique => {
                 arr.insert("uniqueItems".into(), Value::Bool(true));
             }
@@ -772,7 +989,7 @@ fn apply_array_constraints(
             }
         }
     }
-    Ok(())
+    items.emit(name, arr, "minItems", "maxItems", |n| json!(n))
 }
 
 // ── Per-type fragment builders ───────────────────────────────────────────
@@ -840,13 +1057,29 @@ fn type_fragment(
         SimplifiedType::Schema => {
             semantic_type_fragment(name, "schema", DARKMATTER_SCHEMA_KEYWORD, constraints)
         }
-        SimplifiedType::Any => any_fragment(name, constraints),
+        SimplifiedType::Unknown => unknown_fragment(name, constraints),
+        SimplifiedType::Null => null_fragment(name, constraints),
+        SimplifiedType::Alphanumeric => alphanumeric_fragment(name, constraints),
+        SimplifiedType::Shell => shell_fragment(name, constraints),
     }
 }
 
 fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    string_fragment_with_base(name, "string", None, constraints)
+}
+
+/// A string fragment whose value must also match `base_pattern`, which stays
+/// separate from every authored pattern.
+fn string_fragment_with_base(
+    name: &str,
+    type_label: &str,
+    base_pattern: Option<String>,
+    constraints: &[Constraint],
+) -> Result<Value, SchemaError> {
     let mut m = Map::new();
     m.insert("type".into(), Value::String("string".into()));
+    let mut length = Bounds::default();
+    let mut patterns: Vec<String> = base_pattern.into_iter().collect();
     for c in constraints {
         match c {
             Constraint::Required
@@ -864,12 +1097,8 @@ fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
                     ),
                 );
             }
-            Constraint::MinLen(n) => {
-                m.insert("minLength".into(), json!(*n));
-            }
-            Constraint::MaxLen(n) => {
-                m.insert("maxLength".into(), json!(*n));
-            }
+            Constraint::MinLen(n) => length.lower(*n, c),
+            Constraint::MaxLen(n) => length.upper(*n, c),
             Constraint::NotEmpty => {
                 // Lookaround-free: any string containing at least one
                 // non-whitespace character. A lookaround-free pattern keeps this
@@ -877,15 +1106,45 @@ fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
                 // only Feature C pattern-key literal precedence opts a schema
                 // into `fancy-regex` — so the previous `^(?!\s*$).+` form (which
                 // the linear engine rejects) is not portable and `\S` is used.
-                m.insert("pattern".into(), Value::String(r"\S".into()));
+                push_unique(&mut patterns, r"\S");
             }
-            Constraint::Pattern(p) => {
-                m.insert("pattern".into(), Value::String(p.clone()));
-            }
-            other => return Err(invalid_constraint(name, "string", other)),
+            Constraint::Pattern(p) => push_unique(&mut patterns, p),
+            other => return Err(invalid_constraint(name, type_label, other)),
         }
     }
+    length.emit(name, &mut m, "minLength", "maxLength", |n| json!(n))?;
+    insert_patterns(&mut m, patterns);
     Ok(Value::Object(m))
+}
+
+fn push_unique(patterns: &mut Vec<String>, pattern: &str) {
+    if !patterns.iter().any(|existing| existing == pattern) {
+        patterns.push(pattern.to_string());
+    }
+}
+
+/// A value must satisfy every pattern. One pattern keeps the plain `pattern`
+/// keyword; several become `allOf` entries beside the base fragment's other
+/// keywords, never one combined regex. `coerce` recognizes the numberlike arm
+/// by its single `pattern` key, which this keeps unchanged.
+fn insert_patterns(m: &mut Map<String, Value>, patterns: Vec<String>) {
+    match <[String; 1]>::try_from(patterns) {
+        Ok([only]) => {
+            m.insert("pattern".into(), Value::String(only));
+        }
+        Err(patterns) if !patterns.is_empty() => {
+            m.insert(
+                "allOf".into(),
+                Value::Array(
+                    patterns
+                        .into_iter()
+                        .map(|pattern| json!({ "pattern": pattern }))
+                        .collect(),
+                ),
+            );
+        }
+        Err(_) => {}
+    }
 }
 
 fn date_family_fragment(
@@ -900,6 +1159,7 @@ fn date_family_fragment(
 fn number_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     let mut m = Map::new();
     let mut is_integer = false;
+    let mut range = Bounds::default();
     for c in constraints {
         match c {
             Constraint::Required
@@ -917,16 +1177,13 @@ fn number_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
                     ),
                 );
             }
-            Constraint::Min(n) => {
-                m.insert("minimum".into(), number_to_json(*n));
-            }
-            Constraint::Max(n) => {
-                m.insert("maximum".into(), number_to_json(*n));
-            }
+            Constraint::Min(n) => range.lower(*n, c),
+            Constraint::Max(n) => range.upper(*n, c),
             Constraint::Integer => is_integer = true,
             other => return Err(invalid_constraint(name, "number", other)),
         }
     }
+    range.emit(name, &mut m, "minimum", "maximum", number_to_json)?;
     m.insert(
         "type".into(),
         Value::String(if is_integer { "integer" } else { "number" }.into()),
@@ -1026,6 +1283,9 @@ fn url_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaE
     let mut m = Map::new();
     m.insert("type".into(), Value::String("string".into()));
     m.insert("format".into(), Value::String("uri".into()));
+    // Repeated `scheme(...)` lists intersect, in the first list's order.
+    let mut allowed: Option<Vec<String>> = None;
+    let mut authored: Vec<String> = Vec::new();
     for c in constraints {
         match c {
             Constraint::Required
@@ -1033,13 +1293,36 @@ fn url_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaE
             | Constraint::Generated
             | Constraint::Example(_) => {}
             Constraint::Scheme(schemes) => {
-                m.insert(
-                    "x-darkmatter-url-scheme".into(),
-                    Value::Array(schemes.iter().cloned().map(Value::String).collect()),
-                );
+                authored.push(format!("scheme({})", schemes.join(",")));
+                allowed = Some(match allowed {
+                    None => schemes.clone(),
+                    Some(mut current) => {
+                        current.retain(|scheme| schemes.contains(scheme));
+                        current
+                    }
+                });
             }
             other => return Err(invalid_constraint(name, "url", other)),
         }
+    }
+    if let Some(schemes) = allowed {
+        if schemes.is_empty() {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!(
+                    "contradictory constraints: {} share no scheme",
+                    authored
+                        .iter()
+                        .map(|c| format!("`{c}`"))
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                ),
+            });
+        }
+        m.insert(
+            "x-darkmatter-url-scheme".into(),
+            Value::Array(schemes.into_iter().map(Value::String).collect()),
+        );
     }
     Ok(Value::Object(m))
 }
@@ -1152,9 +1435,137 @@ fn expression_default_source(value: &Value) -> String {
     }
 }
 
-fn any_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
-    reject_unsupported(name, "any", constraints, &[])?;
+fn unknown_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    reject_unsupported(name, "unknown", constraints, &[])?;
     Ok(Value::Object(Map::new()))
+}
+
+/// Lowers `null` to `{ "type": "null" }`. A default must itself be null.
+fn null_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    reject_unsupported(name, "null", constraints, &[])?;
+    if let Some(default) = constraints.iter().find_map(|c| match c {
+        Constraint::Default(value) if !value.is_null() => Some(value),
+        _ => None,
+    }) {
+        return Err(SchemaError::Convert {
+            property: name.to_string(),
+            message: format!("`default({default})` is not valid on `null`; a `null` default must be null"),
+        });
+    }
+    Ok(json!({ "type": "null" }))
+}
+
+/// Lowers `alphanumeric` to a string matching its canonical options' regex
+/// beside every authored string constraint. The type and its canonical
+/// options are recorded as non-validating annotations so a JSON consumer can
+/// recover the type identity.
+fn alphanumeric_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    let options = constraints
+        .iter()
+        .filter_map(|c| match c {
+            Constraint::Options(options) => Some(options.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .collect::<AlphanumericOptions>()
+        .canonical();
+    let rest: Vec<Constraint> = constraints
+        .iter()
+        .filter(|c| !matches!(c, Constraint::Options(_)))
+        .cloned()
+        .collect();
+    let mut fragment =
+        string_fragment_with_base(name, "alphanumeric", Some(options.pattern()), &rest)?;
+    check_alphanumeric_values(name, &fragment, &rest)?;
+    if let Value::Object(map) = &mut fragment {
+        map.insert(
+            DARKMATTER_TYPE_ANNOTATION.into(),
+            json!(SimplifiedType::Alphanumeric.as_keyword()),
+        );
+        map.insert(
+            "x-darkmatter-options".into(),
+            Value::Array(options.keywords().map(|keyword| json!(keyword)).collect()),
+        );
+    }
+    Ok(fragment)
+}
+
+/// Fails the load when an `alphanumeric` `default(…)` or `suggest(…)` value is
+/// not itself a valid value of the type, judged by the lowered fragment (the
+/// option pattern plus every authored string constraint) without coercion.
+///
+/// Unlike other types' advisory suggestions, which are only linted, an invalid
+/// `alphanumeric` suggestion is a schema error.
+fn check_alphanumeric_values(
+    name: &str,
+    fragment: &Value,
+    constraints: &[Constraint],
+) -> Result<(), SchemaError> {
+    let mut values = Vec::new();
+    for constraint in constraints {
+        match constraint {
+            Constraint::Default(value) => values.push(("default", value.clone())),
+            Constraint::Suggest(candidates) => values.extend(
+                candidates
+                    .iter()
+                    .map(|candidate| ("suggest", candidate.interpreted.clone())),
+            ),
+            _ => {}
+        }
+    }
+    if values.is_empty() {
+        return Ok(());
+    }
+    let mut target = fragment.clone();
+    if let Value::Object(map) = &mut target {
+        map.remove("default");
+        map.remove("x-darkmatter-suggest");
+    }
+    let validator = super::super::validate::build_structural_validator(&target)?;
+    match values.into_iter().find(|(_, value)| !validator.is_valid(value)) {
+        Some((keyword, value)) => Err(SchemaError::Convert {
+            property: name.to_string(),
+            message: format!("`{keyword}({value})` is not a valid `alphanumeric` value for this type"),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Lowers `shell` to `{ "type": "string", "format": "darkmatter-shell" }`.
+/// Constraint applicability mirrors `expression`. A `default(…)` must be a
+/// valid `shell` value after the text conversion supplied values receive: a
+/// boolean or number default becomes its text, and a structured or null
+/// default fails to load.
+fn shell_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    reject_unsupported(name, "shell", constraints, &[])?;
+    for c in constraints {
+        let Constraint::Default(value) = c else {
+            continue;
+        };
+        let text = match value {
+            Value::String(text) => text.clone(),
+            Value::Bool(flag) => flag.to_string(),
+            Value::Number(number) => number.to_string(),
+            Value::Null | Value::Array(_) | Value::Object(_) => {
+                return Err(SchemaError::Convert {
+                    property: name.to_string(),
+                    message: format!(
+                        "`default({value})` is not valid on `shell`; a `shell` default must be text"
+                    ),
+                });
+            }
+        };
+        if text.chars().all(char::is_whitespace) {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: format!(
+                    "`default({value})` is not a valid `shell` value; a command needs a \
+                     non-whitespace character"
+                ),
+            });
+        }
+    }
+    Ok(json!({ "type": "string", "format": DARKMATTER_SHELL_FORMAT }))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1974,6 +2385,8 @@ config: "{ host: string }(required)"
             ("time(required)", vec!["type", "format"]),
             ("email(required)", vec!["type", "format"]),
             ("any(required)", vec![]),
+            ("unknown(required)", vec![]),
+            ("null(required)", vec!["type"]),
             (
                 "string(pattern(^[a-z]+$))[](min(1); max(5); unique; required)",
                 vec!["type", "items", "minItems", "maxItems", "uniqueItems"],
@@ -2005,7 +2418,6 @@ config: "{ host: string }(required)"
             "datetime",
             "time",
             "email",
-            "any",
             "string(pattern(^[a-z]+$))[](min(1); max(5); unique)",
         ] {
             let v = optional_atom_value(input);
@@ -2154,24 +2566,49 @@ config: "{ host: string }(required)"
     }
 
     #[test]
-    fn optional_any_accepts_null_and_required_any_is_presence_only() {
-        // Compatibility preservation: `any` already includes every JSON value,
-        // so the optional wrapper adds null and the required wrapper is only
-        // a presence check.
-        let schema = convert("opt: any");
+    fn unknown_accepts_null_and_omission_whatever_its_presence_marker() {
+        // `required` has no effect on `unknown`/`any`: absence, null, and
+        // every native value validate, and the key never enters `required`.
+        for declaration in ["opt: any", "opt: unknown", "opt: 'any(required)'", "opt: 'unknown(required)'"] {
+            let schema = convert(declaration);
+            assert_eq!(schema["properties"]["opt"], json!({}), "{declaration}");
+            assert!(schema.get("required").is_none(), "{declaration}");
+            let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
+            assert!(v.is_valid(&json!({})), "{declaration}: absent");
+            assert!(v.is_valid(&json!({ "opt": null })), "{declaration}: null");
+            assert!(v.is_valid(&json!({ "opt": { "nested": [1, null, "x"] } })), "{declaration}");
+        }
+    }
+
+    #[test]
+    fn null_admitting_properties_lower_bare_and_never_enter_required() {
+        for (declaration, expected) in [
+            ("p: 'null'", json!({ "type": "null" })),
+            ("p: 'null(required)'", json!({ "type": "null" })),
+            ("p: 'null(eager; required)'", json!({ "type": "null" })),
+            ("p: 'unknown(generated; required)'", json!({ "x-darkmatter-generated": true })),
+        ] {
+            let schema = convert(declaration);
+            assert_eq!(schema["properties"]["p"], expected, "{declaration}");
+            assert!(schema.get("required").is_none(), "{declaration}");
+        }
+
+        // A union with a null arm is optional and gains no second null arm;
+        // constraints on its other arms still apply to non-null values.
+        let schema = convert("p:\n  - 'string(required; min(3))'\n  - 'null'");
+        assert!(schema.get("required").is_none());
+        assert_eq!(schema["properties"]["p"]["anyOf"].as_array().unwrap().len(), 2);
         let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({})));
-        assert!(v.is_valid(&json!({ "opt": null })));
-        assert!(v.is_valid(&json!({ "opt": { "nested": [1, 2, 3] } })));
+        assert!(v.is_valid(&json!({ "p": null })));
+        assert!(v.is_valid(&json!({ "p": "abc" })));
+        assert!(!v.is_valid(&json!({ "p": "ab" })));
 
-        let required_schema = convert("req: 'any(required)'");
-        let v_req =
-            crate::markdown::schemas::validate::build_structural_validator(&required_schema).unwrap();
-        assert!(!v_req.is_valid(&json!({})), "required any rejects absent");
-        assert!(
-            v_req.is_valid(&json!({ "req": null })),
-            "required any accepts null (presence only)"
-        );
+        // Item and child nullability leave the container required.
+        for declaration in ["p: 'null[](required)'", "p: 'unknown[](required)'", "p: '{ c: null }(required)'"] {
+            let schema = convert(declaration);
+            assert_eq!(schema["required"], json!(["p"]), "{declaration}");
+        }
     }
 
     #[test]
@@ -2775,5 +3212,178 @@ mod schema_plus_phase1 {
             atom_to_schema("test", &atom).is_err(),
             "an off-by-one large-integer default must fail schema load"
         );
+    }
+}
+
+/// Repeated constraints on one atom: no keyword is overwritten
+/// (`2026-10-13-named-type-presence-and-local-names`).
+#[cfg(test)]
+mod repeated_constraints {
+    use super::*;
+    use crate::markdown::schemas::simplified::grammar::parse_type_expr;
+    use crate::markdown::schemas::simplified::parse_yaml_schema;
+
+    fn lower(input: &str) -> Result<Value, SchemaError> {
+        let atom = parse_type_expr("p", input).expect("parse atom");
+        atom_fragment_without_null_wrap("p", &atom, false).map(|(fragment, _)| fragment)
+    }
+
+    fn convert_message(input: &str) -> String {
+        match lower(input) {
+            Err(SchemaError::Convert { property, message }) => {
+                assert_eq!(property, "p");
+                message
+            }
+            other => panic!("`{input}` must be a conversion error, got {other:?}"),
+        }
+    }
+
+    fn schema(yaml: &str) -> Result<Value, SchemaError> {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml");
+        to_json_schema(&parse_yaml_schema(&value).expect("schema parse"))
+    }
+
+    #[test]
+    fn several_patterns_become_all_of_entries_on_the_base_fragment() {
+        let v = lower("string(not-empty; pattern(^a); pattern(^a); max(9))").unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "type": "string",
+                "maxLength": 9,
+                "allOf": [{ "pattern": r"\S" }, { "pattern": "^a" }]
+            })
+        );
+    }
+
+    #[test]
+    fn a_repeated_identical_pattern_stays_a_single_keyword() {
+        assert_eq!(
+            lower("string(not-empty; not-empty)").unwrap(),
+            json!({ "type": "string", "pattern": r"\S" })
+        );
+    }
+
+    #[test]
+    fn repeated_bounds_keep_the_stricter_value_per_kind() {
+        let text = lower("string(min(3); min(5); max(80); max(50))").unwrap();
+        assert_eq!((&text["minLength"], &text["maxLength"]), (&json!(5), &json!(50)));
+        let number = lower("number(min(1.5); min(-2); max(10); max(10))").unwrap();
+        assert_eq!((&number["minimum"], &number["maximum"]), (&json!(1.5), &json!(10)));
+        let items = lower("string[](min(1); min(2); max(4); max(3))").unwrap();
+        assert_eq!((&items["minItems"], &items["maxItems"]), (&json!(2), &json!(3)));
+        let keys = lower("{ <string>: any }(min-keys(1); min-keys(2); max-keys(2))").unwrap();
+        assert_eq!((&keys["minProperties"], &keys["maxProperties"]), (&json!(2), &json!(2)));
+    }
+
+    #[test]
+    fn a_lower_bound_above_its_upper_bound_names_both_constraints() {
+        for (input, low, high) in [
+            ("string(min(10); max(5))", "`min(10)`", "`max(5)`"),
+            ("number(max(1); min(1.5))", "`min(1.5)`", "`max(1)`"),
+            ("string[](min(4); max(3))", "`min(4)`", "`max(3)`"),
+            ("{ <string>: any }(max-keys(1); min-keys(2))", "`min-keys(2)`", "`max-keys(1)`"),
+        ] {
+            let message = convert_message(input);
+            assert!(
+                message.contains("contradictory bounds") && message.contains(low) && message.contains(high),
+                "{input}: {message}"
+            );
+        }
+    }
+
+    /// A block-form object whose atom also carries postfix key bounds, the
+    /// shape a reused named object type takes at a constrained use site.
+    fn block_object_with_postfix(block: &str, postfix: Vec<Constraint>) -> Result<Value, SchemaError> {
+        let value: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&format!("p:\n  \"<string>\": any\n  $constraints:\n{block}")).unwrap();
+        let SimplifiedSchema::Single(mut shape) = parse_yaml_schema(&value).unwrap() else {
+            panic!("single schema");
+        };
+        let Some(PropertyDef::Single(atom)) = shape.properties.get_mut("p") else {
+            panic!("single property");
+        };
+        atom.constraints.extend(postfix);
+        to_json_schema(&SimplifiedSchema::Single(shape))
+    }
+
+    #[test]
+    fn block_and_postfix_key_bounds_are_one_scope() {
+        let v = block_object_with_postfix(
+            "    min-keys: 1\n    max-keys: 4\n",
+            vec![Constraint::MinKeys(2), Constraint::MaxKeys(5)],
+        )
+        .unwrap();
+        let object = &v["properties"]["p"]["anyOf"][1];
+        assert_eq!((&object["minProperties"], &object["maxProperties"]), (&json!(2), &json!(4)));
+        let err = block_object_with_postfix("    min-keys: 3\n", vec![Constraint::MaxKeys(2)]).unwrap_err();
+        assert!(err.to_string().contains("`min-keys(3)` is greater than `max-keys(2)`"), "{err}");
+    }
+
+    #[test]
+    fn schemes_intersect_and_an_empty_intersection_is_an_error() {
+        let v = lower("url(scheme(http, https); scheme(https, ftp))").unwrap();
+        assert_eq!(v["x-darkmatter-url-scheme"], json!(["https"]));
+        let message = convert_message("url(scheme(http); scheme(https))");
+        assert!(message.contains("`scheme(http)` and `scheme(https)` share no scheme"), "{message}");
+    }
+
+    #[test]
+    fn repeated_defaults_must_agree_after_number_normalization() {
+        assert_eq!(lower("number(default(3); default(3.0))").unwrap()["default"], json!(3));
+        let message = convert_message("string(default('3'); default(3))");
+        assert!(message.contains("conflicting `default(...)` values"), "{message}");
+    }
+
+    #[test]
+    fn examples_are_kept_in_authored_order() {
+        let v = lower("string(example(./a.md); example(./b.md, ./c.md))").unwrap();
+        assert_eq!(v["x-darkmatter-example"], json!(["./a.md", "./b.md", "./c.md"]));
+    }
+
+    #[test]
+    fn block_presence_flags_mean_the_postfix_on_an_object_property() {
+        let block = schema("p:\n  a: string\n  $constraints:\n    required: true\n").unwrap();
+        let postfix = schema("p: \"{ a: string }(required)\"\n").unwrap();
+        assert_eq!(block, postfix);
+        let block = schema("p:\n  a: string\n  $constraints:\n    required: true\n    generated: true\n").unwrap();
+        let postfix = schema("p: \"{ a: string }(required; generated)\"\n").unwrap();
+        assert_eq!(block, postfix);
+    }
+
+    #[test]
+    fn block_keys_without_object_meaning_are_rejected() {
+        for key in ["not-empty", "unique", "integer"] {
+            let err = schema(&format!("p:\n  a: string\n  $constraints:\n    {key}: true\n")).unwrap_err();
+            assert!(
+                err.to_string().contains(&format!("`$constraints` key `{key}` is not valid on an inline object")),
+                "{key}: {err}"
+            );
+        }
+        let err = schema("p:\n  a: string\n  $constraints:\n    min-items: 1\n").unwrap_err();
+        assert!(err.to_string().contains("key `min-items` is not valid on an inline object"), "{err}");
+        for key in ["required", "generated"] {
+            let err = schema(&format!("a: string\n$constraints:\n  {key}: true\n")).unwrap_err();
+            assert!(
+                err.to_string().contains(&format!("`$constraints` key `{key}` is not valid on the root object")),
+                "{key}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn several_match_groups_emit_nested_arrays_and_one_group_a_flat_array() {
+        let v = schema(
+            "- {doc: \"file(match('*.md'); match('guide*', '!guide-old*'))\", kind: 'literal(a)'}\n\
+             - {doc: \"file(match('*.txt'))\", kind: 'literal(b)'}\n",
+        )
+        .unwrap();
+        let keyword = |arm: usize| v["anyOf"][arm]["properties"]["doc"].to_string();
+        assert!(
+            keyword(0).contains(r#""x-darkmatter-match":[["*.md"],["guide*","!guide-old*"]]"#),
+            "{}",
+            keyword(0)
+        );
+        assert!(keyword(1).contains(r#""x-darkmatter-match":["*.txt"]"#), "{}", keyword(1));
     }
 }

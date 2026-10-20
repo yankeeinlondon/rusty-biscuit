@@ -246,8 +246,8 @@ fn shipped_implement_plan_launches_without_a_sibling_spec() {
     copy_shipped_prompts(&prompts);
     let implement_plan = fs::read_to_string(prompts.join("_implement/implement-plan.md")).unwrap();
     assert!(
-        implement_plan.contains("epilog: null"),
-        "the normal invocation must exercise the shipped mapping-only lifecycle action"
+        implement_plan.contains("frontmatter(log, 'message_to_agent')"),
+        "the normal invocation must exercise the shipped persisted handoff reader"
     );
     let feature_dir = fixture.home().join("features/no-spec-here");
     fs::create_dir_all(&feature_dir).unwrap();
@@ -648,6 +648,55 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
     assert_clean_lifecycle(&rendered);
 }
 
+/// With nothing staged, the shipped commit prompt's `initialize` skips the
+/// document: it exits zero and no agent launches. A `stop` there would end
+/// only `initialize` and still launch the agent with nothing to commit.
+#[cfg(unix)]
+#[test]
+fn shipped_commit_prompt_with_nothing_staged_launches_no_agent() {
+    use common::{CliProcessFixture, strip_ansi, write, write_executable};
+
+    let fixture = CliProcessFixture::named("shipped-commit-empty");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    write(
+        &fixture.cwd().join(".claudine/memory/commits.md"),
+        "# Commit lessons\n",
+    );
+    // An unstaged change: the dirty tree is not what `initialize` asks about.
+    write(&fixture.cwd().join("unstaged.txt"), "unstaged\n");
+
+    std::fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-codex"),
+        fixture.bin_dir().join("codex"),
+    ).unwrap();
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 99\n");
+    let launches = fixture.workspace_path().join("fake-codex");
+    let output = fixture
+        .command()
+        .env("FAKE_CODEX_DIR", &launches)
+        .env("FAKE_CODEX_PLAN", "ok")
+        .arg("compose")
+        .arg(prompts.join("commit.md"))
+        .args(["-y", "--codex"])
+        .output()
+        .unwrap();
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(output.status.success(), "a skipped commit must exit zero:\n{rendered}");
+    assert!(
+        !launches.join("argv-1.json").exists(),
+        "no agent may launch with nothing staged:\n{rendered}"
+    );
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
+    assert_clean_lifecycle(&rendered);
+}
+
 /// Composes `implement-plan.md` once through the normal CLI path and returns
 /// the prompt the provider received.
 ///
@@ -700,68 +749,64 @@ fn deliver_implement_plan_prompt(
         .unwrap_or_else(|_| panic!("the provider must have started:\n{rendered}"))
 }
 
-/// `initialize` runs `ensure_file: log` before the body composes, so the log
-/// always exists by the time the logging blocks are evaluated. The "start the
-/// log" instructions must therefore key on an *unstarted* log (missing, or
-/// present with no frontmatter and a blank body), not on a missing one —
-/// otherwise a fresh implementation is told the log "already exists" and never
-/// learns to write its title and metadata.
 #[cfg(unix)]
-#[test]
-fn shipped_implement_plan_logging_instructions_follow_log_content() {
-    use common::CliProcessFixture;
+const IMPLEMENT_LOG_CASES: &[(Option<&str>, u32)] = &[
+    (None, 1),
+    (Some(""), 1),
+    (Some("\n  \n"), 1),
+    (Some("---\nmessage_to_agent: Phase 2 is complete; begin Phase 3.\n---\n# Implementation Log\n"), 3),
+    (Some("---\nspec: fixes/case/spec.md\n---\n"), 2),
+    (Some("# Implementation Log\n\n## Phase 1\n\n- did things\n"), 2),
+    (Some("---\nstarted_phase: 1\n---\n# Implementation Log\n\n## Phase 1\n"), 1),
+];
 
-    const UNSTARTED: &str = "the log file for this implementation has not been started yet";
-    const STARTED: &str = "the log file already has content from earlier work";
-
-    let fixture = CliProcessFixture::named("implement-plan-logging");
+/// Initialization creates missing logs and preserves existing bytes; the body
+/// starts blank logs and appends to logs with either frontmatter or a body.
+#[cfg(unix)]
+fn assert_implement_plan_logging_instructions(row: usize) {
+    let (existing, phase) = IMPLEMENT_LOG_CASES[row];
+    let fixture = common::CliProcessFixture::named("implement-plan-logging");
     fixture.initialize_repository();
     fixture.seed_user_config();
     let prompts = fixture.cwd().join("prompts");
     copy_shipped_prompts(&prompts);
     let case = fixture.cwd().join("fixes/case");
     let log = case.join("implementation-log.md");
-
-    // Missing log: initialize creates it empty, and the prompt starts it.
-    assert!(!log.exists());
-    let fresh = deliver_implement_plan_prompt(&fixture, &prompts, &case, 1);
-    assert_eq!(
-        std::fs::read_to_string(&log).expect("initialize must create the log"),
-        "",
-        "ensure_file creates an empty log"
-    );
-    assert!(fresh.contains(UNSTARTED), "a fresh log must be started:\n{fresh}");
-    assert!(fresh.contains("# Implementation Log for"), "title instructions:\n{fresh}");
-    assert!(!fresh.contains(STARTED), "a fresh log has no prior content:\n{fresh}");
-
-    // An empty or whitespace-only log left by an earlier initialize is still unstarted.
-    for unstarted in ["", "\n  \n"] {
-        std::fs::write(&log, unstarted).unwrap();
-        let prompt = deliver_implement_plan_prompt(&fixture, &prompts, &case, 1);
-        assert!(prompt.contains(UNSTARTED), "{unstarted:?} is unstarted:\n{prompt}");
-        assert!(!prompt.contains(STARTED), "{unstarted:?} is unstarted:\n{prompt}");
+    if let Some(existing) = existing { common::write(&log, existing); }
+    let prompt = deliver_implement_plan_prompt(&fixture, &prompts, &case, phase);
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), existing.unwrap_or(""), "log preserved");
+    let started = existing.is_some_and(|text| !text.trim().is_empty());
+    assert_eq!(prompt.contains("the log file already has content from earlier work"), started, "{prompt}");
+    assert_eq!(prompt.contains("the log file for this implementation has not been started yet"), !started, "{prompt}");
+    assert_eq!(prompt.contains("# Implementation Log for"), !started, "{prompt}");
+    if started {
+        assert_eq!(prompt.contains(&format!("we do have the log entries for {}", phase - 1)), phase > 1, "{prompt}");
     }
+}
 
-    // Frontmatter alone, or a body alone, means an earlier phase started the log;
-    // ensure_file must keep those bytes and the prompt must append to them.
-    for (started, phase) in [
-        ("---\nmessage_to_agent: Phase 2 is complete; begin Phase 3.\n---\n# Implementation Log\n", 3),
-        ("---\nspec: fixes/case/spec.md\n---\n", 2),
-        ("# Implementation Log\n\n## Phase 1\n\n- did things\n", 2),
-        ("---\nstarted_phase: 1\n---\n# Implementation Log\n\n## Phase 1\n", 1),
-    ] {
-        std::fs::write(&log, started).unwrap();
-        let prompt = deliver_implement_plan_prompt(&fixture, &prompts, &case, phase);
-        assert_eq!(std::fs::read_to_string(&log).unwrap(), started, "log preserved");
-        assert!(prompt.contains(STARTED), "{started:?} is started:\n{prompt}");
-        assert!(!prompt.contains(UNSTARTED), "{started:?} is started:\n{prompt}");
-        assert!(!prompt.contains("# Implementation Log for"), "no re-title:\n{prompt}");
-        assert_eq!(
-            prompt.contains(&format!("we do have the log entries for {}", phase - 1)),
-            phase > 1,
-            "prior-phase pointer tracks the phase:\n{prompt}"
-        );
-    }
+#[cfg(unix)]
+macro_rules! implement_log_tests {
+    ($($name:ident => $row:literal),* $(,)?) => {
+        $(#[test]
+        fn $name() { assert_implement_plan_logging_instructions($row); })*
+
+        #[test]
+        fn every_implement_log_case_has_a_test() {
+            let covered = std::collections::BTreeSet::from([$($row),*]);
+            assert_eq!(covered, (0..IMPLEMENT_LOG_CASES.len()).collect());
+        }
+    };
+}
+
+#[cfg(unix)]
+implement_log_tests! {
+    implement_plan_logging_starts_missing_log => 0,
+    implement_plan_logging_starts_empty_log => 1,
+    implement_plan_logging_starts_whitespace_log => 2,
+    implement_plan_logging_preserves_handoff_and_routes => 3,
+    implement_plan_logging_preserves_frontmatter_only => 4,
+    implement_plan_logging_preserves_body_only => 5,
+    implement_plan_logging_preserves_first_phase => 6,
 }
 
 fn frontmatter_value(markdown: &Markdown) -> Value {
@@ -923,4 +968,41 @@ fn shipped_prompts_name_specs_by_directory_identity() {
         })
         .collect();
     assert!(defects.is_empty(), "{}", defects.join("\n"));
+}
+
+fn assert_feature_review_next_spec_route(present: bool) {
+    let fixture = common::CliProcessFixture::named("feature-review-next-spec");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    common::write_dry_run_provider_stub(fixture.bin_dir(), "codex");
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    common::write(&fixture.cwd().join("current/spec.md"), "---\nreview_iterations: 0\n---\nCurrent spec.\n");
+    common::write(&fixture.cwd().join("following/spec.md"), "# Following spec\n");
+    common::write(&fixture.cwd().join("following/plan.md"), "# Following plan\n");
+    let mut command = fixture.command();
+    command.arg("compose").arg(prompts.join("_reviews/feature-review.md"))
+        .arg("spec=current/spec.md").args(["--dry-run", "--codex"]);
+    if present { command.arg("next_spec=following/spec.md"); }
+    let output = command.output().expect("feature review composes");
+    let rendered = common::strip_ansi(&format!("{}{}",
+        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)));
+    assert!(output.status.success(), "{rendered}");
+    assert_eq!(rendered.contains("### Spec and Plan Refresh"), present, "{rendered}");
+    if present {
+        assert!(rendered.contains("following/spec.md"), "{rendered}");
+        assert!(rendered.contains("following/plan.md"), "{rendered}");
+    }
+    assert!(!rendered.contains("removed"), "{rendered}");
+    assert!(!fixture.audio_spool().exists(), "no audio may be published");
+}
+
+#[test]
+fn feature_review_next_spec_input_drives_refresh_paths() {
+    assert_feature_review_next_spec_route(true);
+}
+
+#[test]
+fn feature_review_without_next_spec_omits_refresh_instructions() {
+    assert_feature_review_next_spec_route(false);
 }

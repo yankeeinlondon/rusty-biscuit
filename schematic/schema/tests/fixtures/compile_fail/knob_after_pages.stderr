@@ -1,0 +1,12 @@
+error[E0599]: no method named `page_size` found for struct `schematic_schema::schematic_runtime::pager::Pages<'a, A, R>` in the current scope
+ --> tests/fixtures/compile_fail/knob_after_pages.rs
+  |
+  |     let _ = client.list_releases("octo", "widgets").pages().page_size(5);
+  |                    --------------------------------         ^^^^^^^^^
+  |                    |
+  |                    method `page_size` is available on `schematic_schema::github::ListReleasesCall<'_>`
+  |
+help: there is a method `set_page_size` with a similar name
+  |
+6 |     let _ = client.list_releases("octo", "widgets").pages().set_page_size(5);
+  |                                                             ++++

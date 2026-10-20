@@ -424,10 +424,10 @@ mod tests {
 
     #[test]
     fn reserved_roots_are_the_catalog_namespaces_and_null() {
-        for root in ["ctx", "env", "doc", "current", "current_env", "null"] {
+        for root in ["ctx", "env", "fm", "current", "null"] {
             assert!(is_reserved_root(root), "{root}");
         }
-        for root in ["spec-name", "colour", "nul", "repo", "today", "branch"] {
+        for root in ["spec-name", "colour", "nul", "repo", "today", "branch", "doc", "current_env"] {
             assert!(!is_reserved_root(root), "{root}");
         }
     }

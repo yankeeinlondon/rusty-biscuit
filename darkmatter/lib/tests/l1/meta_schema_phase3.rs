@@ -98,7 +98,7 @@ fn semantic_defaults_use_the_passive_parser_authority() {
     }
 
     for invalid in [
-        "type-definition(default(not-a-type))",
+        "type-definition(default('string(min(nope))'))",
         "type-definition(default(true))",
         "schema(default(true))",
         "schema(default('https://example.com/schema.yaml'))",
@@ -117,7 +117,7 @@ fn semantic_type_descriptors_are_authoritative() {
             .unwrap_or_else(|| panic!("missing descriptor for {keyword}"));
         assert_eq!(
             descriptor.accepted_constraints,
-            "eager, default, required, generated"
+            ["default", "required", "generated"]
         );
         let description = descriptor.description.to_ascii_lowercase();
         for required in ["string", "mapping", "sequence", "parse-only", "dmls"] {

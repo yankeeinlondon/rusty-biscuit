@@ -102,7 +102,7 @@ impl DrainCommand {
             Self::Sequence => (
                 "sequence",
                 format!(
-                    "---\nsequence:\n  - only\nsuccess:\n  message: \"{MESSAGE}\"\n---\nRun step {{{{ state.name }}}}\n"
+                    "---\nsequence:\n  - only\nsuccess:\n  message: \"{MESSAGE}\"\n---\nRun step {{{{ seq.name }}}}\n"
                 ),
             ),
             Self::Wrapper => return vec!["claude".to_string(), "Say hello.".to_string()],

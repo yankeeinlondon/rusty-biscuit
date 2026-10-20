@@ -5,6 +5,7 @@ use super::auth::map_auth_strategy;
 use super::diagnostics::OpenApiDiagnostic;
 use super::mappings;
 use super::resolver::RefResolver;
+use crate::cross_origin::CrossOrigin;
 use crate::models::ModelCatalog;
 use crate::types::RestApi;
 
@@ -373,6 +374,11 @@ impl OpenApiImport {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         })
     }
 

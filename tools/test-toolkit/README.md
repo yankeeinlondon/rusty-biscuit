@@ -4,13 +4,14 @@ Shared test lifecycle helpers for the Rusty Biscuit workspace.
 
 ## What it provides
 
-This crate solves five common pain points when writing tests in a Rust workspace:
+This crate solves six common pain points when writing tests in a Rust workspace:
 
 1. **Tracing output in tests** — `trace_phase!` macro and `init_test_tracing()` to emit structured spans around setup/body/teardown phases.
 2. **Safe environment variable mutation** — `EnvGuard` RAII guard that restores env vars after test completion, even when tests panic.
 3. **Containing detached audio** — `LockedAudioSpool`, the one publication fixture for Playa's detached spool.
 4. **Nextest integration** — Works out of the box with the workspace `.config/nextest.toml` for slow-test detection and JUnit reporting.
 5. **Tests that never compile** — `test_layout`, the layout gate for a package that declares its test binaries explicitly (`autotests = false`).
+6. **Proving the arguments a program received** — `argv_recorder`, the body of a native executable that records its argument vector. A consuming package declares one thin `[[bin]]` whose `main` returns `test_toolkit::argv_recorder::main()`; its tests copy that binary onto the child's `PATH`, point `ARGV_RECORDER_FILE` at a file, and read every run back with `read_argv_records`. Optional `ARGV_RECORDER_STDOUT` and `ARGV_RECORDER_STDERR` values emit stream probes after a successful record, so redirection tests can use the same native executable on every OS.
 
 ## Usage
 

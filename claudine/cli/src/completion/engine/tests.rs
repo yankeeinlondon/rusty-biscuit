@@ -280,9 +280,9 @@ fn classifier_declines_when_cursor_crosses_double_dash_separator() {
 
 #[test]
 fn scan_reads_value_options_from_the_clap_surface() {
-    // `--step-timeout` and `--budget-ledger` were missing from the old
-    // hand-written list, so their value read as the composition file.
-    for flag in ["--step-timeout", "--model", "-m", "--set", "--fail-fast"] {
+    // `--step-timeout` was missing from the old hand-written list, so its
+    // value read as the composition file.
+    for flag in ["--step-timeout", "--model", "-m", "--set"] {
         let a = argv(&["claudine", "sequence", flag, "30m", "plan.md", ""]);
         let scan = scan_committed_positional(&a, 2, 5);
         assert_eq!(scan.file_arg.as_deref(), Some("plan.md"), "{flag}");

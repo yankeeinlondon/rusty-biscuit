@@ -35,6 +35,8 @@ Actions live inside event bindings under a provider's `events` map:
 
 When `matcher` is set, the binding only fires if the regex matches the relevant field. For example, `"matcher": "^Bash$"` restricts the binding to Bash tool invocations.
 
+A matcher can also be a Darkmatter condition over the same paths as [`when`](#available-paths), such as `"matcher": "hook.tool_name == 'Bash' && git.branch == 'main'"`. Claudine tries the string as a condition first; a bare word such as `Bash`, or a string that is not a valid condition, is compiled as a regex.
+
 ## Action Types
 
 Every action is a JSON object with a `"type"` discriminator. Claudine supports seven action types.
@@ -74,6 +76,9 @@ redact private preparation text.
 ```json
 { "type": "speak", "message": "Tool {{tool_name}} completed on {{git.branch}}" }
 ```
+
+The provider and voice come from the [`tts` setting](#text-to-speech-settings-tts);
+`speak` actions run only when `tts` is `true` or an object.
 
 ### `log`
 
@@ -251,6 +256,7 @@ The following paths can be referenced in `when` expressions:
 
 | Path Prefix | Description |
 |-------------|-------------|
+| `hook` / `hook.*` | The whole normalized event payload / one field of it (see [The `hook` root](#the-hook-root)) |
 | `env.*` | Shell environment variables (e.g. `env.CI`) |
 | `extra.*` | Arbitrary extra data attached to the event |
 | `tool_input.*` | Nested fields from the tool input JSON |
@@ -284,6 +290,40 @@ Only call a policy engine when `ctx.today` is available:
 }
 ```
 
+### The `hook` root
+
+`hook` names the event payload explicitly. Bare `hook` is the whole normalized
+payload (its event fields, `extra`, and the `os`, `hardware`, `git`, and
+`project` groups), and `hook.<path>` is one field of it. The unprefixed paths
+above read the same fields, so `tool_name` and `hook.tool_name` agree.
+
+```json
+{ "type": "speak", "message": "{{ hook.tool_name }} finished", "when": "hook.tool_name == 'Bash'" }
+```
+
+- A missing `hook.<path>` is absent (`null`); it never falls back to an
+  unprefixed field or another root.
+- `hook` does not contain the environment: `hook.env.HOME` is absent. Read
+  environment variables through `env.*`.
+- `hook.extra.doc` reaches an `extra` field named `doc`.
+- `hook` exists only in hook actions. A hook expression has no frontmatter, so
+  Darkmatter's document root `fm` does not apply here.
+
+#### Migrating from the `doc` root
+
+The payload root was previously named `doc`. It was renamed with no alias, so
+`doc` gets no special treatment in a hook expression:
+
+| Written as | Before | Now |
+| --- | --- | --- |
+| `when: "doc.tool_name == 'Bash'"` | compares the tool name | `doc.tool_name` is absent, so the action never runs |
+| `{{ doc.tool_name }}` in a template | the tool name | left in the output as literal text |
+| `{{ hook.tool_name }}` | left as literal text | the tool name |
+| `{{ hook }}` | left as literal text | the whole payload as JSON |
+
+Replace `doc.` with `hook.` (or drop the prefix) in every `when`, `matcher`,
+and template string. Claudine does not rewrite configuration automatically.
+
 ## Template Variables
 
 All string fields in actions (`message`, `template`, `command`, `args`) support Handlebars-style interpolation.
@@ -302,6 +342,7 @@ All string fields in actions (`message`, `template`, `command`, `args`) support 
 | `{{prompt}}` | User prompt text | before_prompt |
 | `{{agent_type}}` | Agent/subagent type | subagent events |
 | `{{notification_type}}` | Notification type | notification |
+| `{{hook}}` / `{{hook.<path>}}` | The whole payload as JSON / one field of it (see [The `hook` root](#the-hook-root)) | all events |
 
 ### Context Variables (auto-detected at runtime)
 
@@ -338,6 +379,66 @@ Shell environment variables are available via `{{env.VAR_NAME}}` with optional d
 ```
 
 The single-pipe `|` form is no longer supported (see the migration note in unified-events.md §3.7).
+
+## Text-to-speech settings (`tts`)
+
+The top-level `tts` key in `~/.claudine/config.json` (JSON5 accepted) chooses
+how Claudine speaks. It is read in three places: hook [`speak`](#speak)
+actions, the voice that composition lifecycle `say`/`speak` plays with, and
+[pre-warm](flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm),
+which synthesizes lifecycle phrases into the audio cache before their events
+fire. It is a user-scope setting only; it is never a frontmatter key.
+
+`tts` is either a boolean or an object:
+
+```json5
+{ tts: true }                                                      // hook speech on, default provider
+{ tts: false }                                                     // hook speech off (the default)
+{ tts: { provider: "kokoro", voice: "af_heart" } }                 // hook speech on, this provider and voice
+{ tts: { provider: "kokoro", voice: "af_heart", prewarm: false } } // same, without pre-warm
+{ tts: { prewarm: false } }                                        // default provider, without pre-warm
+```
+
+Every key of the object is optional:
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `provider` | string | the default provider | the TTS provider (`say`, `kokoro`, `espeak`, `elevenlabs`, …); absent selects the default provider, as `true` does |
+| `voice` | string or `{ male, female }` | absent | a voice ID, or one voice per gender |
+| `gender` | `male` \| `female` | `female` | which voice of a `{ male, female }` pair is used |
+| `prewarm` | boolean | `true` | `false` turns pre-warm off |
+
+What each shape does:
+
+| Value | Hook `speak` actions | Lifecycle `say` voice | Pre-warm |
+| --- | --- | --- | --- |
+| `tts` absent | off | auto-detected | on |
+| `true` | on, auto-detected provider | auto-detected | on |
+| `false` | off | auto-detected | on |
+| object with `provider`, no `prewarm` | on, with the object's provider and voice | the object's provider and voice | on |
+| object with `provider` and `prewarm: false` | as the same object without `prewarm` | as the same object without `prewarm` | off |
+| object without `provider` (for example `{ prewarm: false }`) | on, with the default provider, as `true` | as `true` | per its `prewarm` (on when absent) |
+
+Lifecycle `say` plays under every shape: `false` silences hook speech only, so
+it leaves lifecycle speech and its pre-warming on. `prewarm` exists only in the
+object form, so turning pre-warm off always writes an object, and an object
+also turns hook `speak` actions on. A user with `tts: false` who wants
+pre-warm off therefore gets hook speech with the default provider as well.
+
+The value is validated strictly when `config.json` loads:
+
+- an unknown key in the object (for example `enabled` or `pre_warm`) is
+  rejected;
+- an explicit `null` for `tts`, `provider`, or `prewarm` is rejected, not read
+  as absent;
+- a wrong type (`tts: "say"`, `provider: 1`, `prewarm: "no"`) is rejected;
+- `{}` loads as an object with every key at its default;
+- a key written twice keeps its last value, as every key in `config.json` does.
+
+The configuration editor's TTS tab keeps `prewarm` when you change the
+object's provider, voice, or gender, and when it saves. Switching the tab's
+toggle to a boolean replaces the object, which restores pre-warm's default of
+on.
 
 ## Messaging Configuration
 

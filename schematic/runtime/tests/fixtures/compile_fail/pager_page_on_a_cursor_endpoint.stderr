@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` is not paginated by page number
+ --> tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.rs
+  |
+  |     let _ = client.send(ListItems).pager().page(2);
+  |                                            ^^^^ `.page(n)` exists only for page-number strategies
+  |
+help: the trait `StartPage` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition authors a different pagination strategy for `ListItems`
+note: required by a bound in `Pager::<'a, A, R>::page`
+ --> src/pager/pages.rs
+  |
+  |     pub fn page(mut self, number: u64) -> Self
+  |            ---- required by a bound in this associated function
+  |     where
+  |         R: StartPage,
+  |            ^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::page`

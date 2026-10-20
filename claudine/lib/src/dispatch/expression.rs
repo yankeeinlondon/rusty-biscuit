@@ -4,14 +4,13 @@
 //! Darkmatter exposes a shared boolean and interpolation expression engine
 //! (`darkmatter::markdown::compose::expression`) keyed off the
 //! [`EvaluationLookup`] trait. This module wraps an [`EventMeta`] reference
-//! so that dispatch templates, hook `when` conditions, event matchers, and
-//! harness validation messages can all evaluate the same expression syntax
-//! against the live event payload.
+//! so that dispatch templates (including report, speak, and message text),
+//! hook `when` conditions, and event matchers can all evaluate the same
+//! expression syntax against the live event payload.
 //!
 //! ## Adapters
 //!
-//! - [`EventMetaExpressionLookup`] — used by templates, matchers, and harness
-//!   validation. Resolves the full event path surface but deliberately leaves
+//! - [`EventMetaExpressionLookup`] — used by templates and matchers. Resolves the full event path surface but deliberately leaves
 //!   `ctx.*` unresolved.
 //! - [`EventMetaConditionLookup`] — used by hook `when` evaluation. Layers
 //!   Darkmatter's lazy `ctx.*` capture on top of [`EventMetaExpressionLookup`]
@@ -19,6 +18,10 @@
 //!
 //! ## Resolution Order (both adapters)
 //!
+//! 0. `hook` / `hook.<path>` — bare `hook` is the whole event payload (the
+//!    top-level fields plus `os`, `hardware`, `git`, `project`, without the
+//!    process `env` root); `hook.<path>` traverses that object and is absent
+//!    when missing, never falling through to the steps below.
 //! 1. `env.NAME` — resolves to the current process environment variable.
 //!    Fallback syntax (`env.NAME || "default"`) is handled by Darkmatter's
 //!    parser, so this layer never inspects the `||` token itself.
@@ -84,15 +87,15 @@ impl<'a> EventMetaExpressionLookup<'a> {
 
 impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
     fn get(&self, path: &str) -> Option<Value> {
-        // Reserved `doc` namespace: bare `doc` is the whole event object;
-        // `doc.<path>` resolves the underlying event field. Intercepted before
-        // normal key lookup and the `ctx.*` short-circuit so a missing
-        // `doc.<path>` never collapses into another namespace.
-        if path == "doc" {
-            return Some(event_doc_object(self.meta));
+        // Reserved `hook` namespace: bare `hook` is the whole event payload;
+        // `hook.<path>` traverses it. Intercepted before normal key lookup and
+        // the `ctx.*` short-circuit so a missing `hook.<path>` never collapses
+        // into a bare field or another root.
+        if path == "hook" {
+            return Some(hook_payload_object(self.meta));
         }
-        if let Some(rest) = path.strip_prefix("doc.") {
-            return nested_pointer(&event_doc_object(self.meta), rest);
+        if let Some(rest) = path.strip_prefix("hook.") {
+            return nested_pointer(&hook_payload_object(self.meta), rest);
         }
 
         if let Some(env_key) = path.strip_prefix("env.") {
@@ -135,9 +138,8 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
 ///
 /// Resolves `ctx.*` via Darkmatter's lazy context capture and delegates
 /// every other path to [`EventMetaExpressionLookup`] (including the reserved
-/// `doc` namespace). This is the only surface where `ctx.*` is honored —
-/// templates, matchers, and harness validation deliberately leave `ctx.*`
-/// unresolved.
+/// `hook` namespace). This is the only surface where `ctx.*` is honored —
+/// templates and matchers deliberately leave `ctx.*` unresolved.
 ///
 /// The lookup also exposes a [`ResolutionContext`] built at `work_dir` from the
 /// dispatching process's request snapshot, so read-side expression functions
@@ -247,12 +249,11 @@ fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
     }
 }
 
-/// Build the reserved `doc` object for the event surface: every resolvable
+/// Build the reserved `hook` object for the event surface: every resolvable
 /// top-level event field plus the grouped environment paths (`os`, `hardware`,
-/// `git`, `project`) as a JSON object. This mirrors darkmatter's `doc`
-/// namespace (the whole root object) where the event payload is the document.
-/// Process environment (`env.*`) is deliberately excluded.
-fn event_doc_object(meta: &EventMeta) -> Value {
+/// `git`, `project`) as a JSON object. Process environment (`env.*`) is
+/// deliberately excluded.
+fn hook_payload_object(meta: &EventMeta) -> Value {
     const TOP_LEVEL_KEYS: [&str; 14] = [
         "provider",
         "event",
@@ -275,18 +276,18 @@ fn event_doc_object(meta: &EventMeta) -> Value {
             map.insert(key.to_string(), value);
         }
     }
-    map.insert("os".to_string(), os_doc_object(meta));
-    map.insert("hardware".to_string(), hardware_doc_object(meta));
-    if let Some(git) = git_doc_object(meta) {
+    map.insert("os".to_string(), os_hook_object(meta));
+    map.insert("hardware".to_string(), hardware_hook_object(meta));
+    if let Some(git) = git_hook_object(meta) {
         map.insert("git".to_string(), git);
     }
-    if let Some(project) = project_doc_object(meta) {
+    if let Some(project) = project_hook_object(meta) {
         map.insert("project".to_string(), project);
     }
     Value::Object(map)
 }
 
-fn os_doc_object(meta: &EventMeta) -> Value {
+fn os_hook_object(meta: &EventMeta) -> Value {
     let mut map = Map::new();
     map.insert(
         "name".to_string(),
@@ -307,7 +308,7 @@ fn os_doc_object(meta: &EventMeta) -> Value {
     Value::Object(map)
 }
 
-fn hardware_doc_object(meta: &EventMeta) -> Value {
+fn hardware_hook_object(meta: &EventMeta) -> Value {
     let mut map = Map::new();
     map.insert(
         "arch".to_string(),
@@ -324,7 +325,7 @@ fn hardware_doc_object(meta: &EventMeta) -> Value {
     Value::Object(map)
 }
 
-fn git_doc_object(meta: &EventMeta) -> Option<Value> {
+fn git_hook_object(meta: &EventMeta) -> Option<Value> {
     let fields: [(&str, Option<Value>); 8] = [
         ("branch", resolve_env_path(meta, "git.branch")),
         ("is_dirty", resolve_env_path(meta, "git.is_dirty")),
@@ -347,7 +348,7 @@ fn git_doc_object(meta: &EventMeta) -> Option<Value> {
     Some(Value::Object(map))
 }
 
-fn project_doc_object(meta: &EventMeta) -> Option<Value> {
+fn project_hook_object(meta: &EventMeta) -> Option<Value> {
     let fields: [(&str, Option<Value>); 3] = [
         ("language", resolve_env_path(meta, "project.language")),
         ("is_monorepo", resolve_env_path(meta, "project.is_monorepo")),

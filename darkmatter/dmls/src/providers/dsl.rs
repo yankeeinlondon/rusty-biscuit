@@ -213,11 +213,7 @@ fn interpolation_completions(
     offset: usize,
     partial: &str,
 ) -> Vec<CompletionItem> {
-    let frontmatter_keys: Vec<String> = ctx
-        .overlay
-        .and_then(|overlay| overlay.ast.as_ref())
-        .map(|ast| ast.top_level().map(|entry| entry.key.clone()).collect())
-        .unwrap_or_default();
+    let frontmatter_keys = frontmatter::expression_property_keys(ctx);
     interpolation_candidates(partial, &frontmatter_keys)
         .into_iter()
         .filter_map(|candidate| text_edit_item(ctx, token_start, offset, candidate))
@@ -258,6 +254,7 @@ fn interpolation_candidates(
             kind: match candidate.kind {
                 expressions::ExprCompletionKind::FrontmatterKey => CompletionItemKind::FIELD,
                 expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
+                expressions::ExprCompletionKind::ReservedRoot => CompletionItemKind::MODULE,
                 expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
             },
             detail: candidate.detail,
@@ -1789,6 +1786,7 @@ mod tests {
             supports_snippets: false,
             client_watches_files: false,
             needs_watch_fallback: false,
+            supports_relative_watch_patterns: false,
             supports_file_operations: false,
             supports_workspace_configuration: false,
             supports_semantic_tokens: false,
@@ -1876,6 +1874,7 @@ mod tests {
             supports_snippets: false,
             client_watches_files: false,
             needs_watch_fallback: false,
+            supports_relative_watch_patterns: false,
             supports_file_operations: false,
             supports_workspace_configuration: false,
             supports_semantic_tokens: false,
@@ -1954,6 +1953,7 @@ mod tests {
             supports_snippets: false,
             client_watches_files: false,
             needs_watch_fallback: false,
+            supports_relative_watch_patterns: false,
             supports_file_operations: false,
             supports_workspace_configuration: false,
             supports_semantic_tokens: false,

@@ -16,3 +16,19 @@ fn the_exported_schema_declares_the_policy_types() {
         assert!(lines.contains(&declaration), "missing {declaration}");
     }
 }
+
+#[test]
+fn the_exported_schema_requires_rule_and_names_its_own_types_bare() {
+    let lines: Vec<&str> = EDITOR_SCHEMA.lines().collect();
+    assert!(lines.contains(&"    rule: \"short_form(required)\""));
+    assert!(lines.contains(&"    - short_form"));
+    assert!(lines.contains(&"    - long_form"));
+    assert!(
+        !EDITOR_SCHEMA.contains("@./content-policy.yaml"),
+        "same-file references are written as bare local names"
+    );
+    assert!(
+        !EDITOR_SCHEMA.contains("is not `(required)`"),
+        "the header no longer notes a missing-rule limitation"
+    );
+}

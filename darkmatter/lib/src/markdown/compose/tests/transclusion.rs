@@ -1495,10 +1495,10 @@ mod remote_transclusion_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn file_exists_false_for_unallowed_remote_host() {
+    async fn file_exists_errors_for_unallowed_remote_host() {
         // Remote reads enabled but no allowed hosts: the URL is denied and
-        // never fetched, so `file_exists` reads it as non-existent rather
-        // than erroring out of composition.
+        // never fetched. A denial is not evidence of absence, so composition
+        // fails instead of reading `false`.
         let server = MockServer::start().await;
         let url = format!("{}/blocked.md", server.uri());
 
@@ -1507,10 +1507,13 @@ mod remote_transclusion_tests {
         let body = format!("X: {{{{ file_exists(\"{url}\") }}}}\n");
         std::fs::write(&root, &body).unwrap();
 
-        let (composed, _) = compose_with_remote(&body, &root, &server, vec![])
+        let error = compose_with_remote(&body, &root, &server, vec![])
             .await
-            .unwrap();
-        assert_eq!(composed.content(), "X: false\n");
+            .expect_err("a denied remote read must not read as a missing file");
+        assert!(
+            format!("{error:?}").contains("remote read denied"),
+            "unexpected error: {error:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2029,17 +2032,16 @@ mod file_links_compose {
     }
 
     /// In-process companion to the Level 2 presentation test: the full
-    /// `::file-links` contract (extension glyphs, repository icon, italic
+    /// `::file-links` contract (extension glyphs, folder icon, italic
     /// dotfile, dimmed gitignored entry, bold target) is produced by
     /// composing then rendering to a terminal string. This runs in the L1
     /// suite, so the bytes the real-terminal test asserts on are verified
     /// without a WezTerm pane.
     #[test]
     fn rich_fixture_renders_full_presentation_contract() {
-        use crate::markdown::output::terminal::{
-            ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
-            TerminalOptions,
-        };
+        use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_document};
+        use biscuit_terminal::terminal::Terminal;
+        use renderable::tree::RenderStrictness;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join(".git")).unwrap();
@@ -2057,7 +2059,6 @@ mod file_links_compose {
         let root = dir.path().join("root.md");
         std::fs::write(&root, "# Root\n\n::file-links --dir docs/topics\n").unwrap();
 
-        // The repository icon follows the request context's repository root.
         let context = biscuit_file::FileResolutionContext::new(dir.path())
             .with_repository_root(dir.path())
             .with_source_path(&root);
@@ -2069,26 +2070,26 @@ mod file_links_compose {
             ))
             .unwrap();
 
-        let options = TerminalOptions {
-            color_mode: crate::markdown::highlighting::ColorMode::Dark,
-            color_depth: Some(ColorDepth::TrueColor),
-            image_mode: TerminalImageMode::Never,
-            italic_mode: ItalicMode::Always,
-            dim_mode: DimMode::Always,
-            hyperlink_mode: HyperlinkMode::Always,
-            mermaid_mode: MermaidMode::Off,
-            max_width: Some(100),
-            ..TerminalOptions::default()
-        };
-        let output = composed.as_terminal(options).unwrap();
+        let (document, _) = crate::markdown::render_tree::to_render_document(&composed).unwrap();
+        let mut term = Terminal::new_optimistic(100);
+        term.is_nerd_font = Some(false);
+        term.osc_link_support = true;
+        let output = render_terminal_document(
+            &document,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Lossy),
+        ).unwrap().output;
 
-        // Extension-specific Unicode glyphs.
-        for glyph in ["📝", "📕", "📗", "📘"] {
+        for glyph in ["📝", "📕", "📗", "📘", "📂"] {
             assert!(output.contains(glyph), "missing glyph {glyph:?}: {output:?}");
         }
-        // Repository icon, never the ordinary folder icon (no subdirs).
-        assert!(output.contains("📦"), "missing repository icon: {output:?}");
-        assert!(!output.contains("📂"), "unexpected folder icon: {output:?}");
+        assert!(!output.contains("📦"), "subdirectory has repository icon: {output:?}");
+        term.is_nerd_font = Some(true);
+        let nerd_output = render_terminal_document(
+            &document,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Lossy),
+        ).unwrap().output;
+        assert!(nerd_output.contains(biscuit_terminal::components::filesystem::icons::nerd::file::MARKDOWN));
+        assert!(!nerd_output.contains("📄"));
         // Dotfile italic, gitignored dim, target bold.
         assert!(output.contains("\x1b[3m"), "missing italic dotfile: {output:?}");
         assert!(output.contains("\x1b[2m"), "missing dim entry: {output:?}");

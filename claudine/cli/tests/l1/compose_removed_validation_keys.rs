@@ -186,7 +186,7 @@ fn sequence_rejects_deviate_key() {
     // The sequence executor prepares each step through the same scan path, so a
     // removed key in the document frontmatter is caught before step 1 launches.
     assert_removed_key_rejected(
-        "---\nsequence:\n  - alpha\ndeviate: shell fix\n---\nRun step {{state}}\n",
+        "---\nsequence:\n  - alpha\ndeviate: shell fix\n---\nRun step {{seq}}\n",
         "sequence",
         "deviate",
         "plus a recovery action",

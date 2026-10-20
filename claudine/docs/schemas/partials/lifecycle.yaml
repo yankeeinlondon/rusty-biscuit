@@ -1,12 +1,14 @@
 kind: schema
 description: Lifecycle schema
 $schema:
-    initialize: null
-    start: null
-    blocked: null
-    success: null
-    failure: null
-    finalized: null
+    # The event shapes are not yet defined; `unknown` accepts any value until
+    # they are.
+    initialize: unknown
+    start: unknown
+    blocked: unknown
+    success: unknown
+    failure: unknown
+    finalized: unknown
     loop:
         - while: expression
           $drop: stack

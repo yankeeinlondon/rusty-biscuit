@@ -128,7 +128,7 @@ fn assert_bare_name_is_a_document_property(name: &str, lookup: &dyn EvaluationLo
     );
 }
 
-/// `env` is the namespace, never the document's `env` key; `doc.env` is.
+/// `env` is the namespace, never the document's `env` key; `fm.env` is.
 #[track_caller]
 fn assert_reserved_roots_win(name: &str, lookup: &dyn EvaluationLookup) {
     let env = lookup.resolve("env").unwrap();
@@ -137,9 +137,9 @@ fn assert_reserved_roots_win(name: &str, lookup: &dyn EvaluationLookup) {
         "{name}: bare env read the document: {env:?}"
     );
     assert_eq!(
-        lookup.resolve("doc.env").unwrap().into_value(),
+        lookup.resolve("fm.env").unwrap().into_value(),
         Some(json!(DOCUMENT_ENV)),
-        "{name}: doc.env reads the document"
+        "{name}: fm.env reads the document"
     );
 }
 

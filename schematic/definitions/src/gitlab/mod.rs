@@ -50,7 +50,12 @@ pub use types::*;
 use crate::registry::SchemaRegistry;
 #[cfg(test)]
 use schematic_define::RestMethod;
-use schematic_define::{ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi};
+use schematic_define::{
+    ApiKeyEnv, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
+    pagination::{
+        Collection, LinkSource, MoreSignal, PageSize, PaginationException, Strategy, ValueSource,
+    },
+};
 
 /// Creates a schema registry containing all GitLab response types.
 ///
@@ -99,6 +104,31 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<Vec<Project>>("Vec<Project>")
         .register::<Pipeline>("Pipeline")
         .register::<Vec<Pipeline>>("Vec<Pipeline>")
+}
+
+/// GitLab's page size: `per_page`, at most 100, 20 when omitted.
+fn gitlab_page_size() -> PageSize {
+    PageSize::new("per_page").server_default(20).max(100)
+}
+
+/// GitLab's offset-based pagination, modeled as a page-number strategy: a
+/// 1-based `page`, ended when the response carries no `X-Next-Page` header,
+/// with the item count in `X-Total`.
+fn gitlab_page_number() -> Strategy {
+    Strategy::page_number("page", MoreSignal::header_present("X-Next-Page"))
+        .page_size(gitlab_page_size())
+        .total(ValueSource::header("X-Total"))
+}
+
+/// GitLab's keyset pagination, an alternate to [`gitlab_page_number`] on the
+/// endpoints that support it: selected by the constants, continued through
+/// the `Link` header.
+fn gitlab_keyset() -> Strategy {
+    Strategy::next_link(LinkSource::link_header("next"))
+        .page_size(gitlab_page_size())
+        .constant("pagination", "keyset")
+        .constant("order_by", "id")
+        .constant("sort", "asc")
 }
 
 /// Creates the GitLab REST API definition.
@@ -186,6 +216,22 @@ pub fn define_gitlab_api() -> RestApi {
             }),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
+        default_pagination: Some(gitlab_page_number()),
+        pagination_exceptions: vec![
+            // Unverified: believed paginated, but no source confirms it.
+            PaginationException::new("ListIssueParticipants", Collection::root().unpaginated()),
+            PaginationException::new(
+                "ListRepositoryTree",
+                Collection::root().or_paginate("keyset", gitlab_keyset()),
+            ),
+            PaginationException::new(
+                "ListGroupProjects",
+                Collection::root().or_paginate("keyset", gitlab_keyset()),
+            ),
+        ],
     }
 }
 

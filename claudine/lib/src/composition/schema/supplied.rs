@@ -2,16 +2,18 @@
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::compose::CallerInputRecords;
-use darkmatter::markdown::schemas::file_match::{file_match_admits, root_union_match_patterns};
+use darkmatter::markdown::schemas::file_match::{
+    file_match_admits, file_match_groups, root_union_match_groups,
+};
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm,
+    Constraint, DarkmatterSchemas, EffectiveSchema, PropertyDef, SchemaArm,
     SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
     select_literal_discriminant_arm,
 };
 
 use super::{
     CompositionError, ResolvedCompositionSource, build_effective_instance,
-    is_composition_independent, load_effective_schema, top_level_pointer_segment,
+    is_composition_independent, load_authored_schema, top_level_pointer_segment,
     value_needs_composition,
 };
 
@@ -39,7 +41,7 @@ pub fn unresolved_supplied_files(
         return Vec::new();
     }
     let Ok(Some(effective)) =
-        load_effective_schema(source, None, document_context, records)
+        load_authored_schema(source, None, document_context, records)
     else {
         return Vec::new();
     };
@@ -48,7 +50,7 @@ pub fn unresolved_supplied_files(
     };
     let mut pending = Vec::new();
     for (name, record) in records {
-        let Some(FileTarget { is_array, patterns }) = arms.eager_file_target(name) else {
+        let Some(FileTarget { is_array, alternatives }) = arms.eager_file_target(name) else {
             continue;
         };
         let values: Vec<_> = match record.raw() {
@@ -84,7 +86,7 @@ pub fn unresolved_supplied_files(
                     &source.resolved_path,
                     name,
                     provided,
-                    FileTarget { is_array, patterns: patterns.clone() },
+                    FileTarget { is_array, alternatives: alternatives.clone() },
                     record.origin(),
                 ),
                 array_index,
@@ -94,12 +96,32 @@ pub fn unresolved_supplied_files(
     pending
 }
 
-/// The glob a caller-supplied file reference is completed against.
+/// The globs a caller-supplied file reference is completed against.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FileTarget {
     pub(super) is_array: bool,
-    /// Never empty: a bare `file` has no glob to walk.
-    pub(super) patterns: Vec<String>,
+    /// Alternatives of `match(...)` groups (see
+    /// [`CompositionError::UnresolvedFileReference`]). Never empty, and no
+    /// alternative is empty: a bare `file` has no glob to walk.
+    pub(super) alternatives: Vec<Vec<Vec<String>>>,
+}
+
+impl FileTarget {
+    /// Add `other`'s alternatives after this target's, skipping any already
+    /// present, when both agree on the array shape (ruling D1). Each arm stays
+    /// its own alternative: concatenating arms' globs would let one arm's
+    /// exclusions and groups leak into another's.
+    fn merge(&mut self, other: Self) -> Option<()> {
+        if self.is_array != other.is_array {
+            return None;
+        }
+        for alternative in other.alternatives {
+            if !self.alternatives.contains(&alternative) {
+                self.alternatives.push(alternative);
+            }
+        }
+        Some(())
+    }
 }
 
 /// The schema arms a caller-supplied file is judged against.
@@ -116,9 +138,9 @@ impl SuppliedArms<'_> {
     ///
     /// An undecided union qualifies only when every contending arm declares
     /// `name` as an eager `file(match)` with the same array shape (ruling D1),
-    /// because only then does the existence verdict not depend on the arm. Its
-    /// patterns are the union of the arms', de-duplicated in arm order and then
-    /// pattern order; the chosen literal path settles the arm afterward.
+    /// because only then does the existence verdict not depend on the arm. Each
+    /// arm contributes its groups as one alternative, de-duplicated in arm
+    /// order; the chosen literal path settles the arm afterward.
     fn eager_file_target(&self, name: &str) -> Option<FileTarget> {
         match self {
             Self::Unique(shape) => eager_file_target(shape, name),
@@ -128,14 +150,7 @@ impl SuppliedArms<'_> {
                     let target = eager_file_target(arm, name)?;
                     match &mut merged {
                         None => merged = Some(target),
-                        Some(merged) if merged.is_array == target.is_array => {
-                            for pattern in target.patterns {
-                                if !merged.patterns.contains(&pattern) {
-                                    merged.patterns.push(pattern);
-                                }
-                            }
-                        }
-                        Some(_) => return None,
+                        Some(merged) => merged.merge(target)?,
                     }
                 }
                 merged
@@ -145,7 +160,8 @@ impl SuppliedArms<'_> {
 }
 
 fn eager_file_target(shape: &SchemaShape, name: &str) -> Option<FileTarget> {
-    let Some(PropertyDef::Single(atom)) = shape.properties.get(name) else {
+    let definition = shape.properties.get(name)?;
+    let PropertyDef::Single(atom) = definition else {
         return None;
     };
     let eager = atom
@@ -156,20 +172,19 @@ fn eager_file_target(shape: &SchemaShape, name: &str) -> Option<FileTarget> {
     if !eager {
         return None;
     }
-    file_match_target(atom)
+    file_match_target(definition)
 }
 
-/// The `match(...)` glob of a `file`/`file[]` atom, whether or not it is eager.
-pub(super) fn file_match_target(atom: &PropertyAtom) -> Option<FileTarget> {
-    if !matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File)) {
+/// Every `match(...)` group of a `file`/`file[]` property, as one
+/// alternative, whether or not it is eager.
+fn file_match_target(definition: &PropertyDef) -> Option<FileTarget> {
+    let PropertyDef::Single(atom) = definition else {
         return None;
-    }
-    atom.constraints.iter().find_map(|constraint| match constraint {
-        Constraint::Match(patterns) if !patterns.is_empty() => Some(FileTarget {
-            is_array: atom.is_array,
-            patterns: patterns.clone(),
-        }),
-        _ => None,
+    };
+    let groups = file_match_groups(definition)?;
+    Some(FileTarget {
+        is_array: atom.is_array,
+        alternatives: vec![groups.into_iter().map(<[String]>::to_vec).collect()],
     })
 }
 
@@ -189,30 +204,27 @@ pub(super) fn unresolved_caller_file(
         source_path: source_path.to_path_buf(),
         property: property.to_string(),
         provided: provided.to_string(),
-        patterns: target.patterns,
+        alternatives: target.alternatives,
         is_array: target.is_array,
         reason: caller_no_match_reason(provided, origin),
     }
 }
 
-/// The glob a validator's file-reference verdict on `name` is completed against.
+/// The globs a validator's file-reference verdict on `name` is completed against.
 ///
 /// A single schema reads the property's own `file(match)` declaration. A root
 /// union whose literal discriminant in `instance` settles one arm reads only
 /// that arm, because a file from another arm's glob would now be rejected by
 /// the settled arm's own. Otherwise it reads every arm that declares `name` as
-/// a `file(match)`: one such arm is that arm's glob, and several merge by the
-/// D1 rule (arm order, then pattern order, de-duplicated) provided they agree
-/// on the array shape.
+/// a `file(match)`: one such arm is that arm's groups, and several merge by
+/// the D1 rule (one alternative per arm, in arm order, de-duplicated)
+/// provided they agree on the array shape.
 pub(super) fn file_reference_target(
     effective: &EffectiveSchema,
     name: &str,
     instance: &serde_json::Value,
 ) -> Option<FileTarget> {
-    let file_atom = |shape: &SchemaShape| match shape.properties.get(name) {
-        Some(PropertyDef::Single(atom)) => file_match_target(atom),
-        _ => None,
-    };
+    let file_atom = |shape: &SchemaShape| shape.properties.get(name).and_then(file_match_target);
     match effective.simplified.as_ref()? {
         SimplifiedSchema::Single(shape) => file_atom(shape),
         SimplifiedSchema::Union(arms) => {
@@ -236,14 +248,7 @@ pub(super) fn file_reference_target(
             }) {
                 match &mut merged {
                     None => merged = Some(target),
-                    Some(merged) if merged.is_array == target.is_array => {
-                        for pattern in target.patterns {
-                            if !merged.patterns.contains(&pattern) {
-                                merged.patterns.push(pattern);
-                            }
-                        }
-                    }
-                    Some(_) => return None,
+                    Some(merged) => merged.merge(target)?,
                 }
             }
             merged
@@ -311,8 +316,8 @@ fn caller_no_match_reason(provided: &str, origin: &FileResolutionContext) -> Str
 /// as opposed to a parse or resolution error that a glob walk cannot rescue.
 pub(super) const NO_MATCH: &str = "no existing file matched reference";
 
-/// Whether every existing caller file this arm declares falls inside its
-/// `match` glob.
+/// Whether every existing caller file this arm declares satisfies every one
+/// of its `match` groups.
 ///
 /// Each arm is validated alone below, where Darkmatter cannot tell which of
 /// its globs discriminate, so the arm-level rule is applied here through the
@@ -320,7 +325,7 @@ pub(super) const NO_MATCH: &str = "no existing file matched reference";
 /// (a partial the chooser will complete) never rules an arm out.
 fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords) -> bool {
     records.iter().all(|(name, record)| {
-        let Some(patterns) = root_union_match_patterns(arm, name) else {
+        let Some(groups) = root_union_match_groups(arm, name) else {
             return true;
         };
         let values: Vec<&str> = match record.raw() {
@@ -332,7 +337,7 @@ fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords) -> bool {
         };
         values
             .into_iter()
-            .all(|value| file_match_admits(value, patterns, record.origin()))
+            .all(|value| file_match_admits(value, &groups, record.origin()))
     })
 }
 

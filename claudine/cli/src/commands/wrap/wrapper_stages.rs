@@ -463,6 +463,7 @@ pub(crate) fn detect_wrapper_harness(
 /// lexed for `#tag`s the same way a composed prompt is. Deriving the flag from
 /// the wrapper's own switches keeps that facet honest instead of pinning it to
 /// the MCP-off shape.
+#[allow(clippy::too_many_arguments)]
 fn passthrough_launch_intent(
     provider: Provider,
     binary_path: &Path,
@@ -475,6 +476,8 @@ fn passthrough_launch_intent(
     harness_base_args: &[String],
     codex_last_message: Option<PathBuf>,
     overlay: Option<claudine::provider_overlay::OverlayPlan>,
+    // The passthrough's one document environment, captured at launch.
+    environment: claudine::invocation_context::DocumentEnvironment,
 ) -> harness_orch::LaunchRebuildIntent {
     harness_orch::LaunchRebuildIntent {
         explicit_provider: Some(provider),
@@ -507,7 +510,7 @@ fn passthrough_launch_intent(
             codex_last_message,
             overlay,
         ),
-        env_lookup: claudine::composition::ambient_env_lookup,
+        environment,
     }
 }
 
@@ -556,13 +559,15 @@ pub(crate) fn run_execution_stage(
             original_ref: source_path.display().to_string(),
             source_path,
             base_prompt: Some(base_prompt),
-            overlay: indexmap::IndexMap::new(),
+            overlay: Default::default(),
+            pending_retry_overlay: None,
             prompt_tail: Vec::new(),
             // A direct wrapper run is one invocation with no caller-owned
             // accumulator, so it owns its own cell.
             runtime_state: std::sync::Arc::clone(&initial_materialized.runtime_state),
             suppress_output_commit: false,
             last_final_output: None,
+            launched_providers: Vec::new(),
             input_layers,
             entry: claudine::composition::DocumentEntryReason::Direct,
             invocation_context: Some(invocation.clone()),
@@ -619,6 +624,7 @@ pub(crate) fn run_execution_stage(
                     &harness_base_args,
                     structured_codex_output.map(|output| output.last_message_path.clone()),
                     env_plan.overlay.clone(),
+                    invocation.document_environment().clone(),
                 ),
                 &env_plan.env,
                 &mut prompt_state,

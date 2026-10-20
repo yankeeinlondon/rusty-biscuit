@@ -11,8 +11,9 @@ timeout: 30m
 step_timeout: 12m
 show_system_prompt: false
 operation: commit
-agent: claude
-model: haiku
+agent: codex
+yolo: true
+model: gpt-6-luna
 resides_in: |-
     {{
         length(ctx.dirty_package_areas) == 1
@@ -20,13 +21,12 @@ resides_in: |-
             : 'are spread across ' + length(ctx.dirty_package_areas) + ':\n ' + as_unordered_list(ctx.dirty_package_areas)
     }}
 initialize:
-    stack:
-        # `current`, not `ctx`: this asks what is staged now. `ctx` is the start-of-run
-        # snapshot, which predates any staging an earlier stage of the same run did.
-        - when: "length(current.staged_files) == 0"
-          action:
-              - message: "🤨  there were no staged files to commit in {{ctx.repo}}; skipping git commit operation"
-              - skip
+    # `current`, not `ctx`: this asks what is staged now. `ctx` is the start-of-run
+    # snapshot, which predates any staging an earlier stage of the same run did.
+    - when: "length(current.staged_files) == 0"
+      then:
+          - message: "🤨  there were no staged files to commit in {{ctx.repo}}; skipping git commit operation"
+          - skip
 start:
     message: |-
         🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{ctx.agent}}/{{ctx.model}}_). {{ ctx.is_monorepo ? 'Packages impacted:\n\n' + as_unordered_list(ctx.dirty_packages) : '' }}

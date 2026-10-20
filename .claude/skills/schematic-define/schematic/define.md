@@ -22,12 +22,13 @@ REST and WebSocket API definition primitives for the Schematic code generation s
 
 | Type | Purpose |
 |------|---------|
-| `Headers` | Fluent builder for HTTP headers with auth support |
+| `Headers` | Fluent builder for HTTP headers with auth support (WebSocket clients; REST clients take runtime `Credential`s) |
 | `SensitiveString` | Secure wrapper for passwords/tokens (redacts Debug output) |
 | `EnvList` | Environment variable fallback chain for credentials |
 | `ApiKeyEnv` | API key header configuration with env source |
 | `EnvMapping` | Complete env var mapping for auth credentials |
-| `HeaderError` | Errors from header validation and credential resolution |
+| `HeaderError` | Errors from header validation and `Headers` env resolution |
+| `CrossOrigin` | API-level policy for redirects and followed links (`same_origin`, `allow_origins`, `allow_without_credentials`, `danger_allow_any`, `deny`) |
 
 ### Model Definition Types (for OpenAPI import)
 
@@ -79,8 +80,11 @@ pub struct RestApi {
     /// Link to API documentation
     pub docs_url: Option<String>,
 
-    /// Authentication strategy
+    /// Authentication strategy (legacy single method)
     pub auth: AuthStrategy,
+
+    /// Explicit methods plus env fallback; overrides `auth` when set
+    pub auth_policy: Option<AuthPolicy>,
 
     /// Env var names for credentials (fallback chain)
     pub env_auth: Vec<String>,
@@ -100,11 +104,20 @@ pub struct RestApi {
     /// Custom suffix for request structs (default: "Request")
     pub request_suffix: Option<String>,
 
+    /// API version, used by OpenAPI export
+    pub version: Option<String>,
+
     /// Environment variable mapping for flexible auth (optional)
     pub env_mapping: Option<EnvMapping>,
 
-    /// Global query/header/cookie parameters (optional)
-    pub params: Option<EndpointParams>,
+    /// Redirects and followed next-page links that leave the base origin
+    pub cross_origin: CrossOrigin,
+
+    /// Response header carrying the provider's request id (case-insensitive)
+    pub request_id_header: Option<String>,
+
+    /// Extra header/query names whose values are never stored in metadata
+    pub secret_names: Vec<String>,
 }
 ```
 
@@ -135,6 +148,9 @@ pub struct Endpoint {
 
     /// Query/header/cookie parameters (optional)
     pub params: Option<EndpointParams>,
+
+    /// OAuth2 scopes this endpoint needs (optional)
+    pub oauth_scopes: Option<Vec<String>>,
 }
 ```
 
@@ -276,7 +292,9 @@ let qualified = Schema::with_path("User", "crate::models"); // full_path() → "
 
 ## Headers Builder
 
-See [Headers Builder](./headers.md) for complete documentation.
+See [Headers Builder](./headers.md) for complete documentation. Generated
+WebSocket clients use it; generated REST clients do not (they take
+`schematic_runtime::Credential`s).
 
 ```rust
 use schematic_define::Headers;
@@ -304,6 +322,7 @@ let mapping = EnvMapping {
     basic_user: None,
     basic_pass: None,
     api_key: None,
+    ..Default::default()
 };
 let headers = Headers::default()
     .with_env_mapping(mapping)

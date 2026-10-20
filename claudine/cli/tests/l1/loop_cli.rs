@@ -2,7 +2,7 @@
 //! looping frontmatter.
 //!
 //! Exercises the loop engine end-to-end through the CLI: iteration counting,
-//! max-iterations overrides, fail-fast semantics, and FAIL_FAST deprecation.
+//! max-iterations overrides, and a failed pass ending the loop.
 
 use std::fs;
 use crate::common;
@@ -260,70 +260,12 @@ exit 0
 }
 
 // ============================================================================
-// FAIL_FAST deprecation
-// ============================================================================
-
-#[cfg(unix)]
-#[test]
-fn compose_fail_fast_deprecated_env_emits_warning() {
-    let fixture = CliProcessFixture::named("loop-cli");
-    let count_path = fixture.cwd().join("call-count.txt");
-
-    let md_file = fixture.cwd().join("loop.md");
-    fs::write(
-        &md_file,
-        r#"---
-loop:
-  while: "counter < 3"
-  actions:
-    - "increment(counter)"
----
-Count is {{counter}}
-"#,
-    )
-    .unwrap();
-
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        r#"#!/bin/sh
-count=0
-if [ -f "$CLAUDINE_COUNT_FILE" ]; then
-  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
-cat > /dev/null
-exit 0
-"#,
-    );
-
-    let assert = fixture
-        .command()
-        .env("CLAUDINE_COUNT_FILE", &count_path)
-        .env("FAIL_FAST", "true")
-        .env_remove("CLAUDINE_FAIL_FAST")
-        .env("RUST_LOG", "warn")
-        .args(["compose", "--goose", md_file.to_str().unwrap()])
-        .assert()
-        .success();
-
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    let plain = strip_ansi(&stderr);
-    assert!(
-        plain.contains("deprecated")
-            || plain.contains("FAIL_FAST")
-            || plain.contains("CLAUDINE_FAIL_FAST"),
-        "should emit deprecation warning for FAIL_FAST; stderr: {plain}"
-    );
-}
-
-// ============================================================================
 // Sequence CLAUDINE_FAIL_FAST propagation
 // ============================================================================
 
 #[cfg(unix)]
 #[test]
-fn sequence_uses_claudine_fail_fast_env() {
+fn sequence_does_not_publish_a_fail_fast_env() {
     let fixture = CliProcessFixture::named("loop-cli");
     let count_path = fixture.cwd().join("call-count.txt");
     let env_path = fixture.cwd().join("child-env.txt");
@@ -337,7 +279,7 @@ sequence:
   - beta
   - gamma
 ---
-Run step {{state}}
+Run step {{seq}}
 "#,
     )
     .unwrap();
@@ -362,11 +304,10 @@ exit 0
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env_remove("FAIL_FAST")
+        .env_remove("CLAUDINE_FAIL_FAST")
         .args([
             "sequence",
             "--goose",
-            "--fail-fast",
-            "false",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -374,18 +315,18 @@ exit 0
 
     let child_env = fs::read_to_string(&env_path).unwrap();
     assert!(
-        child_env.contains("CLAUDINE_FAIL_FAST=false"),
-        "child env should expose CLAUDINE_FAIL_FAST=false; env_file: {child_env}"
+        child_env.trim() == "CLAUDINE_FAIL_FAST=",
+        "child env must not receive an injected policy; env_file: {child_env}"
     );
 }
 
 // ============================================================================
-// Loop with failing iteration and fail_fast=false
+// A failed pass ends the loop; no environment variable continues past it
 // ============================================================================
 
 #[cfg(unix)]
 #[test]
-fn compose_loop_fail_fast_false_continues_after_failure() {
+fn compose_loop_stops_on_a_failed_pass_even_with_claudine_fail_fast_false() {
     let fixture = CliProcessFixture::named("loop-cli");
     let count_path = fixture.cwd().join("call-count.txt");
 
@@ -397,7 +338,6 @@ loop:
   while: "counter < 2"
   actions:
     - "increment(counter)"
-  fail_fast: false
 ---
 Count is {{counter}}
 "#,
@@ -421,28 +361,27 @@ exit 0
 "#,
     );
 
+    // Loop-level fail-fast is gone: the variable that once selected
+    // continuation is not read, and the failed first pass ends the loop.
     fixture
         .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
+        .env("CLAUDINE_FAIL_FAST", "false")
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
-        .success();
+        .failure();
 
     let calls = fs::read_to_string(&count_path).unwrap();
-    assert_eq!(
-        calls.trim(),
-        "3",
-        "fail_fast=false should continue after iteration 1 fails (3 total: 1 fail, 2 ok, 3 ok)"
-    );
+    assert_eq!(calls.trim(), "1", "the failed first pass ends the loop");
 }
 
 // ============================================================================
-// Loop with failing iteration and fail_fast=true
+// Loop with failing iteration, by default
 // ============================================================================
 
 #[cfg(unix)]
 #[test]
-fn compose_loop_fail_fast_true_stops_on_first_failure() {
+fn compose_loop_stops_on_first_failure_by_default() {
     let fixture = CliProcessFixture::named("loop-cli");
     let count_path = fixture.cwd().join("call-count.txt");
 
@@ -454,7 +393,6 @@ loop:
   while: "counter < 3"
   actions:
     - "increment(counter)"
-  fail_fast: true
 ---
 Count is {{counter}}
 "#,
@@ -486,7 +424,7 @@ exit 7
     assert_eq!(
         calls.trim(),
         "1",
-        "fail_fast=true should stop after first failing iteration"
+        "a loop stops after its first failing iteration"
     );
 }
 

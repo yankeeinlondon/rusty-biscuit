@@ -9,8 +9,9 @@
 //! ## Lifecycle-key inventory
 //!
 //! [`lifecycle`] is a documented stopgap: a static copy of the Claudine
-//! lifecycle layout, kept in step with `darkmatter/docs/schemas/claudine.yaml`
-//! and `claudine-types.yaml` by a parity test rather than by a crate dependency. Schema triggers that
+//! lifecycle layout, kept in step with Claudine's schemas in `claudine/schemas/`
+//! (`claudine.yaml`, `lifecycle.yaml`, `action.yaml`) by a parity test rather
+//! than by a crate dependency. Schema triggers that
 //! scope variables are the intended replacement; until then this is the only
 //! place DMLS knows Claudine's lifecycle keys.
 
@@ -25,48 +26,88 @@ use crate::providers::DocumentContext;
 use crate::providers::frontmatter::ExpressionValue;
 
 /// The static Claudine lifecycle layout DMLS mirrors (see the module docs).
+///
+/// Paths are the authored YAML paths Claudine's parser names
+/// (`failure[0].else[1].shell.command`): a stack is a list of items or a
+/// dictionary of verbs, an item may guard `then`/`else` bodies that are stacks
+/// again, and `loop:` holds either loose verbs or a `gate:` list.
 pub(crate) mod lifecycle {
     use crate::overlay::FmPathSegment::{self, Index, Key};
 
-    /// The seven top-level frontmatter keys holding lifecycle events, in
+    /// The seven top-level frontmatter keys holding lifecycle stacks, in
     /// Claudine's `LifecycleSignal::ALL` order.
     pub(crate) const EVENT_KEYS: [&str; 7] =
         ["initialize", "start", "success", "blocked", "failure", "finalize", "loop"];
 
-    /// An event's communication fields: string surfaces whose whole-value
-    /// `{{ … }}` is evaluated once when the event fires. `effect` names a
-    /// sound and `stack` is structured, so neither is a communication field.
-    pub(crate) const COMMUNICATION_FIELDS: [&str; 9] =
-        ["say", "say_first", "message", "stderr", "notify", "info", "warn", "success", "stdout"];
+    /// Keys of a list item that are grammar rather than verbs. A dictionary of
+    /// verbs never carries `when`, `then`, or `else`.
+    pub(crate) const STRUCTURAL_ITEM_KEYS: [&str; 4] = ["when", "then", "else", "no_error"];
 
-    fn is_event(segment: Option<&FmPathSegment<'_>>) -> bool {
-        matches!(segment, Some(Key(key)) if EVENT_KEYS.contains(key))
+    /// The `loop:` keys Claudine's looping parser owns (its
+    /// `LOOP_ITERATION_KEYS`); every other key but `gate` is a loose verb.
+    pub(crate) const LOOP_ITERATION_KEYS: [&str; 7] =
+        ["while", "until", "action", "actions", "max", "fail_fast", "on_rate_limit"];
+
+    /// What a path below a stack names.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Surface {
+        /// A `when` guard: condition text.
+        Predicate,
+        /// A scalar a verb evaluates once when the stack runs.
+        SinglePass,
     }
 
-    /// Whether a whole-value scalar at `path` is evaluated exactly once: an
-    /// event communication field, or any stack item value (action operands
-    /// and `proxy … with` values included) other than its predicate and its
-    /// `no_error` flag.
-    pub(crate) fn is_single_pass_value(path: &[FmPathSegment<'_>]) -> bool {
+    /// Classify `path` (rooted at the frontmatter) as a lifecycle surface.
+    fn classify(path: &[FmPathSegment<'_>]) -> Option<Surface> {
         match path {
-            [event, Key(field)] => is_event(Some(event)) && COMMUNICATION_FIELDS.contains(field),
-            [event, Key("stack"), Index(_), rest @ ..] => {
-                is_event(Some(event))
-                    && !rest.is_empty()
-                    && !matches!(rest, [Key("when" | "no_error")])
+            [Key("loop"), Key("while" | "until")] => Some(Surface::Predicate),
+            [Key("loop"), Key("gate"), rest @ ..] => stack(rest),
+            [Key("loop"), Key(key), rest @ ..] if !LOOP_ITERATION_KEYS.contains(key) => {
+                verb(key, rest)
             }
-            _ => false,
+            [Key("loop"), ..] => None,
+            [Key(event), rest @ ..] if EVENT_KEYS.contains(event) => stack(rest),
+            _ => None,
         }
     }
 
-    /// Whether `path` is a lifecycle predicate: a stack item's `when`, or the
-    /// loop's `while` / `until`.
-    pub(crate) fn is_predicate(path: &[FmPathSegment<'_>]) -> bool {
+    /// A path below a stack or `then`/`else` body: a list item, or a verb of
+    /// a dictionary body.
+    fn stack(path: &[FmPathSegment<'_>]) -> Option<Surface> {
         match path {
-            [event, Key("stack"), Index(_), Key("when")] => is_event(Some(event)),
-            [Key("loop"), Key("while" | "until")] => true,
-            _ => false,
+            [Index(_), Key("when")] => Some(Surface::Predicate),
+            [Index(_), Key("then" | "else"), rest @ ..] => stack(rest),
+            [Index(_), Key(key), rest @ ..] => verb(key, rest),
+            [Key(key), rest @ ..] => verb(key, rest),
+            _ => None,
         }
+    }
+
+    /// A path below one verb key: its short-form value (or argument list),
+    /// its long-form parameters, or `set`/`with` data. A long-form `no_error`
+    /// flag is not evaluated text.
+    fn verb(key: &str, rest: &[FmPathSegment<'_>]) -> Option<Surface> {
+        if STRUCTURAL_ITEM_KEYS.contains(&key) {
+            return None;
+        }
+        match rest {
+            [Key("no_error")] if key != "set" => None,
+            _ => Some(Surface::SinglePass),
+        }
+    }
+
+    /// Whether a whole-value scalar at `path` is evaluated exactly once: any
+    /// value beneath a lifecycle verb, in a list item, a `then`/`else` body, a
+    /// dictionary stack, or `loop.gate` — operands, long-form parameters, and
+    /// `set`/`with` data included — other than a guard and a `no_error` flag.
+    pub(crate) fn is_single_pass_value(path: &[FmPathSegment<'_>]) -> bool {
+        classify(path) == Some(Surface::SinglePass)
+    }
+
+    /// Whether `path` is a lifecycle predicate: an item's `when` at any
+    /// nesting depth, or the loop's `while` / `until`.
+    pub(crate) fn is_predicate(path: &[FmPathSegment<'_>]) -> bool {
+        classify(path) == Some(Surface::Predicate)
     }
 }
 

@@ -41,7 +41,7 @@ fn corpus(fx: &Fixture) -> (FileResolutionContext, Vec<PathBuf>) {
 fn single_location(strategy: &P) -> bool {
     !matches!(
         strategy,
-        P::AuthoredIntent(_) | P::RepoMultiPath(_) | P::MagicPath(_)
+        P::AuthoredIntent(_) | P::TreeRootRelative | P::RepoMultiPath(_) | P::MagicPath(_)
     )
 }
 
@@ -58,6 +58,13 @@ fn every_result_is_a_fixed_point_and_names_its_target() {
             let plan = first.reference().candidate_plan(&ctx).unwrap();
             assert_eq!(plan.len(), 1, "{raw}");
             assert!(same_file(plan[0].path(), target), "{raw} plans {:?}", plan[0].path());
+        } else if first.strategy() == &P::TreeRootRelative {
+            let plan = first.reference().candidate_plan(&ctx).unwrap();
+            assert!(plan.iter().any(|candidate| same_file(candidate.path(), target)), "{raw}");
+            if target.is_file() {
+                let resolved = first.reference().resolve_in_context(&ctx).unwrap().unwrap();
+                assert!(same_file(&resolved, target), "{raw}");
+            }
         }
 
         // Idempotence: feeding the result back returns it unchanged, twice.
@@ -73,15 +80,15 @@ fn cleaning_authored_links_twice_changes_nothing_the_second_time() {
     let fx = Fixture::new();
     let (ctx, _) = corpus(&fx);
     for (authored, cleaned) in [
-        ("../../../f.md", "&f.md"),
-        ("./a.md", "./a.md"),
-        ("a.md", "a.md"),
-        ("sub/b.md", "sub/b.md"),
-        ("../c.md", "../c.md"),
-        ("../src/d.md", "../src/d.md"),
-        ("../../api/e.md", "&apps/api/e.md"),
-        ("./../docs/a.md", "./a.md"),
-        ("./@at.md", "./@at.md"),
+        ("../../../f.md", "f.md"),
+        ("./a.md", "apps/web/docs/a.md"),
+        ("a.md", "apps/web/docs/a.md"),
+        ("sub/b.md", "apps/web/docs/sub/b.md"),
+        ("../c.md", "apps/web/c.md"),
+        ("../src/d.md", "apps/web/src/d.md"),
+        ("../../api/e.md", "apps/api/e.md"),
+        ("./../docs/a.md", "apps/web/docs/a.md"),
+        ("./@at.md", "apps/web/docs/@at.md"),
         ("^/f.md", "^/f.md"),
     ] {
         let first = evaluate(PortablePath::from_reference(reference(authored)).with_ctx(&ctx));
@@ -137,39 +144,37 @@ fn the_documented_examples_hold() {
     let topics = fx.dir("repo/biscuit-file/docs/topics");
     let page = fx.file("repo/biscuit-file/docs/topics/file-references.md");
 
-    // From inside the tree the nearby relative link wins; from elsewhere in
-    // the repository, the `&` form. (From the repository root itself
-    // `ChildDir` precedes `RepoRoot`, so the default writes `./biscuit-file/…`.)
+    // The bare root spelling is independent of the authoring directory.
     let found = evaluate(PortablePath::from_path(&page).with_ctx(&fx.ctx(&topics, &[])));
-    assert_eq!(found.reference().raw(), "./file-references.md");
+    assert_eq!(found.reference().raw(), "biscuit-file/docs/topics/file-references.md");
     let elsewhere = fx.dir("repo/apps/web");
     let found = evaluate(PortablePath::from_path(&page).with_ctx(&fx.ctx(&elsewhere, &[])));
-    assert_eq!(found.reference().raw(), "&biscuit-file/docs/topics/file-references.md");
+    assert_eq!(found.reference().raw(), "biscuit-file/docs/topics/file-references.md");
     let found = evaluate(PortablePath::from_path(&page).with_ctx(&fx.ctx(&fx.repo, &[])));
-    assert_eq!(found.reference().raw(), "./biscuit-file/docs/topics/file-references.md");
+    assert_eq!(found.reference().raw(), "biscuit-file/docs/topics/file-references.md");
 
     // `with_cwd` without a context (the fixture is not a git repository).
     let found = evaluate(PortablePath::from_path(&page).with_cwd(&topics));
-    assert_eq!(found.reference().raw(), "./file-references.md");
+    assert_eq!(found.reference().raw(), "file-references.md");
 
     // A non-repository tree supplied with `with_base_dir`.
     let docs = fx.dir("docs");
     let my_doc = fx.file("docs/my-doc.md");
     let found = evaluate(PortablePath::from_path(&my_doc).with_cwd(&docs).with_base_dir(&docs));
-    assert_eq!(found.reference().raw(), "./my-doc.md");
+    assert_eq!(found.reference().raw(), "my-doc.md");
 
-    // `^/foo.md` is kept; `../../../foo.md` becomes `&foo.md`.
+    // An authored sigil wins before the bare-root preference.
     let guide_dir = fx.dir("repo/apps/web/docs");
     fx.file("repo/foo.md");
     let ctx = fx.ctx(&guide_dir, &[]);
     let kept = evaluate(PortablePath::from_reference(reference("^/foo.md")).with_ctx(&ctx));
     assert_eq!(kept.reference().raw(), "^/foo.md");
     let cleaned = evaluate(PortablePath::from_reference(reference("../../../foo.md")).with_ctx(&ctx));
-    assert_eq!(cleaned.reference().raw(), "&foo.md");
+    assert_eq!(cleaned.reference().raw(), "foo.md");
 
     // Suffixes stay with the caller: split before, reattach after.
     let link = "../../../foo.md#install";
     let (path, suffix) = link.split_at(link.find('#').unwrap());
     let cleaned = evaluate(PortablePath::from_reference(reference(path)).with_ctx(&ctx));
-    assert_eq!(format!("{}{suffix}", cleaned.reference().raw()), "&foo.md#install");
+    assert_eq!(format!("{}{suffix}", cleaned.reference().raw()), "foo.md#install");
 }

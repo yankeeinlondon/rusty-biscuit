@@ -1,4 +1,4 @@
-//! The `loop:` gate's lifecycle concerns read the loop's ambient values.
+//! The `loop:` gate's lifecycle concerns read the `loop` global.
 
 use super::*;
 use crate::composition::lifecycle::{LifecycleEmitter, LifecycleRuntimeContext, parse_lifecycle_config};
@@ -46,31 +46,32 @@ impl LifecycleEmitter for TextRecorder {
     fn emit_notification(&self, _title: &str) {}
 }
 
-const AMBIENT: &str = "count={{_loop_count}} first={{_loop_is_first}} last={{_loop_is_last}} \
-                       out={{_loop_last_output}} code={{_loop_last_exit_code}}";
+const AMBIENT: &str = "count={{loop.count}} first={{loop.is_first}} last={{loop['is_last']}} \
+                       out={{loop.last_output}} code={{loop.last_exit_code}}";
 
-/// Every `_loop_*` value resolves in the gate's `info`, `warn`, `message`,
-/// `stderr`, and stack (both a `when:` guard and an action), on every pass
-/// including the one that ends the loop, with the values the condition reads:
-/// those of the iteration that just finished.
+/// Every `loop` member resolves in the gate's `info`, `warn`, `message`, and
+/// `stderr` actions and in a guarded branch (both its `when:` and its action),
+/// by dotted and static-bracket access, on every pass including the one that
+/// ends the loop, with the values the condition reads: those of the iteration
+/// that just finished.
 #[test]
 fn loop_gate_concerns_read_just_finished_iteration_ambient_on_every_pass() {
     let config = LoopConfig {
-        condition: LoopCondition::Until("_loop_count >= 2".into()),
+        condition: LoopCondition::Until("loop.count >= 2".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
-        fail_fast: Some(false),
+        max_template: None,
         on_rate_limit: None,
     };
     let lifecycle = parse_lifecycle_config(
         &json!({
             "loop": {
-                "info": format!("info {AMBIENT}"),
-                "warn": format!("warn {AMBIENT}"),
-                "message": format!("message {AMBIENT}"),
-                "stderr": format!("stderr {AMBIENT}"),
-                "stack": [
-                    { "when": "_loop_count >= 1", "action": { "info": format!("stack {AMBIENT}") } },
+                "gate": [
+                    { "stderr": format!("stderr {AMBIENT}") },
+                    { "info": format!("info {AMBIENT}") },
+                    { "warn": format!("warn {AMBIENT}") },
+                    { "message": format!("message {AMBIENT}") },
+                    { "when": "loop.count >= 1", "then": [{ "info": format!("stack {AMBIENT}") }] },
                 ],
             },
         }),
@@ -115,16 +116,11 @@ fn loop_gate_concerns_read_just_finished_iteration_ambient_on_every_pass() {
         None,
         |ctx, guard| {
             guard.emit_start_once();
-            // Iteration 1 exits 3 so the gate's `_loop_last_exit_code` is
-            // distinguishable from the seed value; `fail_fast: false` keeps
-            // the loop going to the gate.
+            // Pass 1 settles as `success` with status 3, so the gate's
+            // `loop.last_exit_code` is distinguishable from the entry value.
             let output = format!("out-{}", ctx.iteration);
             Ok(if ctx.iteration == 1 {
-                LoopIterationOutput::failure(
-                    output,
-                    3,
-                    CompositionError::LoopInvalid("iteration 1 failed".into()),
-                )
+                LoopIterationOutput { exit_code: 3, ..LoopIterationOutput::success(output) }
             } else {
                 LoopIterationOutput::success(output)
             })
@@ -138,7 +134,8 @@ fn loop_gate_concerns_read_just_finished_iteration_ambient_on_every_pass() {
         format!("count={count} first={first} last={last} out=out-{count} code={code}")
     };
     let pass_one = pass(1, true, false, 3);
-    let pass_two = pass(2, false, true, 0);
+    // Under the default cap neither pass is the last permitted one.
+    let pass_two = pass(2, false, false, 0);
     let mut lines = emitter.lines.into_inner().unwrap();
     lines.sort();
     let mut expected: Vec<String> = [&pass_one, &pass_two]

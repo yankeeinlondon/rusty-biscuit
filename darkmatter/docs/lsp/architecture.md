@@ -5,8 +5,14 @@ DMLS (`darkmatter/dmls`) is a stdio language server. `run_server` in
 then dispatches every request and notification against one `ServerState`:
 
 - the open documents (the editor's buffers are authoritative over disk)
-- the layered configuration (`.dmls.toml` under `workspace/configuration`)
-- the workspace index and the graph snapshot that readers load
+- the layered configuration (`.dmls.toml` under `workspace/configuration`;
+  see [DMLS Configuration](./configuration.md))
+- the workspace index and the graph snapshot that readers load: the
+  workspace file list and the documents parsed so far (open buffers and the
+  targets they reference)
+- the index store, the per-file facts that references, rename, file
+  rename, and workspace symbols are answered from, filled only when a
+  feature first needs every document (see [DMLS Indexing](./indexing.md))
 - the provider registry, the ordered chain of providers per capability
 - the diagnostics scheduler and the frontmatter overlay caches
 - the watch mode, which decides how on-disk changes are learned
@@ -17,6 +23,34 @@ For each request on an open document, the router assembles a
 overlay, and file-resolution context) and runs the provider chain against
 it. The [DMLS README](../../dmls/README.md#architecture) covers the graph,
 source map, provider registry, and concurrency model in more detail.
+
+## Graphs and the wiki universe
+
+DMLS never holds a graph over every workspace file. It builds a
+`WorkspaceGraph` in two places:
+
+| Graph | Documents | Lifetime |
+| --- | --- | --- |
+| the live snapshot | open buffers, the targets they reference, and their dependencies | replaced on each change |
+| a request graph | the index store's candidate referrers of one request's target, the target, and the open buffers (see [Answering a request from the store](./indexing.md#answering-a-request-from-the-store)) | one references, rename, or file-rename request |
+
+Neither graph holds every file, but a wiki link must still be matched, and
+judged ambiguous, against every file. So
+`WorkspaceGraph::build_with_roots(indices, generation, universe, contexts)`
+takes the **wiki universe** from its caller: a `WikiUniverse`
+([`wiki/universe.rs`](../../dmls/src/wiki/universe.rs)) with one entry per
+listed Markdown file and open buffer, each named by its path relative to
+the wiki roots, built from the file list without reading any file. Wiki resolution, ambiguity
+diagnostics, wiki completion, and the wiki spelling a file rename writes
+all index the universe, never the graph's own documents.
+
+For example, with `alpha/topic.md` and `beta/topic.md` listed, a request
+graph over `notes/b.md` alone still reports `[[topic]]` in `notes/b.md` as
+ambiguous, and a file rename of `alpha/topic.md` still writes the
+shortest spelling unique across both files. A request graph shares the
+live snapshot's universe (`WorkspaceGraph::shared_wiki_universe`), so both
+graphs judge wiki links identically. The universe is a required parameter:
+no caller can silently judge ambiguity against a partial set.
 
 ## File resolution contexts
 
@@ -93,20 +127,31 @@ flowchart TD
 
 | Consumer | How it resolves | Touches disk? |
 |---|---|---|
-| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is an **indexed** document; otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not indexed |
+| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **graph document** (a Markdown file in the workspace file list, an open buffer, or a parsed dependency); otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not a graph document |
 | Single-target features (directive links, definition and hover, transclusion diagnostics, frontmatter navigation, the create-missing-file action) | `resolve_reference`: the first planned candidate that exists, else the first candidate as the place a new file would go | Yes, as composition does |
-| Anchor completion | The first planned candidate that is an indexed document | No |
+| Anchor completion | The first planned candidate that is a graph document; otherwise `resolve_reference`, when it finds a Markdown file | Reads that one document if it has not been parsed |
 
-The index decides where headings live, never whether a file exists. A graph
-edge lands on an indexed document's node, on an existing file the index does
-not hold (`EdgeTarget::File`: above the workspace folder, in `HOME`, under a
-magic root, or not Markdown), or stays unresolved. For example, with only
-`repo/docs/` open, `[t](../target.md)` links to `repo/target.md` and is not
-broken. A `#fragment` on an unindexed file is not checked, because its
-headings were never read; it is neither resolved to a heading nor reported
-missing. A link to an open, unsaved buffer still resolves, unless a place
-searched before it could not be checked (permission denied, a symlink loop):
-that link stays broken with the `Io` failure class, as `md compose` would fail.
+The file list decides which workspace documents exist as graph nodes, never
+whether a file exists. A graph edge lands on a graph document's node, on
+an existing file outside the graph (`EdgeTarget::File`: above the workspace
+folder, in `HOME`, under a magic root, excluded from discovery, or not
+Markdown), or stays unresolved. For example, with only `repo/docs/` open,
+`[t](../target.md)` links to `repo/target.md` and is not broken.
+
+A Markdown document that is not open is parsed only when a feature needs
+its contents: a `#fragment` link or `[[note#heading]]` from an open document
+(to check the anchor), heading completion, hover, or definition on a link to
+it, and the `::file`/`::code` chain followed outward from an open document
+(for cycle detection). Until then its `#fragment`s are neither resolved to a
+heading nor reported missing. This includes a Markdown file outside the
+list that an edge lands on: once parsed it becomes a graph document, a
+**dependency**, whose `#fragment`s are checked like any other, but which is
+never a wiki candidate, a path completion, or part of the index store (see
+[Targets outside the file list](./indexing.md#targets-outside-the-file-list)).
+A file in another format is never parsed. A link to an open, unsaved buffer still resolves, unless a
+place searched before it could not be checked (permission denied, a symlink
+loop): that link stays broken with the `Io` failure class, as `md compose`
+would fail.
 
 ### Invalidation
 
@@ -115,19 +160,28 @@ An entry is dropped, and rebuilt lazily on the next request, when:
 | Event | Entries dropped |
 |---|---|
 | `workspace/didChangeWatchedFiles` names a path | Every entry keyed at an ancestor of the path, and every entry keyed inside the path's owning directory (the parent of `.git` for a path inside `.git/`, otherwise the path's own directory) |
-| A save in server-rescan mode, where the rescan finds a changed document or package manifest | The same entries, for each changed path |
+| A save in server-rescan mode, where the rescan finds a Markdown file that joined or left the file list, a parsed document whose bytes changed, or a changed package manifest | The same entries, for each changed path |
 | `workspace/didChangeConfiguration` | Every entry, even when the effective configuration is unchanged |
 
 When anything is dropped, the graph is relinked so every reference
 re-resolves, and diagnostics are re-published for every open document.
 
 Clients that watch files are asked to report, besides the configured
-document globs and schema YAML, every package manifest sniff detects packages
-by (`PACKAGE_MANIFEST_FILE_NAMES`: `Cargo.toml`, `package.json`,
-`pyproject.toml`, `go.mod`) and `**/.git/config`
+document globs, every YAML file (`**/*.yaml`, `**/*.yml`, even when
+`workspace.include` is empty), the discovery inputs `.gitignore`, `.ignore`,
+and `.dmls.toml` (a change re-lists the workspace), every package manifest
+sniff detects packages by (`PACKAGE_MANIFEST_FILE_NAMES`: `Cargo.toml`,
+`package.json`, `pyproject.toml`, `go.mod`), and `**/.git/config`
 ([`watch.rs`](../../dmls/src/workspace/watch.rs)). These context inputs
-only drop contexts; they are never indexed as documents. In server-rescan
-mode (clients without a reliable watcher), each save re-hashes every
+only drop contexts; they are never indexed as documents. A client that
+supports watchers rooted at a folder (`relativePatternSupport`) is also
+asked to watch each folder the trigger registries read, wherever it lives,
+including a schema root that does not exist yet. A client without that
+support, or one that rejects the registration, gets the save fallback
+instead: every save marks the trigger registries stale. A client that
+rejects the workspace registration is switched to server-rescan mode. In server-rescan
+mode (clients without a reliable watcher), each save lists the workspace
+again, re-reads the closed documents already parsed, and re-hashes every
 package manifest under the workspace roots and compares the result with the
 previous scan. The rescan does not read `.git/config`, so a repaired
 `.git/config` is noticed there only through another change below the

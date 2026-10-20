@@ -3,16 +3,17 @@
 //! These tests verify that committed OpenAPI and Postman artifacts match
 //! what the generator would produce. They iterate every module reported by
 //! [`apis_by_module`] and compare the in-memory regeneration against the
-//! files committed under `schematic/openapi/` and `schematic/postman/`.
+//! files committed under `schematic/openapi/` and `schematic/postman/`, and
+//! scan the committed OpenAPI corpus for `operationId` integrity.
 //!
 //! Run with:
 //!
 //! ```sh
-//! cargo test -p schematic-gen --test l1 artifact_drift::
+//! cargo nextest run -p schematic-gen --test l1 -E 'test(/^artifact_drift::/)'
 //! ```
 //!
-//! The tests run unconditionally on every `cargo test` invocation so CI
-//! catches drift on every PR. Each test is in-process — no `cargo` is
+//! The tests are ordinary L1 tests, so every `just test` run and every CI
+//! run catches drift. Each test is in-process — no `cargo` is
 //! invoked — so the entire suite completes in a few seconds for ~16
 //! modules.
 
@@ -23,7 +24,7 @@ use std::path::PathBuf;
 use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
 use schematic_definitions::registry::get_registries_for_module;
-use schematic_gen::export::openapi::write_openapi_grouped;
+use schematic_gen::export::openapi::{operation_id_diagnostics, write_openapi_grouped};
 use schematic_gen::export::postman::{write_postman, write_postman_grouped};
 
 /// Returns the absolute path to the `schematic/` package area, anchored on
@@ -247,6 +248,48 @@ fn artificial_analysis_attribution_present_in_all_artifacts() {
             path.display(),
         );
     }
+}
+
+/// Every committed OpenAPI document, read back from disk, passes the same
+/// `operationId` scan the writers run: no id is declared twice and every link
+/// names an operation of its own document. This is the passive guard for the
+/// committed corpus; the drift test above proves the generator would write
+/// the same bytes.
+#[test]
+fn committed_openapi_documents_have_unique_operation_ids() {
+    let openapi_dir = schematic_root().join("openapi");
+    let mut documents: Vec<PathBuf> = fs::read_dir(&openapi_dir)
+        .expect("read openapi dir")
+        .map(|entry| entry.expect("openapi dir entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    documents.sort();
+    assert!(
+        !documents.is_empty(),
+        "no committed OpenAPI documents under {}",
+        openapi_dir.display()
+    );
+
+    let mut failures = Vec::new();
+    for path in &documents {
+        let text = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("read {} failed: {e}", path.display()));
+        let doc: openapiv3::OpenAPI = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("{} is not an OpenAPI document: {e}", path.display()));
+        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+        failures.extend(
+            operation_id_diagnostics(&doc, &[name.as_str()])
+                .iter()
+                .map(ToString::to_string),
+        );
+    }
+
+    assert!(
+        failures.is_empty(),
+        "committed OpenAPI documents violate operationId integrity:\n{}\n\
+         Run `just -f schematic/justfile generate` to regenerate them.",
+        failures.join("\n")
+    );
 }
 
 /// Verify the committed `schematic/openapi/` directory contains exactly the

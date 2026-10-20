@@ -14,6 +14,7 @@ use super::super::lifecycle::LifecycleSignal;
 use super::super::runtime_state::LayeredOverrides;
 use super::super::types::OnRateLimit;
 use super::expression::LoopAmbient;
+use super::frame::LoopOutcome;
 use crate::stream::summary::RateLimitInfo;
 
 /// Runtime options that can override per-document loop configuration.
@@ -25,8 +26,6 @@ use crate::stream::summary::RateLimitInfo;
 pub struct LoopExecutionOptions {
     /// Runtime iteration cap override.
     pub max_iterations: Option<usize>,
-    /// Runtime fail-fast override.
-    pub fail_fast: Option<bool>,
     /// Runtime rate-limit policy override. When set, takes precedence over
     /// any per-document [`LoopConfig::on_rate_limit`](super::super::types::LoopConfig::on_rate_limit).
     pub on_rate_limit: Option<OnRateLimit>,
@@ -52,7 +51,7 @@ pub struct LoopIterationContext {
     pub iteration: usize,
     /// Frontmatter state for this iteration.
     pub frontmatter: Map<String, Value>,
-    /// Ambient variables for this iteration.
+    /// The `loop` global's values for this iteration.
     pub ambient: LoopAmbient,
 }
 
@@ -60,16 +59,14 @@ impl LoopIterationContext {
     /// Build the overrides for prompt preparation.
     ///
     /// The result is `caller` — the run's own override layers — with the
-    /// current frontmatter and the read-only ambient loop variables on top.
-    /// Ambient variables intentionally shadow frontmatter keys for the duration
-    /// of an iteration.
+    /// current frontmatter on top. The loop values are not frontmatter: they
+    /// are the `loop` global ([`LoopAmbient::to_value`]), never an override.
     ///
     /// A frontmatter key is authored only while it still holds exactly the
     /// value `caller` supplied as authored (a CLI setter carried through the
     /// seed). Everything else was produced by the run — a control variable
-    /// lifted from the composed seed, a loop action result, an ambient value
-    /// such as `_loop_last_output` — so it is data, and its `{{ … }}` or
-    /// `$( … )` is never scanned again.
+    /// lifted from the composed seed or a loop action result — so it is data,
+    /// and its `{{ … }}` or `$( … )` is never scanned again.
     pub fn as_layered_overrides(&self, caller: &LayeredOverrides) -> LayeredOverrides {
         let mut overrides = caller.clone();
         for (key, value) in &self.frontmatter {
@@ -82,9 +79,6 @@ impl LoopIterationContext {
             };
             overrides.insert(origin, key.clone(), value.clone());
         }
-        let mut ambient = Map::new();
-        insert_ambient_overrides(&mut ambient, &self.ambient);
-        overrides.push(OverrideOrigin::Data, Some(&Value::Object(ambient)));
         overrides
     }
 }
@@ -100,8 +94,7 @@ pub struct LoopIterationOutput {
     pub error: Option<CompositionError>,
     /// Terminal lifecycle signal emitted by this iteration, if any.
     ///
-    /// Used by the loop engine to apply `fail_fast` semantics and to
-    /// sequence the post-`finalize` loop gate.
+    /// A `blocked` or `failure` pass ends the loop before its gate.
     pub terminal_signal: Option<LifecycleSignal>,
     /// Rate-limit signal observed during this iteration, when present.
     ///
@@ -136,10 +129,17 @@ pub struct LoopIterationOutput {
     /// was.
     ///
     /// Every iteration is its own run, so the loop gate that follows it, and
-    /// the next iteration's `_loop_is_last` prediction, read this snapshot
+    /// the next iteration's `loop.is_last` prediction, read this snapshot
     /// rather than the one the loop started with. `None` keeps the most recent
     /// snapshot the loop has.
     pub context: Option<darkmatter::markdown::compose::ComposeContext>,
+    /// The effective frontmatter the pass composed with, when the executor
+    /// prepared one.
+    ///
+    /// The gate and the condition read it beneath the loop's control state,
+    /// so a gate action or a template filled after the pass reads every
+    /// property the pass had, not only the ones the loop controls.
+    pub frontmatter: Option<Map<String, Value>>,
 }
 
 impl LoopIterationOutput {
@@ -156,6 +156,7 @@ impl LoopIterationOutput {
             model_id: None,
             handoff: None,
             context: None,
+            frontmatter: None,
         }
     }
 
@@ -172,6 +173,7 @@ impl LoopIterationOutput {
             model_id: None,
             handoff: None,
             context: None,
+            frontmatter: None,
         }
     }
 
@@ -241,6 +243,14 @@ pub struct LoopExecutionResult {
     /// A committed handoff is already in the run ledger's chain, so a caller
     /// that ignores this field leaves a hop recorded that no document adopted.
     pub handoff: Option<SurfacedHandoff>,
+    /// How the loop ended on its own terms: its condition, its cap, or a
+    /// `break`. `None` when a failure, handoff, cancellation, or `initialize`
+    /// ended it instead.
+    pub outcome: Option<LoopOutcome>,
+    /// The `break` that ended the loop, when [`Self::outcome`] is
+    /// [`LoopOutcome::Broken`]. Its code is the process exit code only when
+    /// this loop is the root invocation's; the caller decides that.
+    pub broken: Option<super::frame::LoopBreak>,
 }
 
 impl LoopExecutionResult {
@@ -257,6 +267,8 @@ impl LoopExecutionResult {
             last_output,
             error: None,
             handoff: None,
+            outcome: None,
+            broken: None,
         }
     }
 
@@ -274,7 +286,23 @@ impl LoopExecutionResult {
             last_output,
             error: Some(error),
             handoff: None,
+            outcome: None,
+            broken: None,
         }
+    }
+
+    #[must_use]
+    pub(super) fn with_outcome(mut self, outcome: LoopOutcome) -> Self {
+        self.outcome = Some(outcome);
+        self
+    }
+
+    /// End the loop with the `break` that interrupted it.
+    #[must_use]
+    pub(super) fn with_break(mut self, broken: super::frame::LoopBreak) -> Self {
+        self.outcome = Some(LoopOutcome::Broken);
+        self.broken = Some(broken);
+        self
     }
 
     /// Attach the handoff the caller's coordinator must consume.
@@ -283,23 +311,4 @@ impl LoopExecutionResult {
         self.handoff = Some(handoff);
         self
     }
-}
-
-/// Insert the read-only ambient loop variables (`_loop_*`) into a frontmatter
-/// override map for prompt preparation.
-pub(super) fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &LoopAmbient) {
-    frontmatter.insert(
-        "_loop_count".to_string(),
-        Value::Number(ambient.iteration.into()),
-    );
-    frontmatter.insert("_loop_is_first".to_string(), Value::Bool(ambient.is_first));
-    frontmatter.insert("_loop_is_last".to_string(), Value::Bool(ambient.is_last));
-    frontmatter.insert(
-        "_loop_last_output".to_string(),
-        Value::String(ambient.last_output.clone()),
-    );
-    frontmatter.insert(
-        "_loop_last_exit_code".to_string(),
-        Value::Number(ambient.last_exit_code.into()),
-    );
 }

@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
 use crate::auth::{AuthPolicy, AuthStrategy, EnvAuthStrategy};
+use crate::cross_origin::CrossOrigin;
 use crate::headers::{EnvList, EnvMapping};
+use crate::pagination::{PaginationException, Strategy};
 use crate::params::EndpointParams;
 use crate::request::ApiRequest;
 use crate::response::ApiResponse;
@@ -83,7 +85,7 @@ pub enum RestMethod {
 /// Create a simple API with no authentication:
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse};
+/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 ///
 /// let api = RestApi {
 ///     name: "SimpleApi".to_string(),
@@ -112,6 +114,11 @@ pub enum RestMethod {
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// assert_eq!(api.name, "SimpleApi");
@@ -119,10 +126,11 @@ pub enum RestMethod {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestApi {
-    /// Unique identifier for this API (used for generated struct/enum names).
+    /// Unique identifier for this API (used for generated type names).
     ///
-    /// This becomes the generated client struct name (e.g., "OpenAI" generates
-    /// `struct OpenAI` and `enum OpenAIRequest`).
+    /// "OpenAI", for example, generates the client struct
+    /// `struct OpenAI(schematic_runtime::Client<OpenAIApi>)` and its tag type
+    /// `enum OpenAIApi {}`.
     pub name: String,
     /// Human-readable description of the API.
     pub description: String,
@@ -143,9 +151,9 @@ pub struct RestApi {
     pub auth_policy: Option<AuthPolicy>,
     /// Environment variable names for authentication credentials.
     ///
-    /// For `BearerToken` and `ApiKey` auth strategies, this is a fallback chain.
-    /// The first env var that is set will be used. If none are set, the request
-    /// will fail with a `MissingCredential` error.
+    /// For `BearerToken`, `ApiKey`, and `ApiKeyParam` auth strategies, this is
+    /// a fallback chain. The first non-empty env var is used. If none is set,
+    /// the request is sent anonymously.
     ///
     /// Example: `vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()]`
     pub env_auth: Vec<String>,
@@ -188,7 +196,7 @@ pub struct RestApi {
     /// ## Examples
     ///
     /// ```
-    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList};
+    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList, CrossOrigin};
     ///
     /// let api = RestApi {
     ///     name: "Example".to_string(),
@@ -211,9 +219,33 @@ pub struct RestApi {
     ///         api_key: None,
     ///         ..Default::default()
     ///     }),
+    ///     cross_origin: CrossOrigin::default(),
+    ///     request_id_header: None,
+    ///     secret_names: vec![],
+    ///     default_pagination: None,
+    ///     pagination_exceptions: vec![],
     /// };
     /// ```
     pub env_mapping: Option<EnvMapping>,
+    /// Governs redirects and followed next-page links that leave the base
+    /// origin. Defaults to same-origin; endpoints cannot override it.
+    pub cross_origin: CrossOrigin,
+    /// Response header carrying the provider's request id, matched
+    /// case-insensitively. `None` when the provider is not known to send one.
+    pub request_id_header: Option<String>,
+    /// Extra header names (matched case-insensitively) and query names
+    /// (matched exactly) whose values are never stored in metadata or shown,
+    /// beyond the built-in names and the API's authentication names.
+    pub secret_names: Vec<String>,
+    /// Strategy inherited by every list endpoint without an exception row.
+    ///
+    /// `None` leaves lists unpaginated. A GET endpoint whose response is an
+    /// explicit `Vec<T>` is a list automatically; any other list needs a row in
+    /// [`Self::pagination_exceptions`]. See [`crate::pagination::resolve`].
+    pub default_pagination: Option<Strategy>,
+    /// List shapes keyed by endpoint id: wrapper lists, opt-outs, overrides,
+    /// and non-GET lists. Each id names an endpoint of this API at most once.
+    pub pagination_exceptions: Vec<PaginationException>,
 }
 
 impl RestApi {
@@ -231,7 +263,7 @@ impl RestApi {
     /// With explicit env_mapping:
     ///
     /// ```
-    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList};
+    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList, CrossOrigin};
     ///
     /// let api = RestApi {
     ///     name: "Example".to_string(),
@@ -254,6 +286,11 @@ impl RestApi {
     ///         api_key: None,
     ///         ..Default::default()
     ///     }),
+    ///     cross_origin: CrossOrigin::default(),
+    ///     request_id_header: None,
+    ///     secret_names: vec![],
+    ///     default_pagination: None,
+    ///     pagination_exceptions: vec![],
     /// };
     ///
     /// let mapping = api.default_env_mapping();
@@ -263,7 +300,7 @@ impl RestApi {
     /// With legacy fields (backward compatible):
     ///
     /// ```
-    /// use schematic_define::{RestApi, AuthStrategy};
+    /// use schematic_define::{RestApi, AuthStrategy, CrossOrigin};
     ///
     /// let api = RestApi {
     ///     name: "Example".to_string(),
@@ -280,6 +317,11 @@ impl RestApi {
     ///     request_suffix: None,
     ///     version: None,
     ///     env_mapping: None,
+    ///     cross_origin: CrossOrigin::default(),
+    ///     request_id_header: None,
+    ///     secret_names: vec![],
+    ///     default_pagination: None,
+    ///     pagination_exceptions: vec![],
     /// };
     ///
     /// let mapping = api.default_env_mapping();
@@ -311,6 +353,12 @@ impl RestApi {
     /// This is used by the generator to preserve the existing `env_auth` /
     /// `env_username` authoring API while routing runtime behavior through
     /// [`EnvMapping`].
+    ///
+    /// An [`AuthStrategy::ApiKeyParam`] strategy yields an empty mapping:
+    /// [`EnvMapping`] only describes header credentials. For an
+    /// [`EnvAuthStrategy::ApiKeyParam`] fallback the generator reads the
+    /// variables from `env_auth` directly and gives them to the runtime's
+    /// environment fallback with a query or cookie placement.
     #[must_use]
     pub fn legacy_env_mapping_for(
         auth: &AuthStrategy,
@@ -329,8 +377,7 @@ impl RestApi {
                 }),
                 ..Default::default()
             },
-            // Parameter-based keys (query/cookie) have no header-based
-            // `EnvMapping` representation; the legacy mapping omits them.
+            // See the doc comment: parameter keys are not header credentials.
             Some(EnvAuthStrategy::ApiKeyParam { .. }) => EnvMapping::default(),
             Some(EnvAuthStrategy::Basic) => EnvMapping {
                 basic_user: env_username.map(EnvList::single),
@@ -550,6 +597,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: Some(explicit_mapping.clone()),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -577,6 +629,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -607,6 +664,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -635,6 +697,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -661,6 +728,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -703,6 +775,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: Some(explicit_mapping.clone()),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -738,6 +815,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: Some(explicit_mapping),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping1 = api.default_env_mapping();

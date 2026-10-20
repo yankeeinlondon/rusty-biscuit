@@ -12,17 +12,24 @@
 
 pub mod bench;
 pub mod capabilities;
+pub mod clock;
 pub mod config;
 pub mod context;
 pub mod corpus;
 pub mod diagnostics;
+mod index_build;
 pub mod graph;
+pub mod index_store;
+pub mod log_capture;
 pub mod overlay;
 pub mod providers;
+mod registry_jobs;
+pub mod request_timing;
 pub mod router;
 pub mod semantic_legend;
 pub mod source_map;
 pub mod wiki;
+pub mod work_counters;
 pub mod workspace;
 
 pub use bench::{BenchReport, bench_index};
@@ -32,5 +39,6 @@ pub use corpus::{CorpusTier, generate_corpus};
 pub use diagnostics::{DiagnosticsScheduler, DiagnosticTier};
 pub use overlay::{DocumentOverlay, OverlayState};
 pub use providers::{DocumentContext, Provider, ProviderRegistry};
-pub use router::{RunOptions, ServerError, run_server};
+pub use registry_jobs::RegistryJobKind;
+pub use router::{RunOptions, ServerError, StartupEvent, StartupHooks, run_server};
 pub use source_map::{PositionEncoding, Region, SourceMap};

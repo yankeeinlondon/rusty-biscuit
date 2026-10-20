@@ -47,7 +47,7 @@ fn config_from_markdown(source: &str) -> LifecycleConfig {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
     );
-    super::super::super::parse::parse_lifecycle_config_with_orders(
+    super::super::super::parse_lifecycle_config_with_orders(
         &frontmatter,
         Path::new("t.md"),
         Some(markdown.frontmatter()),
@@ -63,15 +63,18 @@ fn set_action(entries: Vec<(&str, Value)>, no_error: bool) -> LifecycleAction {
     LifecycleAction {
         kind: LifecycleActionKind::RuntimeSet(RuntimeSet::new(authored).unwrap()),
         no_error,
+        path: crate::composition::LifecyclePath::root("tasks").index(0).field("side_effect").field("set"),
     }
 }
 
 #[test]
 fn set_can_read_an_absent_destination_as_null() {
-    let config = config(json!({"initialize": {"stack": [{"action": [
-        {"set": {"epilog": "{{message_to_agent}}", "message_to_agent": null}},
-        {"message": "handoff=[{{epilog}}]"}
-    ]}]}}));
+    let config = config(json!({
+        "initialize": [
+            { "set": { "epilog": "{{message_to_agent}}", "message_to_agent": null } },
+            { "message": "handoff=[{{epilog}}]" },
+        ],
+    }));
     for base in [map(json!({})), map(json!({"message_to_agent": null})),
         map(json!({"message_to_agent": "continue phase 3"}))] {
         let expected = base.get("message_to_agent").cloned().unwrap_or(Value::Null);
@@ -94,11 +97,13 @@ fn set_can_read_an_absent_destination_as_null() {
 /// resolves from its own pre-action snapshot.
 #[test]
 fn consecutive_set_actions_observe_each_others_updates() {
-    let config = config(json!({"success": {"stack": [{"action": [
-        {"set": {"phase": "build"}},
-        {"set": {"observed": "{{phase}}", "phase": "ship"}},
-        {"message": "observed={{observed}},phase={{phase}}"}
-    ]}]}}));
+    let config = config(json!({
+        "success": [
+            { "set": { "phase": "build" } },
+            { "set": { "observed": "{{phase}}", "phase": "ship" } },
+            { "message": "observed={{observed}},phase={{phase}}" },
+        ],
+    }));
     let base = map(json!({"phase": "plan"}));
     let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
@@ -213,7 +218,7 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     use biscuit_terminal::errors::BlockError;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
-    let source_text = "---\nsuccess:\n    stack:\n        - action:\n            - set:\n                stable: changed\n                metadata:\n                    files:\n                        - \"{{unknown_root()}}\"\n---\nbody\n";
+    let source_text = "---\nsuccess:\n    - set:\n          stable: changed\n          metadata:\n              files:\n                  - \"{{unknown_root()}}\"\n---\nbody\n";
     let config = config_from_markdown(source_text);
     let base = map(json!({"stable": "kept"}));
     let live = std::sync::Mutex::new(base.clone());
@@ -230,7 +235,7 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     );
 
     let info = outcome.evaluation_error.expect("the nested value raises");
-    let expected = "success.stack[0].action[0].set.metadata.files[0]";
+    let expected = "success[0].set.metadata.files[0]";
     assert_eq!(info.property.as_deref(), Some(expected));
     assert_eq!(info.variant, "set");
     assert!(runtime.snapshot().mutations.is_empty());
@@ -253,7 +258,7 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     let excerpt = diagnostic
         .frontmatter_excerpt()
         .expect("the runtime value path selects a frontmatter excerpt");
-    assert_eq!(excerpt.highlight_line(), Some(9));
+    assert_eq!(excerpt.highlight_line(), Some(7));
     let appendix = strip_escape_codes(
         excerpt.render_appendix(&biscuit_terminal::terminal::Terminal::new_optimistic(120)),
     );
@@ -263,19 +268,15 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     assert!(rendered.contains("t.md"), "{rendered}");
 }
 
-/// The task-stack rebasing gives `setup:`/`teardown:` items a `{root}[n]`
-/// spelling with no `stack` segment. An event's items must keep the
-/// `{signal}.stack[n]` spelling they have always had — on both of the
-/// executor's stack-loop property sites, which is why one run asserts the
-/// guard *and* the action.
+/// Task `setup:`/`teardown:` items are spelled `{root}[n]`; an event's items
+/// are spelled `{signal}[n]` the same way — on both of the executor's
+/// property sites, which is why one run asserts the guard *and* the action.
 #[test]
-fn event_stack_items_keep_their_signal_rooted_stack_spelling() {
-    let guard_config = config(json!({"success": {"stack": [
-        {"when": "unknown_guard()", "action": {"set": {"unreached": "value"}}},
-    ]}}));
-    let action_config = config(json!({"success": {"stack": [
-        {"action": {"set": {"stable": "{{ unknown_value() }}"}}},
-    ]}}));
+fn event_stack_items_keep_their_signal_rooted_spelling() {
+    let guard_config = config(json!({
+        "success": [{ "when": "unknown_guard()", "then": [{ "set": { "unreached": "value" } }] }],
+    }));
+    let action_config = config(json!({ "success": [{ "set": { "stable": "{{ unknown_value() }}" } }] }));
     let base = map(json!({"stable": "kept"}));
     let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
@@ -295,7 +296,7 @@ fn event_stack_items_keep_their_signal_rooted_stack_spelling() {
             .expect("the guard raises")
             .property
             .as_deref(),
-        Some("success.stack[0].when"),
+        Some("success[0].when"),
     );
 
     let (action_outcome, _) = run_event(
@@ -312,13 +313,13 @@ fn event_stack_items_keep_their_signal_rooted_stack_spelling() {
             .expect("the value raises")
             .property
             .as_deref(),
-        Some("success.stack[0].action[0].set.stable"),
+        Some("success[0].set.stable"),
     );
 }
 
 #[test]
 fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
-    for invalid in ["outputs", "a.b"] {
+    for invalid in ["seq", "a.b"] {
         let action = set_action(
             vec![("valid", json!("resolved")), (invalid, json!("refused"))],
             false,
@@ -367,11 +368,15 @@ fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
 }
 
 #[test]
-fn no_error_suppresses_a_batch_refusal_without_exposing_a_partial_write() {
-    let config = config(json!({"success": {"stack": [{"action": [
-        {"set": {"stable": "changed", "outputs": "refused"}, "no_error": true},
-        {"message": "stable={{stable}}"}
-    ]}]}}));
+fn a_batch_refusal_stops_the_stack_without_exposing_a_partial_write() {
+    // `no_error` never applies to `set` (the parser rejects it beside one), so
+    // a refused batch always stops the stack.
+    let config = config(json!({
+        "success": [
+            { "set": { "stable": "changed", "seq": "refused" } },
+            { "message": "stable={{stable}}" },
+        ],
+    }));
     let base = map(json!({"stable": "kept"}));
     let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
@@ -386,10 +391,43 @@ fn no_error_suppresses_a_batch_refusal_without_exposing_a_partial_write() {
         &engine,
     );
 
-    assert_eq!(outcome, LifecycleEventOutcome::default());
-    assert_eq!(events, vec![Emitted::Message("stable=kept".to_string())]);
+    assert_ne!(outcome, LifecycleEventOutcome::default(), "the refusal stops the stack");
+    assert!(events.is_empty(), "nothing after the refused `set` runs: {events:?}");
     assert!(runtime.snapshot().mutations.is_empty());
     assert_eq!(*live.lock().unwrap(), base);
+}
+
+/// A bundle's sibling `no_error` covers its other verbs but never its `set`:
+/// a refused batch in a mixed bundle still stops the stack before the
+/// bundle's later verbs, and before every later item.
+#[test]
+fn bundle_no_error_cannot_suppress_its_set_failure() {
+    let config = config(json!({
+        "success": [
+            { "when": "true", "then": [
+                { "set": { "stable": "changed", "seq": "refused" }, "info": "bundled", "no_error": true },
+            ]},
+            { "message": "stable={{stable}}" },
+        ],
+    }));
+    let base = map(json!({"stable": "kept"}));
+    let live = std::sync::Mutex::new(base.clone());
+    let runtime = RuntimeState::new();
+    let (_dir, engine) = temp_engine();
+
+    let (outcome, events) = run_event(
+        &config,
+        LifecycleSignal::Success,
+        &base,
+        &live,
+        &runtime,
+        &engine,
+    );
+
+    let error = outcome.action_error.as_ref().expect("the refused `set` is not suppressed");
+    assert_eq!(error.variant, "set", "{error:?}");
+    assert!(events.is_empty(), "nothing after the refused `set` runs: {events:?}");
+    assert!(runtime.snapshot().mutations.is_empty());
 }
 
 #[test]
@@ -438,10 +476,7 @@ fn mapping_result_reports_all_priors_and_preserves_explicit_runtime_null() {
 /// A one-property mapping writes the runtime layer.
 #[test]
 fn a_one_property_mapping_writes_the_runtime_layer() {
-    let config = config(json!({"success": {"stack": [{"action": [
-        {"set": {"phase": "ship"}},
-        {"message": "phase={{phase}}"}
-    ]}]}}));
+    let config = config(json!({ "success": [{ "set": { "phase": "ship" } }, { "message": "phase={{phase}}" }] }));
     let base = map(json!({"phase": "plan"}));
     let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
@@ -465,13 +500,9 @@ fn a_one_property_mapping_writes_the_runtime_layer() {
 /// stored mutation is a boolean/number/array, not the rendered string.
 #[test]
 fn a_whole_value_span_keeps_its_type() {
-    let config = config(json!({"success": {"stack": [{"action": [
-        {"set": {
-            "ready": "{{ true }}",
-            "retries": "{{ 2 + 1 }}",
-            "items": "{{ tags }}"
-        }}
-    ]}]}}));
+    let config = config(json!({
+        "success": [{ "set": { "ready": "{{ true }}", "retries": "{{ 2 + 1 }}", "items": "{{ tags }}" } }],
+    }));
     let base = map(json!({"tags": ["a", "b"]}));
     let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
@@ -498,8 +529,8 @@ fn a_whole_value_span_keeps_its_type() {
 #[test]
 fn a_mutation_in_start_is_visible_to_a_later_event() {
     let config = config(json!({
-        "start": {"stack": [{"action": {"set": {"phase": "running"}}}]},
-        "success": {"message": "phase={{phase}}"}
+        "start": [{ "set": { "phase": "running" } }],
+        "success": { "message": "phase={{phase}}" },
     }));
     let base = map(json!({"phase": "pending"}));
     let live = std::sync::Mutex::new(base.clone());
@@ -531,9 +562,7 @@ fn a_mutation_in_start_is_visible_to_a_later_event() {
 /// `set_frontmatter`.
 #[test]
 fn set_writes_no_file() {
-    let config = config(json!({"success": {"stack": [
-        {"action": {"set": {"phase": "build"}}}
-    ]}}));
+    let config = config(json!({ "success": [{ "set": { "phase": "build" } }] }));
     let base = map(json!({"phase": "plan"}));
     let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
@@ -562,12 +591,10 @@ fn set_writes_no_file() {
 /// the runtime layer is left clean.
 #[test]
 fn set_refuses_every_reserved_root_key() {
-    for key in ["state", "previous", "next", "outputs", "sequence_id"] {
+    for key in ["seq", "group", "loop"] {
         let mut destinations = Map::new();
         destinations.insert(key.to_string(), json!("hijacked"));
-        let config = config(json!({"success": {"stack": [
-            {"action": {"set": Value::Object(destinations)}}
-        ]}}));
+        let config = config(json!({ "success": [{ "set": Value::Object(destinations) }] }));
         let base = map(json!({
             "state": {"id": "authored"},
             "previous": {"id": "before"},
@@ -604,9 +631,7 @@ fn set_refuses_every_reserved_root_key() {
 /// A dotted path is refused: v1 `set` writes top-level keys only.
 #[test]
 fn set_refuses_a_dotted_key() {
-    let config = config(json!({"success": {"stack": [
-        {"action": {"set": {"a.b": "x"}}}
-    ]}}));
+    let config = config(json!({ "success": [{ "set": { "a.b": "x" } }] }));
     let base = map(json!({}));
     let live = std::sync::Mutex::new(base.clone());
     let runtime = RuntimeState::new();
@@ -634,10 +659,7 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
     let shell = MockShell::new(0);
     let harness = Harness::default();
 
-    let applied = config(json!({"success": {"stack": [{"action": [
-        {"set": {"phase": "build"}},
-        {"message": "phase={{phase}}"}
-    ]}]}}));
+    let applied = config(json!({ "success": [{ "set": { "phase": "build" } }, { "message": "phase={{phase}}" }] }));
     let fm = map(json!({"phase": "plan"}));
     let recorder = Recorder::default();
     let context = ctx(
@@ -656,9 +678,7 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
         vec![Emitted::Message("phase=build".to_string())]
     );
 
-    let refused = config(json!({"success": {"stack": [
-        {"action": {"set": {"outputs": "hijacked"}}}
-    ]}}));
+    let refused = config(json!({ "success": [{ "set": { "seq": "hijacked" } }] }));
     let recorder = Recorder::default();
     let context = ctx(
         LifecycleSignal::Success,
@@ -673,20 +693,18 @@ fn without_a_runtime_cell_set_still_applies_and_still_refuses_reserved_keys() {
     assert!(context.execute_event(&refused).action_error.is_some());
 }
 
-/// `outputs` is readable through `last(outputs)` at event time and reflects
+/// `seq.outputs` is readable through `last(seq.outputs)` at event time and reflects
 /// what the executor committed — the temporal view the spec assigns to
 /// `success`/`finalize`.
 #[test]
 fn last_outputs_reads_the_committed_accumulator() {
-    let config = config(json!({"success": {"message": "prev={{ last(outputs) }}"}}));
+    let config = config(json!({"success": {"message": "prev={{ last(seq.outputs) }}"}}));
     let runtime = RuntimeState::new();
     runtime.append_output("first run\n");
     runtime.append_output("second run");
 
     let base = map(json!({}));
-    let mut seeded = base.clone();
-    seeded.insert("outputs".into(), runtime.outputs_value());
-    let live = std::sync::Mutex::new(seeded);
+    let live = std::sync::Mutex::new(base.clone());
     let (_dir, engine) = temp_engine();
 
     let (_, events) = run_event(

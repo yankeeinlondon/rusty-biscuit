@@ -2,7 +2,7 @@
 //!
 //! Both work off the substrate's `references` edges: the link node under the
 //! cursor already carries a resolved target node (heading or document root),
-//! an existing file outside the indexed documents, or stays unresolved. Links inside code spans and fenced code blocks never reach
+//! an existing file outside the graph's documents, or stays unresolved. Links inside code spans and fenced code blocks never reach
 //! here because the CommonMark parser does not emit link events inside code, so
 //! no suppression logic is needed.
 
@@ -95,7 +95,7 @@ pub(super) fn resolved_targets(graph: &WorkspaceGraph, link: NodeId) -> Vec<Node
         .collect()
 }
 
-/// The existing file outside the indexed documents a link resolved to, if any.
+/// The existing file outside the graph's documents a link resolved to, if any.
 pub(super) fn resolved_file(graph: &WorkspaceGraph, link: NodeId) -> Option<std::path::PathBuf> {
     graph.outgoing(link, EdgeKind::References).find_map(|edge| match &edge.target {
         EdgeTarget::File(path) => Some(path.clone()),

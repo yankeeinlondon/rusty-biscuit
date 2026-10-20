@@ -27,14 +27,14 @@ fn link_dir(target: &Path, link: &Path) {
 }
 
 #[test]
-fn a_leading_sigil_in_a_file_name_is_protected_by_dot_slash() {
+fn a_leading_sigil_in_a_file_name_is_protected_by_a_directory_prefix() {
     let fx = Fixture::new();
     let cwd = fx.dir("repo/docs");
     let ctx = fx.ctx(&cwd, &[]);
     for name in ["@notes.md", "&notes.md", "^notes.md", "~notes.md"] {
         let target = fx.file(&format!("repo/docs/{name}"));
         let found = evaluate(PortablePath::from_path(&target).with_ctx(&ctx));
-        assert_eq!(found.reference().raw(), format!("./{name}"));
+        assert_eq!(found.reference().raw(), format!("docs/{name}"));
         let resolved = found.reference().resolve_in_context(&ctx).unwrap().unwrap();
         assert!(same_file(&resolved, &target), "{name}");
     }
@@ -129,7 +129,7 @@ fn windows_spellings_of_one_directory_route_alike() {
     let lower_drive = PathBuf::from(format!("{}{}", text[..1].to_ascii_lowercase(), &text[1..]));
     for spelling in [target.clone(), verbatim, lower_drive] {
         let found = evaluate(PortablePath::from_path(&spelling).with_ctx(&ctx));
-        assert_eq!(found.reference().raw(), "./x.md", "{}", spelling.display());
+        assert_eq!(found.reference().raw(), "docs/x.md", "{}", spelling.display());
     }
 }
 

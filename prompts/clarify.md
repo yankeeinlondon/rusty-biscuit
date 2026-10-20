@@ -15,17 +15,16 @@ doc_desc: |-
     }}
 interactive: true
 initialize:
-    stack:
-        - when: "spec && design"
-          action:
-            - warn: "The {{ link(prompts/clarify.md) }} prompt expects _either_ a `spec` or `design` document to be passed in but not both!"
+    - when: "spec && design"
+      then:
+        - warn: "The {{ link(prompts/clarify.md) }} prompt expects _either_ a `spec` or `design` document to be passed in but not both!"
             # - stop: ""
 start:
     stderr: "We are starting the clarification process and will need human involvement."
     say: "Please stand by while we prepare a set of clarification questions"
 success:
-    say: "The {{ title_case( without_date(parent_dir(doc.doc))) }} {{doc_desc}} has completed the clarification process is now complete in {{ ctx.area || ctx.repo }}"
-    message: "The specification file `{{parent_dir(doc.doc) + '/' + basename(doc.doc) }}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
+    say: "The {{ title_case( without_date(parent_dir(doc))) }} {{doc_desc}} has completed the clarification process is now complete in {{ ctx.area || ctx.repo }}"
+    message: "The specification file `{{parent_dir(doc) + '/' + basename(doc) }}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
 ---
 
 ## Context
@@ -35,10 +34,10 @@ success:
 - The document you will be working with is: 
 
 ::block when="spec"
-The functional specification document: {{doc.doc}}. 
+The functional specification document: {{doc}}. 
 ::end-block
 ::block when="design"
-The technical design specification document: {{doc.doc}}. 
+The technical design specification document: {{doc}}. 
 ::end-block
 
 ## Important Constraints
@@ -195,7 +194,7 @@ Your job is to follow these steps exactly:
     - ask the user if they'd like to address any open ambiguities or design decisions from the list now:
         - if yes: iterate one by one through remaining items employing the same basic technique used in the **Clarification** stage
         - if no: make sure the unanswered questions are documented in the spec/design document with enough detail that any future reader can understand the remaining rulings that are needed
-    - update the document's frontmatter ({{doc.doc}}):
+    - update the document's frontmatter ({{doc}}):
         ::file ./_set_spec_schema.md
         - set `status` to "finalized-spec"
         - set `clarified` to `true`

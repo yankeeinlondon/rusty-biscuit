@@ -210,9 +210,9 @@ pub(crate) struct LaunchRebuildIntent {
     /// document's own `model:` names one and the rebuild keeps
     /// [`Self::fallback_provider`] — the model counterpart of that field.
     ///
-    /// A sequence step carries its planned target's model here (a review-screen
-    /// choice, or the model planned from the sequence document), which the
-    /// launched document cannot re-derive. It must never hold a model the
+    /// A sequence task carries its planned target's model here (a review-screen
+    /// choice, or the model preflight planned from the task's hints or the
+    /// sequence document's), which the launched document cannot re-derive. It must never hold a model the
     /// launched document's own frontmatter chose: that one is re-derived from
     /// each refreshed read, so a retry after `model:` is removed drops it.
     pub(crate) fallback_model: Option<(String, ModelResolutionReason)>,
@@ -227,18 +227,11 @@ pub(crate) struct LaunchRebuildIntent {
     /// rebuild can re-derive argv and the environment overlay without repeating
     /// any of them. See [`crate::commands::wrap::launch_plan`].
     pub(crate) launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
-    /// Where model precedence steps 2 and 3 — the provider-specific model
-    /// variables and the generic `MODEL` — read their values.
-    ///
-    /// Production passes [`claudine::composition::ambient_env_lookup`]; the
-    /// field exists so the rebuild's unit tests can be reproducible under
-    /// whatever the developer's shell exports. They run in the same process as
-    /// every other test in the binary, so scrubbing the process environment is
-    /// not available to them: `std::env::set_var` is unsound while sibling
-    /// tests are running, and a Claudine-wrapped session exports `MODEL` into
-    /// every command it launches — which is the ambient value that silently
-    /// out-ranked these fixtures' frontmatter.
-    pub(crate) env_lookup: fn(&str) -> Option<String>,
+    /// The environment model precedence steps 2 and 3 — the
+    /// provider-specific model variables and the generic `MODEL` — read: the
+    /// map the launching document captured at entry, reused by every rebuild
+    /// of its retries and resumes.
+    pub(crate) environment: claudine::invocation_context::DocumentEnvironment,
 }
 
 /// The launch properties a resume cannot renegotiate, recomputed from one
@@ -377,7 +370,7 @@ pub(crate) fn rebuild_launch_identity(
     let facets = launch_plan::DocumentLaunchFacets {
         provider,
         non_interactive,
-        yolo_requested: intent.cli_yolo,
+        yolo_requested: document.selection_hints.yolo_enabled(intent.cli_yolo),
         is_inline: intent.is_inline,
         model: model.clone(),
         mcp_body_tags: mcp_tags.clone(),
@@ -628,29 +621,29 @@ fn resolve_launch_model(
     {
         return (Some(model.clone()), reason.clone());
     }
-    let env_lookup = intent.env_lookup;
     let selection_config =
         crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
     let catalog = match &selection_config {
         Some(cfg) => ModelCatalogService::with_overrides(cfg.model_overrides.clone()),
         None => ModelCatalogService::new(),
     };
-    crate::commands::wrap::composition::resolve_document_model_from(
+    crate::commands::wrap::composition::resolve_document_model(
         &catalog,
         provider,
         &document.selection_hints,
         cli_model,
         crate::commands::wrap::composition::ModelResolveMode::REBUILD,
-        env_lookup,
+        &intent.environment,
     )
 }
 
 /// The [`LaunchRebuildIntent::fallback_model`] for a composition launching
 /// under `target`.
 ///
-/// A sequence step's target was planned before the step ran — from the review
-/// screen, or from the sequence document rather than the document the step
-/// launches — so its model is carried whatever its reason. Outside a sequence
+/// A sequence task's target was planned before the document it launches was
+/// read (from the review screen, or by preflight from the task's hints or the
+/// sequence document's), its model re-selected under the task's own map when
+/// it entered, so its model is carried whatever its reason. Outside a sequence
 /// the target was resolved from the launched document itself, so a model its
 /// frontmatter chose is left to each refreshed read; a model from `--model`
 /// or the environment is carried, which the rebuild would re-derive

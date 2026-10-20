@@ -185,6 +185,10 @@ A short root can simplify while its long descendant cannot.
 let real: std::io::Result<PathBuf> = biscuit_file::canonicalize_simplified(path);
 // Feature `file-reference`. HOME (POSIX) / USERPROFILE (Windows), relative → None.
 let home: Option<PathBuf> = biscuit_file::home_dir();
+// Feature `file-reference`. Per-user cache root; None when it cannot be named.
+let cache: Option<PathBuf> = biscuit_file::user_cache_dir();
+// The same rules over an injected env lookup and home (a request snapshot's).
+let cache: Option<PathBuf> = biscuit_file::user_cache_dir_from(|name| env.get(name).map(Into::into), home.as_deref());
 ```
 
 - `canonicalize_simplified` is std's `canonicalize` on macOS/Linux; it differs
@@ -194,6 +198,13 @@ let home: Option<PathBuf> = biscuit_file::home_dir();
 - `home_dir()` is `std::env::home_dir().filter(is_absolute)`: never
   canonicalized, no existence check, `HOME` ignored on native Windows. It
   replaced `dirs::home_dir` (known-folder lookup) on 2026-10-03.
+- `user_cache_dir()`: macOS `<home>/Library/Caches` (XDG ignored); other
+  Unix absolute `$XDG_CACHE_HOME`, else `<home>/.cache`; native Windows
+  absolute `%LOCALAPPDATA%`, else `None` (no home-derived fallback). Empty or
+  relative variables count as unset; home is `home_dir()`. Not canonicalized,
+  no existence check. `user_cache_dir_from(env, home)` is the injected form
+  (a relative `home` counts as none); library code with a request snapshot
+  uses it instead of reading the process.
 
 ## Path Identity
 Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference`)
@@ -251,17 +262,21 @@ found.attempts();    // &[Attempt { strategy, outcome, rejected }], one per pref
 found.findings();    // &[Finding] about the returned reference
 ```
 
-- Default: `AuthoredIntent(ALL)`, `SameDirRelative`, `ChildDir`, `PeerDir`,
+- Default: `AuthoredIntent(ALL)`, `TreeRootRelative`, `SameDirRelative`, `ChildDir`, `PeerDir`,
   `ImmediateParentDir`, `RepoRoot(None)`, `EnvRootedPath`, `HomeDir`,
   `AbsolutePath`. Opt-in: `ParentDir`, `ExternalRelativePath` (verified with
   `allow_external_relative()`), `RepoMultiPath(filter)` (`^`), `MagicPath(filter)`
   (`@`; a filter must name an `@` root and spellings come from it).
+- `TreeRootRelative` writes a bare path from `base_dir` (repository root inside
+  a repository), verified against existing lookup order. A local shadow rejects
+  it. Directory links use the first non-file candidate if no file matched;
+  missing multi-root bare spellings fall through. No resolver roots change.
 - Filters are eligibility only (`RepoRoot(Some("docs"))` still writes `&docs/x.md`);
   bad syntax is `InvalidConfiguration(InvalidFilter)` before any preference runs.
 - Reference inputs: intent forms (`~ @ ^ & vault:`, URL, `%`, leading portable
   `{{VAR}}`) are kept by `AuthoredIntent`; position forms are resolved
-  (`resolve_detailed`) and rewritten. Minimal churn keeps `./x.md` / bare `x.md`
-  already in the chosen form; results are fixed points. A multi-candidate miss,
+  (`resolve_detailed`) and rewritten. Bare tree-root spellings precede nearby
+  relative forms; results are fixed points. A multi-candidate miss,
   boundary escape, missing anchor, or probe failure is `UnresolvableInput`
   (caller keeps the link); URL/`%` without `AuthoredIntent` is
   `NormalizationUnsupported`.

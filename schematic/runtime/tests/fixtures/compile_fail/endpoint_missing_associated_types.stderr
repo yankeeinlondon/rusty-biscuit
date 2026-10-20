@@ -1,0 +1,8 @@
+error[E0046]: not all trait items implemented, missing: `Success`, `Decoder`
+ --> tests/fixtures/compile_fail/endpoint_missing_associated_types.rs
+  |
+  | impl EndpointSpec for ListItems {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `Success`, `Decoder` in implementation
+  |
+  = help: implement the missing item: `type Success = /* Type */;`
+  = help: implement the missing item: `type Decoder = /* Type */;`

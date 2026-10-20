@@ -3,7 +3,7 @@
 //! These functions encapsulate the logic that was previously inline in modal
 //! key handlers, making them independently testable without any App/terminal state.
 
-use claudine::config::claudine_config::VoiceSelection;
+use claudine::config::claudine_config::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
 
 #[cfg(test)]
 use claudine::actions::HookAction;
@@ -64,6 +64,24 @@ pub fn apply_voice_selection(
         },
         // No prior voice — start as Single.
         (None, _) => VoiceSelection::Single(voice),
+    }
+}
+
+/// Compute the TTS object after the user picks a provider.
+///
+/// Voices reset to the new provider's defaults; the preferred gender and the
+/// `prewarm` switch carry over from an existing object, so a provider change
+/// never turns pre-warm back on.
+pub fn apply_tts_provider_selection(current: &TtsValue, provider: String) -> TtsConfigSettings {
+    let (gender, prewarm) = match current {
+        TtsValue::Config(cfg) => (cfg.gender, cfg.prewarm),
+        TtsValue::Boolean(_) => (Gender::Female, None),
+    };
+    TtsConfigSettings {
+        provider: Some(provider),
+        voice: None,
+        gender,
+        prewarm,
     }
 }
 
@@ -305,5 +323,43 @@ mod tests {
                 female: "Samantha".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn provider_selection_keeps_prewarm_and_gender_and_resets_voice() {
+        let current = TtsValue::Config(TtsConfigSettings {
+            provider: Some("say".to_string()),
+            voice: Some(VoiceSelection::Single("Samantha".to_string())),
+            gender: Gender::Male,
+            prewarm: Some(false),
+        });
+        let next = apply_tts_provider_selection(&current, "kokoro".to_string());
+        assert_eq!(next.provider.as_deref(), Some("kokoro"));
+        assert_eq!(next.voice, None);
+        assert_eq!(next.gender, Gender::Male);
+        assert_eq!(next.prewarm, Some(false));
+    }
+
+    #[test]
+    fn provider_selection_from_a_provider_less_object_keeps_prewarm() {
+        let current = TtsValue::Config(TtsConfigSettings {
+            provider: None,
+            voice: None,
+            gender: Gender::Female,
+            prewarm: Some(false),
+        });
+        let next = apply_tts_provider_selection(&current, "say".to_string());
+        assert_eq!(next.provider.as_deref(), Some("say"));
+        assert_eq!(next.prewarm, Some(false));
+    }
+
+    #[test]
+    fn provider_selection_from_a_boolean_starts_with_prewarm_unset() {
+        for current in [TtsValue::Boolean(true), TtsValue::Boolean(false)] {
+            let next = apply_tts_provider_selection(&current, "say".to_string());
+            assert_eq!(next.prewarm, None, "{current:?}");
+            assert_eq!(next.gender, Gender::Female);
+            assert!(TtsValue::Config(next).prewarm_enabled());
+        }
     }
 }

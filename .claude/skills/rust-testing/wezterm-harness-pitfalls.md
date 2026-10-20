@@ -1,123 +1,64 @@
 # WezTerm Harness Pitfalls
 
-Notes on L2 tests that use `biscuit_test_harness::wezterm::WezTermHarness` to
-capture `frame.raw` from a real WezTerm pane.
+Part of the `rust-testing` skill; [SKILL.md](SKILL.md) is the index.
 
-> For backend selection, `SpawnVisibility`, `SharedHarness`, and the
-> "which terminal am I running inside" gotcha, load the
-> `biscuit-test-harness` skill via the Skill tool. This page is scoped
-> to *assertion patterns* against captured frames.
+Assertion patterns for L2 tests that read `frame.raw` from a real WezTerm pane
+via `biscuit_test_harness::wezterm::WezTermHarness`. Backend selection,
+`SharedHarness`, client turn-taking, and `--skip-config` live in the
+`biscuit-test-harness` skill.
 
-## SGR Re-emission Collapses
+## Capture re-emits SGR only on transitions
 
-`harness.capture()` reads the pane via `wezterm cli get-text --escapes`, which
-walks the cell grid and emits SGR **only on transitions**. This means:
+`capture()` uses `wezterm cli get-text --escapes`, which walks the cell grid and
+emits SGR only where attributes change. So `frame.raw` is not the bytes the CLI
+wrote:
 
-- Contiguous same-attribute cells collapse into a single SGR span. The leading
-  SGR may appear on a previous row and not re-appear on the next row, even
-  when the CLI emitted a fresh SGR sequence per line.
-- Truecolor SGR re-emits in **either** semicolon form (`\x1b[48;2;R;G;Bm`) **or**
-  ITU colon form (`\x1b[48:2::R:G:Bm`) depending on terminfo and WezTerm
-  version. The same test on the same machine has been observed switching
-  between forms across runs.
-- `\x1b[0m` in the source may come back as `\x1b[39m\x1b[49m` (separate fg
-  and bg resets) or be elided entirely when the following cell shares the
-  prior attributes.
+- Same-attribute runs collapse; a leading SGR may sit on an earlier row and not
+  repeat on the next.
+- Truecolor comes back in either semicolon (`\x1b[38;2;R;G;Bm`) or ITU colon
+  (`\x1b[38:2::R:G:Bm`) form, and the form can change between runs.
+- `\x1b[0m` may return as separate `39m`/`49m` resets, or vanish when the next
+  cell shares attributes.
 
-## What This Breaks
+**Consequence:** never assert byte equality of two captures, per line or per
+frame. Two identical CLI outputs can capture differently.
 
-**Per-line or per-frame byte-equality assertions across two captures.**
+## Prove the CLI output first
 
-You will see panics where two captures are byte-identical in their CLI
-output (verifiable with `script(1)`) but `frame.raw` differs by a leading
-SGR span being elided on one capture. The left and right strings look "the
-same shape" with only an SGR prefix or suffix missing.
+When two captures differ, compare the program's real bytes before changing code:
+run each case under `script -q /dev/null …`, pipe through `xxd`, and `diff`. If
+the bytes match (apart from echo/prompt), the test is wrong, not the renderer.
 
-Real example: comparing two `md --code-theme nord` renders where one had
-frontmatter and one did not — the underlying `md` output was identical, but
-WezTerm captured the leading `\x1b[48:2::46:52:64m` on one and not the other.
+## Assert semantically
 
-## Diagnostic First Step
+- **Presence:** accept the expected color in both forms
+  (`raw.contains(semi) || raw.contains(colon)`).
+- **Absence:** reject the disallowed color in both forms.
+- **Ordering:** to prove a span wraps a region, compare byte offsets
+  (`open_at < alpha_at < beta_at`) and assert no reset between them.
+- **Isolate the region** with unique text sentinels around the content under
+  test, as `level2_style_hr_color_emits_sgr_in_real_terminal`
+  (`darkmatter/cli/tests/level2/level2_horizontal_rules.rs`) does.
+- **Parse SGR rather than substring-match** when you need cell attributes;
+  `biscuit-terminal/cli/tests/level2/prose_cells.rs` and
+  `biscuit-test-harness/src/layout_invariants.rs` accept both truecolor forms.
 
-Before changing the implementation, prove the CLI output is identical:
+## Pick sharp witnesses
 
-```bash
-script -q /dev/null bash -c "./target/debug/md fixture_a.md --flags" 2>&1 \
-  | xxd > /tmp/a.hex
-script -q /dev/null bash -c "./target/debug/md fixture_b.md --flags" 2>&1 \
-  | xxd > /tmp/b.hex
-diff /tmp/a.hex /tmp/b.hex
-```
+To prove "theme X is in effect", panel background is weak because themes share or
+nearly share backgrounds. Use a signature foreground that differs unambiguously
+between the themes being distinguished (for example the keyword color in a code
+snippet); see `level2_code_block_styling.rs`.
 
-If the hex diffs are identical (or differ only in echo/prompt prefix), the
-bug is in the test, not the code.
+## Gate and shell traps
 
-## Recommended Assertion Pattern
-
-Replace byte equality with semantic checks on the full `frame.raw` stream:
-
-1. **Presence of expected SGR bytes** in both forms:
-   ```rust
-   let nord_kw_semi = "\x1b[38;2;129;161;193m";
-   let nord_kw_colon = "\x1b[38:2::129:161:193m";
-   assert!(
-       frame.raw.contains(nord_kw_semi) || frame.raw.contains(nord_kw_colon),
-       "expected nord keyword fg. raw={:?}", frame.raw
-   );
-   ```
-
-2. **Absence of disallowed SGR bytes** (the rejected theme's signature color):
-   ```rust
-   let dracula_kw_semi = "\x1b[38;2;255;121;198m";
-   let dracula_kw_colon = "\x1b[38:2::255:121:198m";
-   assert!(
-       !frame.raw.contains(dracula_kw_semi)
-           && !frame.raw.contains(dracula_kw_colon),
-       "frontmatter dracula color must not appear when CLI claims the slot. \
-        raw={:?}", frame.raw
-   );
-   ```
-
-3. **Ordering** when you need to prove a span wraps a region — see commit
-   `be5d0409e` for the `red_open_at < alpha_at < beta_at` pattern with a
-   no-reset-between assertion.
-
-## Pick Sharp Witnesses
-
-When asserting "theme X is in effect", panel background alone is weak —
-themes can share `#2e3440` or close-but-not-identical bg colors. Prefer
-**signature foreground colors** that differ unambiguously between the two
-themes you're trying to discriminate (e.g. nord blue `#81a1c1` vs dracula
-pink `#ff79c6` for the `fn`/`let` keywords in a rust snippet).
-
-## The Client Evaluates The Developer's Config
-
-Every `wezterm cli …` process the harness starts is a full WezTerm client, and
-some subcommands (`spawn`; not `list`) evaluate the developer's `wezterm.lua`
-before doing anything. The harness only ever talks to the mux named by
-`WEZTERM_UNIX_SOCKET`, so nothing in that config can change what its commands
-do — but it can stall them (a `dofile` of an unreachable network path blocked
-`spawn` for 21 s on the Windows build host, against a 15 s `SPAWN_TIMEOUT`),
-fail them, or add log lines to stderr. `WezTermHarness` therefore runs every
-client as `wezterm --skip-config`, which also wins over the
-`WEZTERM_CONFIG_FILE` the GUI exports into its panes. A test that shells out
-to `wezterm cli` on its own should do the same, or better, go through the
-harness: harness clients also take turns at the mux (two at a time across all
-processes), and a test's own clients do not.
-
-Two related readings of a WezTerm gate worth knowing:
-
-- `WezTermHarness::available()` requires `WEZTERM_UNIX_SOCKET`. A shell that
-  lacks it — `cross-check --os windows`'s SSH session, for one — skips the
-  test, and nextest prints **PASS in ~0.02 s**. A real run takes seconds.
-  `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` turns that skip into a failure.
-- A `?` typed into an interactive shell that loads Atuin opens the Atuin AI
-  overlay and wedges the pane; `"$?"` in an exit-marker trailer is enough.
-  Report status with `&& … || …` instead.
-
-## Cross-References
-
-- `darkmatter/cli/tests/level2_layout.rs` module-level doc — same pitfall
-  documented inline next to the tests it affects.
-- Commit `be5d0409e` "fix(darkmatter-cli): handle WezTerm SGR re-emission
-  variants in tests" — the canonical fix pattern for ul/hyperlink colors.
+- **A fast PASS can be a skip.** `WezTermHarness::available()` requires
+  `WEZTERM_UNIX_SOCKET`; without it the test returns early and nextest reports a
+  near-instant PASS. Set `BISCUIT_TEST_REQUIRED_BACKENDS=wezterm` to make that a
+  failure ([tiers-and-gating.md](tiers-and-gating.md)).
+- **Do not shell out to `wezterm cli` yourself.** Go through the harness, which
+  runs clients with `--skip-config` and rations them per mux; a test's own
+  clients get neither.
+- **Never type `?` into an interactive pane**: with Atuin loaded it opens the AI
+  overlay and wedges the pane (`"$?"` in an exit trailer is enough). Report status
+  with `&& … || …`.

@@ -11,13 +11,12 @@ $schema:
     pass_icon: string
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
-    is_last: boolean -> a boolean flag based on 
-    in_loop: boolean -> set by the `review-loop` sequence; when true this step opts out once the spec is marked `implemented`
 yolo: true
+commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
-pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
+pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
     {{
         file_exists(plan)
@@ -35,65 +34,54 @@ spec: |-
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
-    stack:
-        # Inside the review-loop sequence the step list is static; a plan whose
-        # spec is already implemented opts out here and launches nothing.
-        - when: "in_loop && spec && frontmatter(spec, 'implemented') == true"
-          action:
-              - message: "implementation skipped: `{{parent_dir(spec)}}` is already marked implemented"
-              - skip
-        - action:
-            - ensure_file: "{{log}}"
-        - when: "phase != 1"
-          action:
-              - set:
-                    epilog: null
-        - when: "!total_phases || total_phases <= 0"
-          action:
-              - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-        - when: "spec && file_exists(spec) && frontmatter(spec, 'message_to_agent')"
-          action:
-              - stderr: |-
-                    The previous phase's agent has passed a message to this agent:
+    - ensure_file: "{{log}}"
+    - when: "!total_phases || total_phases <= 0"
+      then:
+          - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
 
-                    > {{frontmatter(spec, 'message_to_agent')}}
-              - message: |-
-                    The previous phase's agent has passed a message to this agent:
-        
-                    > {{frontmatter(spec, 'message_to_agent')}}
-              - set:
-                    epilog: "{{frontmatter(spec, 'message_to_agent')}}"
-
-                  
 start:
-    message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+    - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+    # `start` (not `initialize`) because a loop re-enters each phase here; the
+    # body renders the same message for the agent itself.
+    - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
+      then:
+          - message: |-
+                The previous phase's agent has passed a message to this agent:
+
+                {{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
 success: 
-    say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
-    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
-    success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
-    stack:
-        - when: "ctx.dirty_files && !commit_message"
-          action:
-            - message: |-
-                staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
+    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
+    - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    - say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
+    # The agent writes the completion flags; this only surfaces a final
+    # phase that exited without them, since marking them here could claim
+    # gates the agent never finished.
+    - when: "phase >= total_phases && (!frontmatter(plan, 'implemented') || (spec && !frontmatter(spec, 'implemented')))"
+      then:
+        - warn: "the final phase of `{{parent_dir(plan)}}` finished without setting `implemented: true` on the plan and spec; check the log before treating it as complete"
+        - message: "⚠️  final phase of `{{parent_dir(plan)}}` finished without `implemented: true` on the plan and spec; check the log before treating it as complete"
+    - when: "ctx.dirty_files && !commit_message"
+      then:
+        - message: |-
+            staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
 
-                {{ as_unordered_list(ctx.dirty_files) }}
-            - shell: "git add {{ctx.repo_root}}"
-            - shell: just commit
-        - when: "ctx.dirty_files && commit_message"
-          action:
-            - message: |-
-                staging all files from phase **#{{phase}}** in preparation for the git commit:
+            {{ as_unordered_list(ctx.dirty_files) }}
+        - shell: "git add {{ctx.repo_root}}"
+        - shell: just commit
+    - when: "ctx.dirty_files && commit_message"
+      then:
+        - message: |-
+            staging all files from phase **#{{phase}}** in preparation for the git commit:
 
-                {{ as_unordered_list(ctx.dirty_files) }}
-            - shell: git add ..
-            - shell: git commit -m "{{commit_message}}"
-        - when: "!ctx.dirty_files"
-          action:
-              - message: phase {{phase}} of the plan made no file changes!
-              - warn: phase {{phase}} of the plan made no file changes!
+            {{ as_unordered_list(ctx.dirty_files) }}
+        - shell: git add ..
+        - shell: git commit -m "{{commit_message}}"
+    - when: "!ctx.dirty_files"
+      then:
+          - message: phase {{phase}} of the plan made no file changes!
+          - warn: phase {{phase}} of the plan made no file changes!
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
@@ -101,7 +89,7 @@ failure:
     message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
     effect: sad-trombone
 loop:
-    until: "phase >= total_phases || frontmatter(log, 'human_involvement')"
+    until: "phase >= total_phases || frontmatter(log, 'human_review') == true"
     action: "increment(phase)"
 ---
 ::block when="total_phases"
@@ -114,6 +102,8 @@ loop:
 ::end-block
 
 ::file "../_no_formatting.md"
+
+::file "../_frontmatter_edits.md"
 
 Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan}}'.
 
@@ -144,19 +134,20 @@ You will log your implementation progress to: {{log}}
     - set `started_phase` to "{{phase}}"
 ::end-block
 
-::block when="is_last"
-Now we need to update the specification file's frontmatter ({{spec}}):
-
-- set `implemented` to `true`
-- set `implemented_by` to "{{ctx.agent}}/{{ctx.model}}"
-::end-block
-
 ::block when="file_exists(log) && (!markdown_body_empty(log) || !is_empty(frontmatter(log)))"
 - the log file already has content from earlier work; keep it and append to it
 - you'll need to add a new H2 section `## Phase {{phase}}` to the document for log entries during this phase of the implementation
 ::block when="phase > 1"
 - since we are implementing phase {{phase}}, we do have the log entries for {{phase - 1}} which you can review at: {{log}}
 ::end-block
+::end-block
+
+::block when="file_exists(log) && frontmatter(log, 'message_to_agent')"
+### Message from the Previous Phase's Agent
+
+The agent that implemented the previous phase left this message for you:
+
+{{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
 ::end-block
 
 ## Test Design Requirements
@@ -173,7 +164,8 @@ For every changed behavior:
 YAML values, missing versus present values, and boundary values
 - assert dependent outputs and downstream state, not only the immediate value
 - include negative/error behavior where malformed or invalid input is possible
-- choose the verification level required by `rust-testing`; unit coverage alone
+- name the boundary the behavior depends on and choose the fidelity rung (F1/F2/F3) and tier
+required by `rust-testing`; unit coverage alone
 is insufficient when behavior crosses crate, CLI, filesystem, terminal, or
 persistence boundaries
 - log important details of your work to {{log}} under the `## Phase {{phase}}` section
@@ -181,7 +173,6 @@ persistence boundaries
 When changing parsers, schemas, templates, prompts, or configuration-driven
 behavior:
 
-- add a passive corpus test covering all shipped artifacts
 - add at least one end-to-end test using the real shipped artifact and normal
 invocation path
 - include a repeated read/write/read round trip when values are persisted
@@ -206,6 +197,34 @@ You are done when:
 - all GFM tasks/todos in the plan have been completed (and have been marked as complete)
     - NOTE: you should mark tasks as complete as soon as you believe they are complete (e.g., implemented and any relevant tests suggest this is complete). Doing this allows an immediate feedback loop but also helps in recovering from a phase that didn't complete
 
+### When the Test and Lint Gates May Be Skipped
+
+`just test` and `just lint` are required unless the CI scope calculator shows
+that this phase changed nothing any package reads. You do not decide that by
+judgment; you decide it by running this from the repository root after all of
+the phase's edits (including plan, log, and spec frontmatter) are saved:
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+The uncommitted working tree is exactly this phase's changes, because each
+earlier phase is committed when it succeeds.
+
+- if the output has `"packages": []`, the gates may be skipped
+    - record the command and its `packages` / `change_class` values in the log
+      under `## Phase {{phase}}`, and state in your final summary that the
+      gates were skipped and why
+- in every other case run both gates, including when:
+    - `packages` is non-empty: a "documentation" file such as a Markdown
+      fixture, golden file, or `include_str!` target counts as source when
+      compiled code reads it, and the calculator knows that while you may not
+    - the command errors or its output cannot be read
+    - you listed any file in `source_files_during_phase_{{phase}}`
+- never skip a gate because the change is small, "only a rename", "only
+  comments", or "only tests"; those all compile
+
 ### Plan and Log Frontmatter
 
 - You must set the following Frontmatter properties to both the plan file ({{plan}}) and the implementation log ({{log}}):
@@ -213,12 +232,6 @@ You are done when:
     - `docs_updated_during_phase_{{phase}}` should be set to all documentation files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `docs_created_during_phase_{{phase}}` should be set to all documentation files which were created during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `skills_files_updated_during_phase_{{phase}}` should be set to all agent skill files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
-    ::block when="phase == total_phases"
-        - set `source_code` Frontmatter to every source code file that was updated or created during the various phases of the plan
-        - set `documentation` Frontmatter to every documentation file that was updated or created during the various phases of the plan
-        - set `completed_phase` to `{{phase}}`
-        - set `implemented` to `true`
-    ::end-block
     ::block when="ctx.is_monorepo"
     - set `packages` as a list of packages in the monorepo which were touched by the implementation in phase {{phase}}
         ::block when="phase > 1"
@@ -227,16 +240,10 @@ You are done when:
         ::end-block
     ::end-block
 
-::block when="spec"
-### Spec Frontmatter
+### Handoff to the Next Phase
 
-The following Frontmatter properties must be set on the spec file ({{spec}}):
+Set these properties on the implementation log ({{log}}), never on the spec or plan:
 
-- an earlier phase may already have set some of these keys; when a key exists, overwrite its value in place and never add a second copy of the key (duplicate keys make the frontmatter unparseable)
-
-::block when="!frontmatter(spec, '$schema')"
-::file ../_set_spec_schema.md 
-::end-block
 - If something happened during the implementation of this phase (# {{phase}}) that you feel requires human involvement _before_ proceeding onto the next phase for implementation then set `human_review` to `true` (otherwise set to `false`)
     - this should be kept to a minimum as it will impact flow but when it's necessary it needs to be raised
     - when `human_review` is set to `true` you must also set `human_review_items`:
@@ -250,10 +257,37 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
             - you must recommend one of these options and explain why you're recommending it
         - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
-    - a previous phase's message may already be there; replace it with yours, or remove the `message_to_agent` key when you have nothing new to pass on, so a stale message is not handed to the next agent again
-::block when="_loop_is_last"
-- set the `implemented` frontmatter to `true`
+    - `message_to_agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
+
+::block when="spec"
+### Spec Frontmatter
+
+The following Frontmatter properties must be set on the spec file ({{spec}}):
+
+::block when="!frontmatter(spec, '$schema')"
+::file ../_set_spec_schema.md 
 ::end-block
+::end-block
+
+::block when="phase == total_phases"
+### Final Phase: Mark the Implementation Complete
+
+This is the **last** phase of the plan. Once its work and gates are finished,
+and before your final summary, set these Frontmatter properties:
+
+- on the plan ({{plan}}) **and** the implementation log ({{log}}):
+    - `source_code`: every source code file created or updated across all phases of the plan
+    - `documentation`: every documentation file created or updated across all phases of the plan
+    - `completed_phase`: `{{phase}}`
+    - `implemented`: `true`
+::block when="spec"
+- on the spec ({{spec}}):
+    - `implemented`: `true`
+    - `implemented_by`: "{{ctx.agent}}/{{ctx.model}}"
+::end-block
+
+The pipeline reads these flags to decide what runs next, so the plan is not
+complete until they are saved to disk.
 ::end-block
 
 **IMPORTANT:** 
@@ -266,8 +300,12 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
 ::end-block
 - Do NOT commit or stage files to git, this will be done as a separate process.
 - Report a summary of what you did including all the source files you changed.
-- You do not need to run tests across the entire monorepo as this will take far too long. Only 
+- You do not need to run tests across the entire monorepo as this will take far too long. Only run the gates for the '{{ctx.current_package_area}}' package area plus the dependent-package tests described in "Test Scope", and skip the gates only as described in "When the Test and Lint Gates May Be Skipped".
 - once the implementation is complete update the '{{ctx.current_package_area}}' if there were any notable changes needed in this skill
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
+
+::file "../_finish-before-exit.md"
+
+::file "../_test-scope.md"
 
 ::file "../_os.md"

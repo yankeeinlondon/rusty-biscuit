@@ -7,8 +7,10 @@ use std::path::{Path, PathBuf};
 
 use schematic_define::RestApi;
 
+use crate::diagnostics::Output;
 use crate::errors::GeneratorError;
 use crate::export::naming::resolve_module_name;
+use crate::validation::{ensure_no_errors, validate_postman};
 
 mod auth;
 mod collection;
@@ -32,11 +34,16 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 ///
 /// File naming: `<module_name>.postman_collection.json`
 ///
+/// ## Errors
+///
+/// [`GeneratorError::Validation`] when [`validate_postman`] reports an error
+/// (nothing is written), or a serialization or write error.
+///
 /// ## Examples
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use schematic_define::{RestApi, RestMethod, AuthStrategy, ApiResponse};
+/// use schematic_define::{RestApi, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 /// use schematic_gen::export::postman::write_postman;
 ///
 /// let api = RestApi {
@@ -54,12 +61,18 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let path = write_postman(&api, Path::new("/tmp"), false).unwrap();
 /// assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
 /// ```
 pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf, GeneratorError> {
+    ensure_no_errors(Output::Postman, validate_postman(&[api]))?;
     let collection = build_postman_collection(api);
     let module_name = resolve_module_name(api);
     let filename = format!("{}.postman_collection.json", module_name);
@@ -85,11 +98,16 @@ pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf
 ///
 /// File naming: `<module_name>.postman_collection.json`
 ///
+/// ## Errors
+///
+/// [`GeneratorError::Validation`] when [`validate_postman`] reports an error
+/// for any member (nothing is written), or a serialization or write error.
+///
 /// ## Examples
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use schematic_define::{RestApi, AuthStrategy};
+/// use schematic_define::{RestApi, AuthStrategy, CrossOrigin};
 /// use schematic_gen::export::postman::write_postman_grouped;
 ///
 /// let api1 = RestApi {
@@ -107,6 +125,11 @@ pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let path = write_postman_grouped(&[&api1], "ollama", Path::new("/tmp"), false).unwrap();
@@ -118,6 +141,7 @@ pub fn write_postman_grouped(
     dir: &Path,
     dry_run: bool,
 ) -> Result<PathBuf, GeneratorError> {
+    ensure_no_errors(Output::Postman, validate_postman(apis))?;
     let collection = build_postman_collection_grouped(apis, module_name);
     let filename = format!("{}.postman_collection.json", module_name);
     let path = dir.join(&filename);
@@ -136,6 +160,26 @@ pub fn write_postman_grouped(
     })?;
 
     Ok(path)
+}
+
+/// Serializes the Postman collection of one export module.
+///
+/// A module with one API gets that API's collection
+/// ([`build_postman_collection`]); a shared module gets the grouped
+/// collection ([`build_postman_collection_grouped`]). The text is what
+/// [`write_postman`] and [`write_postman_grouped`] write for the same input.
+///
+/// ## Errors
+///
+/// [`GeneratorError::CodeGenError`] when serialization fails.
+pub fn render_postman_module(apis: &[&RestApi], module_name: &str) -> Result<String, GeneratorError> {
+    let collection = match apis {
+        [api] => build_postman_collection(api),
+        _ => build_postman_collection_grouped(apis, module_name),
+    };
+    serde_json::to_string_pretty(&collection).map_err(|e| {
+        GeneratorError::CodeGenError(format!("Failed to serialize Postman collection: {}", e))
+    })
 }
 
 #[cfg(test)]

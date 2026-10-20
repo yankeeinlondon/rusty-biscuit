@@ -116,6 +116,7 @@ pub fn export<R: SchemaRegistryLike>(
 mod tests {
     use super::*;
     use crate::auth::AuthStrategy;
+    use crate::cross_origin::CrossOrigin;
     use crate::headers::{EnvList, EnvMapping};
     use crate::request::ApiRequest;
     use crate::response::ApiResponse;
@@ -174,6 +175,11 @@ mod tests {
                 bearer_token: Some(EnvList::single("TEST_API_KEY")),
                 ..Default::default()
             }),
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -216,6 +222,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -353,6 +364,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new();
         let options = ExportOptions::new();
@@ -395,6 +411,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new();
         let options = ExportOptions::new();
@@ -437,6 +458,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new().with_schema("Model");
         let options = ExportOptions::new();
@@ -491,6 +517,11 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new()
             .with_schema("RequestBody")

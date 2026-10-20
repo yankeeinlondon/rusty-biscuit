@@ -1062,8 +1062,7 @@ exit 1
 title: unknown model
 model: llamacpp/test-model
 failure:
-  stack:
-    - action: {append_line: ["events.log", "{{err.variant}} | {{err.msg}}"]}
+  - {append_line: ["events.log", "{{err.variant}} | {{err.msg}}"]}
 ---
 Prompt body
 "#,

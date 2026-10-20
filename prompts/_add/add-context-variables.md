@@ -19,10 +19,9 @@ catalog_command: "claudine context"
 spec_dir: "{{ ctx.repo_root + '/darkmatter/features/' + ctx.today + '-' + (name || 'add-context-variables') }}"
 interactive: true
 initialize:
-    stack:
-        - when: "!file_exists(ctx.repo_root + '/darkmatter/docs/schemas/darkmatter.yaml')"
-          action:
-              - error: "The **add-context-variables** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/docs/schemas/darkmatter.yaml`, which was not found under `{{ctx.repo_root}}`."
+    - when: "!file_exists(ctx.repo_root + '/darkmatter/docs/schemas/darkmatter.yaml')"
+      then:
+          - error: "The **add-context-variables** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/docs/schemas/darkmatter.yaml`, which was not found under `{{ctx.repo_root}}`."
 start:
     stderr: "Starting an interactive session to add context variables; the agent will clarify the requirements, write a spec to `{{spec_dir}}`, then implement it."
     say: "Starting the add context variables session."

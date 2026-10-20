@@ -122,7 +122,7 @@ mod resolution {
         let fallback = render("{{ group || 'none' }}", &session).unwrap_err();
         assert_eq!(unavailable_root(&fallback), Some(("group", OUTSIDE_GROUP)));
         // `doc.group` always selects document data.
-        assert_eq!(render("{{ doc.group }}", &session).unwrap(), json!("document group"));
+        assert_eq!(render("{{ fm.group }}", &session).unwrap(), json!("document group"));
 
         // Absent document property: a document read of nothing, null as a value.
         assert_eq!(session.resolve("missing").unwrap(), ResolvedBinding::Document { value: None });
@@ -153,12 +153,12 @@ mod resolution {
             "a member the global lacks must not fall through to the document"
         );
         assert_eq!(render("[{{ err.code }}]", &session).unwrap(), json!("[]"));
-        assert_eq!(render("{{ doc.err.message }}", &session).unwrap(), json!("from the document"));
+        assert_eq!(render("{{ fm.err.message }}", &session).unwrap(), json!("from the document"));
     }
 
-    /// `doc.doc`, `doc.ctx`, and `doc.env` are ordinary document properties.
+    /// `fm.doc`, `fm.ctx`, and `fm.env` read ordinary document properties.
     #[test]
-    fn doc_prefixed_reserved_names_read_document_data() {
+    fn fm_prefixed_reserved_names_read_document_data() {
         let doc = document(json!({
             "doc": "doc property",
             "ctx": { "note": "ctx property" },
@@ -175,10 +175,11 @@ mod resolution {
         )
         .unwrap();
 
-        assert_eq!(render("{{ doc.doc }}", &session).unwrap(), json!("doc property"));
-        assert_eq!(render("{{ doc.ctx.note }}", &session).unwrap(), json!("ctx property"));
-        assert_eq!(render("{{ doc.env.note }}", &session).unwrap(), json!("env property"));
-        assert!(matches!(session.resolve("doc.doc").unwrap(), ResolvedBinding::Namespace { .. }));
+        assert_eq!(render("{{ fm.doc }}", &session).unwrap(), json!("doc property"));
+        assert_eq!(render("{{ doc }}", &session).unwrap(), json!("doc property"));
+        assert_eq!(render("{{ fm.ctx.note }}", &session).unwrap(), json!("ctx property"));
+        assert_eq!(render("{{ fm.env.note }}", &session).unwrap(), json!("env property"));
+        assert!(matches!(session.resolve("fm.doc").unwrap(), ResolvedBinding::Namespace { .. }));
     }
 
     /// A lazy global runs once per session, on first read, even when it
@@ -277,7 +278,7 @@ mod registration {
     #[test]
     fn every_reserved_root_is_rejected_before_any_provider_runs() {
         let names: Vec<&str> = reserved_root_descriptors().iter().map(|root| root.name).collect();
-        assert_eq!(names, ["doc", "ctx", "env", "current", "current_env"]);
+        assert_eq!(names, ["fm", "ctx", "env", "current"]);
 
         let doc = document(json!({}));
         for name in names {

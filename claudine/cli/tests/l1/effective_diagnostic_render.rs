@@ -108,8 +108,7 @@ fn initialize_proxy_resolution_failure_renders_a_status_block() {
         r#"---
 title: motivating incident
 initialize:
-  stack:
-    - action: {proxy: "no/such/target.md"}
+  - {proxy: "no/such/target.md"}
 ---
 Body
 "#,
@@ -140,10 +139,10 @@ Body
     // Structured `property` path, driven by the real `route_initialize`
     // constructor: it names the authoring stack location, not a bare event
     // root. Fails against the pre-fix `"initialize"` value, which lacks
-    // `.stack[*].proxy`.
+    // `[*].proxy`.
     assert!(
-        stderr.contains("initialize.stack[*].proxy"),
-        "the block must name the authored `initialize.stack[*].proxy` property; \
+        stderr.contains("initialize[*].proxy"),
+        "the block must name the authored `initialize[*].proxy` property; \
          stderr:\n{stderr}"
     );
     assert!(
@@ -199,8 +198,7 @@ fn terminal_proxy_resolution_failure_renders_a_status_block() {
         r#"---
 title: terminal proxy
 failure:
-  stack:
-    - action: {proxy: "no/such/target.md"}
+  - {proxy: "no/such/target.md"}
 ---
 Body
 "#,
@@ -228,11 +226,11 @@ Body
         "the adopted target must be named; stderr:\n{stderr}"
     );
     // Structured `property` path, driven by the real `dispatch_terminal_control`
-    // constructor: it names the terminal stack location (`failure.stack[*].proxy`),
+    // constructor: it names the terminal stack location (`failure[*].proxy`),
     // not a bare `proxy`. Fails against the pre-fix `"proxy"` value.
     assert!(
-        stderr.contains("failure.stack[*].proxy"),
-        "the block must name the authored `failure.stack[*].proxy` property; \
+        stderr.contains("failure[*].proxy"),
+        "the block must name the authored `failure[*].proxy` property; \
          stderr:\n{stderr}"
     );
 }
@@ -249,7 +247,7 @@ fn status_block_is_plain_and_informative_when_piped() {
         let doc = root.join("route.md");
         write(
             &doc,
-            "---\ntitle: t\ninitialize:\n  stack:\n    - action: {proxy: \"no/such/target.md\"}\n---\nBody\n",
+            "---\ntitle: t\ninitialize:\n    - {proxy: \"no/such/target.md\"}\n---\nBody\n",
         );
         let output = fixture
             .command()

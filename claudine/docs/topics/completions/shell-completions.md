@@ -609,9 +609,14 @@ property and dispatches by `CompletionKind`:
 - **`enum` → enum members** as `property='value'`. Prefix-insensitive
   match when a value partial is typed; all members surface when the
   partial is empty.
-- **`file(match(…))` → the files the globs admit.** Each pattern is a
-  glob reference, so its prefix picks where it searches, exactly as a
-  single file reference does:
+- **`file(match(…))` → the files the globs admit.** A property with
+  several `match(...)` groups — for example a reused file type
+  `doc: "file(match('*.md'))"` used as `doc(match('guide*'))` — offers
+  only files **every** group admits (`guide-intro.md`, not `notes.md` or
+  `guide.txt`); each group's `!` exclusions apply to its own positives
+  only, and groups that admit nothing in common offer nothing. Each
+  pattern is a glob reference, so its prefix picks where it searches,
+  exactly as a single file reference does:
 
   | Pattern | Searched, in order |
   |---------|--------------------|
@@ -682,10 +687,11 @@ property-value completion merge the inline arms rather than declining:
 - **Names** — the union of every arm's completable property names,
   deduplicated in first-seen (arm) order. A `spec`-or-`design` union
   offers both `spec=` and `design=`.
-- **Values** — for a property that appears in more than one arm, the
-  arms' `match(...)` globs are combined (deduplicated) when every
-  contributing arm is a `file`, so the candidate set is the union of the
-  arms' matches; otherwise the first completable arm wins. Unresolved
+- **Values** — for a property that appears in more than one arm, when
+  every contributing arm is a `file`, each arm is judged on its own and
+  the candidate set is the union of the arms' matches (a file two arms
+  admit is offered once). One arm's `!` exclusions never hide another
+  arm's files. Otherwise the first completable arm wins. Unresolved
   file-reference arms are skipped.
 
 There is no authored property-order hint for a root union, so names come
@@ -755,8 +761,8 @@ The rules:
   never prompts (an interactive run asks which agent the arguments are for;
   completion does not) and never reports an error. This holds for every
   cursor shape: a setter, a bare word, a flag, or a Claudine option's value
-  (`--provider`, `--exclude`, `--on-rate-limit`, `--debug`,
-  `sequence --budget-ledger`, and every other value-taking option or alias).
+  (`--provider`, `--exclude`, `--on-rate-limit`, `--debug`, and every other
+  value-taking option or alias).
 - **A flag is judged by the words before it.** A partial flag such as
   `--mod` may become a Claudine option, so it is not itself read as a
   forwarded switch; the words before it must read cleanly for any flag to

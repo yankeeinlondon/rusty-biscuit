@@ -604,12 +604,9 @@ mod schema_validation_integration {
             let native_spec = native(&spec);
             assert_eq!(frontmatter.get("spec"), Some(&serde_json::json!(native_spec)));
             assert_eq!(frontmatter.get("x"), frontmatter.get("spec"));
-            assert_eq!(
-                frontmatter.get("plan"),
-                Some(&serde_json::json!(
-                    "claudine/fixes/file-param-anchoring/plan.md"
-                )),
-            );
+            // `dirname` of the absolute caller value keeps its absolute anchor.
+            let plan = format!("{}/plan.md", biscuit_file::to_portable_string(&case_dir));
+            assert_eq!(frontmatter.get("plan"), Some(&serde_json::json!(plan)));
             assert!(
                 composed.content().contains(&format!(
                     "SPEC={}",
@@ -619,9 +616,7 @@ mod schema_validation_integration {
                 composed.content(),
             );
             assert!(
-                composed
-                    .content()
-                    .contains("PLAN=claudine/fixes/file-param-anchoring/plan.md"),
+                composed.content().contains(&format!("PLAN={plan}")),
                 "derived plan should remain beside the specification: {}",
                 composed.content(),
             );
@@ -722,19 +717,16 @@ mod schema_validation_integration {
             composed.frontmatter().as_map()["spec"],
             serde_json::json!(native(&spec)),
         );
-        assert_eq!(
-            composed.frontmatter().as_map()["plan"],
-            serde_json::json!("claudine/fixes/stable/stable.md"),
+        let plan = format!(
+            "{}/stable.md",
+            biscuit_file::to_portable_string(spec.parent().unwrap())
         );
+        assert_eq!(composed.frontmatter().as_map()["plan"], serde_json::json!(plan));
         assert!(composed.content().contains(&format!(
             "SPEC={}",
             biscuit_file::to_portable_string(&spec)
         )));
-        assert!(
-            composed
-                .content()
-                .contains("PLAN=claudine/fixes/stable/stable.md")
-        );
+        assert!(composed.content().contains(&format!("PLAN={plan}")));
     }
 
     #[test]
@@ -861,7 +853,10 @@ mod schema_validation_integration {
         );
         assert_eq!(
             composed.frontmatter().as_map()["plan"],
-            serde_json::json!("claudine/fixes/layered/plan.md"),
+            serde_json::json!(format!(
+                "{}/plan.md",
+                biscuit_file::to_portable_string(spec.parent().unwrap())
+            )),
         );
         assert_eq!(
             composed.frontmatter().as_map()["optional_input"],
@@ -915,15 +910,12 @@ mod schema_validation_integration {
             composed.frontmatter().as_map()["spec"],
             serde_json::json!(native(&spec)),
         );
-        assert_eq!(
-            composed.frontmatter().as_map()["plan"],
-            serde_json::json!("claudine/fixes/context-only/plan.md"),
+        let plan = format!(
+            "{}/plan.md",
+            biscuit_file::to_portable_string(spec.parent().unwrap())
         );
-        assert!(
-            composed
-                .content()
-                .contains("PLAN=claudine/fixes/context-only/plan.md")
-        );
+        assert_eq!(composed.frontmatter().as_map()["plan"], serde_json::json!(plan));
+        assert!(composed.content().contains(&format!("PLAN={plan}")));
     }
 
     #[test]
@@ -1559,7 +1551,7 @@ mod schema_validation_integration {
                     .with_source_file(&prompt)
                     .with_file_ref_fallback_dir(&launch)
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
-                    .with_pre_approved_commands(["echo text".to_string()].into_iter().collect())
+                    .with_pre_approved_commands(["echo text".to_string()].into_iter().collect::<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>())
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::FrontmatterShellExpansion,

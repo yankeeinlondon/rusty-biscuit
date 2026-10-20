@@ -242,6 +242,16 @@ pub enum HarnessError {
     #[error("shell command blacklisted: \"{command}\" — {reason}")]
     ShellCommandBlacklisted { command: String, reason: String },
 
+    /// A persistent approval decision could not be written to the shell
+    /// policy file. The decision is not cached: it is neither a persistent
+    /// approval nor an implicit once.
+    #[error("could not write shell policy file {}: {source}", path.display())]
+    ShellPolicyWriteFailed {
+        path: PathBuf,
+        #[source]
+        source: Box<darkmatter::markdown::compose::shell_expansion::ShellExpansionError>,
+    },
+
     // --- Path resolution ---
     /// A repository-anchored path required a repository root, but none was
     /// available.
@@ -384,6 +394,8 @@ impl Diagnostic for HarnessError {
             // Still environmental: the run needed a repo root and the process
             // was launched outside one.
             HarnessError::RepoRootRequired { .. } => "io.read_failed",
+            // The policy file beside the document could not be written.
+            HarnessError::ShellPolicyWriteFailed { .. } => "io.write_failed",
         }
     }
 
@@ -422,6 +434,7 @@ impl Diagnostic for HarnessError {
             }
             HarnessError::ShellAuditParseError { detail, .. } => json!({ "command": detail }),
             HarnessError::RepoRootRequired { path } => json!({ "path": path }),
+            HarnessError::ShellPolicyWriteFailed { path, .. } => json!({ "path": path }),
             // Seeded from the catalog so every declared key is present.
             // `reference`, `source_path`, and the typed `failure` are always
             // known; `kind`, `effective_kind`, `base_dir`, `repository_root`,

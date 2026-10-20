@@ -107,13 +107,18 @@ pub fn decide_control(
     provider_launched: bool,
 ) -> ControlDispatch {
     match control {
-        StackControl::Stop | StackControl::Skip | StackControl::Error { .. } => {
+        // A `break` ends its event like `stop`; its loop reads the break from
+        // the slot the executor recorded it in.
+        StackControl::Stop | StackControl::Skip | StackControl::Error { .. } | StackControl::Break { .. } => {
             ControlDispatch::Stop
         }
         StackControl::Retry {
             max_attempts,
             backoff,
             delay,
+            // The overlay is not a dispatch decision; the wrapper reads it
+            // from the control when it applies the re-entry.
+            overlay: _,
         } => {
             // `control_budget` carries the absolute attempt ceiling derived
             // from `max_attempts` when the control first fired. When this is

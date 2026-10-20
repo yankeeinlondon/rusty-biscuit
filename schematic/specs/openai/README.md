@@ -17,6 +17,11 @@ just -f schematic/justfile import-openai
 The Assistants family (`/assistants`, `/threads`) is excluded: it is superseded
 by the Responses and Conversations APIs and slated for removal by OpenAI.
 
+The document declares no pagination, so the imported definition applies the
+hand-written `schematic/definitions/src/openai_pagination.rs` through the
+importer's `--overlay` option. The recipe rewrites `definitions/src/openai/`
+but never that file, so a re-import keeps every list's pagination.
+
 ## Known spec quirks
 
 `CreateChatCompletionRequest.seed` declares its bounds as `-9223372036854776000`

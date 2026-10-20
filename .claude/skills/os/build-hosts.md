@@ -1,369 +1,264 @@
 # Build Hosts
 
-Remote build hosts are declared through environment variables, never named in
-scripts or docs. A machine that sets a variable is saying that host is
-available from it; an unset variable means "not from here". Check with
-`env | grep '^BUILD_'` before planning cross-OS evidence, and say which hosts
-were declared when you report.
+Part of the `os` skill; [SKILL.md](SKILL.md) is the index.
+
+Remote build hosts are declared only through environment variables, never
+named in scripts or docs. A set variable means "that host is reachable from
+here"; an unset one means "not from here". Run `env | grep '^BUILD_'` before
+planning cross-OS evidence, and say which hosts were declared when you report.
 
 | Variable | Provides | Notes |
 |---|---|---|
-| `BUILD_LINUX` | Native Linux | Target of `just cross-check --os linux`. Has `tmux` and `wezterm` but no `Xvfb`, `kitty`, or `xdotool` (checked 2026-09-28), so X11 Level 3 tests skip there; run them in Docker instead ([macos.md](macos.md)). Do not install packages on it. |
-| `BUILD_WIN` | Native Windows, PowerShell as the remote shell | Target of `just cross-check --os windows`. Git's stderr shows as a red `NativeCommandError`; harmless. |
-| `BUILD_WSL` | A WSL2 Ubuntu guest | Target of `just cross-check --os wsl`, which runs CI's archive mode ([wsl.md](wsl.md)). For ad hoc commands, non-login shells lack `~/.cargo/bin`; wrap them in `bash -lc`. |
-| `BUILD_MACOS` | A macOS host other than the current one | Target of `just cross-check --os macos`; same flow as Linux. |
+| `BUILD_LINUX` | Native Linux | Has `tmux` and `wezterm`, but no `Xvfb`, `kitty`, or `xdotool`, so X11 Level 3 tests skip there. Run those in Docker instead ([macos.md](macos.md)). Do not install packages on it. |
+| `BUILD_WIN` | Native Windows, with PowerShell as the remote shell | Git's stderr appears as a red `NativeCommandError`; ignore it. |
+| `BUILD_WSL` | A WSL2 Ubuntu guest | `cross-check` runs CI's archive mode here ([wsl.md](wsl.md)). For ad hoc commands, wrap them in `bash -lc`: non-login shells do not have `~/.cargo/bin` on `PATH`. |
+| `BUILD_MACOS` | A macOS host other than this one | Same flow as Linux. |
 
-### Standing clone layout
-
-`cross-check` assumes nothing about a host's disk. Each host keeps one
-standing clone per originating checkout, at
-`<coding dir>/<local host>--<worktree>/rusty-biscuit`:
-
-- `<coding dir>` is the **host's** `CODING_DIR` (its login environment on
-  Unix, its user environment on Windows), else `~/coding`
-  (`%USERPROFILE%\coding` on Windows). It is resolved over SSH at the start
-  of each leg and printed as `clone: <host>:<dir>`.
-- `<local host>--<worktree>` is the machine running `cross-check` and the
-  linked worktree's directory name, or `main` for the main checkout, lowercased
-  (e.g. `shazam--feat-dark-fixes`). Runs of `-` in the host name collapse, so
-  the first `--` is always the separator.
-
-On 2026-09-22 `build-win-native` set `CODING_DIR=B:\coding` (user scope; `B:`
-is a fixed ReFS volume), and `build-linux` and the WSL guest set none, so they
-use `~/coding`. **On Windows, an unset `CODING_DIR` falls back to the small
-`C:` system drive**, which has frozen that host once already (see below), so
-keep it set there.
-
-A clone is created only when a checkout first runs `cross-check`, so a host
-holds one clone (and one `target/`) per origin worktree that has used it, and
-no two worktrees ever share one. A clone's last use is the time of its
-`rusty-biscuit/.git/FETCH_HEAD`, which the `git fetch` at the start of every
-run rewrites; a clone that never fetched falls back to its directory's time.
-Before any leg starts, each selected host retires every clone whose lock is
-not held and that is either:
-
-- **stale:** a `<this host>--*` clone whose worktree no longer exists here
-  (absent from `git worktree list`, or listed as `prunable`). Only the calling
-  host can know this, so other hosts' clones are never judged stale.
-- **expired:** any clone, whatever its prefix, last used
-  `CROSS_CHECK_MAX_AGE_DAYS` (default 3) or more days ago. This is what clears clones of other or renamed calling hosts (e.g.
-  `mac--*` on `build-win-native`) and of live but idle worktrees.
-
-The run's own clone is never retired, and only directories that look like
-clones (a `rusty-biscuit` child) are candidates. Retiring is a rename
-to `.cross-check-trash--…` followed by a detached delete (on Windows started
-through WMI, since OpenSSH kills a session's children, with a `\\?\` path
-for deep `target\` trees), so no leg waits on it; every pass re-deletes any
-leftover trash. A clone whose lock is held is kept and reported; a rename that
-fails is reported and does not stop the run.
-
-A run prunes only the hosts it selects. `just cross-check-refresh [--os …]
-[--dry-run]` applies the same rules (`scripts/cross-check-hosts.sh`) to every
-declared host on demand. It reports each host's free space and every clone's
-size and days unused before, deletes synchronously, and reports what was
-removed and the space reclaimed after. `just cross-check-test` runs the rules'
-L1 tests.
-
-The build hosts do not offer post-quantum key exchange, so OpenSSH 10 clients
-print a three-line `** WARNING: connection is not using a post-quantum key
-exchange algorithm` on every connection. `cross-check` and the refresh pass
-`-o WarnWeakCrypto=no` when the local client accepts it (checked with
-`ssh -G`, which does not connect); older clients do not know the option and
-would refuse to connect with it.
-
-The pre-2026-09-22 shared clones (`~/ci-verification`, `W:\ci-verification`) are
-no longer used, and deleting them is the host owner's call.
-
-`cross-check` forwards `BISCUIT_TEST_REQUIRED_BACKENDS` from your shell to the
-remote run. Set it whenever you run a Level 2 filter remotely — a backend the
-host lacks otherwise skips, and nextest prints PASS in ~0.02 s. The Unix legs
-also never read the remote `~/.config` (`GIT_CONFIG_GLOBAL=/dev/null`, empty
-`XDG_CONFIG_HOME`), so a down NAS cannot fail them ([wsl.md](wsl.md)).
-
-Each value is an SSH destination: an alias from the developer's
-`~/.ssh/config` or `user@host`. Use it as `ssh -o BatchMode=yes "$BUILD_WSL"
-...` so a missing key fails fast instead of prompting. The `post-quantum`
-warnings SSH prints are noise.
-
-For an ad hoc PowerShell script on `BUILD_WIN`, copy it over and run it with
-`-File`; do not pipe it into `powershell -Command -`. Piped input is read
-line by line, and on 2026-09-24 a script with multi-line `foreach`/`switch`
-blocks printed nothing and reported no error. The remote shell is
-PowerShell, so `%TEMP%` stays literal; quote the command for your local shell
-and use `$env:TEMP`:
-
-```sh
-scp -q probe.ps1 "$BUILD_WIN":AppData/Local/Temp/probe.ps1
-ssh -o BatchMode=yes "$BUILD_WIN" 'powershell -NoProfile -ExecutionPolicy Bypass -File $env:TEMP\probe.ps1; Remove-Item $env:TEMP\probe.ps1'
-```
-
-`BUILD_WIN` and `BUILD_WSL` are commonly the same physical machine. If the
-WSL guest's sshd hangs while the distro is running, go through the Windows
-side: `ssh "$BUILD_WIN" 'wsl.exe -d <distro> -e <argv>'` and strip NULs from
-the output.
+Each value is an SSH destination (an `~/.ssh/config` alias or `user@host`).
+Call it as `ssh -o BatchMode=yes "$BUILD_WSL" …` so a missing key fails fast
+instead of prompting. OpenSSH 10 prints a `post-quantum key exchange` warning
+on every connection; it is noise. `cross-check` passes `-o WarnWeakCrypto=no`
+only when the local client supports that option, because older clients
+refuse to connect with it. In zsh, `"$BUILD_LINUX:path"` applies the `:s`
+history modifier and mangles the destination; write `"${BUILD_LINUX}:path"`.
 
 ## `just cross-check`
 
-`scripts/cross-check.sh` (root `just cross-check <package> [--os
-linux|windows|wsl|macos|all] [nextest args]`) commits your working tree
-(tracked edits and untracked, non-ignored files) as one throwaway commit over
-`origin/<branch>` (falls back to `origin/main` when the branch is unpushed),
-ships that commit as a `git bundle`, checks the standing clone out at it, and
-runs the package's L1 suite there. Your branch, index, and stash stack are
-untouched and nothing is signed. The commit is the tested revision and the
-plan's `head`, which is what lets archive mode run at all: `ci-build` refuses
-any checkout that is not `plan.head` or whose tracked tree is dirty. Compile caches stay warm
-between runs. It reads `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, and
-`BUILD_MACOS`. The default `--os all` runs on every declared OS except the
-one the script is running on, since the local suite already covers it; the
-banner names the skipped OS. An explicit `--os` runs that one OS even when it
-matches the local one, errors when its host is undeclared, and `all` errors
-when nothing but the local OS is declared rather than passing silently. The
-`wsl` host runs CI's nextest archive mode with the builder target directory
-hidden, so it catches the class of failure that only the `wsl2-ubuntu` CI
-leg sees. By default every host builds the package's declared CI features
-(`[package.metadata.ci.tests] features`, not `local-features`) and runs the L1
-filter. A Cargo build flag (`--features`, `--all-features`,
-`--no-default-features`) cannot be honored in archive mode, so passing one
-switches *every* host to plain `cargo nextest run` with no tier filter and no
-receipt; every other argument goes to the run.
+`just cross-check <package> [--os linux|windows|wsl|macos|all] [nextest args]`
+(`scripts/cross-check.sh`) works like this:
 
-Every archive-mode `wsl` or `windows` leg prints `cross-check-*:` markers
-(`tree`, `dirty`, `key`, `digest`, `manifest-exit`, `exit`, `duration`) and
-leaves its whole staging directory (`manifest.jsonl`, `L1/<package>.xml`, and
-`expected-L1.json`, which `just _expected_manifest` writes before the tests) at
-`<clone dir>/cross-check-<run id>-reports` until the orchestrating host has
-fetched it with `scp -r`; the host then deletes it. When the leg qualifies it
-becomes a `rig` observation for its own environment (`wsl2-ubuntu` or
-`windows-latest`, never the other) and the retained JUnit report, expected
-manifest, and completion record sit in
-`${BISCUIT_CI_EVIDENCE_DIR:-~/.rusty-biscuit/ci-evidence}/<head>/<environment>/<package>-L1-<run id>/`.
-A native-mode run (a Cargo build flag) stages nothing and publishes nothing.
-For one-off evidence of a `cfg`-gated test, `--no-tests=pass` still means a
-green leg does not prove it ran; read the PASS line in the live output, or tee
-the output (`./scripts/cross-check.sh <pkg> --os windows 2>&1 | tee <file>`).
+1. It commits your working tree, including tracked edits and untracked
+   non-ignored files, as one throwaway commit on top of `origin/<branch>`
+   (or `origin/main` if the branch is unpushed).
+2. It ships that commit as a `git bundle` and checks out a standing clone at
+   it.
+3. It runs the package's L1 suite with the package's declared CI `features`.
 
-`--os` takes one value (`linux`, `windows`, `wsl`, `macos`, or `all`); a
-comma list is rejected. A `wsl` leg that fails with `ssh: connect to host ...
-port 22: Operation timed out` while the Windows host answers means the guest
-is stopped, not unreachable: `ssh $BUILD_WIN 'wsl.exe -l -v'` shows `Stopped`,
-and `ssh $BUILD_WIN 'wsl.exe -d Ubuntu-26.04 -e true'` boots it with sshd up
-within seconds (2026-09-26).
+Your branch, index, and stash stay untouched, and nothing gets signed. That
+commit is the plan's `head`, which archive mode requires: `ci-build` refuses
+any checkout that is not `plan.head`, or whose tracked tree is dirty.
 
-A Linux archive build that reports an output as "not writeable" needs an
-artifact and wrapper check, not a feature flag. See **Compiler cache on the
-hosts** below. A build flag switches to different coverage without repairing
-the release target or preventing another cache restore.
+- **OS selection.** `--os` takes exactly one value; a comma list is rejected.
+  `all` (the default) skips the local OS and names it in the banner. It
+  errors if no other OS is declared. An explicit `--os` runs even when it
+  matches the local OS, and errors if that host is undeclared.
+- **Archive vs native mode.** The `wsl` leg runs CI's nextest archive mode,
+  with the builder's target dir hidden. It catches failures that only the
+  `wsl2-ubuntu` CI leg would see. Any Cargo build flag (`--features`,
+  `--all-features`, `--no-default-features`) switches *every* host to plain
+  `cargo nextest run`, with no tier filter, no receipt, and no published
+  observation. In archive mode a target selector (`--test l1`, `--lib`) gets a
+  usage error from `--archive-file` and the leg fails.
+- **Filtering.** Positional args are nextest test-name substrings, and
+  nextest ORs them together. A binary name matches nothing ("0 tests run").
+  Arguments are re-split by a shell on each side. A filterset with spaces,
+  `|`, or parentheses (`-E 'test(/a|b/)'`) breaks: `just` drops the quotes,
+  and the Windows leg's recipes re-split it even when you call the script
+  directly. Pass several substrings instead, for example
+  `just cross-check claudine --os windows claudine_schemas composition::schema`.
+  A filtered run is targeted evidence only.
+- **Suites that run Cargo themselves** (trybuild compile-fail, fresh-output
+  compiles) are `slow_`, which the L1 recipe's filter excludes, so an archive-mode run
+  cannot select them; a crate outside the workspace has no archive at all. Run them in
+  native mode with a build flag:
+  `./scripts/cross-check.sh --os all schematic-runtime --all-features --test l1 -E 'test(/(^|::)slow_/)'`,
+  or `… schematic-schema --all-features --manifest-path schematic/schema/Cargo.toml`
+  for the generated crate. Schematic's fresh-output guard builds `--offline`
+  against `schematic/schema/Cargo.lock`, so a host whose Cargo cache lacks a
+  crate fails it with "failed to download … --offline was specified". That is
+  a cache gap: `cargo fetch --manifest-path schematic/schema/Cargo.toml` on
+  that host fills it, as CI's build job does.
+- **Check what ran.** Before you trust a result, check the banner
+  `cross-check: <pkg> @ origin/<branch> (<sha>) + N changed file(s) as <rev>`.
+  `--no-tests=pass` means a green leg does not prove that a `cfg`-gated test
+  ran, so look for its PASS line, or tee the output to a file.
+- **Level 2 remotely.** Set `BISCUIT_TEST_REQUIRED_BACKENDS` in your shell
+  (`cross-check` forwards it). Otherwise a backend the host lacks makes the
+  test skip, and nextest still prints PASS. The Unix legs never read the
+  remote `~/.config` (`GIT_CONFIG_GLOBAL=/dev/null`, empty
+  `XDG_CONFIG_HOME`), so a down NAS cannot fail them.
+- **Remote output.** A remote test failure does not show child-process
+  stderr. If a probe must be read back, have it append to a file in the clone
+  dir and `Get-Content` or `cat` that file over SSH.
 
-In archive mode a Cargo target selector (`--test l1`, `--lib`) reaches the
-consumer's `cargo nextest run --archive-file` and is rejected with a usage
-error, reported as a failing leg. Narrow by test-name filter alone
-(`just cross-check darkmatter --os windows glob_implementation_guard`).
+### Publication
 
-The `just` recipe re-splits its arguments, so a filterset containing spaces
-or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error
-before any host is contacted. Call `./scripts/cross-check.sh` directly for a
-filtered run; it passes the quoted filterset through intact.
+A leg publishes a `rig` observation for its own environment only
+(`wsl2-ubuntu` or `windows-latest`), and only when all of these hold:
 
-Two runs from the same checkout share a clone. Each run holds that clone's
-lock (`<clone dir>/.cross-check.lock`, an atomically created directory with an
-`owner` file naming the user, branch, base SHA, and start time) for the whole
-reset, checkout, and test sequence, so overlapping runs queue instead of
-clobbering the clone. A waiter prints the owner and gives up after 30 minutes
-with exit 75. A lock left by a dead run is reported, never removed by the
-script; only its owner removes it by hand. Never work in the standing clone
-directly; use your own worktree for ad hoc sessions.
+- the remote tested tree is exactly the outgoing `HEAD`'s tree;
+- the remote worktree is clean;
+- the run is unfiltered and in archive mode;
+- the leg reported `cross-check-manifest-exit: 0`.
 
-- Verify the banner line `cross-check: <pkg> @ origin/<branch> (<sha>) + N
-  changed file(s) as <rev>` before trusting a result. If in doubt, confirm the
-  remote head: `ssh "$BUILD_WIN" "git -C <clone dir>\rusty-biscuit log
-  -1 --oneline"` — it is `<rev>`.
-- A clone left dirty by an earlier run used to make the checkout fail silently
-  and test the old tree. The script resets and cleans before checking the
-  tested revision out; recover an older clone by hand with `git reset --hard;
-  git clean -fdq; git checkout --detach <sha>` over SSH.
-- Positional filter args are nextest test-name substrings. A binary name
-  matches nothing ("0 tests run"). `-E 'test(...)'` breaks the recipe's
-  unquoted argument line (a `|` in it is run as a shell pipe); pass several
-  name substrings instead, which nextest ORs.
-- Child-process stderr is not shown by a remote test failure. A probe that
-  must be read back can append to `<clone dir>\probe.txt` and be read
-  with `ssh "$BUILD_WIN" "Get-Content <clone dir>\probe.txt"`.
-- `BUILD_WIN` has **no usable `python3`**: the name resolves to a Cygwin shim
-  pointing at a deleted `Python313\python.exe`, so a command that merely probes
-  for `python3` finds one and then fails on use. A working 3.13 is reachable
-  only as `py`. Anything that runs `scripts/ci/*.py` over SSH must spell `py`
-  (measured 2026-09-15).
-- **`tar` on `BUILD_WIN`'s `PATH` is Cygwin's too** (`/usr/bin/tar`), and it
-  cannot open a `C:\...` path ("Cannot open: Input/output error"). To unpack an
-  archive copied over with `scp`, call Windows' own
-  `& "$env:SystemRoot\System32\tar.exe" -xzf <file> -C <dir>` (2026-09-24).
-- **`bash` on `BUILD_WIN`'s `PATH` is Cygwin's** (`C:\cygwin64\bin\bash.exe`,
-  `uname -s` = `CYGWIN_NT`, drives under `/cygdrive/b`), not Git Bash. To run a
-  repo shell script the way a Git Bash user would, call
-  `& "C:\Program Files\Git\bin\bash.exe" /b/<path>` (`MINGW64_NT`, `/b/`).
-  `scripts/kache-host.sh qualify` gave the same verdicts under both
-  (2026-09-23). `B:` is ReFS and `C:` NTFS, so the host covers both kache
-  qualification outcomes; a scratch directory on `B:` plus a scratch
-  `LOCALAPPDATA` keeps a probe off the real `B:\kache` and user cache.
-- **A login shell reports its `~/.bash_logout`'s status, not the script's.**
-  Diagnosed 2026-09-22, and the cause of the `wsl FAIL` with a
-  `cross-check-exit: 0` marker recorded on 2026-09-15. The WSL guest's
-  `~/.bash_logout` ends with `[ -x /usr/bin/clear_console ] &&
-  /usr/bin/clear_console -q`, which fails without a tty, so `ssh <host> 'bash
-  -l <script>'` returned 1 for a run whose every test passed. `bash -lc 'bash
-  "$0"' <script>` does not do this and still sources the profile, so `cargo`
-  stays on `PATH`; that is what `cross-check` now sends. Suspect this shape in
-  any remote command that runs a script through a login shell, and check the
-  host's `~/.bash_logout` before believing the exit status.
-- **Only a pristine committed tree publishes** (checked 2026-10-11). A leg
-  publishes when the remote's tested tree IS the outgoing `HEAD`'s tree, on a
-  clean remote worktree, unfiltered, in archive mode, with a successful
-  `cross-check-manifest-exit: 0`; any other run prints
-  `cross-check: publishing no <environment> observation - <reason>` and records
-  nothing. `completion.py` and the publisher run on the ORCHESTRATING host over
-  the fetched staging directory, because the native Windows rig has no usable
-  `python3`. A completed failure (the report shows a failing test) is published
-  as a failing observation; a missing, unexpected, or malformed report, an empty
-  expectation, or a run that never reached its tests publishes nothing. Exit
-  75 is printed as `BUSY` and 255 as `UNREACHABLE`; neither ran anything. Ctrl-C
-  or `kill` ends the script nonzero, prints `cross-check: <os> interrupted; no
-  observation recorded`, and leaves every earlier leg's observation in place.
-- `build-win-native` has `jq` (Cygwin's, LF line endings) and `just`, so
-  `_expected_manifest` works there (1054 tests for `biscuit-file`, target
-  `x86_64-pc-windows-msvc`; the WSL2 guest lists 1062 on
-  `x86_64-unknown-linux-gnu`). The listing runs before the tests and its failure
-  does not stop them.
-- **Never run `cross-check` from a scratch clone that is not a worktree of the
-  real repository** (found 2026-10-11 rehearsing publication). The stale-clone
-  prune keeps only clones whose worktree `git worktree list` names HERE, so a
-  scratch clone deleted the Windows rig's warm clones for three live worktrees
-  (`feat-filesystem-watchers`, `feat-symbols`, `fix-bt-inline-prose`) and each
-  re-cloned cold on its next run. For a rehearsal, make the scratch checkout a
-  linked worktree of a clone, or rehearse publication against fetched files with
-  `observation_notes.py publish-receipt --kind rig` instead.
-- **Native Windows, first working run 2026-09-22.** Two faults had been hidden
-  behind the storage preflight, which always refused the leg before it got far
-  enough: `cross-check` looked for `ci-build.exe` under
-  `<clone>\scripts\target\release` (the `scripts` crate is a root-workspace
-  member, so it builds into the workspace `target\`), and Git for Windows
-  refused this repository's deepest paths (`Filename too long`) until the clone
-  set `core.longpaths true` — `LongPathsEnabled` in the registry is not enough,
-  since Git keeps its own 260-character cap.
+Any other run prints `cross-check: publishing no <environment> observation -
+<reason>`. A completed failure is published as a failing observation. A
+missing or malformed report, an empty expectation, or a run that never reached
+its tests publishes nothing.
 
-## Storage rules on the Windows host
+The leg leaves its staging dir (`manifest.jsonl`, `L1/<package>.xml`,
+`expected-L1.json`) at `<clone dir>/cross-check-<run id>-reports`. The
+orchestrating host fetches it and then deletes it remotely. `completion.py`
+and the publisher (`scripts/ci/observation_notes.py publish-receipt --kind
+rig`) run on the orchestrating host, because the Windows host has no usable
+`python3`. Evidence lands under
+`${BISCUIT_CI_EVIDENCE_DIR:-~/.rusty-biscuit/ci-evidence}/<head>/<environment>/`.
 
-The Windows host has a small system drive and a large `W:` volume that holds
-the WSL VHDX and every Cargo target. The checkout's `.cargo/config.toml` pins
-`target-dir` to `W:`. **Never override `CARGO_TARGET_DIR` there**; doing so
-once filled the system drive to zero bytes and froze the host.
+Exit statuses:
 
-- `just` recipes run a storage preflight (`scripts/storage-preflight.sh`)
-  that refuses to build below 50 GiB free. It is not bypassable and it is not
-  advisory; when it fails, free space or use another host.
-- Scratch checkouts and their target directories are outside every sweep's
-  scope. Delete your own scratch targets before reporting, on both the
-  Windows side and inside the WSL guest.
-- Check free space first: `ssh "$BUILD_WIN" "Get-PSDrive C, W"`; inside
-  WSL, `ssh "$BUILD_WSL" 'df -h ~'`.
-- The standing clone's own target under `W:\ci-verification` is **also**
-  outside the scheduled sweep: `RustyBiscuit-CargoSweep` is rooted at the
-  `C:` checkout. On 2026-09-16 it held 161 GB, `W:` had 143 MB free, and
-  `cross-check --os windows` died compiling with `os error 112` (not enough
-  space). Running the scheduled task reclaimed nothing. `cross-check` has no
-  sweep of its own, so report it rather than deleting the shared target.
-  `W:` was freed by 2026-09-15. Later on 2026-09-16 a run failed *before*
-  compiling: the patch upload reported `scp: write remote
-  "W:/ci-verification/cross-check-….patch": Failure`, then git reported
-  `unable to write file …` and `Could not reset index file`. That pattern
-  points to write failures on `W:`, not to a patch bug. Check
-  `Get-PSDrive W` before debugging the patch.
-  On 2026-09-16 `W:` reported 0 GB free, and SSH to `$BUILD_WSL` failed at
-  key exchange with `Connection reset by peer`. The guest's VHDX lives on
-  `W:`, so treat a WSL reset as the same storage problem, not a network one.
-- The standing cross-check clone `W:\ci-verification\rusty-biscuit` does not
-  inherit that `target-dir` pin: it builds into its own `target\`, which the
-  daily `RustyBiscuit-CargoSweep` (scoped to `W:/rusty-biscuit-target`) never
-  touches. On 2026-09-17 that `target\` plus an orphan
-  `W:\ci-verification\rb-pr66` (62 GB, 2026-08-30) and the 131 GB WSL VHDX
-  left `W:` at 8 KB free while the sweep log reported success with
-  `free_gib=0`. A full `W:` fails `--os windows` at the patch upload (`scp
-  ... Failure`, `No space left on device`). The same day the WSL guest (its
-  VHDX lives on `W:`) reset every SSH connection
-  (`kex_exchange_identification: Connection reset`), so suspect a full `W:`
-  first when both legs fail together. Freeing `W:` is the owner's call.
+- **75** is `BUSY` (the lock is held) and **255** is `UNREACHABLE`; nothing
+  ran in either case.
+- An interrupt prints `cross-check: <os> interrupted; no observation
+  recorded` and keeps the observations of earlier legs.
 
-A stale lock on a standing clone does not block Linux evidence. Build a
-private clone that only *reads* the standing one: `git clone --shared
---no-checkout <clone dir>/rusty-biscuit ~/scratch/<name>`. If the base
-commit is missing there, send the gap as a `git bundle` (`<remote tip>..<base>`)
-instead of fetching into the standing clone. Apply a
-`git diff --cached --binary <base>` built with a temporary `GIT_INDEX_FILE`, so
-untracked files come along and the local index is untouched. Run the recipes
-through `bash -lc`, which is what puts `just` and `cargo-nextest` on `PATH`.
-Delete `~/scratch/<name>` afterward; its `target/` is not swept.
-  Measure over SSH with `-EncodedCommand` (UTF-16LE base64): a `$` in an
-  inline PowerShell argument does not survive the remote shell.
+### Standing clones
+
+Each host keeps one clone per originating checkout, at
+`<coding dir>/<local host>--<worktree>/rusty-biscuit`:
+
+- `<coding dir>` is the host's own `CODING_DIR`, or `~/coding` if that is
+  unset. It is resolved over SSH and printed as `clone: <host>:<dir>`. **On
+  Windows, keep `CODING_DIR` set to the large volume.** If it is unset, the
+  clone falls back to the small `C:` system drive, which has filled and frozen
+  the host before.
+- `<local host>--<worktree>` is the machine running `cross-check` plus the
+  worktree's directory name (`main` for the main checkout), lowercased. Runs
+  of `-` in the host name collapse, so the first `--` is always the
+  separator.
+
+**Lock.** A run holds `<clone dir>/.cross-check.lock` for its whole
+reset/checkout/test sequence. The lock is a directory with an `owner` file, so
+two runs from the same checkout queue instead of clobbering each other. A
+waiter gives up after 30 minutes with exit 75. A lock left by a dead run is
+reported but never removed automatically; only its owner removes it. Never
+work in a standing clone directly.
+
+**Pruning.** Before a leg starts, each selected host retires every unlocked
+clone that is either:
+
+- **stale**: a `<this host>--*` clone whose worktree no longer exists here
+  (absent from `git worktree list`, or marked `prunable`); or
+- **expired**: any clone last used `CROSS_CHECK_MAX_AGE_DAYS` (default 3) or
+  more days ago, judged by its `.git/FETCH_HEAD` time.
+
+Retiring renames the clone to trash and deletes it in the background. On
+Windows the delete starts through WMI, because OpenSSH kills session
+children, and uses a `\\?\` path for deep trees. `just cross-check-refresh
+[--os …] [--dry-run]` (`scripts/cross-check-hosts.sh`) applies the same rules
+to every declared host, deletes synchronously, and reports sizes and the
+space reclaimed. `just cross-check-test` runs the rules' tests.
+
+**Never run `cross-check` from a scratch clone that is not a worktree of the
+real repository.** The stale rule keeps only clones that this checkout's
+`git worktree list` names. A scratch clone therefore deletes the warm clones
+of every live worktree on that host. To rehearse, use a linked worktree, or
+publish from fetched files with `observation_notes.py publish-receipt --kind
+rig`.
+
+**Working around a stale lock** (Linux). Make a private clone that only
+*reads* the standing one: `git clone --shared --no-checkout <clone
+dir>/rusty-biscuit ~/scratch/<name>`. Send any missing base commit as a
+`git bundle` instead of fetching into the standing clone. Apply your changes
+as a `git diff --cached --binary <base>` built with a temporary
+`GIT_INDEX_FILE`, so untracked files come along. Run recipes through
+`bash -lc`, and delete the scratch dir afterward, since nothing sweeps it.
+
+## Host traps
+
+- **A login shell returns its `~/.bash_logout` status, not the script's.**
+  The WSL guest's `~/.bash_logout` runs `clear_console`, which fails without a
+  TTY, so `ssh <host> 'bash -l <script>'` returns 1 after every test passed.
+  `cross-check` sends `bash -lc 'bash "$0"' <script>` instead. Suspect this
+  whenever a login-shell remote command reports a failure that the output
+  contradicts.
+- **A `wsl` leg times out on port 22 while `BUILD_WIN` answers.** The guest
+  is stopped, not unreachable. `ssh "$BUILD_WIN" 'wsl.exe -l -v'` shows
+  `Stopped`, and `ssh "$BUILD_WIN" 'wsl.exe -d <distro> -e true'` boots it.
+  If the guest's sshd hangs while the distro is running, run commands through
+  `wsl.exe -d <distro> -e <argv>` from the Windows side and strip NULs from
+  the output.
+- **`BUILD_WIN` and `BUILD_WSL` are usually one machine.** Do not run a
+  `--os windows` leg while a `--os wsl` leg is compiling. Commit memory runs
+  out (`The paging file is too small … (os error 1455)`), and the Windows
+  clone's `target\` is left poisoned, so the retry fails with `E0463: can't
+  find crate`. Run the legs one after another, and discard a clone whose build
+  hit 1455.
+- **Windows `PATH` tools are Cygwin's.**
+  - `python3` is a broken shim; use `py` for anything that runs
+    `scripts/ci/*.py`.
+  - `tar` cannot open `C:\…` paths; use
+    `& "$env:SystemRoot\System32\tar.exe"`.
+  - `bash` is Cygwin's (`CYGWIN_NT`, `/cygdrive/b`). To run a script the way
+    a Git Bash user would, call `& "C:\Program Files\Git\bin\bash.exe"`
+    (`MINGW64_NT`).
+  - `jq` (Cygwin's) and `just` both work, so `_expected_manifest` runs there.
+- **The Windows host covers both kache qualification outcomes.** Its two
+  volumes are ReFS and NTFS. A scratch dir on the ReFS volume plus a scratch
+  `LOCALAPPDATA` keeps a `scripts/kache-host.sh qualify` probe away from the
+  real store and user cache.
+- **Git for Windows has its own 260-character path limit.** Setting
+  `LongPathsEnabled` in the registry is not enough. The clone needs
+  `core.longpaths true`, which `cross-check` sets.
+- **Ad hoc PowerShell.** `scp` the script over and run it with `-File`.
+  Piping it into `powershell -Command -` reads it line by line and silently
+  drops multi-line blocks. The remote shell is PowerShell, so use `$env:TEMP`,
+  not `%TEMP%`, and quote it for your local shell. When an inline argument
+  needs a `$`, use `-EncodedCommand` (UTF-16LE base64).
+
+  ```sh
+  scp -q probe.ps1 "$BUILD_WIN":AppData/Local/Temp/probe.ps1
+  ssh -o BatchMode=yes "$BUILD_WIN" 'powershell -NoProfile -ExecutionPolicy Bypass -File $env:TEMP\probe.ps1; Remove-Item $env:TEMP\probe.ps1'
+  ```
+- **Remote processes outlive local ones.** Stopping a local background task
+  does not stop a backgrounded remote PowerShell pipeline. Kill the parent
+  `powershell.exe`, or it starts the next cargo command.
+- **Use the gates.** Run remote work through `just` recipes rather than raw
+  `cargo`, so timing records and preflights apply. After you `scp` a single
+  file into a clone, confirm that `git status --short` shows only that file.
+
+## Storage
+
+Disk-space crises are handled by the `storage-strategy` skill. What
+`cross-check` users need to know:
+
+- `just` recipes run `scripts/storage-preflight.sh`, which refuses to build
+  below 50 GiB free (`BISCUIT_BUILD_MIN_FREE_GIB`). When it refuses, free
+  space or use another host; do not work around it.
+- **Never override `CARGO_TARGET_DIR` on the Windows host.** No Cargo config
+  pins the target directory: each clone builds into its own `<clone>\target`,
+  which sits on the `CODING_DIR` volume because the clone does. An override
+  pointing anywhere else can fill the small system drive and freeze the host.
+- No scheduled sweep covers standing clones or scratch checkouts.
+  `cross-check-refresh` is how clones get retired. Delete your own scratch
+  targets, on Windows and inside the WSL guest, before you report.
+- **A full volume looks like a different bug.** On Windows it can show up as
+  `scp … Failure`, `unable to write file`, `Could not reset index file`, or
+  `os error 112`. The WSL guest's VHDX lives on the large volume, so SSH to
+  `BUILD_WSL` failing with `Connection reset` at key exchange is the same
+  problem. When both legs fail together, check free space first:
+  `ssh "$BUILD_WIN" "Get-PSDrive"`, and `df -h ~` in the guest.
 
 ## Compiler cache on the hosts
 
-The standing `cross-check` clones must never build through kache, matching CI.
-The Unix remote prelude explicitly exports `RUSTC_WRAPPER=""` and
-`RUSTC_WORKSPACE_WRAPPER=""` before either native or archive builds. Unsetting
-the variables is insufficient: host config or a Cargo shim can reactivate a
-wrapper. This also applies to private scratch checkouts on non-qualifying hosts.
+Standing clones must never build through kache, matching CI. The Unix remote
+prelude exports `RUSTC_WRAPPER=""` and `RUSTC_WORKSPACE_WRAPPER=""`. Exporting
+them as empty is required, because unsetting is not enough: host config or a
+`cargo` shim (for example one in `/usr/local/bin` that turns kache on) can
+bring a wrapper back. The same applies to private scratch checkouts on hosts
+that don't qualify for kache.
 
-**Linux repair verified 2026-10-06.** The host still had a root-owned
-`/usr/local/bin/cargo` shim that automatically enabled kache 0.12.0 for cold
-builds, even though Cargo config declared no wrapper. Stats showed 508 hits in
-24 hours; the store-to-checkout `cp --reflink=always` probe failed with
-"operation not permitted" on ZFS. The `fix-file-association` standing clone
-had 492 read-only release artifacts; sampled files, including
-`libbiscuit_file-*.rmeta`, shared device/inode identities with store blobs.
-This was active policy drift, not merely historical target permissions.
+- **"Output not writeable" in a Linux archive build** means the target holds
+  read-only, cache-linked artifacts: they share device/inode with kache store
+  blobs, because reflink failed on that filesystem. To repair a clone:
+  1. Take its `.cross-check.lock`.
+  2. Confirm the links against the store by device/inode.
+  3. Unlink those artifacts, or replace them with independent writable
+     copies.
 
-The automatic shim was backed up beside itself as
-`cargo.kache-auto-backup-20261006T180334Z` and replaced with a symlink to the
-host's rustup Cargo proxy. The 492 proven cache-linked artifacts in that
-checkout were atomically replaced with independent, owner-writable copies,
-preserving artifact contents and leaving store blobs unchanged. A follow-up
-scan of 15 target trees under `~/coding`, `~/ci-verification`, and `~/scratch`
-found 2,372 more cache-linked artifacts in six standing clones. Those were
-replaced under each clone's lock with independent writable copies; every copy
-was compared byte-for-byte before replacement, and cache blob modes, sizes,
-and modification times were verified unchanged. The final scan found zero
-remaining cache links across those 15 target trees. The repaired checkout built the release
-`ci-build` tool successfully, and a fresh scratch build invoked rustc directly
-with incremental compilation enabled. Before repairing another clone, acquire its
-`.cross-check.lock`, verify the links against the store by device/inode, then
-unlink generated artifacts or replace them with independent writable copies.
-**Never chmod a shared artifact:** it also changes the cache blob. Do not use
-a package feature to bypass archive coverage as a permissions remedy.
-
-- The macOS dev host sets `rustc-wrapper = "kache"` in `~/.cargo/config.toml`
-  and puts kache `cc`/`gcc`/`clang` shims (`~/.local/lib/kache/shims`) on
-  `PATH`. A "kache off" timing needs `RUSTC_WRAPPER=""` and those shims removed
-  from `PATH`. Otherwise the second of two "clean" builds restores the first
-  one's dependencies (33.8 s against 114 s for the same package).
-
-## Remote-process hygiene
-
-- Stopping a local background task does not stop a backgrounded remote
-  PowerShell pipeline; kill the parent `powershell.exe` PID or it starts the
-  next cargo command.
-- Run remote work through `just` gates where one exists rather than raw
-  `cargo`, so timing records and preflights apply.
-- When copying a single changed file to a standing clone for a quick check,
-  `scp` it and then confirm `git status --short` on the remote shows only that
-  file before running.
-- Do not run a `--os windows` leg while a `--os wsl` leg is compiling. The two
-  hosts are one physical machine, and on 2026-09-23 a first `claudine` build
-  in a new Windows clone ran out of commit memory while the guest built the
-  same package: `The paging file is too small for this operation to complete.
-  (os error 1455)` on `libstd`/`libtest` rmeta. That clone's `target\` was
-  left poisoned, and the retry failed with `E0463: can't find crate for
-  claudine`. Run the legs one after the other, and discard (or let `cross-check`
-  prune) a clone whose build hit 1455 before trusting its next result.
-- In zsh, `"$BUILD_LINUX:scratch/x"` applies the `:s` history modifier and
-  mangles the destination (`build-linuxap-…`). Brace the variable:
-  `"${BUILD_LINUX}:scratch/x"`.
+  **Never chmod a shared artifact**, because that changes the cache blob too.
+  A feature flag is not a fix: it only switches to different coverage.
+- **Timing a "kache off" build on the macOS dev host.** Its
+  `~/.cargo/config.toml` sets `rustc-wrapper = "kache"`, and kache
+  `cc`/`gcc`/`clang` shims (`~/.local/lib/kache/shims`) are on `PATH`. Set
+  `RUSTC_WRAPPER=""` and remove the shims from `PATH`. Otherwise the second
+  "clean" build restores the first one's dependencies.

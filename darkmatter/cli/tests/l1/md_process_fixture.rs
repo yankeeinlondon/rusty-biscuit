@@ -74,6 +74,8 @@ fn write_probe_stub(bin_dir: &Path) {
                 ">>\"%FIXTURE_PROBE_CAPTURE%\" echo AGENT=[%AGENT%]\r\n",
                 ">>\"%FIXTURE_PROBE_CAPTURE%\" echo MODEL=[%MODEL%]\r\n",
                 ">>\"%FIXTURE_PROBE_CAPTURE%\" echo RUST_LOG=[%RUST_LOG%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo BASELINE_SCHEMA=[%BASELINE_SCHEMA%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo SCHEMAS_DIR=[%SCHEMAS_DIR%]\r\n",
                 ">>\"%FIXTURE_PROBE_CAPTURE%\" echo CONTROL=[%FIXTURE_PROBE_CONTROL%]\r\n",
                 ">>\"%FIXTURE_PROBE_CAPTURE%\" echo PATHEXT=[%PATHEXT%]\r\n",
                 ">>\"%FIXTURE_PROBE_CAPTURE%\" echo COMSPEC=[%COMSPEC%]\r\n",
@@ -121,6 +123,8 @@ fn write_probe_stub(bin_dir: &Path) {
   printf 'AGENT=[%s]\n' "$AGENT"
   printf 'MODEL=[%s]\n' "$MODEL"
   printf 'RUST_LOG=[%s]\n' "$RUST_LOG"
+  printf 'BASELINE_SCHEMA=[%s]\n' "$BASELINE_SCHEMA"
+  printf 'SCHEMAS_DIR=[%s]\n' "$SCHEMAS_DIR"
   printf 'CONTROL=[%s]\n' "$FIXTURE_PROBE_CONTROL"
   printf 'PATHEXT=[%s]\n' "$PATHEXT"
   printf 'COMSPEC=[%s]\n' "$COMSPEC"
@@ -302,6 +306,8 @@ fn export_scrubbed_sentinels() {
         std::env::set_var("AGENT", "sentinel-agent");
         std::env::set_var("MODEL", "sentinel-model");
         std::env::set_var("RUST_LOG", "sentinel-trace");
+        std::env::set_var("BASELINE_SCHEMA", "/sentinel-baseline.yaml");
+        std::env::set_var("SCHEMAS_DIR", "/sentinel-schemas");
         std::env::set_var("THEME", "sentinel-theme");
         std::env::set_var("GIT_DIR", "/sentinel-git/.git");
         std::env::set_var("GIT_WORK_TREE", "/sentinel-git");
@@ -336,6 +342,8 @@ fn inherited_families_do_not_reach_the_child_and_fixture_defaults_win() {
         "AGENT",
         "MODEL",
         "RUST_LOG",
+        "BASELINE_SCHEMA",
+        "SCHEMAS_DIR",
         "THEME",
         "GIT_DIR",
         "GIT_WORK_TREE",

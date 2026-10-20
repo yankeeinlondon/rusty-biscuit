@@ -1,9 +1,9 @@
-//! `messenger research prepare|check-run|runs|promote|reject|cleanup`: the
+//! `messenger research prepare|run|check-run|runs|promote|reject|cleanup`: the
 //! refresh and review lifecycle over `messenger::research::refresh`.
 //!
 //! These commands write only the gitignored state area, except `promote`,
-//! which publishes accepted research through the snapshot protocol. None of
-//! them starts Claudine or an agent: `prepare` prints the commands to run.
+//! which publishes accepted research through the snapshot protocol. `run`
+//! starts Claudine; `prepare` prints the runner command.
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
@@ -18,9 +18,10 @@ use messenger::research::refresh::check::{CheckReport, check_run};
 use messenger::research::refresh::cleanup::{self, CleanupPlan, DEFAULT_THRESHOLD_DAYS};
 use messenger::research::refresh::prepare::{self, PreparedRun};
 use messenger::research::refresh::promote::{self, Promoted, Request};
+use messenger::research::refresh::runner;
 use messenger::research::refresh::select::{self, Reason, Skip};
-use messenger::research::refresh::state::{LedgerView, StageStatus};
-use messenger::research::refresh::{DecisionReason, Maintainer, RefreshError, RunLimits, Stage, StateArea};
+use messenger::research::refresh::state::{RunnerOutcome, StageStatus};
+use messenger::research::refresh::{DecisionReason, Maintainer, RefreshError, RunLimits, RunRecord, RunStatus, Stage, StateArea};
 use serde::Serialize;
 use serde_json::json;
 
@@ -28,6 +29,8 @@ use super::research::{EXIT_FINDINGS, EXIT_OK, parse_platform};
 
 /// Invalid arguments, including missing run limits and blank decision inputs.
 pub const EXIT_USAGE: i32 = 2;
+/// A run interrupted by Ctrl-C, matching the sequence's documented exit.
+pub const EXIT_INTERRUPTED: i32 = 130;
 
 #[derive(Debug, Args)]
 pub struct PrepareArgs {
@@ -51,7 +54,7 @@ pub struct PrepareArgs {
     #[arg(long, conflicts_with = "resume")]
     pub dry_run: bool,
     /// Re-prepare a failed, interrupted, or exhausted run from its first
-    /// incomplete stage, within its existing budget (at most two times).
+    /// incomplete stage (at most two times).
     #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["platforms", "force", "max_seconds", "max_invocations", "observed"])]
     pub resume: Option<String>,
     /// Emit JSON instead of styled terminal output.
@@ -63,6 +66,17 @@ pub struct PrepareArgs {
 pub enum StageArg {
     Validation,
     Review,
+}
+
+#[derive(Debug, Args)]
+pub struct RunArgs {
+    pub run_id: String,
+    /// Extra arguments for the run's `claudine sequence` command, after `--`
+    /// (for example `-- --claude` to name the agent).
+    #[arg(last = true, allow_hyphen_values = true)]
+    pub sequence_args: Vec<String>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -121,6 +135,10 @@ pub struct CleanupArgs {
     /// Remove the previewed records. Without it nothing is deleted.
     #[arg(long)]
     pub apply: bool,
+    /// Mark a stale `active` run (its runner is gone) `interrupted` instead of
+    /// previewing removals.
+    #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["apply", "older_than"])]
+    pub recover: Option<String>,
     #[arg(long)]
     pub json: bool,
 }
@@ -152,7 +170,9 @@ fn refusal(error: RefreshError, json: bool) -> Result<i32, String> {
         RefreshError::WrongStatus { .. }
         | RefreshError::NotEligible { .. }
         | RefreshError::RecoveryLimit { .. }
-        | RefreshError::Ledger { .. }
+        | RefreshError::InvocationLimit { .. }
+        | RefreshError::RunnerLive { .. }
+        | RefreshError::NotLaunched { .. }
         | RefreshError::OtherRunBlocks { .. }
         | RefreshError::NotInRoster { .. } => EXIT_FINDINGS,
         RefreshError::Generate(inner) if matches!(**inner, GenerateError::Refused { .. }) => EXIT_FINDINGS,
@@ -290,6 +310,62 @@ fn emit_prepared(selections: &[select::Selection], runs: &[PreparedRun], json: b
     }
 }
 
+// ---- run ------------------------------------------------------------------------
+
+/// Admission hook for prepared prompts; refusal prevents the provider launch.
+pub fn admit_agent(loader: &Loader, run_id: &str, json: bool) -> Result<i32, String> {
+    match runner::admit_agent(loader, run_id) {
+        Ok(record) => {
+            if json {
+                println!("{}", pretty(&json!({ "run_id": record.run_id, "invocations": record.invocations })));
+            }
+            Ok(EXIT_OK)
+        }
+        Err(error) => refusal(error, json),
+    }
+}
+
+/// Runs a prepared run's sequence under the fleet lock. The exit status
+/// follows the runner's observation: `0` finished, `1` stopped, `130`
+/// interrupted. Arguments after `--` reach the run's `claudine sequence`
+/// command (for example `-- --claude`).
+pub fn run(loader: &Loader, args: RunArgs) -> Result<i32, String> {
+    let record = match runner::execute(loader, &args.run_id, &args.sequence_args) {
+        Ok(record) => record,
+        Err(error) => return refusal(error, args.json),
+    };
+    let outcome = record.runner;
+    if args.json {
+        println!(
+            "{}",
+            pretty(&json!({
+                "run_id": record.run_id,
+                "platform_id": record.platform_id,
+                "status": record.status,
+                "runner": outcome,
+                "stop_reason": record.stop_reason,
+            }))
+        );
+    } else {
+        let term = Terminal::default();
+        let outcome = outcome.expect("a settled run records its outcome");
+        let headline = match outcome {
+            RunnerOutcome::Finished => format!("<b>Run {} finished.</b> It is {}.", record.run_id, record.status),
+            RunnerOutcome::Interrupted => format!("<b>Run {} was interrupted.</b> Resume it once the cause is addressed.", record.run_id),
+            RunnerOutcome::Stopped => format!("<b>Run {} stopped before its checks passed.</b> It is {}.", record.run_id, record.status),
+        };
+        print!("{}", prose(headline, &term));
+        if let Some(reason) = &record.stop_reason {
+            print!("{}", list(vec![reason.clone()], &term));
+        }
+    }
+    Ok(match outcome {
+        Some(RunnerOutcome::Finished) => EXIT_OK,
+        Some(RunnerOutcome::Interrupted) => EXIT_INTERRUPTED,
+        _ => EXIT_FINDINGS,
+    })
+}
+
 // ---- check-run -----------------------------------------------------------------
 
 pub fn check(loader: &Loader, args: CheckRunArgs, today: &Date) -> Result<i32, String> {
@@ -338,8 +414,29 @@ struct RunRow {
     next_stage: Option<Stage>,
     recovery_attempts: Option<u32>,
     stop_reason: Option<String>,
-    ledger: Option<LedgerView>,
+    runner: Option<RunnerOutcome>,
+    /// What an active record is doing now: running, waiting to be run, or stale.
+    note: Option<String>,
+    /// A ledger-era `budget.json` sits beside the record; it is ignored, not
+    /// deleted.
+    legacy_ledger: bool,
     error: Option<String>,
+}
+
+/// What an active record is doing right now: a live runner may be executing
+/// it, it may be prepared and never run, or its runner may be gone (stale —
+/// recovered explicitly, never silently).
+fn active_note(state: &StateArea, record: &RunRecord) -> Option<String> {
+    if record.status != RunStatus::Active {
+        return None;
+    }
+    if state.fleet_lock_held() {
+        Some("a research runner holds the fleet lock".to_string())
+    } else if record.launched {
+        Some(format!("stale: the runner is gone; recover it with `messenger research cleanup --recover {}`", record.run_id))
+    } else {
+        Some(format!("prepared, not yet run (`messenger research run {}`)", record.run_id))
+    }
 }
 
 pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
@@ -356,12 +453,14 @@ pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
                 next_stage: None,
                 recovery_attempts: None,
                 stop_reason: None,
-                ledger: None,
+                runner: None,
+                note: None,
+                legacy_ledger: false,
                 error: Some(error.to_string()),
             },
-            Ok(mut record) => {
-                let ledger = state.ledger(&record).ok().flatten();
-                messenger::research::refresh::state::apply_ledger(&mut record, ledger.as_ref());
+            Ok(record) => {
+                let note = active_note(&state, &record);
+                let legacy_ledger = state.has_legacy_ledger(&record);
                 RunRow {
                     path,
                     run_id: Some(record.run_id.to_string()),
@@ -371,7 +470,9 @@ pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
                     next_stage: record.next_stage(),
                     recovery_attempts: Some(record.recovery_attempts),
                     stop_reason: record.stop_reason.clone(),
-                    ledger,
+                    runner: record.runner,
+                    note,
+                    legacy_ledger,
                     error: None,
                 }
             }
@@ -396,15 +497,14 @@ pub fn runs(loader: &Loader, args: RunsArgs) -> Result<i32, String> {
                 if let Some(stage) = row.next_stage {
                     facts.push(format!("next stage {stage}"));
                 }
-                if let Some(ledger) = &row.ledger {
-                    facts.push(format!(
-                        "ledger {} ({}/{} invocations, {}/{} s)",
-                        ledger.state,
-                        ledger.used.invocations,
-                        ledger.limits.invocations,
-                        ledger.used.active_ms / 1000,
-                        ledger.limits.active_ms / 1000
-                    ));
+                if let Some(runner) = row.runner {
+                    facts.push(format!("runner {runner}"));
+                }
+                if row.legacy_ledger {
+                    facts.push("a ledger-era budget.json is present; it is ignored".to_string());
+                }
+                if let Some(note) = &row.note {
+                    facts.push(note.clone());
                 }
                 if let Some(reason) = &row.stop_reason {
                     facts.push(reason.clone());
@@ -479,7 +579,32 @@ pub fn reject(loader: &Loader, args: RejectArgs, today: &Date) -> Result<i32, St
 
 pub fn cleanup(loader: &Loader, args: CleanupArgs, today: &Date) -> Result<i32, String> {
     let state = StateArea::new(loader.workspace());
-    let plan = cleanup::plan(&state, today, args.older_than);
+    if let Some(run_id) = &args.recover {
+        return match cleanup::recover(&state, run_id) {
+            Ok(record) => {
+                if args.json {
+                    println!("{}", pretty(&json!({ "run_id": record.run_id, "status": record.status })));
+                } else {
+                    print!(
+                        "{}",
+                        prose(
+                            format!(
+                                "<b>Recovered run {}.</b> It is marked interrupted; resume or reject it.",
+                                record.run_id
+                            ),
+                            &Terminal::default(),
+                        )
+                    );
+                }
+                Ok(EXIT_OK)
+            }
+            Err(error) => refusal(error, args.json),
+        };
+    }
+    let plan = match cleanup::plan(&state, today, args.older_than) {
+        Ok(plan) => plan,
+        Err(error) => return refusal(error, args.json),
+    };
     let removed = if args.apply { Some(cleanup::apply(&state, &plan).map_err(|e| e.to_string())?) } else { None };
     if args.json {
         println!("{}", pretty(&json!({ "applied": args.apply, "plan": plan, "removed": removed })));

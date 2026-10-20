@@ -396,6 +396,66 @@ Suggested integration flow:
 
 This keeps the data-driven design intact while allowing end-to-end OpenAPI imports.
 
+## Importing into `schematic-definitions`
+
+`schematic-gen import --definitions-out <dir>` writes a definitions-crate
+module instead of a standalone client: `<dir>/types.rs` holds the models and
+`<dir>/mod.rs` holds `define_{module}_api()`, which rebuilds the imported
+`RestApi` as a value, plus `openapi_registry()`. The imported API then joins
+the catalog and flows through `schematic-gen generate` like a hand-written one.
+
+```bash
+schematic-gen import --input specs/openai/openapi.yaml --api-name OpenAI \
+    --module-path openai --definitions-out definitions/src/openai
+```
+
+### Overlays: authored additions the import keeps
+
+An OpenAPI document cannot express everything a definition carries;
+pagination is the main example. Writing such additions into the imported
+`mod.rs` does not work, because the next import overwrites it. Put them in a
+hand-written overlay function instead and name it with `--overlay`:
+
+```bash
+schematic-gen import ... --definitions-out definitions/src/openai \
+    --overlay crate::openai_pagination::apply
+```
+
+The overlay is a `fn(RestApi) -> RestApi` anywhere the module can reach by
+that path. The importer never reads or writes it; it only emits the call, so
+the factory every client and exporter uses returns the augmented definition:
+
+```rust
+pub fn define_openai_api() -> RestApi {
+    let endpoints = Vec::from([/* imported endpoints */]);
+    let api = RestApi {
+        // imported fields; `default_pagination: None`,
+        // `pagination_exceptions: vec![]`
+    };
+    crate::openai_pagination::apply(api)
+}
+```
+
+```mermaid
+flowchart LR
+    spec[OpenAPI document] -->|schematic-gen import| modrs["openai/mod.rs (regenerated)"]
+    overlay["openai_pagination.rs (hand-written)"] -.->|called by| modrs
+    modrs --> factory["define_openai_api()"]
+```
+
+Rules:
+
+- The value must be a plain Rust path: `crate::openai_pagination::apply`,
+  `super::apply`, and `apply` are accepted; an empty value, generic arguments
+  (`crate::x::apply::<T>`), or anything that is not a path (`apply()`) is
+  rejected before anything is written.
+- `--overlay` requires `--definitions-out`; a standalone client has no
+  definitions factory to call it from, so the combination is rejected.
+- Without `--overlay` the factory ends with the `RestApi` literal itself.
+- The module docs' regeneration hint includes the `--overlay` argument, so the
+  emitted file records how to reproduce it. `just import-openai` passes
+  `--overlay crate::openai_pagination::apply`.
+
 ## Example mapping (conceptual)
 
 OpenAPI:

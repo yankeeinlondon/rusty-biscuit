@@ -165,7 +165,7 @@ fn match_validation_reads_reference_prefixes() {
     let context_guide = crate::request_support::context_at(&root.join("area/pkg/guide"));
     let admits = |context: &biscuit_file::FileResolutionContext, value: &str, patterns: &[&str]| {
         let patterns: Vec<String> = patterns.iter().map(|pattern| (*pattern).to_string()).collect();
-        file_match_admits(value, &patterns, context)
+        file_match_admits(value, &[patterns], context)
     };
     let incident = "fixes/2026-09-29-ts-review-improvements/spec.md";
 
@@ -449,7 +449,7 @@ fn assert_consumers_judge_directory_spelling(stored: &str, authored: &str, trave
         compose_in_repo("index.md", &format!("# Index\n\n::file-links {pattern}\n")).content().to_string()
     };
     let value = biscuit_file::to_portable_string(&file);
-    let admits = |pattern: &str| file_match_admits(&value, &[pattern.to_string()], &env_context);
+    let admits = |pattern: &str| file_match_admits(&value, &[vec![pattern.to_string()]], &env_context);
 
     for mismatched in [format!("{repo_text}/{authored}/*.md"), format!("{{{{ROOT}}}}/{authored}/*.md")] {
         assert!(find_files(&mismatched).is_empty(), "find_files('{mismatched}')");

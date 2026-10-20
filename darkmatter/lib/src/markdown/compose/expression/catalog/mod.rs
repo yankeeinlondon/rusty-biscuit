@@ -87,8 +87,11 @@ impl DataType {
             SimplifiedType::Email => Self::Email,
             SimplifiedType::Yaml => Self::Yaml,
             SimplifiedType::Json => Self::Json,
-            SimplifiedType::Any => Self::Any,
+            SimplifiedType::Unknown => Self::Any,
             SimplifiedType::NumberLike
+            | SimplifiedType::Null
+            | SimplifiedType::Alphanumeric
+            | SimplifiedType::Shell
             | SimplifiedType::Boolish
             | SimplifiedType::Enum
             | SimplifiedType::Literal

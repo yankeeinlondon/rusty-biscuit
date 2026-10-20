@@ -29,7 +29,8 @@ use jsonschema::Validator;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, QueryParamType};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, FormField, RestApi, RestMethod, Schema,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField, RestApi, RestMethod,
+    Schema,
 };
 use schematic_gen::export::postman::{build_postman_collection, build_postman_collection_grouped};
 use serde_json::Value;
@@ -143,6 +144,11 @@ fn rest_api(
         request_suffix: None,
         version: None,
         env_mapping: None,
+        cross_origin: CrossOrigin::default(),
+        request_id_header: None,
+        secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 

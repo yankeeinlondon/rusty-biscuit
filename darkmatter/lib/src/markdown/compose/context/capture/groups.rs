@@ -548,7 +548,7 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
     /// interpolation reads code as it reads prose.
     #[test]
     fn frontmatter_strings_are_scanned_at_every_depth() {
-        let document: crate::markdown::Markdown = "---\nstart:\n    stack:\n        - when: \"length(ctx.staged_files) > 0\"\n          action:\n              - info: \"on {{ ctx.branch }}\"\nnote: |\n    ```\n    {{ ctx.os }}\n    ```\n---\nBody.\n"
+        let document: crate::markdown::Markdown = "---\nstart:\n    - when: \"length(ctx.staged_files) > 0\"\n      then:\n          - info: \"on {{ ctx.branch }}\"\nnote: |\n    ```\n    {{ ctx.os }}\n    ```\n---\nBody.\n"
             .into();
 
         let requirements = ContextRequirements::for_document(&document);

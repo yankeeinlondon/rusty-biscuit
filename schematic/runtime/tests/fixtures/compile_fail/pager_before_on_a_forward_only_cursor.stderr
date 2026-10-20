@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no resumable backward cursor
+ --> tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.rs
+  |
+  |     let _ = client.send(ListItems).pager().before("b".to_owned());
+  |                                            ^^^^^^ `.before(..)` needs a resumable cursor with a backward leg in the definition
+  |
+help: the trait `ResumeBefore` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` authors no resumable backward cursor
+note: required by a bound in `Pager::<'a, A, R>::before`
+ --> src/pager/pages.rs
+  |
+  |     pub fn before(mut self, cursor: impl Into<<R as ResumeBefore>::Cursor>) -> Self
+  |            ------ required by a bound in this associated function
+  |     where
+  |         R: ResumeBefore,
+  |            ^^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::before`

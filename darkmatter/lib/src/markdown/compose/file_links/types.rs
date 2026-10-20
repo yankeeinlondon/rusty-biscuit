@@ -74,12 +74,12 @@ pub struct FileLinksRender {
     pub included_paths: Vec<PathBuf>,
     /// Boundary-relative prefix rendered dimmed before the target name.
     ///
-    /// Includes a leading separator when non-empty (e.g. `/docs/`). Empty when
+    /// Has no leading separator and ends in `/` when non-empty (e.g. `docs/`). Empty when
     /// the component root is the boundary itself.
     pub dimmed_prefix: String,
-    /// Highlighted target directory name rendered on the root line.
+    /// Highlighted target directory name, ending in `/`, on the unlinked root line.
     pub target_name: String,
-    /// Whether the repository folder icon should be used on the root line.
+    /// Whether the component root is the repository root itself.
     pub uses_repo_icon: bool,
 }
 

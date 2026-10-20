@@ -143,14 +143,14 @@ fn detect_value_atom(value: &Value, context: &FileResolutionContext) -> Property
         Value::String(s) => PropertyAtom::bare(classify_string(s, context)),
         Value::Array(items) => detect_array_atom(items, context),
         Value::Object(_) => PropertyAtom::bare(SimplifiedType::Object),
-        Value::Null => PropertyAtom::bare(SimplifiedType::Any),
+        Value::Null => PropertyAtom::bare(SimplifiedType::Unknown),
     }
 }
 
 fn detect_array_atom(items: &[Value], context: &FileResolutionContext) -> PropertyAtom {
     if items.is_empty() {
         return PropertyAtom {
-            ty: TypeExpr::Primitive(SimplifiedType::Any),
+            ty: TypeExpr::Primitive(SimplifiedType::Unknown),
             is_array: true,
             constraints: vec![],
             array_constraints: vec![],
@@ -179,7 +179,7 @@ fn detect_array_atom(items: &[Value], context: &FileResolutionContext) -> Proper
             }
             None => {
                 return PropertyAtom {
-                    ty: TypeExpr::Primitive(SimplifiedType::Any),
+                    ty: TypeExpr::Primitive(SimplifiedType::Unknown),
                     is_array: true,
                     constraints: vec![],
                     array_constraints: vec![],
@@ -418,8 +418,8 @@ fn unify_types(a: &TypeExpr, b: &TypeExpr) -> Option<SimplifiedType> {
         // boolean-family widening
         (Boolean, Boolish) | (Boolish, Boolean) => Some(Boolish),
 
-        // `Any` swallows everything
-        (Any, t) | (t, Any) => Some(t),
+        // `Unknown` swallows everything
+        (Unknown, t) | (t, Unknown) => Some(t),
 
         _ => None,
     }
@@ -428,9 +428,9 @@ fn unify_types(a: &TypeExpr, b: &TypeExpr) -> Option<SimplifiedType> {
 fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
     match ty {
         TypeExpr::Primitive(p) => Some(*p),
-        // Inline objects and imported types do not unify with any other type
-        // in detection (detecting either is a non-goal of this feature).
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } => None,
+        // Inline objects, imported types, and resolved unions do not unify
+        // with any other type in detection (detection never produces them).
+        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
     }
 }
 
@@ -475,6 +475,11 @@ fn mark_required(def: &mut PropertyDef) {
 ///
 /// Property values are emitted as quoted type-and-constraint strings when
 /// they contain characters that YAML would otherwise interpret.
+///
+/// The output parses back for a detected or passively parsed schema. Detection
+/// never produces a resolved union type ([`TypeExpr::Union`]), whose
+/// [`serialize_property_atom`](super::simplified::serialize_property_atom)
+/// form is display only.
 pub fn schema_to_yaml(schema: &SimplifiedSchema) -> String {
     let mut out = String::from("$schema:\n");
     match schema {
@@ -763,7 +768,7 @@ mod tests {
         match def {
             PropertyDef::Single(atom) => {
                 assert!(atom.is_array);
-                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Any));
+                assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Unknown));
             }
             _ => panic!(),
         }

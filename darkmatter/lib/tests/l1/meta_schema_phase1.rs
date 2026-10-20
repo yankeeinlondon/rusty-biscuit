@@ -228,7 +228,7 @@ fn shipped_schema_corpus_is_passively_classified_without_resolution() {
         .filter(|path| matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml")))
         .collect::<Vec<_>>();
     paths.sort();
-    assert_eq!(paths.len(), 7, "every shipped YAML artifact must remain in the corpus");
+    assert_eq!(paths.len(), 5, "every shipped YAML artifact must remain in the corpus");
 
     let mut schemas = Vec::new();
     let mut other_artifacts = Vec::new();
@@ -244,7 +244,7 @@ fn shipped_schema_corpus_is_passively_classified_without_resolution() {
     }
     assert_eq!(
         schemas,
-        ["claudine-types.yaml", "claudine.yaml", "darkmatter.yaml", "env.yaml"]
+        ["darkmatter.yaml", "env.yaml"]
     );
     assert_eq!(other_artifacts, ["expression-functions.yaml", "schema-definition.yaml"]);
     assert_eq!(rejected_claims, ["err.yaml"]);

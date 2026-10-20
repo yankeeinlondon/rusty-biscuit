@@ -18,8 +18,13 @@ pub(crate) fn generate_build_request_method(
         ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
             let request = request.into();
             let endpoint_id = request.endpoint_id();
-            let (method, path, body, endpoint_headers) = request.into_parts()?;
-            let url = format!("{}{}", self.base_url, path);
+            let (method, path, body, endpoint_headers, mut query) = request.into_parts()?;
+            // An API-key parameter joins the query or the Cookie header.
+            let (api_headers, api_key_param) = #auth_setup;
+            let mut cookies = Vec::new();
+            crate::shared::apply_api_key_param(api_key_param, &mut query, &mut cookies);
+            let mut url = format!("{}{}", self.base_url, path);
+            crate::shared::append_query_pairs(&mut url, &path, &query);
 
             let mut req_builder = match method {
                 "GET" => self.client.get(&url),
@@ -32,13 +37,13 @@ pub(crate) fn generate_build_request_method(
                 _ => return Err(SchematicError::UnsupportedMethod(method.to_string())),
             };
 
-            // Resolve authentication and build API-level headers.
-            let api_headers = #auth_setup;
-
-            // Merge API-level and endpoint-level headers
-            let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
+            // Merge API-level and endpoint-level headers, one Cookie header,
+            // each checked before anything is sent.
+            let mut merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
+            crate::shared::combine_cookie_headers(&mut merged_headers, &cookies)?;
             for (key, value) in merged_headers {
-                req_builder = req_builder.header(key.as_str(), value.as_str());
+                let (key, value) = crate::shared::header_pair(&key, &value)?;
+                req_builder = req_builder.header(key, value);
             }
 
             // Each body variant carries its own content type; reqwest sets the
@@ -118,8 +123,8 @@ pub(crate) fn generate_merge_headers_method() -> TokenStream {
     quote! {
         /// Merges API-level and endpoint-level headers.
         ///
-        /// Endpoint headers override API headers for matching keys (case-insensitive).
-        /// Returns a new Vec with the merged headers.
+        /// Endpoint headers override API headers for matching keys (case-insensitive),
+        /// except `Cookie`: both are kept, API first, for `combine_cookie_headers`.
         fn merge_headers(
             api_headers: &[(String, String)],
             endpoint_headers: &[(String, String)],
@@ -128,9 +133,10 @@ pub(crate) fn generate_merge_headers_method() -> TokenStream {
 
             // Add API headers that don't have endpoint overrides
             for (api_key, api_value) in api_headers {
-                let has_override = endpoint_headers
-                    .iter()
-                    .any(|(k, _)| k.eq_ignore_ascii_case(api_key));
+                let has_override = !api_key.eq_ignore_ascii_case("cookie")
+                    && endpoint_headers
+                        .iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case(api_key));
                 if !has_override {
                     result.push((api_key.clone(), api_value.clone()));
                 }

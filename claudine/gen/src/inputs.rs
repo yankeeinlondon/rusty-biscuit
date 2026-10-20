@@ -277,7 +277,10 @@ fn validate_frontmatter(
         let problems = report
             .problems
             .iter()
-            .map(|p| format!("- {}", p.message))
+            .map(|p| match p.path.as_str() {
+                "" => format!("- {}", p.message),
+                path => format!("- {path}: {}", p.message),
+            })
             .collect::<Vec<_>>()
             .join("\n");
         return Err(GenError::ResearchInvalid {

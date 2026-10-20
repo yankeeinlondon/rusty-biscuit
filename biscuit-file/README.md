@@ -11,7 +11,7 @@ A Rust library and CLI for working with files and file formats.
 - **Detect file types** -- Automatically identify files using extensions and magic bytes
 - [**File Resolution**](./docs/topics/file-references.md) -- resolves the file path of a passed in file using a set of smart and consistent path based logic
 - [**Glob references**](./docs/topics/file-references.md#glob-references-globreference) -- match a set of files with a file-reference prefix plus a glob, most local first (`GlobReference::new(["^**/*spec*.md", "!&**/_completed/**"])`)
-- [**Portable references**](#portable-references) -- write the link to a file that keeps working when the document, repository, or host moves (`./x.md`, `&docs/x.md`, `~/x.md`, `{{VAR}}/x.md`)
+- [**Portable references**](#portable-references) -- write the link to a file that keeps working when the document, repository, or host moves (`docs/x.md`, `./x.md`, `&docs/x.md`, `~/x.md`, `{{VAR}}/x.md`)
 - [**Portable path text**](#portable-path-text) -- render a `Path` as forward-slash text without breaking Windows verbatim, UNC, or device paths
 
 ## Packages
@@ -69,11 +69,12 @@ use biscuit_file::{FileResolutionContext, PortablePath};
 
 let ctx = FileResolutionContext::new("/work/repo/apps/web/docs").with_repository_root("/work/repo");
 let found = PortablePath::from_path("/work/repo/foo.md").with_ctx(&ctx).file_reference()?;
-assert_eq!(found.reference().raw(), "&foo.md");
+assert_eq!(found.reference().raw(), "foo.md");
 # Ok::<(), biscuit_file::PortablePathError>(())
 ```
 
-Nearby relative links come first, then the repository root (`&`), a declared
+After preserving authored intent, verified bare tree-root paths come first,
+then nearby relative links, the repository root (`&`), a declared
 portable environment variable (`{{VAR}}`), and home (`~`); an absolute path is
 a visible last resort. See
 [Portable References](./docs/topics/file-references.md#portable-references-portablepath)
@@ -141,11 +142,15 @@ canonicalized the same way.
 and Linux, `USERPROFILE` on native Windows (setting only `HOME` there changes
 nothing), the platform profile lookup when the variable is unset, and `None`
 for a relative value. The result is used as spelled, never canonicalized.
+`user_cache_dir()` (same feature) names the per-user cache directory from
+that home: `<home>/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
+`<home>/.cache` elsewhere on Unix, `%LOCALAPPDATA%` on native Windows.
 
 ```rust
 let home = biscuit_file::home_dir();                       // Option<PathBuf>
+let cache = biscuit_file::user_cache_dir();                // Option<PathBuf>
 let here = biscuit_file::canonicalize_simplified(std::path::Path::new("."))?;
-# let _ = (home, here);
+# let _ = (home, cache, here);
 # Ok::<(), std::io::Error>(())
 ```
 

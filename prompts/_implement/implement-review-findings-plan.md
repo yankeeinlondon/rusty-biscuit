@@ -78,14 +78,14 @@ Your task is to implement phase {{phase}} of the plan found in '@{{plan}}'.
     YAML values, missing versus present values, and boundary values
   - assert dependent outputs and downstream state, not only the immediate value
   - include negative/error behavior where malformed or invalid input is possible
-  - choose the verification level required by `rust-testing`; unit coverage alone
+  - name the boundary the behavior depends on and choose the fidelity rung (F1/F2/F3) and tier
+    required by `rust-testing`; unit coverage alone
     is insufficient when behavior crosses crate, CLI, filesystem, terminal, or
     persistence boundaries
 
   When changing parsers, schemas, templates, prompts, or configuration-driven
   behavior:
 
-  - add a passive corpus test covering all shipped artifacts
   - add at least one end-to-end test using the real shipped artifact and normal
     invocation path
   - include a repeated read/write/read round trip when values are persisted

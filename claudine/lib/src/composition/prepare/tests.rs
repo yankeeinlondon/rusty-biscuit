@@ -6,6 +6,40 @@ use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
 
+/// The payload of the first `verb` communication action in `signal`'s stack,
+/// as the parser kept it for event-time evaluation.
+fn communication_expr(
+    lifecycle: &crate::composition::lifecycle::LifecycleConfig,
+    signal: crate::composition::lifecycle::LifecycleSignal,
+    verb: &str,
+) -> Option<darkmatter::markdown::compose::expression::Expr> {
+    use crate::composition::lifecycle_actions::{LifecycleActionKind, for_each_action};
+    let mut found = None;
+    for_each_action(lifecycle.stack(signal), &mut |action| {
+        if let LifecycleActionKind::Communication(comm) = &action.kind
+            && comm.channel.verb() == verb
+            && found.is_none()
+        {
+            found = Some(comm.text.clone());
+        }
+    });
+    found
+}
+
+/// [`communication_expr`] for a payload kept as literal text (a template
+/// with surrounding text is interpolated at event time, never at prepare).
+fn communication_text(
+    lifecycle: &crate::composition::lifecycle::LifecycleConfig,
+    signal: crate::composition::lifecycle::LifecycleSignal,
+    verb: &str,
+) -> Option<String> {
+    use darkmatter::markdown::compose::expression::Expr;
+    communication_expr(lifecycle, signal, verb).map(|expr| match expr {
+        Expr::StringLiteral(text) => text,
+        other => panic!("expected the raw text of `{verb}`, got {other:?}"),
+    })
+}
+
 fn make_source(
     dir: &TempDir,
     frontmatter: &[(&str, serde_json::Value)],
@@ -27,6 +61,30 @@ fn make_source(
         resolved_path: file,
         original_text,
         markdown,
+    }
+}
+
+#[test]
+fn file_links_prompts_export_both_listings_without_render_metadata() {
+    let dir = TempDir::new().unwrap();
+    for (folder, file) in [("modes", "mode-1004.md"), ("osc", "osc-8.md")] {
+        fs::create_dir(dir.path().join(folder)).unwrap();
+        fs::write(dir.path().join(folder).join(file), "# Standard\n").unwrap();
+    }
+    let body = "# Resources\n\n### Modes Standards\n\n::file-links ./modes/*.md\n\n### OSC Standards\n\n::file-links ./osc/*.md\n\n## After\n\nKeep **this** text.\n";
+    let direct = make_source(&dir, &[], body);
+    let inline = make_source(&dir, &[("prompt", json!(body))], "Edit this document.");
+    let context = crate::test_support::context_at(dir.path());
+    let prompts = [
+        prepare_direct(&direct, PrepareOptions::new(context.clone())).unwrap().prompt,
+        prepare_inline(&inline, PrepareOptions::new(context)).unwrap().prompt,
+    ];
+    for prompt in prompts {
+        assert!(!prompt.contains("bt:render-tree"), "internal metadata leaked into prompt");
+        assert!(!prompt.contains("::file-links"));
+        assert!(prompt.contains("[mode-1004.md](modes/mode-1004.md)"), "{prompt}");
+        assert!(prompt.contains("[osc-8.md](osc/osc-8.md)"), "{prompt}");
+        assert!(prompt.contains("## After\n\nKeep **this** text."));
     }
 }
 
@@ -153,7 +211,10 @@ fn inline_composition_uses_effective_frontmatter() {
     assert!(prepared.prompt.contains("summary of what you did"));
     assert!(prepared.prompt.find("List three colors").unwrap() < prepared.prompt.find("IMPORTANT").unwrap());
     assert!(!prepared.prompt.contains("Return the replacement Markdown body"));
-    assert!(prepared.launch_schema.is_none(), "no `$schema` declared");
+    // With no `$schema`, the launch schema is Claudine's trigger payload alone.
+    let launch = prepared.launch_schema.as_ref().expect("Claudine's triggers match");
+    assert!(launch.effective.simplified.is_none(), "no authored `$schema`");
+    assert!(crate::composition::schema::bundle::is_claudine_owned(&launch.effective, "prompt"));
 
     // Effective frontmatter should contain composed keys
     assert!(prepared.effective_frontmatter.is_object());
@@ -322,10 +383,10 @@ fn direct_composition_parses_lifecycle_config() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    assert!(prepared.lifecycle.start.is_some());
-    assert!(prepared.lifecycle.success.is_some());
-    assert!(prepared.lifecycle.blocked.is_none());
-    assert!(prepared.lifecycle.failure.is_none());
+    assert!(!prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Start).is_empty());
+    assert!(!prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Success).is_empty());
+    assert!(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Blocked).is_empty());
+    assert!(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Failure).is_empty());
 }
 
 /// Regression: Darkmatter's `normalize_list_spacing` used to insert a
@@ -375,8 +436,8 @@ fn inline_composition_parses_lifecycle_config() {
     );
 
     let prepared = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    assert!(prepared.lifecycle.failure.is_some());
-    assert!(prepared.lifecycle.start.is_none());
+    assert!(!prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Failure).is_empty());
+    assert!(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Start).is_empty());
 }
 
 #[test]
@@ -386,7 +447,7 @@ fn invalid_lifecycle_config_fails_preparation() {
         &dir,
         &[
             ("title", json!("Test")),
-            ("start", json!({"say": "Hello", "say_first": "Also hello"})),
+            ("start", json!({"say": "Hello", "speak": "Also hello"})),
         ],
         "Content",
     );
@@ -396,12 +457,10 @@ fn invalid_lifecycle_config_fails_preparation() {
 }
 
 #[test]
-fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
-    // C1: lifecycle communication strings are deferred from compose-time
-    // resolution, so their authored `{{ }}` spans survive prepare intact.
-    // A malformed span is no longer a prepare-time leak — it is resolved
-    // (and fails closed) at event-time via DM2 (C2). Prepare keeps the raw
-    // span verbatim.
+fn lifecycle_malformed_mixed_span_is_rejected_at_prepare() {
+    // C1 defers lifecycle communication strings from compose-time
+    // resolution, but not from syntax checking: a span that does not parse is
+    // an authoring error, reported at prepare with the operand's path.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -412,16 +471,11 @@ fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
-    assert_eq!(message, "leak {{ parent_dir(review)) }}");
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
+    let CompositionError::LifecycleActionInvalidLongForm { message, .. } = &err else {
+        panic!("expected LifecycleActionInvalidLongForm, got {err:?}");
+    };
+    assert!(message.contains("`start.message.text`"), "{message}");
 }
 
 #[test]
@@ -442,14 +496,8 @@ fn undefined_lifecycle_variable_is_deferred_not_rejected_at_prepare() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
+    let message = communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
     assert_eq!(message, "before {{ missing_lifecycle_var }} after");
 }
 
@@ -468,21 +516,16 @@ fn lifecycle_message_referencing_frontmatter_is_deferred_raw() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
+    let message = communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
     assert_eq!(message, "working on {{ area }}");
 }
 
 #[test]
-fn lifecycle_fallback_span_is_deferred_raw() {
+fn lifecycle_fallback_span_is_deferred_unresolved() {
     // Fallback (`{{ x || 'y' }}`) is deferred like any other lifecycle
-    // span; it resolves at event-time.
+    // span: a whole-value span is parsed, never resolved, at prepare and
+    // resolves at event-time.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -494,19 +537,20 @@ fn lifecycle_fallback_span_is_deferred_raw() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
-    assert_eq!(message, "{{ missing_lifecycle_var || 'default' }}");
+    use darkmatter::markdown::compose::expression::Expr;
+    let message = communication_expr(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
+    assert_eq!(
+        message,
+        Expr::Fallback {
+            primary: Box::new(Expr::Variable("missing_lifecycle_var".to_string())),
+            fallback: Box::new(Expr::StringLiteral("default".to_string())),
+        }
+    );
 }
 
 #[test]
-fn lifecycle_ctx_interpolation_is_deferred_raw() {
+fn lifecycle_ctx_interpolation_is_deferred_unresolved() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -518,35 +562,38 @@ fn lifecycle_ctx_interpolation_is_deferred_raw() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let start = prepared.lifecycle.start.as_ref().unwrap();
-    let message = start.message.as_ref().unwrap();
-    // Deferred: the span survives raw for event-time interpolation (C2).
-    assert_eq!(message, "{{ ctx.today }}");
+    use darkmatter::markdown::compose::expression::Expr;
+    let message = communication_expr(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
+    // Deferred: the whole-value span is the unresolved expression, evaluated
+    // at event time (C2).
+    assert_eq!(message, Expr::Variable("ctx.today".to_string()));
 }
 
 #[test]
 fn multiple_lifecycle_spans_all_deferred_raw() {
     // Every lifecycle communication string is deferred; none trips a
-    // prepare-time leak. They all resolve at event-time.
+    // prepare-time leak, even a span that can only fail when evaluated. They
+    // all resolve at event-time.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
         &[
             ("title", json!("Test")),
-            ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
-            ("failure", json!({"say": "leak {{ broken( }}"})),
+            ("start", json!({"message": "leak {{ parent_dir(review) }}"})),
+            ("failure", json!({"say": "leak {{ no_such_fn(1) }}"})),
         ],
         "Content",
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
-        prepared.lifecycle.start.as_ref().unwrap().message.as_deref(),
-        Some("leak {{ parent_dir(review)) }}")
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message").as_deref(),
+        Some("leak {{ parent_dir(review) }}")
     );
     assert_eq!(
-        prepared.lifecycle.failure.as_ref().unwrap().say.as_deref(),
-        Some("leak {{ broken( }}")
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Failure, "say").as_deref(),
+        Some("leak {{ no_such_fn(1) }}")
     );
 }
 
@@ -646,8 +693,11 @@ fn direct_lifecycle_ctx_message_is_deferred_raw() {
     };
 
     let prepared = prepare_direct(&source, options).unwrap();
-    let start = prepared.lifecycle.start.as_ref().unwrap();
-    assert_eq!(start.message.as_deref(), Some("{{ctx.agent}}/{{ctx.model}}"));
+    assert_eq!(
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+            .as_deref(),
+        Some("{{ctx.agent}}/{{ctx.model}}")
+    );
 }
 
 #[test]
@@ -948,7 +998,7 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
     let mut approved = std::collections::HashSet::new();
     approved.insert(executable);
     let options = PrepareOptions {
-        pre_approved_commands: Some(approved),
+        pre_approved_commands: Some(approved.into()),
         shell_working_directory: Some(work_dir.path().to_path_buf()),
         ..PrepareOptions::new(crate::test_support::context())
     };
@@ -1033,13 +1083,7 @@ fn lifecycle_err_span_survives_raw_in_effective_frontmatter() {
         "deferred lifecycle subtree retains its raw span"
     );
     assert_eq!(
-        prepared
-            .lifecycle
-            .failure
-            .as_ref()
-            .unwrap()
-            .message
-            .as_deref(),
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Failure, "message").as_deref(),
         Some("❌️ {{err.msg}}"),
         "parse_lifecycle_config sees the raw span"
     );
@@ -1052,15 +1096,13 @@ fn first_shell_command(
     signal: crate::composition::lifecycle::LifecycleSignal,
 ) -> darkmatter::markdown::compose::expression::Expr {
     use crate::composition::lifecycle_actions::LifecycleActionKind;
-    let stack = lifecycle.stack(signal).expect("stack present");
-    for item in stack {
-        for action in &item.actions {
-            if let LifecycleActionKind::Shell(shell) = &action.kind {
-                return shell.command.clone();
-            }
+    let mut command = None;
+    crate::composition::lifecycle_actions::for_each_action(lifecycle.stack(signal), &mut |action| {
+        if let LifecycleActionKind::Shell(shell) = &action.kind {
+            command.get_or_insert_with(|| shell.command.clone());
         }
-    }
-    panic!("no shell action in stack");
+    });
+    command.expect("a shell action in the stack")
 }
 
 #[test]
@@ -1076,7 +1118,7 @@ fn shell_command_early_binding_resolves_at_preflight() {
             ("branch", json!("main")),
             (
                 "start",
-                json!({"stack": [{"action": {"shell": "git fetch {{branch}}"}}]}),
+                json!([{ "shell": "git fetch {{branch}}" }]),
             ),
         ],
         "Do the work.",
@@ -1097,7 +1139,7 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
         &dir,
         &[(
             "failure",
-            json!({"stack": [{"action": {"shell": "rm {{err.msg}}"}}]}),
+            json!([{ "shell": "rm {{err.msg}}" }]),
         )],
         "Do the work.",
     );
@@ -1110,7 +1152,7 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
             message,
             ..
         } => {
-            assert_eq!(property, "failure.stack[0].action[0].command");
+            assert_eq!(property, "failure[0].shell.command");
             assert_eq!(raw, "rm {{err.msg}}");
             assert!(
                 message.contains("err"),
@@ -1121,47 +1163,61 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
     }
 }
 
-/// The two lazy reserved roots are late-binding for the shell gate too.
+/// The lazy reserved root `current` is late-binding for the shell gate too.
 ///
 /// A lifecycle `shell` command is approved at preflight against early-binding
-/// surfaces only, so a command naming `current.*` or `current_env.*` would be
-/// approved as one string and executed observing another. The rejection is
-/// what keeps the approved bytes and the executed bytes identical (R33).
+/// surfaces only, so a command naming `current.*` would be approved as one
+/// string and executed observing another. The rejection is what keeps the
+/// approved bytes and the executed bytes identical (R33).
 #[test]
-fn lazy_reserved_roots_in_a_lifecycle_shell_command_are_rejected_at_prepare() {
-    for (root, reference) in [
-        ("current", "{{current.branch}}"),
-        ("current_env", "{{current_env.HOME}}"),
-    ] {
-        let dir = TempDir::new().unwrap();
-        let command = format!("rm {reference}");
-        let source = make_source(
-            &dir,
-            &[(
-                "failure",
-                json!({"stack": [{"action": {"shell": command.clone()}}]}),
-            )],
-            "Do the work.",
-        );
+fn the_lazy_current_root_in_a_lifecycle_shell_command_is_rejected_at_prepare() {
+    let dir = TempDir::new().unwrap();
+    let command = "rm {{current.branch}}".to_string();
+    let source = make_source(
+        &dir,
+        &[("failure", json!([{ "shell": command.clone() }]))],
+        "Do the work.",
+    );
 
-        let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context()))
-            .expect_err("a lazy reserved root cannot be approved at preflight");
-        match err {
-            CompositionError::LifecycleShellResolution { raw, message, .. } => {
-                assert_eq!(raw, command);
-                assert!(
-                    message.contains(root),
-                    "message names the rejected root `{root}`: {message}"
-                );
-            }
-            other => panic!("expected LifecycleShellResolution for `{root}`, got: {other:?}"),
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context()))
+        .expect_err("a lazy reserved root cannot be approved at preflight");
+    match err {
+        CompositionError::LifecycleShellResolution { raw, message, .. } => {
+            assert_eq!(raw, command);
+            assert!(message.contains("current"), "message names the rejected root: {message}");
         }
+        other => panic!("expected LifecycleShellResolution, got: {other:?}"),
     }
+}
+
+/// `current_env` is an ordinary frontmatter property, so lifecycle shell
+/// approval reads the document's value and stamps it into the approved bytes
+/// instead of refusing it as a late root.
+#[test]
+fn current_env_in_a_lifecycle_shell_command_reads_the_frontmatter() {
+    use darkmatter::markdown::compose::expression::Expr;
+
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[
+            ("current_env", json!({"HOME": "userland"})),
+            ("start", json!([{ "shell": "echo {{ current_env.HOME }}" }])),
+        ],
+        "Do the work.",
+    );
+
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context()))
+        .expect("an ordinary property is approvable");
+    assert_eq!(
+        first_shell_command(&prepared.lifecycle, crate::composition::LifecycleSignal::Start),
+        Expr::StringLiteral("echo userland".to_string())
+    );
 }
 
 /// Lifecycle shell approval — what a sequence's referenced prompt goes through
 /// at its turn — refuses `group` like every late global, even in a branch that
-/// never runs, and carries Darkmatter's typed cause. `doc.group` reads the
+/// never runs, and carries Darkmatter's typed cause. `fm.group` reads the
 /// document, and its resolved bytes are what was stamped for execution.
 #[test]
 fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_the_document() {
@@ -1174,7 +1230,7 @@ fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_th
             ("group", json!({"label": "document"})),
             (
                 "start",
-                json!({"stack": [{"action": {"shell": "echo {{ false ? group.label : 'x' }}"}}]}),
+                json!([{ "shell": "echo {{ false ? group.label : 'x' }}" }]),
             ),
         ],
         "Do the work.",
@@ -1200,7 +1256,7 @@ fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_th
         &dir,
         &[
             ("group", json!({"label": "document"})),
-            ("start", json!({"stack": [{"action": {"shell": "echo {{ doc.group.label }}"}}]})),
+            ("start", json!([{ "shell": "echo {{ fm.group.label }}" }])),
         ],
         "Do the work.",
     );
@@ -1220,7 +1276,7 @@ fn shell_long_form_command_late_binding_rejected_at_prepare() {
         &dir,
         &[(
             "failure",
-            json!({"stack": [{"action": {"action": "shell", "command": "rm {{err.msg}}"}}]}),
+            json!([{ "shell": { "command": "rm {{err.msg}}" } }]),
         )],
         "Do the work.",
     );
@@ -1228,7 +1284,7 @@ fn shell_long_form_command_late_binding_rejected_at_prepare() {
     let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::LifecycleShellResolution { property, raw, .. } => {
-            assert_eq!(property, "failure.stack[0].action[0].command");
+            assert_eq!(property, "failure[0].shell.command");
             assert_eq!(raw, "rm {{err.msg}}");
         }
         other => panic!("expected LifecycleShellResolution, got: {other:?}"),
@@ -1275,7 +1331,7 @@ fn compose_error_preserves_frontmatter_fence_mismatch_source() {
 }
 
 /// Every composition — not just a sequence step — initializes the `outputs`
-/// accumulator, so a document written with `{{ last(outputs) }}` composes
+/// accumulator, so a document written with `{{ last(seq.outputs) }}` composes
 /// identically standalone and mid-sequence.
 #[test]
 fn direct_composition_initializes_the_outputs_accumulator() {
@@ -1283,12 +1339,12 @@ fn direct_composition_initializes_the_outputs_accumulator() {
     let source = make_source(
         &dir,
         &[("title", json!("Research"))],
-        "# Research\n\nprev={{ last(outputs) }}.",
+        "# Research\n\nprev={{ last(seq.outputs) }}.",
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
-    assert_eq!(fm.get("outputs"), Some(&json!([])));
+    assert_eq!(fm.get("outputs"), None);
     assert!(
         prepared.prompt.contains("prev=."),
         "an empty accumulator renders as nothing, not as a raw span: {:?}",
@@ -1297,11 +1353,11 @@ fn direct_composition_initializes_the_outputs_accumulator() {
 }
 
 /// The caller's runtime layers survive into the composed body: entries handed
-/// through `set_overrides` are what `last(outputs)` reads.
+/// through `set_overrides` are what `last(seq.outputs)` reads.
 #[test]
 fn prior_outputs_are_visible_to_the_composed_body() {
     let dir = TempDir::new().unwrap();
-    let source = make_source(&dir, &[], "prev={{ last(outputs) }}");
+    let source = make_source(&dir, &[], "prev={{ last(seq.outputs) }}");
 
     let runtime = crate::composition::RuntimeState::new();
     runtime.append_output("step one output\n");
@@ -1322,7 +1378,7 @@ fn prior_outputs_are_visible_to_the_composed_body() {
     );
     assert_eq!(
         prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
-        Some(&json!(["step one output"]))
+        None
     );
 }
 
@@ -1344,24 +1400,312 @@ fn a_user_setter_cannot_replace_outputs() {
 
     assert_eq!(
         prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
-        Some(&json!([]))
+        Some(&json!(["hijacked"]))
     );
 }
 
 /// An author who declares `outputs:` in their own frontmatter still gets the
 /// executor's accumulator — the reserved key is never author-owned.
 #[test]
-fn authored_outputs_frontmatter_is_overridden_by_the_accumulator() {
+fn authored_outputs_frontmatter_is_preserved_beside_the_accumulator() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
         &[("outputs", json!(["authored"]))],
-        "prev={{ last(outputs) }}",
+        "prev={{ last(seq.outputs) }}",
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
-        Some(&json!([]))
+        Some(&json!(["authored"]))
     );
+}
+
+#[test]
+fn sequence_lifecycle_shell_snapshot_survives_later_preparation() {
+    use crate::composition::lifecycle_actions::{LifecycleActionKind, for_each_action};
+    use darkmatter::markdown::compose::shell_expansion::template::{DeferredShellRoots, DocumentShellValues, fill_template};
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[
+        ("outputs", json!(["barrier value"])),
+        ("start", json!([{"shell": "tool {{ last(seq.outputs) }} {{ label }}"},
+            {"set": {"captured": "$(tool {{ last(seq.outputs) }} {{ label }})"}}])),
+        ("label", json!("early")),
+    ], "Prompt.");
+    let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+    options.deferred_shell_roots = DeferredShellRoots::new(["seq"]).with_placeholders_template_required();
+    options.document_shell_values = Some(DocumentShellValues::default());
+    options.sequence_binding = Some(json!({"outputs": ["barrier value"]}));
+    validate_document_shell_late_values(&source, &options).unwrap();
+    options.sequence_binding = Some(json!({"outputs": ["changed late"]}));
+    options.set_overrides = Some(json!({"label": "current value"}));
+    let prepared = prepare_sequence_probe(&source, options, CompositionMode::ChainedDocument).unwrap();
+    let mut checked = 0;
+    for_each_action(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Start), &mut |action| {
+        let sites = match &action.kind {
+            LifecycleActionKind::Shell(shell) => vec![shell.template.as_ref().unwrap()],
+            LifecycleActionKind::RuntimeSet(set) => set.shell_values().map(|(_, shell)| shell.template.as_ref().unwrap()).collect(),
+            _ => Vec::new(),
+        };
+        for site in sites {
+            let evaluate = |expression: &str| -> Result<serde_json::Value, darkmatter::markdown::compose::expression::ExpressionError> {
+                Ok(if expression == "label" { json!("current value") } else { json!("changed late") })
+            };
+            let chain = fill_template(site.template(), &evaluate, site.late_values()).unwrap();
+            assert_eq!(chain.segments[0].args, vec!["barrier value", "current value"]);
+            checked += 1;
+        }
+    });
+    assert_eq!(checked, 2, "shell and whole-value set both retain the barrier");
+}
+
+#[test]
+fn sequence_lifecycle_requires_preapproved_shape_membership() {
+    use darkmatter::markdown::compose::shell_expansion::template::{DeferredShellRoots, ShellPreApprovals};
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("out", json!("known")),
+        ("start", json!([{"shell": "tool {{ out }}"}]))], "Prompt.");
+    let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+    options.deferred_shell_roots = DeferredShellRoots::new(["seq"]).with_placeholders_template_required();
+    let mut approvals = ShellPreApprovals::new();
+    approvals.insert_exact("tool known");
+    options.pre_approved_commands = Some(approvals);
+    let error = prepare_sequence_probe(&source, options, CompositionMode::ChainedDocument).unwrap_err();
+    assert!(error.to_string().contains("not approved at sequence preflight"), "{error}");
+}
+
+
+fn assert_sequence_lifecycle_byte_grammar(event: &str, long: bool) {
+    use crate::composition::lifecycle::{LifecycleSignal, actions::{LifecycleActionKind, for_each_action}};
+    use darkmatter::markdown::compose::expression::Expr;
+    use darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots;
+    let dir = TempDir::new().unwrap();
+    for (command, expected) in [("{{ tool }} probe", "tool probe"),
+        ("tool {{ out }}; tool tail", "tool dist; tool tail")] {
+        let action = if long { json!({"shell": {"command": command}}) } else { json!({"shell": command}) };
+        let stack = if event == "loop" { json!({"until": "loop.count >= 1", "gate": [action]}) } else { json!([action]) };
+        let source = make_source(&dir, &[("tool", json!("tool")), ("out", json!("dist")), (event, stack)], "Prompt.");
+        let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+        options.deferred_shell_roots = DeferredShellRoots::new(["seq", "loop", "group"]);
+        let audited = validate_document_shell_late_values(&source, &options).unwrap();
+        let prepared = prepare_sequence_probe(&source, options.clone(), CompositionMode::ChainedDocument).unwrap();
+        for lifecycle in [&audited, &prepared.lifecycle] {
+            let mut commands = Vec::new();
+            for signal in LifecycleSignal::ALL {
+                for_each_action(lifecycle.stack(signal), &mut |action| {
+                    if let LifecycleActionKind::Shell(shell) = &action.kind {
+                        assert!(shell.template.is_none(), "known bytes have no valid template shape");
+                        let Expr::StringLiteral(bytes) = &shell.command else { panic!("resolved bytes") };
+                        commands.push(bytes.clone());
+                    }
+                });
+            }
+            assert_eq!(commands, vec![expected.to_string()], "audit and JIT preserve the exact bytes");
+        }
+        options.deferred_shell_roots = options.deferred_shell_roots.with_placeholders_template_required();
+        let error = validate_document_shell_late_values(&source, &options).unwrap_err();
+        assert!(error.to_string().contains("invalid shell template grammar"), "{error}");
+    }
+}
+
+macro_rules! sequence_lifecycle_byte_grammar_case {
+    ($name:ident, $event:literal, $long:literal) => {
+        #[test] fn $name() { assert_sequence_lifecycle_byte_grammar($event, $long); }
+    };
+}
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_start_short, "start", false);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_start_long, "start", true);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_success_short, "success", false);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_success_long, "success", true);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_finalize_short, "finalize", false);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_finalize_long, "finalize", true);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_failure_short, "failure", false);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_failure_long, "failure", true);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_blocked_short, "blocked", false);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_blocked_long, "blocked", true);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_loop_short, "loop", false);
+sequence_lifecycle_byte_grammar_case!(sequence_lifecycle_byte_grammar_loop_long, "loop", true);
+
+#[test]
+fn sequence_lifecycle_byte_grammar_keeps_late_and_forbidden_reads() {
+    use darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots;
+    let dir = TempDir::new().unwrap();
+    for command in ["{{ last(seq.outputs) }} probe", "tool {{ last(seq.outputs) }}; tool tail",
+        "{{ derived }} probe", "{{ tool }} {{ last(seq.outputs) }} {{ err.msg }}",
+        "{{ tool }} {{ current.branch }}"] {
+        let source = make_source(&dir, &[("tool", json!("tool")),
+            ("derived", json!("{{ last(seq.outputs) }}")),
+            ("start", json!([{"shell": command}]))], "Prompt.");
+        let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+        options.deferred_shell_roots = DeferredShellRoots::new(["seq", "loop", "group"]);
+        let error = validate_document_shell_late_values(&source, &options).unwrap_err();
+        let text = error.to_string();
+        if command.contains("err.msg") || command.contains("current.branch") {
+            assert!(!text.contains("invalid shell template grammar"), "forbidden reads retain their earlier typed diagnosis: {error}");
+            assert!(text.contains(if command.contains("err.msg") { "err" } else { "current" }), "{error}");
+        } else { assert!(text.contains("invalid shell template grammar"), "{error}"); }
+    }
+}
+
+#[test]
+fn sequence_binding_composes_typed_rows_shorthand_and_authored_namespaces() {
+    use crate::composition::lifecycle::bindings::SequenceBinding;
+    use crate::composition::sequence::{build_step_overlay, resolve_sequence_plan};
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[
+        ("sequence", json!([{"name":"Bob","age":32},{"name":"Sally","age":36},{"name":"Bob"}])),
+        ("seq", json!({"name":"authored"})),
+        ("row", json!("{{ seq }}")),
+    ], "Who {{ seq }} age {{ seq.age }} next {{ seq.next }}; fm={{ fm.seq.name }}.");
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
+    for (index, expected) in [(0, "Who Bob age 32 next Sally; fm=authored."),
+        (1, "Who Sally age 36 next Bob; fm=authored."), (2, "Who Bob age  next ; fm=authored.")] {
+        let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+        options.sequence_binding = Some(SequenceBinding::step(&build_step_overlay(&plan, index), vec![json!("prior")]).to_value());
+        let prepared = prepare_direct(&source, options).unwrap();
+        assert_eq!(prepared.prompt, expected);
+        let fm = &prepared.effective_frontmatter;
+        assert_eq!(fm["seq"], json!({"name":"authored"}));
+        assert_eq!(fm["row"]["name"], plan.steps[index].name);
+        assert_eq!(fm["row"]["index"], json!(index + 1));
+        assert_eq!(fm["row"]["outputs"], json!(["prior"]));
+        assert!(fm["row"]["previous"].get("outputs").is_none());
+        assert!(fm["row"]["next"].get("previous").is_none());
+        for retired in ["state", "previous", "next", "outputs", "sequence_id", "step", "total_steps", "is_first", "is_last"] {
+            assert!(fm.get(retired).is_none(), "generated property {retired} escaped into frontmatter");
+        }
+    }
+}
+
+#[test]
+fn rename_presence_controls_apply_through_normal_preparation() {
+    for (property, value) in [("previous", json!("mine")), ("previous", serde_json::Value::Null),
+        ("outputs", json!(["mine"])), ("state", json!({"name":"mine"}))] {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(&dir, &[], &format!("value={{{{ {property} }}}}"));
+        let error = prepare_direct(&source, PrepareOptions::new(crate::test_support::context_for(&source.resolved_path))).unwrap_err();
+        assert!(matches!(error, CompositionError::RemovedGrammar { .. }), "{error}");
+        let mut options = PrepareOptions::new(crate::test_support::context_for(&source.resolved_path));
+        options.set_overrides = Some(json!({property: value}));
+        let prepared = prepare_direct(&source, options).unwrap();
+        assert_eq!(prepared.effective_frontmatter[property], value);
+        assert!(!prepared.prompt.contains("{{"));
+    }
+}
+
+#[test]
+fn transcluded_rename_reads_respect_the_reading_documents_property_presence() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[], "::file ./child.md\n");
+    for (child, wanted) in [
+        ("---\nprevious: mine\nlabel: '{{ previous }}'\n---\nChild {{ label }} / {{ previous }}.\n", "Child mine / mine."),
+        ("---\nprevious: null\n---\nChild {{ previous }}.\n", "Child ."),
+    ] {
+        fs::write(dir.path().join("child.md"), child).unwrap();
+        let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context_for(&source.resolved_path))).unwrap();
+        assert!(prepared.prompt.contains(wanted), "{}", prepared.prompt);
+    }
+    fs::write(dir.path().join("child.md"), "Child {{ previous }}.\n").unwrap();
+    let error = prepare_direct(&source, PrepareOptions::new(crate::test_support::context_for(&source.resolved_path))).unwrap_err();
+    assert!(matches!(error, CompositionError::RemovedGrammar { .. }), "{error}");
+}
+
+#[test]
+fn rename_validation_uses_active_authored_overrides_and_never_scans_runtime_data() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("title", json!("{{ state.name }}"))], "Value {{ title }}.");
+    let context = crate::test_support::context_for(&source.resolved_path);
+    let mut options = PrepareOptions::new(context.clone());
+    options.set_overrides = Some(json!({"title":"safe"}));
+    assert_eq!(prepare_direct(&source, options).unwrap().prompt, "Value safe.");
+
+    let data = crate::composition::LayeredOverrides::data(Some(&json!({"title":"{{ state.name }}"})));
+    let options = PrepareOptions::new(context.clone()).with_layered_overrides(data);
+    assert_eq!(prepare_direct(&source, options).unwrap().prompt, "Value {{ state.name }}.");
+
+    let mut options = PrepareOptions::new(context);
+    options.set_overrides = Some(json!({"title":"{{ false ? state.name : 'safe' }}"}));
+    let error = prepare_direct(&source, options).unwrap_err();
+    assert!(matches!(error, CompositionError::RemovedGrammar { ref removed, .. } if removed == "state.name"), "{error}");
+}
+
+#[test]
+fn direct_composition_parses_yolo_hint() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("yolo", json!(true))], "Content");
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
+    assert!(prepared.selection_hints.yolo_enabled(false));
+}
+
+/// A `with:` overlay's file value resolves from the file that authored it —
+/// not the target's directory and not the launch directory — whether or not
+/// the caller supplied setters of its own, and a caller setter still outranks
+/// it, value and origin alike.
+#[test]
+fn an_anchored_overlay_file_value_resolves_from_its_authoring_file() {
+    let dir = TempDir::new().unwrap();
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    for (folder, marker) in [("router", "authoring"), ("target", "target"), ("", "launch")] {
+        let folder = root.join(folder);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("notes.md"), format!("---\nmarker: {marker}\n---\n")).unwrap();
+    }
+    let target = root.join("target/target.md");
+    fs::write(&target, "---\n$schema:\n  notes: 'file(required)'\n  choice: string\nmarker: \"{{ frontmatter(notes, 'marker') }}\"\n---\nROUTE={{ marker }}\n").unwrap();
+    let launch = crate::test_support::context_at(&root);
+    let router = launch.for_source(root.join("router/router.md"));
+    let values: indexmap::IndexMap<String, serde_json::Value> =
+        [("notes".to_string(), json!("./notes.md"))].into_iter().collect();
+
+    let prepare = |setters: Option<serde_json::Value>| {
+        let mut source = crate::composition::resolve_fixture_source(target.to_str().unwrap()).unwrap();
+        for (key, value) in &values {
+            source.markdown.frontmatter_mut().as_map_mut().insert(key.clone(), value.clone());
+        }
+        let records = crate::composition::CallerInputLayers::from_caller_overrides(setters.clone(), launch.clone()).caller_input_records;
+        let options = PrepareOptions {
+            proxy_overlay: crate::composition::AnchoredOverlay::new(values.clone(), &router),
+            set_overrides: setters,
+            caller_input_records: records,
+            ..PrepareOptions::new(launch.for_source(&target))
+        };
+        prepare_direct(&source, options).unwrap().prompt
+    };
+
+    assert!(prepare(None).contains("ROUTE=authoring"), "{}", prepare(None));
+    let unrelated = prepare(Some(json!({ "choice": "caller" })));
+    assert!(unrelated.contains("ROUTE=authoring"), "an unrelated caller setter must not move the overlay's origin: {unrelated}");
+    let pinned = prepare(Some(json!({ "notes": "notes.md" })));
+    assert!(pinned.contains("ROUTE=launch"), "the caller's setter outranks `with`, from the launch directory: {pinned}");
+}
+
+/// Layering keeps each key's origin with its value: a retry's value replaces
+/// the proxy's together with its origin, and a `null` removal carries none.
+#[test]
+fn anchored_overlays_layer_value_and_origin_together() {
+    let dir = TempDir::new().unwrap();
+    let source_origin = crate::test_support::context_at(dir.path()).for_source(dir.path().join("source/source.md"));
+    let retry_origin = crate::test_support::context_at(dir.path()).for_source(dir.path().join("target/target.md"));
+    let proxy = crate::composition::AnchoredOverlay::new(
+        [("kept", json!("./a.md")), ("replaced", json!("./b.md")), ("removed", json!("./c.md"))]
+            .into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        &source_origin,
+    );
+    let retry = crate::composition::AnchoredOverlay::new(
+        [("replaced", json!("./d.md")), ("removed", serde_json::Value::Null)]
+            .into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        &retry_origin,
+    );
+
+    let layered = proxy.layered(&retry);
+    let records = layered.input_records();
+
+    assert_eq!(layered.values()["replaced"], json!("./d.md"));
+    assert_eq!(layered.values()["removed"], serde_json::Value::Null);
+    assert_eq!(records["kept"].origin(), &source_origin);
+    assert_eq!(records["replaced"].origin(), &retry_origin);
+    assert_eq!(records["replaced"].raw(), &json!("./d.md"));
+    assert!(!records.contains_key("removed"), "a removal has no value to anchor");
+    assert_eq!(format!("{layered:?}"), r#"["kept", "replaced", "removed"]"#, "debug output names keys, never values");
 }

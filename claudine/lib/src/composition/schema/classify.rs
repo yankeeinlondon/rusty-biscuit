@@ -25,7 +25,10 @@ pub(super) fn categorize_problems(
     for problem in problems {
         pointer_paths.push(problem.path.clone());
         match problem.kind {
-            ValidationProblemKind::Missing => {
+            // Only a top-level property can be collected; a field missing
+            // inside a value (`/content_policy/0` lacks `rule`) is a problem
+            // of that value and keeps its instance path.
+            ValidationProblemKind::Missing if problem.path.is_empty() => {
                 let name = problem
                     .property
                     .clone()
@@ -46,12 +49,17 @@ pub(super) fn categorize_problems(
                     interactive_shape,
                 });
             }
-            ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
+            ValidationProblemKind::Missing
+            | ValidationProblemKind::Type
+            | ValidationProblemKind::Invalid => {
                 let top = top_level_pointer_segment(&problem.path);
+                // A Claudine control is hard at every phase: an invalid one
+                // blocks the launch rather than being cleaned away.
                 let hard_at_this_phase = top
                     .as_deref()
                     .map(|name| {
-                        is_required(shape, name)
+                        effective.is_some_and(|effective| super::bundle::is_claudine_owned(effective, name))
+                            || is_required(shape, name)
                             || (phase == Some(SchemaPhase::Launch) && is_eager(shape, name))
                     })
                     .unwrap_or(true);
@@ -90,16 +98,27 @@ pub(super) fn is_eager(shape: Option<&SchemaShape>, name: &str) -> bool {
     let Some(def) = shape.and_then(|shape| shape.properties.get(name)) else {
         return false;
     };
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(a) => vec![a],
-        PropertyDef::Union(items) => items.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
+    any_atom_constraint(def, |c| matches!(c, Constraint::Eager))
+}
+
+/// Whether any atom of `def` declares a constraint matching `predicate`, on
+/// the value or the array. The alternatives of a resolved union-typed
+/// reference (`U(required)`, `U[]`) count as arms, because Darkmatter hoists
+/// their presence markers to the property.
+fn any_atom_constraint(def: &PropertyDef, predicate: impl Fn(&Constraint) -> bool + Copy) -> bool {
+    fn atom_matches(atom: &PropertyAtom, predicate: impl Fn(&Constraint) -> bool + Copy) -> bool {
         atom.constraints
             .iter()
             .chain(atom.array_constraints.iter())
-            .any(|c| matches!(c, Constraint::Eager))
-    })
+            .any(predicate)
+            || atom
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(|arm| atom_matches(arm, predicate)))
+    }
+    match def {
+        PropertyDef::Single(atom) => atom_matches(atom, predicate),
+        PropertyDef::Union(atoms) => atoms.iter().any(|atom| atom_matches(atom, predicate)),
+    }
 }
 
 /// Reclassify a required top-level property whose effective value is `null`
@@ -182,16 +201,7 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
         // reason.
         return true;
     };
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(a) => vec![a],
-        PropertyDef::Union(items) => items.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
-        atom.constraints
-            .iter()
-            .chain(atom.array_constraints.iter())
-            .any(|c| matches!(c, Constraint::Required))
-    })
+    def.is_required()
 }
 
 /// Classify a validation problem set as a
@@ -205,10 +215,10 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
 /// candidates. The CLI catches this variant and drives a confirmation dialog
 /// (single match) or chooser (multiple), mirroring the missing-property loop.
 ///
-/// A root union qualifies too: the glob comes from the arm a literal
+/// A root union qualifies too: the `match` groups come from the arm a literal
 /// discriminant settles, the arm that declares the property as
-/// `file(match)`, or the D1 merge when several do (see
-/// [`supplied::file_reference_target`]).
+/// `file(match)`, or the D1 merge (one alternative per arm) when several do
+/// (see [`supplied::file_reference_target`]).
 ///
 /// Returns `None` when no problem qualifies, so the caller falls back to the
 /// generic [`CompositionError::SchemaValidation`]. Only the first qualifying
@@ -240,7 +250,7 @@ pub(super) fn classify_unresolved_file_reference(
             source_path: source_path.to_path_buf(),
             property: name,
             provided,
-            patterns: target.patterns,
+            alternatives: target.alternatives,
             is_array: target.is_array,
             reason: problem.message.clone(),
         });
@@ -272,7 +282,7 @@ pub(super) fn provided_partial_value(value: Option<&serde_json::Value>) -> Optio
 /// Map a [`PropertyAtom`] to an [`InteractiveShape`] for CLI prompting.
 ///
 /// Returns `None` when the atom describes a shape that cannot be
-/// collected via a single TUI widget (e.g. `object`, `any`, or a semantic
+/// collected via a single TUI widget (e.g. `object`, `unknown`, or a semantic
 /// definition artifact).
 pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<InteractiveShape> {
     match &atom.ty {
@@ -309,7 +319,9 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
             SimplifiedType::String
             | SimplifiedType::Yaml
             | SimplifiedType::Json
-            | SimplifiedType::Expression,
+            | SimplifiedType::Expression
+            | SimplifiedType::Alphanumeric
+            | SimplifiedType::Shell,
         ) => {
             let (min_len, max_len) = string_length_constraints(atom);
             Some(InteractiveShape::Text {
@@ -344,30 +356,34 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
             max_len: None,
         }),
         TypeExpr::Primitive(SimplifiedType::File) => {
-            let patterns = atom
+            let groups: Vec<Vec<String>> = atom
                 .constraints
                 .iter()
-                .find_map(|c| match c {
-                    Constraint::Match(p) => Some(p.clone()),
+                .filter_map(|c| match c {
+                    Constraint::Match(p) if !p.is_empty() => Some(p.clone()),
                     _ => None,
                 })
-                .unwrap_or_default();
+                .collect();
             Some(InteractiveShape::File {
                 is_array: atom.is_array,
-                patterns,
+                alternatives: if groups.is_empty() { Vec::new() } else { vec![groups] },
             })
         }
-        // A `literal(...)` is a fixed `const` with exactly one valid value, so
-        // there is nothing to prompt for.
+        // A `literal(...)` is a fixed `const` with exactly one valid value,
+        // and `null` admits only null, so there is nothing to prompt for.
         TypeExpr::Primitive(
             SimplifiedType::Object
-            | SimplifiedType::Any
+            | SimplifiedType::Unknown
+            | SimplifiedType::Null
             | SimplifiedType::Literal
             | SimplifiedType::TypeDefinition
             | SimplifiedType::Schema,
         )
         | TypeExpr::InlineObject(_)
-        | TypeExpr::Imported { .. } => None,
+        | TypeExpr::Imported { .. }
+        // A value with several alternatives has no single widget, as for a
+        // property-level union.
+        | TypeExpr::Union(_) => None,
     }
 }
 
@@ -413,6 +429,7 @@ pub(super) fn type_label_for_atom(atom: &PropertyAtom) -> String {
         TypeExpr::Primitive(ty) => format!("{base}{suffix}", base = ty.as_keyword()),
         TypeExpr::InlineObject(_) => format!("object{suffix}"),
         TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
+        TypeExpr::Union(_) => format!("union{suffix}"),
     }
 }
 
@@ -527,7 +544,14 @@ pub fn build_schema_status_report_for_mode(
     }
 
     let callers = override_records(set_overrides, file_resolution_context, file_ref_fallback_dir);
-    let effective = load_effective_schema(source, file_ref_fallback_dir, file_resolution_context, &callers)?;
+    let snapshot = super::build_effective_instance(source, set_overrides);
+    let effective = load_effective_schema(
+        source,
+        Some(&snapshot),
+        file_ref_fallback_dir,
+        file_resolution_context,
+        &callers,
+    )?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
         // run validation, but without typed metadata for per-property
@@ -619,14 +643,17 @@ pub(in crate::composition) fn status_report_from_validation(
         std::collections::BTreeSet::new();
     for problem in &report.problems {
         match problem.kind {
-            ValidationProblemKind::Missing => {
+            // A field missing inside a value makes that value invalid.
+            ValidationProblemKind::Missing if problem.path.is_empty() => {
                 let name = problem
                     .property
                     .clone()
                     .unwrap_or_else(|| problem.path.clone());
                 missing_by_name.insert(name);
             }
-            ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
+            ValidationProblemKind::Missing
+            | ValidationProblemKind::Type
+            | ValidationProblemKind::Invalid => {
                 let Some(name) = top_level_pointer_segment(&problem.path) else {
                     continue;
                 };

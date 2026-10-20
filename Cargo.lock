@@ -1367,6 +1367,7 @@ dependencies = [
  "tokio",
  "tracing",
  "which 8.0.2",
+ "wiremock",
 ]
 
 [[package]]
@@ -3061,6 +3062,7 @@ dependencies = [
  "biscuit-test-harness",
  "chromiumoxide",
  "chrono",
+ "content-policy",
  "criterion",
  "cssparser 0.37.0",
  "dashmap",
@@ -3161,6 +3163,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "rlsp-yaml-parser",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -3934,6 +3937,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unfolded-integration-helper",
+ "wiremock",
 ]
 
 [[package]]
@@ -6063,6 +6067,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -8088,6 +8093,7 @@ dependencies = [
  "serde_path_to_error",
  "serial_test",
  "sniff",
+ "sysinfo",
  "tempfile",
  "test-toolkit",
  "thiserror 2.0.18",
@@ -8225,7 +8231,6 @@ dependencies = [
  "gguf-rs-lib",
  "reqwest 0.13.2",
  "schematic-definitions",
- "schematic-schema",
  "serde",
  "serde_json",
  "serial_test",
@@ -11752,14 +11757,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "schematic-runtime"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "biscuit-test-harness",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http 1.4.0",
+ "rcgen",
+ "reqwest 0.13.2",
+ "rustls",
+ "serde",
+ "serde_json",
+ "test-toolkit",
+ "tokio",
+ "tokio-rustls",
+ "trybuild",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "schematic-schema"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-util",
- "reqwest 0.13.2",
  "schematic-define",
  "schematic-definitions",
+ "schematic-runtime",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

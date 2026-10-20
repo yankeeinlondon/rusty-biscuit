@@ -74,6 +74,7 @@ members = [
     "schematic/definitions",
     "schematic/gen",
     "schematic/oauth",
+    "schematic/runtime",
     "agent-sandbox/cli",
     "scripts",
 ]
@@ -101,6 +102,31 @@ opt-level = 2
 opt-level = 1
 debug-assertions = true
 overflow-checks = true
+
+# A host's trigger schemas can resolve to megabytes of JSON Schema (Claudine's
+# lifecycle bundle is about 2.5 MB), which every isolated test process that
+# launches a document compiles into validators. Unoptimized, the schema
+# compiler and its regex, hashing, and JSON dependencies dominate those tests.
+[profile.test.package.jsonschema]
+opt-level = 3
+
+[profile.test.package.referencing]
+opt-level = 3
+
+[profile.test.package.regex-automata]
+opt-level = 3
+
+[profile.test.package.regex-syntax]
+opt-level = 3
+
+[profile.test.package.fancy-regex]
+opt-level = 3
+
+[profile.test.package.ahash]
+opt-level = 3
+
+[profile.test.package.serde_json]
+opt-level = 3
 
 [profile.profiling]
 inherits = "release"

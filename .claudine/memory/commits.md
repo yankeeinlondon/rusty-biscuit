@@ -61,7 +61,7 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
 
 - Never pre-flight signing with `git commit --allow-empty`: it still commits
   whatever is staged. Read-only checks are `git log -5 --pretty='%G? %s'`
-  or `gpg-connect-agent 'getinfo passphrase' /bye`.
+  or `gpg-connect-agent 'keyinfo --list' /bye` (a `1` in field 7 means cached).
 - Scan full staged blobs (`git show :<path>`) for conflict markers, including
   the diff3 base marker `|||||||`. `git diff --check` misses markers outside
   the changed hunks. On a hit, refuse, leave the path staged, report

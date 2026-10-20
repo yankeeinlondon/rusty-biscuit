@@ -34,7 +34,7 @@ fn doc(fixture: &CliProcessFixture, name: &str, content: &str) -> String {
 
 /// A document whose `success` records what `model_reasoning_effort` resolved
 /// to; it stays empty unless a setter applied it.
-const SETTER_PROBE: &str = "---\ntitle: plan\nsuccess:\n  stack:\n    - action: {append_line: ['probe.log', 'effort=[{{ model_reasoning_effort }}]']}\n---\nPlan body\n";
+const SETTER_PROBE: &str = "---\ntitle: plan\nsuccess:\n  - {append_line: ['probe.log', 'effort=[{{ model_reasoning_effort }}]']}\n---\nPlan body\n";
 
 fn probe(fixture: &CliProcessFixture) -> String {
     fs::read_to_string(fixture.cwd().join("probe.log")).unwrap_or_default()
@@ -125,7 +125,7 @@ fn sequence_forwards_the_headline_tail_to_each_step_and_applies_no_setter() {
 fn a_retry_relaunches_with_the_tail_exactly_once() {
     let fixture = CliProcessFixture::named("tail-launch-retry");
     let log = stub(&fixture, "codex", "[ \"$n\" = 0 ] && exit 1\nexit 0");
-    let file = doc(&fixture, "plan.md", "---\nfailure:\n  stack:\n    - action: {retry: 1}\n---\nBody\n");
+    let file = doc(&fixture, "plan.md", "---\nfailure:\n  - {retry: 1}\n---\nBody\n");
 
     let (code, _, stderr) = run(&fixture, &["compose", &file, "--codex", "-c", "x=y", "-c", "x=y"]);
 
@@ -146,7 +146,7 @@ fn a_proxy_target_launches_with_the_tail_exactly_once() {
     let file = doc(
         &fixture,
         "plan.md",
-        "---\nfailure:\n  stack:\n    - action: {proxy: './target.md'}\n---\nBody\n",
+        "---\nfailure:\n  - {proxy: './target.md'}\n---\nBody\n",
     );
 
     let (code, _, stderr) = run(&fixture, &["compose", &file, "--codex", "-c", "x=y"]);
@@ -176,7 +176,7 @@ fn a_resume_carries_the_tail_exactly_once() {
     let file = doc(
         &fixture,
         "plan.md",
-        "---\nfailure:\n  stack:\n    - action: {resume: 'continue'}\n---\nBody\n",
+        "---\nfailure:\n  - {resume: 'continue'}\n---\nBody\n",
     );
     let tail = ["--add-dir", "a", "--add-dir", "a", "--json"];
 
@@ -210,7 +210,7 @@ fn each_step_of_a_multi_provider_sequence_carries_the_tail_once() {
     doc(
         &fixture,
         "b.md",
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './b-claude.md'}\n---\nTask B\n",
+        "---\ninitialize:\n  - {proxy: './b-claude.md'}\n---\nTask B\n",
     );
     doc(&fixture, "b-claude.md", "---\nagent: claude\n---\nTask B on Claude\n");
     let seq = doc(
@@ -244,7 +244,7 @@ fn a_proxy_to_a_provider_that_types_the_tail_differently_fails_before_its_spawn(
     doc(
         &fixture,
         "b.md",
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './b-claude.md'}\n---\nTask B\n",
+        "---\ninitialize:\n  - {proxy: './b-claude.md'}\n---\nTask B\n",
     );
     doc(&fixture, "b-claude.md", "---\nagent: claude\n---\nTask B on Claude\n");
     let seq = doc(

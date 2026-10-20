@@ -172,22 +172,19 @@ Plan for {{topic}}.
 #[test]
 fn a_required_property_violation_stops_before_lifecycle_actions_under_existing_recovery_policy() {
     const STACKS: &str = r#"start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+    - {append_line: ["events.log", "start"]}
 blocked:
-  stack:
-    - when: "plan"
-      action: {append_line: ["events.log", "guard over an absent property"]}
-    - action: {append_line: ["events.log", "blocked {{ err.code }} plan=[{{ plan }}]"]}
+  - when: "plan"
+    then: {append_line: ["events.log", "guard over an absent property"]}
+  - {append_line: ["events.log", "blocked {{ err.code }} plan=[{{ plan }}]"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 "#;
     for (case, initialize, expected) in [
         ("eager", "", vec![]),
         (
             "staged",
-            "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            "initialize:\n    - {append_line: [\"events.log\", \"initialize\"]}\n",
             vec!["initialize", "blocked composition.missing_properties plan=[]", "finalize"],
         ),
     ] {
@@ -640,7 +637,7 @@ $schema:
   topic: 'string(required)'
 loop:
   max: 2
-  condition: '{{ _loop_count < 1 }}'
+  while: 'loop.count < 1'
 ---
 Plan for {{topic}}.
 "#,
@@ -1246,12 +1243,20 @@ mod compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area 
             .assert()
             .success();
         let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        // `dirname` of the absolute eager spec keeps its absolute anchor, so
+        // the plan is named absolutely, beside the spec.
+        let spec_dir = biscuit_file::canonicalize_simplified(
+            &fixture.cwd().join("claudine/cli/tests/fixtures/shipped_plan_route"),
+        )
+        .unwrap();
+        let expected = format!(
+            "Save the plan as \"{}/plan.md\"",
+            biscuit_file::to_portable_string(&spec_dir)
+        );
         assert!(
-            stdout.contains(
-                "Save the plan as \"claudine/cli/tests/fixtures/shipped_plan_route/plan.md\""
-            ),
-            "the complete target instruction must be launch-directory invariant; \
-             launch_dir={}\nstdout:\n{stdout}",
+            stdout.contains(&expected),
+            "the complete target instruction must be launch-directory invariant \
+             ({expected}); launch_dir={}\nstdout:\n{stdout}",
             launch_dir.display()
         );
         assert!(
@@ -1261,6 +1266,52 @@ mod compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area 
             launch_dir.display()
         );
     }
+}
+
+/// The frozen `prompts/clarify.md` (intentionally not kept in step with the
+/// live prompt) declares an ordinary frontmatter property named `doc` and
+/// reads it as bare `{{doc}}`. `doc` is not a reserved root, so the composed
+/// prompt names the supplied specification wherever the body reads it.
+#[test]
+fn compose_frozen_clarify_reads_its_ordinary_doc_property() {
+    let fixture = CliProcessFixture::named("compose-frozen-clarify");
+    let root = fixture.cwd().to_path_buf();
+    common::prompt_staging::stage_frozen_prompts(&root.join("prompts"), &["clarify.md"]);
+    common::write(&root.join("specs/demo-spec.md"), "# Demo\n");
+    fixture.initialize_repository();
+    // `--dry-run` never reaches the provider, but discovery still has to find
+    // one; the stub fails loudly if the dry run ever does launch it.
+    common::write_dry_run_provider_stub(fixture.bin_dir(), "claude");
+    let assert = fixture
+        .command()
+        .env("CLAUDE_CODE_EXIT", "0")
+        .args(["compose", "--claude", "--dry-run", "prompts/clarify.md", "spec=specs/demo-spec.md"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    // The eager `spec` file normalizes to an absolute path, so each line is
+    // matched by its fixed text and the file name it ends with. The frozen
+    // prompt's specification line carries trailing whitespace, so both ends
+    // are trimmed.
+    let line_with = |prefix: &str| {
+        stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no line starting {prefix:?}:\n{stdout}"))
+    };
+    assert!(
+        line_with("The functional specification document: ").ends_with("demo-spec.md."),
+        "the body must read the ordinary `doc` property:\n{stdout}"
+    );
+    assert!(
+        line_with("- update the document's frontmatter (").ends_with("demo-spec.md):"),
+        "every `{{{{doc}}}}` span must read the same property:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("{{doc") && !stdout.contains("technical design specification"),
+        "no expression may leak and the `design` block must stay closed:\n{stdout}"
+    );
 }
 
 // ============================================================================
@@ -1747,6 +1798,28 @@ fn completion_file_match_emits_matching_files_only() {
     );
 }
 
+/// A reused file type keeps its `match` group beside the use site's: the
+/// completer offers only files both groups admit.
+#[test]
+fn completion_file_match_intersects_a_reused_types_groups() {
+    let ws = common::TestWorkspace::named("complete-schema-file-match-groups");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("types.yaml"),
+        "kind: schema\ntypes:\n  doc: \"file(match('*.md'))\"\n",
+    );
+    write_file(
+        &ws.path().join("prompts").join("read.md"),
+        "---\n$schema:\n  doc: \"doc(match('guide*'))@./types.yaml\"\n---\nRead {{doc}}.\n",
+    );
+    for file in ["guide-intro.md", "notes.md", "guide.txt"] {
+        write_file(&ws.path().join("docs").join(file), "x\n");
+    }
+
+    let got = run_complete(ws.path(), &["compose", "prompts/read.md", "doc="]);
+    assert_eq!(got, ["doc='docs/guide-intro.md'"]);
+}
+
 #[test]
 fn completion_file_match_emits_path_qualified_glob_matches() {
     // Regression test for review-4 medium finding. A schema like
@@ -2080,8 +2153,7 @@ fn compose_late_caller_file_verdict_names_the_launch_directory() {
             "    spec: 'file(required;match(**/*note*.md);eager)[]'\n",
             "kind: \"{{ 'feature' }}\"\n",
             "initialize:\n",
-            "  stack:\n",
-            "    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            "    - {append_line: [\"events.log\", \"initialize\"]}\n",
             "---\n",
             "Spec: {{spec}}\n",
         ),
@@ -2137,7 +2209,7 @@ fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive()
     let (fixture, count_path, events) = caller_file_fixture("compose-early-caller-file");
     let prompts = fixture.cwd().join("prompts");
     fs::create_dir_all(&prompts).unwrap();
-    let initialize = "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n";
+    let initialize = "initialize:\n    - {append_line: [\"events.log\", \"initialize\"]}\n";
     for (label, schema) in [
         (
             "templated sibling",

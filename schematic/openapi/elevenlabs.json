@@ -225,6 +225,28 @@
         "summary": "Lists all available voices",
         "description": "Lists all available voices",
         "operationId": "ListVoices",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "description": "Voices per page (at most 100)",
+            "schema": {
+              "type": "integer"
+            },
+            "explode": false,
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "The previous page's `next_page_token`",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",

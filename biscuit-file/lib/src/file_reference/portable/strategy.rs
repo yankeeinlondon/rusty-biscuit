@@ -39,6 +39,10 @@ pub enum PortabilityPreference {
     /// means "normalize everything", except URLs and recursive searches,
     /// which no other preference rewrites.
     AuthoredIntent(IntentForms),
+    /// A bare path from the file-tree root (`docs/topics/x.md`), which is the
+    /// repository root inside a repository. Accepted only when lookup in the
+    /// authoring context reaches the same target; a local shadow rejects it.
+    TreeRootRelative,
     /// A target whose parent is `cwd` (`./x.md`); a target equal to `cwd` is
     /// written `./`.
     SameDirRelative,
@@ -90,6 +94,9 @@ pub enum PortabilityPreference {
 impl PortabilityPreference {
     /// The default strategy.
     ///
+    /// A verified bare tree-root spelling precedes nearby relative routes;
+    /// a local shadow falls through to the remaining preferences.
+    ///
     /// `RepoRoot` precedes `HomeDir` because a repository usually lives under
     /// `~`; `EnvRootedPath` precedes `HomeDir` because a declared variable
     /// survives a host where the directory lives elsewhere. `ParentDir` and
@@ -97,6 +104,7 @@ impl PortabilityPreference {
     /// target outside a repository falls through to the anchored forms.
     pub const DEFAULT_STRATEGY: &'static [Self] = &[
         Self::AuthoredIntent(IntentForms::ALL),
+        Self::TreeRootRelative,
         Self::SameDirRelative,
         Self::ChildDir,
         Self::PeerDir,
@@ -116,6 +124,7 @@ impl fmt::Display for PortabilityPreference {
         };
         match self {
             Self::AuthoredIntent(_) => f.write_str("AuthoredIntent"),
+            Self::TreeRootRelative => f.write_str("TreeRootRelative"),
             Self::SameDirRelative => f.write_str("SameDirRelative"),
             Self::ChildDir => f.write_str("ChildDir"),
             Self::ImmediateParentDir => f.write_str("ImmediateParentDir"),

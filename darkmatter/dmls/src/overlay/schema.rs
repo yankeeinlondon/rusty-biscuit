@@ -22,7 +22,7 @@ use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
     SchemaAdvisory, SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind,
     SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr,
-    darkmatter_base_json_schema_ref, darkmatter_base_schema, mapping_separator,
+    darkmatter_base_json_schema_ref, effective_property_shape, mapping_separator,
     triggers::TriggerRegistry,
 };
 use globset::{Glob, GlobSetBuilder};
@@ -787,39 +787,16 @@ fn note_flow_value_start(frames: &mut [FlowFrame], index: usize) {
     }
 }
 
+/// The document's editor property shape (see
+/// [`EffectiveSchema::property_shape`]), without discriminant narrowing: a
+/// root `$schema` union contributes every inline arm's properties, merged.
 fn effective_shape(outcome: &SchemaOutcome) -> SchemaShape {
-    let mut shape = match darkmatter_base_schema() {
-        SimplifiedSchema::Single(shape) => shape,
-        SimplifiedSchema::Union(_) => SchemaShape::default(),
-    };
-    let SchemaOutcome::Ready(Some(bundle)) = outcome else {
-        return shape;
-    };
-    for extension in &bundle.extension_shapes {
-        overlay_shape(&mut shape, extension);
-    }
-    match &bundle.effective.simplified {
-        Some(SimplifiedSchema::Single(document)) => overlay_shape(&mut shape, document),
-        Some(SimplifiedSchema::Union(arms)) => overlay_shape(&mut shape, &merged_root_shape(arms)),
-        None => {}
-    }
-    shape
-}
-
-fn overlay_shape(base: &mut SchemaShape, overlay: &SchemaShape) {
-    for (name, definition) in &overlay.properties {
-        base.properties.insert(name.clone(), definition.clone());
-    }
-}
-
-fn merged_root_shape(arms: &[SchemaArm]) -> SchemaShape {
-    let mut merged = SchemaShape::default();
-    for arm in arms {
-        if let SchemaArm::Inline(shape) = arm {
-            merge_shape(&mut merged, shape);
+    match outcome {
+        SchemaOutcome::Ready(Some(bundle)) => {
+            bundle.effective.property_shape(&bundle.extension_shapes, &Value::Null)
         }
+        _ => effective_property_shape(&[], None, &Value::Null),
     }
-    merged
 }
 
 fn merge_shape(base: &mut SchemaShape, incoming: &SchemaShape) {
@@ -844,7 +821,7 @@ fn def_at_path(root: &SchemaShape, path: &[&str]) -> Option<PropertyDef> {
 
 fn merged_inline_shape(definition: &PropertyDef) -> Option<SchemaShape> {
     let mut merged = None;
-    for atom in atoms(definition) {
+    for atom in alternatives(definition) {
         let TypeExpr::InlineObject(shape) = &atom.ty else {
             continue;
         };
@@ -869,7 +846,7 @@ fn merge_defs(existing: &PropertyDef, incoming: &PropertyDef) -> PropertyDef {
 
 fn meta_schema_kinds(definition: &PropertyDef) -> Vec<MetaSchemaKind> {
     let mut kinds = Vec::new();
-    for atom in atoms(definition) {
+    for atom in alternatives(definition) {
         let kind = match atom.ty {
             TypeExpr::Primitive(SimplifiedType::TypeDefinition) => MetaSchemaKind::TypeDefinition,
             TypeExpr::Primitive(SimplifiedType::Schema) => MetaSchemaKind::Schema,
@@ -889,12 +866,28 @@ fn atoms(definition: &PropertyDef) -> &[PropertyAtom] {
     }
 }
 
+/// The value alternatives of a definition: [`atoms`], with each resolved
+/// union-typed reference (`U[]`, `U(required)`) replaced by its arms,
+/// recursively, as the library's frontmatter shape reads them.
+fn alternatives(definition: &PropertyDef) -> Vec<&PropertyAtom> {
+    fn push<'a>(atom: &'a PropertyAtom, out: &mut Vec<&'a PropertyAtom>) {
+        match atom.union_arms() {
+            Some(arms) => arms.iter().for_each(|arm| push(arm, out)),
+            None => out.push(atom),
+        }
+    }
+    let mut out = Vec::new();
+    atoms(definition).iter().for_each(|atom| push(atom, &mut out));
+    out
+}
+
 /// The assembled schema for one document: the effective schema plus the
 /// frontmatter JSON it validates (both derived from the same parsed document,
 /// so diagnostics never re-parse).
 #[derive(Clone)]
 pub struct SchemaBundle {
-    /// The layered effective schema (base + extensions + document `$schema`).
+    /// The layered effective schema (base + extensions + matching trigger
+    /// payloads + document `$schema`).
     pub effective: EffectiveSchema,
     /// Non-fatal findings discovered while resolving referenced schemas.
     pub advisories: Vec<SchemaAdvisory>,
@@ -903,10 +896,12 @@ pub struct SchemaBundle {
     pub frontmatter_json: Value,
     /// The SimplifiedSchema shapes of the matched extension baselines.
     ///
-    /// `effective.simplified` carries only the document's own `$schema`; the
-    /// extension shapes are kept separately so completion/hover can offer
-    /// extension-declared keys (e.g. Claudine's `provider`/`model`) even when
-    /// the document has no `$schema` of its own.
+    /// `effective.simplified` carries only the document's own `$schema`, and
+    /// the effective schema's trigger shapes only the matching trigger
+    /// payloads; the extension shapes are kept separately so completion and
+    /// hover can offer extension-declared keys even when the document has no
+    /// `$schema` of its own. [`EffectiveSchema::property_shape`] layers all
+    /// three.
     pub extension_shapes: Vec<SchemaShape>,
     /// Extension-baseline dependency files (each matched extension's own path
     /// plus its imports/examples), sorted and deduplicated. These are NOT on

@@ -32,7 +32,9 @@ mod launcher;
 pub mod parser;
 pub mod policy;
 pub(crate) mod probe;
+pub(crate) mod site;
 pub mod store;
+pub mod template;
 pub mod tokenize;
 pub mod types;
 
@@ -41,12 +43,13 @@ pub use discovery::collect_shell_commands;
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
 pub use policy::{
-    check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command,
+    check_builtin_blacklist, check_filled_chain, check_template_blacklist, check_user_blacklist,
+    check_whitelist, normalize_command,
 };
 pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
-    ShellApprovalRequest, ShellCommandEntry, ShellCommandOrigin, ShellDirective,
+    ShellApprovalRequest, ShellChildEnvironment, ShellCommandEntry, ShellCommandOrigin, ShellDirective,
     ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
     ShellRuleSet, ShellTimeoutBehavior,
 };
@@ -66,7 +69,7 @@ use crate::markdown::compose::ComposeWarning;
 /// releases only what is genuinely still held.
 struct ReservationGuard<'a> {
     runtime: &'a mut ShellExpansionRuntime,
-    held: Vec<String>,
+    held: Vec<template::ApprovalKey>,
 }
 
 impl<'a> ReservationGuard<'a> {
@@ -77,10 +80,10 @@ impl<'a> ReservationGuard<'a> {
         }
     }
 
-    fn reserve(&mut self, normalized: &str, may_wait: bool) -> types::ReserveOutcome {
-        let outcome = self.runtime.reserve_allow_once(normalized, may_wait);
+    fn reserve(&mut self, key: &template::ApprovalKey, may_wait: bool) -> types::ReserveOutcome {
+        let outcome = self.runtime.reserve_allow_once(key, may_wait);
         if outcome == types::ReserveOutcome::Reserved {
-            self.held.push(normalized.to_string());
+            self.held.push(key.clone());
         }
         outcome
     }
@@ -94,18 +97,18 @@ impl<'a> ReservationGuard<'a> {
     /// A command this guard never reserved is already authorized — by the
     /// whitelist or by a peer's completed allow-once — so it is left alone
     /// rather than released out from under whoever does own it.
-    fn release(&mut self, normalized: &str, approved: bool) {
-        if let Some(index) = self.held.iter().position(|held| held == normalized) {
+    fn release(&mut self, key: &template::ApprovalKey, approved: bool) {
+        if let Some(index) = self.held.iter().position(|held| held == key) {
             self.held.swap_remove(index);
-            self.runtime.complete_allow_once(normalized, approved);
+            self.runtime.complete_allow_once(key, approved);
         }
     }
 }
 
 impl Drop for ReservationGuard<'_> {
     fn drop(&mut self) {
-        for normalized in std::mem::take(&mut self.held) {
-            self.runtime.complete_allow_once(&normalized, false);
+        for key in std::mem::take(&mut self.held) {
+            self.runtime.complete_allow_once(&key, false);
         }
     }
 }
@@ -115,6 +118,28 @@ impl Drop for ReservationGuard<'_> {
 pub(crate) struct PreparedShellDirective {
     pub effective: ShellDirective,
     pub display_command: String,
+    pub mode: ExecutionMode,
+}
+
+/// How a prepared directive's arguments were produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExecutionMode {
+    /// The command's resolved bytes, tokenized after interpolation.
+    ResolvedBytes,
+    /// A filled template: every program is a resolved native target and every
+    /// argument one filled placeholder argument. Its raw command and display
+    /// command are the authored text, never the filled values.
+    Template,
+}
+
+impl PreparedShellDirective {
+    fn resolved(effective: ShellDirective, display_command: String) -> Self {
+        Self {
+            effective,
+            display_command,
+            mode: ExecutionMode::ResolvedBytes,
+        }
+    }
 }
 
 /// Detailed output from executing a prepared shell directive.
@@ -230,6 +255,21 @@ pub(crate) fn prepare_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
+    prepare_resolved(directive, None, options, policy_paths, shell_runtime)
+}
+
+/// [`prepare_directive`] for a directive that may run as its resolved bytes.
+///
+/// `template` is the directive's authored template site, when it has one: a
+/// prompt then also offers the shape, and choosing it persists the shape and
+/// prepares the directive in template mode instead.
+pub(crate) fn prepare_resolved(
+    directive: &ShellDirective,
+    template: Option<&site::TemplateSite<'_>>,
+    options: &crate::markdown::compose::ComposeRequest,
+    policy_paths: &ShellPolicyPaths,
+    shell_runtime: &mut ShellExpansionRuntime,
+) -> Result<PreparedShellDirective, ShellExpansionError> {
     let (effective, alias_name) = resolve_or_passthrough(
         directive,
         &options.alias_resolutions,
@@ -241,26 +281,24 @@ pub(crate) fn prepare_directive(
     let normalized_commands = collect_normalized_commands(&effective);
 
     // ── Pre-approved fast path ───────────────────────────────────────
+    // Resolved-byte membership only: every segment's freshly resolved bytes
+    // must be in the exact set. A site approved by its shape alone is not a
+    // member here, and nothing here adds the bytes it resolved to.
     if let Some(ref approved) = options.pre_approved_commands {
         for normalized in &normalized_commands {
-            if !approved.contains(normalized) {
+            if !approved.contains_exact(normalized) {
                 return Err(ShellExpansionError::NotPreApproved {
                     ctx: Box::new(directive.ctx.clone()),
                     command: display_command.clone(),
                     origin: directive.origin.clone(),
-                    source_desc: match &options.source {
-                        crate::markdown::compose::ComposeSource::File(p) => {
-                            format!(" (in {})", p.display())
-                        }
-                        _ => String::new(),
-                    },
+                    source_desc: site::source_desc(options),
                 });
             }
         }
-        return Ok(PreparedShellDirective {
-            effective,
-            display_command,
-        });
+        // Pre-approved transport is membership, not policy: the complete
+        // chain still meets both blacklists before its first segment runs.
+        check_runtime_blacklists(&effective, &display_command, &shell_runtime.snapshot().user_blacklist)?;
+        return Ok(PreparedShellDirective::resolved(effective, display_command));
     }
 
     let runtime_snapshot = shell_runtime.snapshot();
@@ -290,6 +328,18 @@ pub(crate) fn prepare_directive(
         }
     }
 
+    // A multi-segment user rule (a chain `template` blacklist) is judged on
+    // the complete chain.
+    check_runtime_blacklists(&effective, &display_command, &runtime_snapshot.user_blacklist)?;
+
+    // Session approvals are keyed by mode and policy root: these are
+    // resolved-byte keys, which a template approval never matches.
+    let policy_root = template::ApprovalKey::policy_root_of(policy_paths);
+    let approval_keys: Vec<template::ApprovalKey> = normalized_commands
+        .iter()
+        .map(|normalized| template::ApprovalKey::exact(policy_root, normalized.clone()))
+        .collect();
+
     // 3. Check whitelist for all commands
     let all_whitelisted = normalized_commands
         .iter()
@@ -297,14 +347,11 @@ pub(crate) fn prepare_directive(
         .all(|(i, normalized)| {
             let (exe, _) = executable_and_args_at(&effective, i);
             check_whitelist(&runtime_snapshot.whitelist, &exe, normalized)
-                || runtime_snapshot.allow_once.contains(normalized)
+                || runtime_snapshot.allow_once.contains(&approval_keys[i])
         });
 
     if all_whitelisted {
-        return Ok(PreparedShellDirective {
-            effective,
-            display_command,
-        });
+        return Ok(PreparedShellDirective::resolved(effective, display_command));
     }
 
     // 5. Request approval for the entire chain
@@ -326,7 +373,7 @@ pub(crate) fn prepare_directive(
             // reservations of our own; otherwise a hold-and-wait cycle across
             // cross-ordered chains could deadlock.
             let may_wait = guard.holds_none();
-            match guard.reserve(normalized, may_wait) {
+            match guard.reserve(&approval_keys[i], may_wait) {
                 types::ReserveOutcome::Reserved | types::ReserveOutcome::AlreadyAllowed => {}
                 types::ReserveOutcome::Pending => {
                     pending_conflict = true;
@@ -352,10 +399,7 @@ pub(crate) fn prepare_directive(
         if guard.holds_none() {
             // Every command in the chain is now authorized (whitelist or a
             // concurrently-completed allow-once). No prompt is needed.
-            return Ok(PreparedShellDirective {
-                effective,
-                display_command,
-            });
+            return Ok(PreparedShellDirective::resolved(effective, display_command));
         }
 
         // Build the unique list of chain executables for the prompt. Empty
@@ -382,23 +426,32 @@ pub(crate) fn prepare_directive(
             blacklist_path: policy_paths.blacklist.clone(),
             alias_name: alias_name.clone(),
             chain_executables,
+            offered: template.map_or_else(template::OfferedChoices::resolved_bytes, |site| site.offered()),
+            template: template.and_then(|site| site.candidate().approval_view()),
         };
 
-        match handler.approve(request)? {
+        let decision = handler.approve(request)?;
+        if let (ShellApprovalDecision::AllowTemplatePersist, Some(site)) = (&decision, template) {
+            for key in &approval_keys {
+                guard.release(key, false);
+            }
+            let shape = site.shape();
+            store::append_whitelist_template(policy_paths, &shape)?;
+            guard.runtime.persist_whitelist_template(shape);
+            return site.prepare_template(options, &guard.runtime.snapshot());
+        }
+        match decision {
             ShellApprovalDecision::AllowExactPersist => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+                for (normalized, key) in normalized_commands.iter().zip(&approval_keys) {
+                    guard.release(key, false);
                     store::append_whitelist_exact(policy_paths, normalized)?;
                     guard.runtime.persist_whitelist_exact(normalized.clone());
                 }
-                Ok(PreparedShellDirective {
-                    effective,
-                    display_command,
-                })
+                Ok(PreparedShellDirective::resolved(effective, display_command))
             }
             ShellApprovalDecision::AllowCommandPersist => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+                for key in &approval_keys {
+                    guard.release(key, false);
                 }
                 // Persist a prefix entry for every unique executable in the
                 // chain so the next run does not re-prompt for later actions.
@@ -409,24 +462,20 @@ pub(crate) fn prepare_directive(
                         guard.runtime.persist_whitelist_prefix(exe);
                     }
                 }
-                Ok(PreparedShellDirective {
-                    effective,
-                    display_command,
-                })
+                Ok(PreparedShellDirective::resolved(effective, display_command))
             }
             ShellApprovalDecision::AllowOnce => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, true);
+                for key in &approval_keys {
+                    guard.release(key, true);
                 }
                 guard.runtime.approvals_used += 1;
-                Ok(PreparedShellDirective {
-                    effective,
-                    display_command,
-                })
+                Ok(PreparedShellDirective::resolved(effective, display_command))
             }
-            ShellApprovalDecision::Deny => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+            // The shape choice was not offered: this request is for resolved
+            // bytes, so a template decision cannot authorize it.
+            ShellApprovalDecision::Deny | ShellApprovalDecision::AllowTemplatePersist => {
+                for key in &approval_keys {
+                    guard.release(key, false);
                 }
                 Err(ShellExpansionError::Denied {
                     ctx: Box::new(directive.ctx.clone()),
@@ -435,8 +484,8 @@ pub(crate) fn prepare_directive(
                 })
             }
             ShellApprovalDecision::BlacklistPersist => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+                for (normalized, key) in normalized_commands.iter().zip(&approval_keys) {
+                    guard.release(key, false);
                     store::append_blacklist_exact(policy_paths, normalized)?;
                     guard.runtime.persist_blacklist_exact(normalized.clone());
                 }
@@ -456,6 +505,31 @@ pub(crate) fn prepare_directive(
             blacklist_path: Box::new(policy_paths.blacklist.clone()),
             origin: directive.origin.clone(),
         })
+    }
+}
+
+/// Checks `effective`'s complete chain against the built-in and user
+/// blacklists, every segment before any runs.
+fn check_runtime_blacklists(
+    effective: &ShellDirective,
+    display_command: &str,
+    user_blacklist: &ShellRuleSet,
+) -> Result<(), ShellExpansionError> {
+    let chain = match &effective.pipeline {
+        Some(pipeline) => template::FilledChain::from_pipeline(pipeline),
+        None => template::FilledChain::from_pipeline(&types::ShellPipeline::single(
+            effective.executable.clone(),
+            effective.args.clone(),
+        )),
+    };
+    match check_filled_chain(&chain, user_blacklist) {
+        Some(reason) => Err(ShellExpansionError::Blacklisted {
+            ctx: Box::new(effective.ctx.clone()),
+            command: display_command.to_string(),
+            reason,
+            origin: effective.origin.clone(),
+        }),
+        None => Ok(()),
     }
 }
 
@@ -480,14 +554,21 @@ const VOLATILE_EXECUTABLES: &[&str] = &["uuidgen", "date", "openssl"];
 /// reused only by a reader that would have run the command in the same working
 /// directory, with the same color environment, under the same timeout and
 /// timeout policy.
+///
+/// A template-mode command keys on explicit argument boundaries instead (see
+/// [`template_command_key`]): its arguments routinely hold spaces, quotes, or
+/// nothing at all, which a rendered command line cannot keep apart.
 fn cache_key(
-    effective: &ShellDirective,
+    prepared: &PreparedShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &crate::markdown::compose::ComposeSource,
     context: &biscuit_file::FileResolutionContext,
 ) -> String {
+    let effective = &prepared.effective;
     let mut key = String::new();
-    if let Some(ref pipeline) = effective.pipeline {
+    if prepared.mode == ExecutionMode::Template {
+        key = template_command_key(effective);
+    } else if let Some(ref pipeline) = effective.pipeline {
         for action in &pipeline.actions {
             let op_str = match action.operator {
                 types::ChainOperator::None => "",
@@ -519,6 +600,38 @@ fn cache_key(
         timeout.as_nanos(),
         shell_opts.timeout_behavior,
     ));
+    key
+}
+
+/// The command part of a template-mode cache key: a length-prefixed encoding
+/// of a mode tag and, for every segment, its operator, its resolved program,
+/// its argument count, each argument, and its redirections. Every field is
+/// length-prefixed, so no two different filled chains share an encoding, and
+/// the tag keeps it apart from every resolved-byte key.
+fn template_command_key(effective: &ShellDirective) -> String {
+    fn field(key: &mut String, value: &str) {
+        key.push_str(&value.len().to_string());
+        key.push(':');
+        key.push_str(value);
+    }
+    let mut key = String::new();
+    field(&mut key, "template");
+    for action in effective.pipeline.iter().flat_map(|pipeline| &pipeline.actions) {
+        field(
+            &mut key,
+            match action.operator {
+                types::ChainOperator::None => "",
+                types::ChainOperator::And => "&&",
+                types::ChainOperator::Or => "||",
+            },
+        );
+        field(&mut key, &action.command.executable);
+        field(&mut key, &action.command.args.len().to_string());
+        for arg in &action.command.args {
+            field(&mut key, arg);
+        }
+        field(&mut key, &types::render_redirection(&action.command.redirection));
+    }
     key
 }
 
@@ -582,7 +695,13 @@ pub(crate) fn execute_prepared_outcome(
 ) -> Result<DirectiveOutcome, ShellExpansionError> {
     let shell_opts = options.shell_options();
     let run = || {
-        executor::execute_directive_outcome(&prepared.effective, &shell_opts, &options.source, options.resolution_context())
+        executor::execute_directive_outcome(
+            &prepared.effective,
+            &shell_opts,
+            &options.source,
+            options.resolution_context(),
+            options.shell_child_environment(),
+        )
     };
     if prepared.effective.no_cache {
         return Ok(DirectiveOutcome {
@@ -592,7 +711,7 @@ pub(crate) fn execute_prepared_outcome(
         });
     }
 
-    let key = cache_key(&prepared.effective, &shell_opts, &options.source, options.resolution_context());
+    let key = cache_key(prepared, &shell_opts, &options.source, options.resolution_context());
     let (outcome, fresh) = shell_runtime.cached_outcome(&key, run)?;
     // Warnings from the original execution (e.g. a timeout fallback) belong to
     // that occurrence and are not replayed; a one-shot discoverability warning

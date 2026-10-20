@@ -24,11 +24,10 @@ Claudine can invoke side effects at **lifecycle events**: points in a workflow s
 
 ```yaml
 success:
-  stack:
-    - action: { set_frontmatter: ["state.md", "status", "done"] }
+  - set_frontmatter: ["state.md", "status", "done"]
 ```
 
-Here, `stack` is a list of actions to run. `set_frontmatter` changes a property in the YAML metadata block at the top of the named Markdown file. If its frontmatter contains `status: in-progress`, the action replaces that value with `status: done`.
+Here, `success` holds a list of actions, run in order. `set_frontmatter` changes a property in the YAML metadata block at the top of the named Markdown file. If its frontmatter contains `status: in-progress`, the action replaces that value with `status: done`.
 
 See [Lifecycle: Side-Effect Actions](../flow-control/lifecycle.md#side-effect-actions) for how to configure these actions.
 
@@ -71,15 +70,14 @@ instead of scanning it as a template:
 
 ```yaml
 success:
-  stack:
-    - action: {set_frontmatter: ["doc.md", "note", "{{ frontmatter('log.md', 'message') }}"]}
+  - set_frontmatter: ["doc.md", "note", "{{ frontmatter('log.md', 'message') }}"]
 ```
 
 If `log.md` holds `message: see {{…}} siblings`, `doc.md` receives
 `note: '{{!data:v1:c2VlIHt74oCmfX0gc2libGluZ3M}}'`, and `{{ note }}` in the
 next run renders `see {{…}} siblings`. Strings without those two sequences,
 numbers, and mapping keys are written as they are. The in-memory value that
-later actions in the same stack read stays raw. A tool that reads the YAML
+later actions in the same event read stays raw. A tool that reads the YAML
 file directly sees the token.
 
 ### Files and directories

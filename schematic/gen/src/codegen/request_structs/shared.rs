@@ -7,7 +7,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
-use schematic_define::{EndpointParams, QueryParamType};
+use schematic_define::{EndpointParams, ParamDef, QueryParamType};
 
 /// Renders a schema type name as Rust type tokens.
 ///
@@ -67,6 +67,9 @@ pub fn to_snake_case(s: &str) -> String {
 }
 
 /// Information about a query parameter for code generation.
+///
+/// Header and cookie parameters use it too: they share the query type
+/// mapping and the `Option<T>` field and `with_*` builder shape.
 #[derive(Debug, Clone)]
 pub struct QueryParamInfo {
     pub name: String,
@@ -76,17 +79,28 @@ pub struct QueryParamInfo {
 
 /// Extracts query parameters from an endpoint's params field.
 pub fn extract_query_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
-    match params {
-        Some(EndpointParams { query, .. }) => query
-            .iter()
-            .map(|p| QueryParamInfo {
-                name: p.name.clone(),
-                description: p.description.clone(),
-                param_type: p.param_type.clone(),
-            })
-            .collect(),
-        None => Vec::new(),
-    }
+    params.as_ref().map(|p| param_infos(&p.query)).unwrap_or_default()
+}
+
+/// Extracts header parameters from an endpoint's params field.
+pub fn extract_header_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
+    params.as_ref().map(|p| param_infos(&p.header)).unwrap_or_default()
+}
+
+/// Extracts cookie parameters from an endpoint's params field.
+pub fn extract_cookie_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
+    params.as_ref().map(|p| param_infos(&p.cookie)).unwrap_or_default()
+}
+
+fn param_infos(params: &[ParamDef]) -> Vec<QueryParamInfo> {
+    params
+        .iter()
+        .map(|p| QueryParamInfo {
+            name: p.name.clone(),
+            description: p.description.clone(),
+            param_type: p.param_type.clone(),
+        })
+        .collect()
 }
 
 /// Maps QueryParamType to a Rust type token stream.
@@ -106,26 +120,22 @@ pub fn query_param_type_to_rust_type(param_type: &QueryParamType) -> TokenStream
     }
 }
 
-/// Generates the path format expression with query parameter handling.
+/// Generates the statements that bind `path` and `query` inside `into_parts`.
 ///
-/// Uses a collector pattern for query parameters:
-/// 1. Collects all params into a `Vec<(&str, String)>`
-/// 2. URL-encodes values using `urlencoding::encode()`
-/// 3. Constructs query string with single `?`/`&` check
+/// `path` is the endpoint path with path parameters substituted (and
+/// percent-encoded unless written `{+name}`); any query written into the path
+/// template stays in it untouched. `query` holds the declared query parameters
+/// as unencoded `(name, value)` pairs in declaration order, one pair per array
+/// element. The runtime client percent-encodes them once, when it builds the
+/// URL.
 pub fn generate_path_format(
     path: &str,
     path_params: &[&str],
     query_params: &[QueryParamInfo],
 ) -> TokenStream {
-    let mut_tok = if !query_params.is_empty() {
-        quote! { mut }
-    } else {
-        quote! {}
-    };
-
     let base_path = if path_params.is_empty() {
         let path_literal = path;
-        quote! { let #mut_tok path = #path_literal.to_string(); }
+        quote! { let path = #path_literal.to_string(); }
     } else {
         // Build format string and arguments. The format string keeps each
         // placeholder's position by wire name; the interpolated value is the
@@ -147,60 +157,41 @@ pub fn generate_path_format(
             }
         });
 
-        quote! { let #mut_tok path = format!(#format_str, #(#format_args),*); }
+        quote! { let path = format!(#format_str, #(#format_args),*); }
     };
 
-    // Generate query parameter collection and appending
-    let query_appending = if query_params.is_empty() {
-        quote! {}
+    let query = if query_params.is_empty() {
+        quote! { let query: Vec<(String, String)> = Vec::new(); }
     } else {
-        // Generate collection statements for each param
         let query_param_collectors = query_params.iter().map(|qp| {
             let field_name = format_ident!("{}", param_field_name(&qp.name));
             let param_name = &qp.name;
 
             match &qp.param_type {
-                QueryParamType::Array(_) => {
-                    // Arrays add multiple entries for the same key
-                    quote! {
-                        if let Some(ref values) = self.#field_name {
-                            for value in values {
-                                query_pairs.push((#param_name, value.to_string()));
-                            }
+                QueryParamType::Array(_) => quote! {
+                    if let Some(ref values) = self.#field_name {
+                        for value in values {
+                            query.push((#param_name.to_string(), value.to_string()));
                         }
                     }
-                }
-                _ => {
-                    quote! {
-                        if let Some(ref value) = self.#field_name {
-                            query_pairs.push((#param_name, value.to_string()));
-                        }
+                },
+                _ => quote! {
+                    if let Some(ref value) = self.#field_name {
+                        query.push((#param_name.to_string(), value.to_string()));
                     }
-                }
+                },
             }
         });
 
         quote! {
-            let mut query_pairs: Vec<(&str, String)> = Vec::new();
+            let mut query: Vec<(String, String)> = Vec::new();
             #(#query_param_collectors)*
-            if !query_pairs.is_empty() {
-                let query_string: String = query_pairs
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-                    .collect::<Vec<_>>()
-                    .join("&");
-                if path.contains('?') {
-                    path.push_str(&format!("&{}", query_string));
-                } else {
-                    path.push_str(&format!("?{}", query_string));
-                }
-            }
         }
     };
 
     quote! {
         #base_path
-        #query_appending
+        #query
     }
 }
 

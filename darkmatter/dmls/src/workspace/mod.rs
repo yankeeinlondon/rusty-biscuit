@@ -1,6 +1,5 @@
-//! Workspace state: open documents, on-disk discovery, the worker-pool
-//! startup indexer, watch handling, and the shared snapshot the protocol loop
-//! reads from.
+//! Workspace state: open documents, the on-disk file list, the progress seam,
+//! watch handling, and the shared snapshot the protocol loop reads from.
 
 pub mod discover;
 pub mod documents;
@@ -15,7 +14,7 @@ use lsp_types::{InitializeParams, Uri};
 pub use discover::{DiscoveryReport, discover_workspace};
 pub use documents::{DocumentError, DocumentStore, OpenDocument};
 pub use snapshot::{Generation, SharedSnapshot};
-pub use startup::{ProgressReporter, SilentProgress, collect_indices, index_workspace};
+pub use startup::{ProgressReporter, SilentProgress};
 pub use watch::{CoalescedChange, WatchMode, coalesce_changes, watch_registration};
 
 /// Converts a `file://` URI into a filesystem path.
@@ -61,6 +60,22 @@ pub fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
         .and_then(uri_to_file_path)
         .into_iter()
         .collect()
+}
+
+/// The workspace identifier on DMLS's workspace log lines: the workspace
+/// folders' URIs as the client sent them, comma-separated, or the root URI,
+/// or else the effective root paths.
+pub fn workspace_identifier(params: &InitializeParams, roots: &[PathBuf]) -> String {
+    if let Some(folders) = params.workspace_folders.as_ref()
+        && !folders.is_empty()
+    {
+        return folders.iter().map(|folder| folder.uri.as_str()).collect::<Vec<_>>().join(",");
+    }
+    #[allow(deprecated)]
+    if let Some(root) = params.root_uri.as_ref() {
+        return root.as_str().to_string();
+    }
+    roots.iter().map(|root| root.display().to_string()).collect::<Vec<_>>().join(",")
 }
 
 /// Resolves the R-8 wiki roots from the workspace folders and the optional

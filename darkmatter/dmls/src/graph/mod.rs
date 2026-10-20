@@ -27,7 +27,8 @@ pub mod node;
 pub mod substrate;
 
 pub use arena::{
-    DocumentContexts, DocumentId, DocumentRecord, LinkDiagnostic, NoContexts, WorkspaceGraph,
+    DocumentContexts, DocumentId, DocumentRecord, LinkDiagnostic, Listing, NoContexts,
+    WorkspaceGraph, is_markdown_path,
 };
 pub use edge::{Edge, EdgeId, EdgeKind, EdgeTarget};
 pub use invalidate::{Invalidation, WorkspaceIndex};

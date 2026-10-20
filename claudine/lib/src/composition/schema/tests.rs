@@ -5,6 +5,7 @@ use crate::composition::CompositionMode;
 use crate::composition::resolve::resolve_composition_source;
 #[cfg(feature = "prompt-tests")]
 use crate::composition::resolve::resolve_composition_source_in_context;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 #[cfg(feature = "prompt-tests")]
@@ -360,15 +361,22 @@ fn schema_validates_while_lifecycle_err_span_is_deferred() {
             .any(|k| k == "failure"),
         "failure should be reported as a deferred lifecycle key"
     );
+    let failure = prepared
+        .lifecycle
+        .stack(crate::composition::LifecycleSignal::Failure);
+    let [crate::composition::lifecycle_actions::LifecycleNode::Action(action)] = failure else {
+        panic!("expected one failure action, got {failure:?}");
+    };
+    let crate::composition::lifecycle_actions::LifecycleActionKind::Communication(message) =
+        &action.kind
+    else {
+        panic!("expected a message action, got {action:?}");
+    };
     assert_eq!(
-        prepared
-            .lifecycle
-            .failure
-            .as_ref()
-            .unwrap()
-            .message
-            .as_deref(),
-        Some("❌️ phase {{phase}} failed: {{err.msg}}"),
+        message.text,
+        darkmatter::markdown::compose::expression::Expr::StringLiteral(
+            "❌️ phase {{phase}} failed: {{err.msg}}".to_string()
+        ),
         "lifecycle parsing sees the raw late-binding span after schema validation"
     );
 }
@@ -949,7 +957,7 @@ fn missing_file_property_maps_to_file_shape() {
                 missing[0].interactive_shape,
                 Some(InteractiveShape::File {
                     is_array: false,
-                    patterns: Vec::new(),
+                    alternatives: Vec::new(),
                 })
             );
         }
@@ -971,7 +979,7 @@ fn missing_file_array_property_maps_to_file_array_shape() {
                 missing[0].interactive_shape,
                 Some(InteractiveShape::File {
                     is_array: true,
-                    patterns: Vec::new(),
+                    alternatives: Vec::new(),
                 })
             );
         }
@@ -991,14 +999,89 @@ fn missing_file_property_preserves_match_patterns() {
         CompositionError::MissingProperties { missing, .. } => match &missing[0]
             .interactive_shape
         {
-            Some(InteractiveShape::File { patterns, is_array }) => {
+            Some(InteractiveShape::File { alternatives, is_array }) => {
                 assert!(!is_array);
-                assert_eq!(patterns, &["*.png", "*.jpg"]);
+                assert_eq!(alternatives, &[vec![vec!["*.png", "*.jpg"]]]);
             }
             other => panic!("expected File shape, got {other:?}"),
         },
         other => panic!("expected MissingProperties, got {other:?}"),
     }
+}
+
+/// `doc` reuses `file(required; eager; match('*.md'))` from `types.yaml`
+/// with a use-site `match('guide*')`, beside one file for each group.
+fn reused_doc_source(dir: &TempDir) -> ResolvedCompositionSource {
+    for file in ["guide-intro.md", "notes.md", "guide.txt"] {
+        fs::write(dir.path().join(file), "x\n").unwrap();
+    }
+    fs::write(
+        dir.path().join("types.yaml"),
+        "kind: schema\ntypes:\n  doc: \"file(required; eager; match('*.md'))\"\n",
+    )
+    .unwrap();
+    make_source(dir, "---\n$schema:\n  doc: \"doc(match('guide*'))@./types.yaml\"\n---\nbody\n")
+}
+
+fn reused_doc_alternatives() -> Vec<Vec<Vec<String>>> {
+    vec![vec![vec!["*.md".to_string()], vec!["guide*".to_string()]]]
+}
+
+#[test]
+fn a_reused_file_type_keeps_inherited_presence_and_every_match_group() {
+    let dir = TempDir::new().unwrap();
+    let source = reused_doc_source(&dir);
+
+    // `required` comes only from the named type; the chooser gets both groups.
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
+    let CompositionError::MissingProperties { missing, .. } = err else {
+        panic!("expected MissingProperties, got {err:?}");
+    };
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert_eq!(missing[0].name, "doc");
+    assert_eq!(
+        missing[0].interactive_shape,
+        Some(InteractiveShape::File { is_array: false, alternatives: reused_doc_alternatives() })
+    );
+
+    // A provided partial completes against the same groups.
+    let overrides = serde_json::json!({ "doc": "intro" });
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+        .expect_err("`intro` names no file");
+    let CompositionError::UnresolvedFileReference { property, alternatives, .. } = err else {
+        panic!("expected UnresolvedFileReference, got {err:?}");
+    };
+    assert_eq!(property, "doc");
+    assert_eq!(alternatives, reused_doc_alternatives());
+}
+
+#[test]
+fn match_groups_stay_passive_for_an_existing_file_in_a_single_schema() {
+    let dir = TempDir::new().unwrap();
+    let source = reused_doc_source(&dir);
+    // Each value satisfies at most one group; outside a root union `match`
+    // only shapes completion and rejects none of them.
+    for value in ["guide-intro.md", "notes.md", "guide.txt"] {
+        let overrides = serde_json::json!({ "doc": value });
+        pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+            .unwrap_or_else(|err| panic!("`{value}` is accepted: {err}"));
+    }
+}
+
+#[test]
+fn an_empty_match_intersection_parses_and_reports_the_partial() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  doc: \"file(required; eager; match('*.md'); match('*.txt'))\"\n---\nbody\n",
+    );
+    let overrides = serde_json::json!({ "doc": "partial" });
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
+        .expect_err("`partial` names no file");
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = err else {
+        panic!("expected UnresolvedFileReference, not a schema error: {err:?}");
+    };
+    assert_eq!(alternatives, vec![vec![vec!["*.md".to_string()], vec!["*.txt".to_string()]]]);
 }
 
 #[test]
@@ -1014,6 +1097,26 @@ fn missing_object_property_has_no_interactive_shape() {
             assert_eq!(missing[0].interactive_shape, None);
         }
         other => panic!("expected MissingProperties, got {other:?}"),
+    }
+}
+
+/// A field missing inside a value is a problem of that value: it keeps its
+/// instance path and is never offered as a top-level property to collect.
+#[test]
+fn missing_nested_field_reports_its_instance_path() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  config: '{ name: string(required) }(required)'\nconfig: {}\n---\nbody\n",
+    );
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
+    match err {
+        CompositionError::SchemaValidation { message, problems, .. } => {
+            assert_eq!(problems, ["/config"]);
+            assert!(message.starts_with("/config: "), "{message}");
+            assert!(message.contains("name"), "{message}");
+        }
+        other => panic!("expected SchemaValidation, got {other:?}"),
     }
 }
 
@@ -1062,6 +1165,18 @@ fn status_report_marks_invalid_required_correctly() {
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
     let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    assert_eq!(report.required[0].state, PropertyState::Invalid);
+}
+
+#[test]
+fn status_report_marks_a_value_missing_a_nested_field_invalid() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  config: '{ name: string(required) }(required)'\nconfig: {}\n---\nbody\n",
+    );
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
+    assert_eq!(report.required[0].name, "config");
     assert_eq!(report.required[0].state, PropertyState::Invalid);
 }
 
@@ -1429,14 +1544,14 @@ fn provided_file_match_partial_reports_unresolved_file_reference() {
         CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             reason,
             ..
         } => {
             assert_eq!(property, "spec");
             assert_eq!(provided, "everywhere");
-            assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+            assert_eq!(alternatives, vec![vec![vec!["**/*spec*.md".to_string()]]]);
             assert!(!is_array);
             assert!(
                 reason.contains("no existing file matched reference"),
@@ -1465,14 +1580,14 @@ fn provided_file_array_match_partial_reports_unresolved_file_reference() {
         CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             reason,
             ..
         } => {
             assert_eq!(property, "attachments");
             assert_eq!(provided, "everywhere");
-            assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+            assert_eq!(alternatives, vec![vec![vec!["**/*spec*.md".to_string()]]]);
             assert!(is_array, "file[] property must report is_array: true");
             assert!(
                 reason.contains("no existing file matched reference"),
@@ -1531,13 +1646,13 @@ fn provided_file_array_multi_element_partial_reports_first_element() {
         CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             ..
         } => {
             assert_eq!(property, "attachments");
             assert_eq!(provided, "everywhere");
-            assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+            assert_eq!(alternatives, vec![vec![vec!["**/*spec*.md".to_string()]]]);
             assert!(is_array, "file[] property must report is_array: true");
         }
         other => panic!("expected UnresolvedFileReference, got {other:?}"),
@@ -1663,7 +1778,7 @@ fn post_shell_valid_value_passes() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();
@@ -1697,7 +1812,7 @@ fn post_shell_invalid_required_returns_schema_validation_error() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let err = prepare_direct_with_schema(&source, opts).unwrap_err();
@@ -1728,7 +1843,7 @@ fn post_shell_invalid_optional_is_dropped_with_diagnostic() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();
@@ -1769,6 +1884,32 @@ fn pre_validation_drop_surfaces_diagnostic() {
     );
 }
 
+/// A drop names only the property, so a problem inside its value leads the
+/// reason with its instance path; a problem on the value itself does not.
+#[test]
+fn drop_reason_locates_a_problem_inside_the_value() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  count: 'number'\n  config: '{ size: number }'\ncount: nope\nconfig:\n  size: big\n---\nbody\n",
+    );
+    let reasons = |drops: &[DroppedOptional]| -> Vec<(String, String)> {
+        let mut reasons: Vec<_> = drops.iter().map(|d| (d.property.clone(), d.reason.clone())).collect();
+        reasons.sort();
+        reasons
+    };
+
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap();
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
+    for drops in [reasons(&pre.dropped_optionals), reasons(&prepared.dropped_optionals)] {
+        assert_eq!(drops.len(), 2, "{drops:?}");
+        assert_eq!(drops[0].0, "config");
+        assert!(drops[0].1.starts_with("/config/size: "), "{drops:?}");
+        assert_eq!(drops[1].0, "count");
+        assert!(!drops[1].1.starts_with('/'), "{drops:?}");
+    }
+}
+
 // ── Phase 4 regression: $schema references stay document-relative when ──
 // ── a file-reference fallback is threaded into claudine's schema path. ──
 //
@@ -1800,6 +1941,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
     // Fallback points at a dir WITHOUT schema.yaml.
     let effective = load_effective_schema(
         &source,
+        None,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
@@ -1829,6 +1971,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
 
     let effective = load_effective_schema(
         &source,
+        None,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
@@ -2266,12 +2409,16 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
     for (schema, expected) in [
         (
             "  - spec: 'file(required;match(**/*spec*.md);eager)'\n  - design: 'file(required)'\n",
-            vec!["**/*spec*.md"],
+            vec![vec![vec!["**/*spec*.md"]]],
         ),
         (
             "  - spec: 'file(required;match(**/features/**/spec.md);eager)'\n  \
              - spec: 'file(required;match(**/fixes/**/spec.md, **/features/**/spec.md);eager)'\n",
-            vec!["**/features/**/spec.md", "**/fixes/**/spec.md"],
+            // One alternative per arm, never one concatenated list.
+            vec![
+                vec![vec!["**/features/**/spec.md"]],
+                vec![vec!["**/fixes/**/spec.md", "**/features/**/spec.md"]],
+            ],
         ),
     ] {
         let source = make_source(&dir, &format!("---\n$schema:\n{schema}---\nbody\n"));
@@ -2280,7 +2427,7 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         let CompositionError::UnresolvedFileReference {
             property,
             provided,
-            patterns,
+            alternatives,
             is_array,
             reason,
             ..
@@ -2290,7 +2437,7 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         };
         assert_eq!(property, "spec");
         assert_eq!(provided, "everywhere");
-        assert_eq!(patterns, expected, "{schema}");
+        assert_eq!(alternatives, expected, "{schema}");
         assert!(!is_array);
         assert!(reason.contains("no existing file matched reference"), "{reason}");
     }
@@ -2338,4 +2485,157 @@ fn schema_status_report_keeps_the_heading_and_each_property_on_rows() {
     assert!(rows[1].starts_with("✓ state: string"), "{rows:#?}");
     assert!(rows[2].starts_with("⍉ topic: string"), "{rows:#?}");
     assert!(rows[3].starts_with("✓ tone: string"), "{rows:#?}");
+}
+
+#[test]
+fn presence_and_timing_read_through_a_resolved_union_reference() {
+    let dir = TempDir::new().unwrap();
+    let schema = serde_json::json!({
+        "choice": ["string(required)", "number"],
+        "loose": ["string", "file(eager)"],
+        "listed": "choice[]",
+        "marked": "loose(required)",
+        "optional": "loose -> any",
+        "timed": "loose(eager)",
+        "loose_list": "loose[]",
+    });
+    let resolved = darkmatter::markdown::schemas::resolve::resolve_schema(
+        &schema,
+        dir.path(),
+        &biscuit_file::FileResolutionContext::new(dir.path()),
+    )
+    .unwrap();
+    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    else {
+        panic!("a single shape");
+    };
+    assert!(classify::is_required(Some(shape), "listed"), "inherited from an item arm");
+    assert!(classify::is_required(Some(shape), "marked"), "use-site marker");
+    assert!(!classify::is_required(Some(shape), "optional"));
+    assert!(classify::is_eager(Some(shape), "timed"), "use-site timing");
+    assert!(classify::is_eager(Some(shape), "optional"), "an eager arm, as in a property union");
+    assert!(classify::is_eager(Some(shape), "loose"));
+    // Darkmatter's launch projection agrees: an arm's `eager` times a list
+    // of the union exactly as it times the union.
+    assert!(classify::is_eager(Some(shape), "loose_list"), "an eager arm times the list");
+}
+
+#[test]
+fn null_admitting_whole_values_are_not_required() {
+    let dir = TempDir::new().unwrap();
+    let schema = serde_json::json!({
+        "nothing": "null(required)",
+        "anything": "unknown(required)",
+        "maybe": ["string(required)", "null"],
+        "nulls": "null[](required)",
+        "concrete": "string(required)",
+    });
+    let resolved = darkmatter::markdown::schemas::resolve::resolve_schema(
+        &schema,
+        dir.path(),
+        &biscuit_file::FileResolutionContext::new(dir.path()),
+    )
+    .unwrap();
+    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    else {
+        panic!("a single shape");
+    };
+    for optional in ["nothing", "anything", "maybe"] {
+        assert!(!classify::is_required(Some(shape), optional), "{optional}");
+    }
+    for required in ["nulls", "concrete"] {
+        assert!(classify::is_required(Some(shape), required), "{required}");
+    }
+}
+
+/// The identity selector sees the hints a frontmatter `$( … )` produced, and
+/// the body, the retained context, and the retained caller layers all carry
+/// the overrides it returned; the frontmatter command and the body render
+/// once.
+#[test]
+fn selecting_preparation_renders_the_body_with_the_selected_identity() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, "---\nagent: '$(echo goose)'\n---\nBODY_AGENT={{ env.AGENT }}\n");
+    let mut options = PrepareOptions::new(crate::test_support::context());
+    options.env_overrides = BTreeMap::from([("AGENT".to_string(), "claude".to_string())]);
+    options.pre_approved_commands = Some(std::collections::HashSet::from(["echo goose".to_string()]).into());
+    let seen = std::cell::RefCell::new(Vec::new());
+    let select = |hints: &crate::composition::EffectiveSelectionHints| {
+        seen.borrow_mut().push(hints.agent.clone());
+        Ok(BTreeMap::from([("AGENT".to_string(), "goose".to_string())]))
+    };
+
+    let prepared = prepare_direct_with_schema_selecting(&source, options, &select).unwrap();
+
+    assert_eq!(
+        *seen.borrow(),
+        [Some(crate::composition::AgentHint::Single(crate::provider_id::Provider::Goose))],
+        "called once, with the command's answer"
+    );
+    assert!(prepared.prompt.contains("BODY_AGENT=goose"), "{}", prepared.prompt);
+    assert_eq!(prepared.compose_context.env().get("AGENT").map(String::as_str), Some("goose"));
+    assert_eq!(prepared.input_layers.env_overrides.get("AGENT").map(String::as_str), Some("goose"));
+}
+
+/// A resolved caller value that looks like a command is data: the selector
+/// receives it as written.
+#[test]
+fn selecting_preparation_passes_a_command_looking_caller_model_as_data() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, "---\ntitle: t\n---\nBODY_MODEL={{ env.MODEL }}\n");
+    // A task's `with` values reach the document as a data layer.
+    let options = PrepareOptions::new(crate::test_support::context()).with_layered_overrides(
+        crate::composition::LayeredOverrides::from_parts(
+            Some(&serde_json::json!({ "model": "$(echo x)" })),
+            &std::collections::BTreeSet::from(["model".to_string()]),
+        ),
+    );
+    let select = |hints: &crate::composition::EffectiveSelectionHints| {
+        let model = hints.model.as_ref().map(|model| format!("{model:?}")).unwrap_or_default();
+        assert!(model.contains("$(echo x)"), "{model}");
+        Ok(BTreeMap::from([("MODEL".to_string(), "$(echo x)".to_string())]))
+    };
+
+    let prepared = prepare_direct_with_schema_selecting(&source, options, &select).unwrap();
+
+    assert!(prepared.prompt.contains("BODY_MODEL=$(echo x)"), "{}", prepared.prompt);
+}
+
+/// A selector error ends the preparation with that error, before the body
+/// renders.
+#[test]
+fn selecting_preparation_returns_the_selectors_error() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, "---\nagent: goose\n---\nbody\n");
+    let select = |_: &crate::composition::EffectiveSelectionHints| {
+        Err(CompositionError::AgentHintInvalid("no provider".to_string()))
+    };
+
+    let error = prepare_direct_with_schema_selecting(&source, PrepareOptions::new(crate::test_support::context()), &select)
+        .unwrap_err();
+
+    assert!(matches!(error, CompositionError::AgentHintInvalid(ref message) if message == "no provider"), "{error:?}");
+}
+
+/// A key only the installed overrides set returns to its captured value, or
+/// is unset.
+#[test]
+fn replacing_env_overrides_restores_or_unsets_dropped_keys() {
+    let mut env = std::collections::HashMap::from([
+        ("AGENT".to_string(), "claude".to_string()),
+        ("MODEL".to_string(), "old".to_string()),
+    ]);
+    let installed = BTreeMap::from([
+        ("AGENT".to_string(), "claude".to_string()),
+        ("MODEL".to_string(), "old".to_string()),
+    ]);
+
+    crate::composition::replace_env_overrides(
+        &mut env,
+        &installed,
+        &BTreeMap::from([("AGENT".to_string(), "goose".to_string())]),
+        None,
+    );
+
+    assert_eq!(env, std::collections::HashMap::from([("AGENT".to_string(), "goose".to_string())]));
 }

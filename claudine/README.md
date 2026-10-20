@@ -122,6 +122,9 @@ The stop itself is unchanged. Turn this off with `CLAUDINE_AUTO_STEER=off` or
 
 Claudine's composition features let you use Markdown as a dynamic template for agentic CLI sessions, leveraging [Darkmatter](../darkmatter/README.md)'s composition pipeline (transclusion, interpolation, conditionals, shell commands).
 
+Composed prompts and dry-run bodies export plain Markdown, including generated
+file listings. See [Composition](docs/topics/composition.md#direct-composition).
+
 Prompt context uses the launch repository even for prompts stored elsewhere:
 `ctx.repo` provides its name independently of Git-variable references, while
 `ctx.area` is empty at the repository root. See [context variables](docs/topics/state-management/context-variables.md).
@@ -130,7 +133,7 @@ Three canonical commands:
 
 - **`claudine compose <file-ref> [key=value ...]`** — compose a Markdown file and send it as a prompt (no file mutation)
 - **`claudine inline-compose <file-ref> [key=value ...]`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
-- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure. `--budget-ledger <path>` caps the whole run with a persisted invocation and active-time budget that `claudine budget` creates and operates ([Shared execution budgets](docs/cli/budget.md))
+- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache, nested sequences, concurrent task groups, container lifecycle recovery, and cancellation cleanup for sibling failures and Ctrl-C; see [Sequences](docs/topics/flow-control/sequences.md)
 
 **Inline Shorthand.** You can override frontmatter values using `key=value` positional arguments. Values are parsed as JSON5 first (supporting numbers, booleans, arrays) and fall back to plain strings. These shorthand overrides win over `--set` JSON blobs.
 
@@ -139,6 +142,13 @@ claudine compose @prompts/review.md review="review.md" count=3 draft=true
 ```
 
 All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and lifecycle-stack recovery.
+
+Shell approval can fix an exact command or authorize a typed command shape,
+such as `template just clean --out {{ string }}/build`. Shape-approved commands
+validate current values and pass each containing word as one argument directly
+to the program. Later sequence tasks with placeholders require shape approval;
+missing values stop execution. See [Pre-Flight Checks](docs/topics/pre-flight-checks.md)
+for policy rules, supported syntax, and validation timing.
 
 **Unified Harness Execution.** Every non-dry-run `compose` and `inline-compose` run flows through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; the plan now carries only timeout configuration (the pre/post validation and handler-recovery DSL has been retired in favor of lifecycle stacks). The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and lifecycle-stack recovery (`Retry`/`Resume`/`Proxy`) through one code path.
 
@@ -159,6 +169,10 @@ key in a `set` mapping reads as null during that mapping's snapshot evaluation;
 null interpolated into text renders empty.
 
 For eager file parameters with a schema `match(...)` glob, a partial path triggers confirmation or a file chooser before `initialize` reads it. This also works with `-y`; missing unrelated parameters remain deferred until after initialization. See [Composition](./docs/topics/composition.md#provided-partial-file-references) for the matching rules and interactive gates.
+
+Sequence prompts read their current row and prior results through the
+read-only `seq` root (`seq.name`, `seq.outputs`). Runtime roots are separate
+from saved frontmatter. See [sequence bindings](docs/topics/flow-control/sequences.md#the-seq-runtime-root).
 
 ### Performance Reporting
 
@@ -287,6 +301,7 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [Skills](./docs/topics/skills.md), [Commands](./docs/topics/commands.md), [Agents](./docs/topics/agents.md) - Cross-provider shared-resource synchronization
 - [MCP Catalog](./docs/topics/mcp-catalog.md) and [MCP Mode](./docs/topics/mcp-mode.md) - Catalog storage, `claudine mcp`, provider support, wrapper runtime behavior
 - [Composition](./docs/topics/composition.md) - `compose`, `inline-compose`, `sequence` commands and harness
+- [Schemas](./docs/topics/schemas.md) - Claudine's frontmatter schemas: what the editor and the launch verdict check, and how a document reaches them
 - [System Prompt](./docs/topics/system-prompt.md) - Discovery and CLI switch resolution
 - [Pre-Flight Checks](./docs/topics/pre-flight-checks.md) and [Lifecycle](./docs/topics/flow-control/lifecycle.md) - Pre-flight shell audit/schema validation and the lifecycle stack (gating, verification, recovery)
 - [Policy Engine](./docs/topics/policy-engine.md) and [Protect Service](./docs/topics/protect-service.md) - Permissions and runtime safety
@@ -311,3 +326,6 @@ Uses the following libraries from this monorepo:
 - `darkmatter` - Composition pipeline (transclusion, interpolation, `::shell`) and Markdown-to-terminal rendering
 - `playa` - Sound effect playback (88 embedded effects)
 - `sniff` - System and environment detection (OS, hardware, git, repo context)
+
+Prompt frontmatter can set `yolo: true` to enable the agent's native permission
+bypass. See [composition permissions](docs/topics/composition.md#provider-auto-approval-with-yolo).

@@ -225,7 +225,7 @@ fn resolve_unresolved_file_reference(
     let CompositionError::UnresolvedFileReference {
         ref property,
         ref provided,
-        ref patterns,
+        ref alternatives,
         is_array,
         ..
     } = err
@@ -239,7 +239,7 @@ fn resolve_unresolved_file_reference(
         return Err(downgrade_to_schema_validation(err));
     }
 
-    let resolved = match resolve_provided_file_reference(property, provided, patterns, is_array) {
+    let resolved = match resolve_provided_file_reference(property, provided, alternatives, is_array) {
         Ok(Some(value)) => value,
         // Zero glob+substring matches, the user declined / cancelled, or the
         // chooser failed → fall back to the original schema-validation error,
@@ -297,11 +297,11 @@ fn downgrade_to_schema_validation(err: CompositionError) -> CompositionError {
 fn resolve_provided_file_reference(
     property: &str,
     provided: &str,
-    patterns: &[String],
+    alternatives: &[Vec<Vec<String>>],
     is_array: bool,
 ) -> io::Result<Option<serde_json::Value>> {
     let ctx = ScopeContext::discover();
-    let Some(path) = choose_provided_file_reference(property, provided, patterns, &ctx)? else {
+    let Some(path) = choose_provided_file_reference(property, provided, alternatives, &ctx)? else {
         return Ok(None);
     };
     let value = resolve_file_value(&path, &ctx)?;
@@ -315,10 +315,10 @@ fn resolve_provided_file_reference(
 fn choose_provided_file_reference(
     property: &str,
     provided: &str,
-    patterns: &[String],
+    alternatives: &[Vec<Vec<String>>],
     ctx: &ScopeContext,
 ) -> io::Result<Option<std::path::PathBuf>> {
-    let candidates = provided_partial_candidates(patterns, provided, ctx);
+    let candidates = provided_partial_candidates(alternatives, provided, ctx);
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -362,11 +362,11 @@ fn choose_provided_file_reference(
 /// `match(...)` candidates ([`file_candidate_paths`], in native order) whose
 /// path contains `provided` (case-insensitive).
 fn provided_partial_candidates(
-    patterns: &[String],
+    alternatives: &[Vec<Vec<String>>],
     provided: &str,
     ctx: &ScopeContext,
 ) -> Vec<std::path::PathBuf> {
-    let mut candidates = file_candidate_paths(patterns, ctx);
+    let mut candidates = file_candidate_paths(alternatives, ctx);
     let needle = provided.to_ascii_lowercase();
     candidates.retain(|path| scopes::path_matches_query(path, &needle));
     candidates
@@ -388,8 +388,9 @@ fn merge_overrides(
 
 /// Emit a user-visible stderr warning per dropped optional property.
 ///
-/// Schema validation silently elides optional properties whose value
-/// fails validation so the run can continue; without a CLI-level warning
+/// Schema validation silently elides optional application properties whose
+/// value fails validation so the run can continue (an invalid Claudine
+/// control fails the launch instead); without a CLI-level warning
 /// users never learn that their supplied value was removed. This
 /// surfaces each drop via [`log::warn`] (yellow, always-on) so the
 /// behavior is auditable on every run.
@@ -492,8 +493,8 @@ fn prompt_for_property(
             render_intro(prop, "string", &term);
             collect_text(prop, *format, *min_len, *max_len)
         }
-        InteractiveShape::File { is_array, patterns } => {
-            collect_file(prop, *is_array, patterns)
+        InteractiveShape::File { is_array, alternatives } => {
+            collect_file(prop, *is_array, alternatives)
         }
     }
 }
@@ -651,10 +652,10 @@ pub(crate) fn chooser_height(option_count: usize, labeled: bool) -> Option<Heigh
 fn collect_file(
     prop: &MissingProperty,
     is_array: bool,
-    patterns: &[String],
+    alternatives: &[Vec<Vec<String>>],
 ) -> io::Result<serde_json::Value> {
     let ctx = ScopeContext::discover();
-    let paths = file_candidate_paths(patterns, &ctx);
+    let paths = file_candidate_paths(alternatives, &ctx);
 
     if paths.is_empty() {
         return Err(io::Error::new(

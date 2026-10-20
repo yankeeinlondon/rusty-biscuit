@@ -1,37 +1,20 @@
-//! Atomic task execution: one outcome contract for every task variant.
+//! Task dispatch with native container results and atomic publication.
 //!
-//! A [`PreflightTask`] describes *what could run*; [`TaskExecution`] runs it.
-//! Every variant — `prompt`, `shell`, `side_effect`, `group` — passes through
-//! the same three stages and reports the same [`TaskOutcome`], so a scheduler
-//! never learns what kind of work it just ran. A `group` is the one variant
-//! that is itself a scheduler: see [`group`].
+//! Shell and side-effect tasks return text; prompt documents delegate their
+//! lifecycle to the provider wrapper. Nested sequences and concurrent groups
+//! use the shared container lifecycle driver and return arrays or dictionaries.
+//! A result is published only after successful cleanup. Group legs keep private
+//! runtime branches until the owning group's terminal events and finalize settle.
 //!
-//! ## Stage contract
-//!
-//! `setup` → primary → `teardown`, with these ratified rules (spec → *Task
-//! Resolution and Lifecycle Semantics*):
-//!
-//! - a failed `setup` skips the primary action, but **not** `teardown`
-//! - `teardown` runs exactly once whenever `setup` has *started*, including
-//!   after a failed or interrupted primary, and reads the current `err`
-//! - a failed `teardown` converts an otherwise successful task to failure; when
-//!   the primary already failed, its error stays primary and the teardown error
-//!   attaches as a secondary diagnostic
-//! - the output is appended only after `teardown` completes, so no later work
-//!   observes an output from a task whose teardown failed it
-//!
-//! A stack shape that will not parse fails the task *before* setup starts, so
-//! nothing runs and no teardown is owed.
-//!
-//! ## Seams
-//!
-//! Composing and launching a `prompt:` document is the wrapper's job, so it
-//! enters through [`PromptTaskRunner`]; shell commands enter through
-//! [`TaskShellRunner`]. Both are injected, which is what lets the whole stage
-//! contract be tested without a provider or a process.
+//! The injected prompt and shell runners let tests observe public outcomes
+//! without launching providers. Internal setup/teardown fields remain available
+//! to legacy execution fixtures; authored task grammar rejects those keys.
 
 mod group;
 mod shell;
+pub(crate) use shell::run_owned_lifecycle_command;
+mod sequence;
+mod templates;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -42,12 +25,12 @@ use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 
 use super::super::lifecycle::action_value_to_expr;
-use super::super::lifecycle::bindings::{LifecycleScope, LifecycleValues, runtime_bindings};
+use super::super::lifecycle::bindings::{LifecycleScope, LifecycleValues, runtime_bindings_in_loop};
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::actions::{
-    LifecycleAction, LifecycleActionKind, LifecycleStackItem, is_known_side_effect,
+    LifecycleAction, LifecycleActionKind, LifecycleNode, for_each_action_mut, is_known_side_effect,
 };
 use super::super::lifecycle::context::{LifecycleCause, LifecycleErrorInfo};
 use super::super::lifecycle::executor::{LifecycleExprError, StackExecutionContext};
@@ -69,6 +52,18 @@ pub use shell::{
     DEFAULT_COMMAND_TIMEOUT, RunawayTrip, RunawayTripKind, ShellCommandOutput, SystemTaskShell,
     TaskShellError, TaskShellRunner,
 };
+
+/// The settings a sequence task's `setup:`/`teardown:` stacks play speech
+/// with, for a top-level task and every group member alike.
+///
+/// Task stacks do not read the user's `config.json`: their `say` uses the
+/// auto-detected provider and no requested voice. Task playback and TTS
+/// pre-warm of task stacks both take their settings from here, so a prepared
+/// phrase matches the configuration it later plays with.
+#[must_use]
+pub fn task_playback_settings() -> crate::events::GlobalSettings {
+    crate::events::GlobalSettings::default()
+}
 
 /// Which stage of a task produced a diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +137,8 @@ impl TaskDiagnostic {
 /// The structured result of running one task.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskOutcome {
+    /// Native task result; containers retain arrays and named objects.
+    pub result: Value,
     /// Success, failure, or interruption.
     pub status: TaskStatus,
     /// The task's captured stdout — provider final text, concatenated command
@@ -152,8 +149,12 @@ pub struct TaskOutcome {
     /// multi-command task reads as its results one per line and a blank line
     /// the command actually wrote survives.
     pub stdout: String,
-    /// `true` when this outcome's `stdout` was committed to `outputs`.
+    /// `true` when this outcome's native `result` was committed to `seq.outputs`.
     pub output_committed: bool,
+    /// `true` when the task's `when:` guard was false: nothing was composed or
+    /// launched, no event fired, and nothing was published. A skipped task
+    /// succeeded.
+    pub skipped: bool,
     /// Runtime state written by this task's stages, in first-write order.
     pub mutations: Vec<RuntimeMutation>,
     /// Wall-clock time across all three stages.
@@ -182,6 +183,18 @@ impl TaskOutcome {
 /// to compose and launch.
 #[derive(Debug, Clone)]
 pub struct PromptTaskRequest {
+    /// Compose only the body; the enclosing sequence owns lifecycle events.
+    pub body_only: bool,
+    /// Established lexical group variables; absent outside groups.
+    pub lifecycle_group: Option<Map<String, Value>>,
+    /// The context captured by the document barrier, reused without a second capture.
+    pub prepared_context: std::sync::Arc<std::sync::Mutex<Option<darkmatter::markdown::compose::ComposeContext>>>,
+    /// The prompt document's captured epoch, shared by its entry barrier and execution.
+    pub document_epoch: std::sync::Arc<std::sync::Mutex<Option<crate::invocation_context::DocumentEpoch>>>,
+    /// Fresh per-execution snapshot filled before task setup.
+    pub document_shell_values: darkmatter::markdown::compose::shell_expansion::template::DocumentShellValues,
+    /// Static position and late roots retained from graph discovery.
+    pub deferred_shell_roots: darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots,
     /// The canonical document path resolved at preflight.
     pub path: std::path::PathBuf,
     /// The reference as authored, for diagnostics.
@@ -189,14 +202,15 @@ pub struct PromptTaskRequest {
     /// `true` when the document's own frontmatter carries a string `prompt:`,
     /// making this an inline-compose run that rewrites the document's body.
     pub inline_compose: bool,
-    /// The fully layered overrides: task `params` < sequence user setters <
+    /// The fully layered overrides: task `with` < sequence user setters <
     /// accumulated runtime mutations < the reserved overlay. Only the user
-    /// setters are authored; evaluated `params` and every later layer are data.
+    /// setters are authored; evaluated `with` and every later layer are data.
     pub set_overrides: LayeredOverrides,
-    /// The evaluated `params` alone, for diagnostics and reporting.
-    pub params: Map<String, Value>,
-    /// Source document that authored `params`, used to retain their file origin.
-    pub params_origin_path: std::path::PathBuf,
+    /// The evaluated `with` alone, which the runner anchors at
+    /// `with_origin_path` so a relative file value resolves from its author.
+    pub with: Map<String, Value>,
+    /// Source document that authored `with`, used to retain its file origin.
+    pub with_origin_path: std::path::PathBuf,
     /// Effective operation after group defaults and task overrides.
     pub operation: Option<String>,
     /// Effective flow after group defaults and task overrides.
@@ -219,6 +233,17 @@ pub struct PromptTaskRequest {
     /// document open a run of its own. A handoff, retry, or resume inside the
     /// document is a new run regardless.
     pub run_evidence: Option<crate::invocation_context::RunEvidence>,
+    /// The invocation view of the document the task runs in: the step's, or
+    /// a group leg's own. The runner composes and launches the prompt
+    /// document under its environment. `None` leaves the choice to the runner.
+    pub document: Option<crate::invocation_context::InvocationContext>,
+    /// The `loop` values of the innermost looping container around the task,
+    /// which the document reads as `loop.*` unless it loops itself. `None`
+    /// outside every loop.
+    pub loop_values: Option<crate::composition::LoopAmbient>,
+    /// The task's place in the preflight graph, which its per-task provider
+    /// choice is keyed by.
+    pub task_identity: super::preflight::TaskIdentity,
 }
 
 /// A composition run opened for a group member or a whole parallel group.
@@ -228,6 +253,10 @@ pub struct TaskRun {
     pub context: darkmatter::markdown::compose::ComposeContext,
     /// The run a member's prompt document joins.
     pub run: crate::invocation_context::RunEvidence,
+    /// The document a group leg entered, with the environment it captured.
+    /// `None` for a run that is not a document of its own (a parallel
+    /// group's shared run).
+    pub document: Option<crate::invocation_context::InvocationContext>,
 }
 
 /// What a `prompt:` task's runner reports back.
@@ -243,12 +272,42 @@ pub struct PromptRunOutcome {
     pub exit_code: i32,
     /// `true` when the run ended because the user interrupted it.
     pub interrupted: bool,
+    /// `true` when the document produced no result to publish: its
+    /// `initialize` skipped, or a `break` ended it before it launched. A
+    /// withheld success appends nothing to `seq.outputs`.
+    pub withheld: bool,
 }
 
 /// Composes and launches a `prompt:` task's document.
 ///
 /// The wrapper implements this; the library never owns provider launch.
 pub trait PromptTaskRunner: Sync {
+    /// Whether containers should compose recursively without dispatching lifecycle events.
+    fn is_dry_run(&self) -> bool {
+        false
+    }
+
+    /// Whether a dry run runs `shell:` tasks (`--dry-run-shell`). Without it a
+    /// dry run renders each one instead.
+    fn dry_run_shell(&self) -> bool {
+        false
+    }
+
+    /// Check the document's late shell inputs before this task's setup runs.
+    fn validate(&self, _request: &PromptTaskRequest) -> Result<(), CompositionError> {
+        Ok(())
+    }
+
+    /// The runtime cap override (`--max-iterations`, then
+    /// `CLAUDINE_MAX_ITERATIONS`) for the loop authored in `source`. It
+    /// applies to each loop independently.
+    ///
+    /// ## Errors
+    ///
+    /// A malformed environment value, for a loop that would use it.
+    fn loop_cap_override(&self, _source: &std::path::Path) -> Result<Option<usize>, CompositionError> {
+        Ok(None)
+    }
     /// Run one prompt task.
     ///
     /// ## Errors
@@ -258,12 +317,30 @@ pub trait PromptTaskRunner: Sync {
     /// code through [`PromptRunOutcome::exit_code`].
     fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError>;
 
-    /// Open the composition run one serial group member executes as.
+    /// Open the composition run an ordered sequence child executes as.
     ///
-    /// A serial member is a run of its own, so it observes what the members
-    /// before it changed. `None` keeps the group's snapshot for the member's
-    /// fields, which is all a runner without launch evidence can offer.
+    /// Each child is a run and document of its own. Late shell readers
+    /// open at the group barrier; other members open at dispatch, observing
+    /// what earlier members changed. `None` keeps the group's snapshot for the member's fields,
+    /// which is all a runner without launch evidence can offer.
     fn open_member_run(&self, _task: &PreflightTask) -> Option<TaskRun> {
+        None
+    }
+
+    /// Refresh Git/run observations for an ordered child without late shell inputs,
+    /// so ordinary reads see earlier members' changes. Retain the document and its
+    /// environment; a new document capture would change the member's input snapshot.
+    fn refresh_member_run(&self, _task: &PreflightTask, run: &TaskRun) -> TaskRun {
+        run.clone()
+    }
+
+    /// Open one parallel group leg: a document of its own, capturing its own
+    /// environment, inside the group's shared run (`group`) so siblings still
+    /// observe one view of the working tree.
+    ///
+    /// Called for every leg in declaration order before any leg starts.
+    /// `None` keeps the group's snapshot and document.
+    fn open_leg_run(&self, _task: &PreflightTask, _group: Option<&TaskRun>) -> Option<TaskRun> {
         None
     }
 
@@ -295,6 +372,43 @@ impl PromptTaskRunner for UnavailablePromptRunner {
     }
 }
 
+/// Evaluate `task`'s `when:` guard against `context`'s frontmatter, runtime
+/// state, and `seq`/`loop`/`group` roots. A task without a guard runs.
+///
+/// The guard is read-only: it is evaluated with shells disabled and no live
+/// document cell, in the task-setup binding scope.
+///
+/// ## Errors
+///
+/// [`CompositionError::TaskWhenEvaluationFailed`], located at the guard,
+/// when it raises.
+pub fn evaluate_task_guard(task: &PreflightTask, context: &StackExecutionContext<'_>) -> Result<bool, CompositionError> {
+    let Some(condition) = &task.when else { return Ok(true) };
+    let disabled = super::super::lifecycle::executor::DisabledShellRunner;
+    let guard = StackExecutionContext {
+        live_frontmatter: None, shell_runner: &disabled,
+        ..context.in_scope(LifecycleScope::TaskSetup)
+    };
+    guard.evaluate_task_guard(condition).map_err(|cause| CompositionError::TaskWhenEvaluationFailed {
+        source_path: task.diagnostic.source_path.clone(),
+        property: super::grammar::child_property(&task.diagnostic.task_property, "when"),
+        cause,
+    })
+}
+
+/// The values a root sequence step's guard reads before the step composes:
+/// the document's authored frontmatter as stored text, under `overrides`
+/// (caller setters, runtime writes, and the reserved overlay).
+pub fn step_guard_frontmatter(
+    authored: &darkmatter::markdown::FrontmatterMap,
+    overrides: &Map<String, Value>,
+) -> Map<String, Value> {
+    let mut state: Map<String, Value> = authored.iter()
+        .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
+    state.extend(overrides.iter().map(|(key, value)| (key.clone(), value.clone())));
+    state
+}
+
 /// Everything one task needs to run.
 ///
 /// Every field is a borrow, so the whole wiring is `Copy`: a group scheduler
@@ -310,18 +424,18 @@ pub struct TaskExecution<'a> {
     /// The lifecycle machinery, already carrying this task's effective
     /// frontmatter, runtime cell, and emitter routes.
     pub stack: &'a StackExecutionContext<'a>,
-    /// The state `params` and `timeout` evaluate against.
+    /// The state `with` and `timeout` evaluate against.
     pub state: &'a EffectiveState,
     /// The runtime cell this task accumulates mutations and outputs into.
     ///
-    /// For a sequence step or a serial group member this is the one invocation
-    /// cell; a parallel group member gets a private buffer instead, which is what
+    /// A sequence step uses its invocation cell; a concurrent group leg gets
+    /// a private buffer, which is what
     /// makes sibling mutations invisible to each other until the merge. Shared as
     /// an `Arc` because a `prompt:` task's runner must hand the *same* cell to the
     /// wrapper pipeline, so the document's own lifecycle `set` lands in the
     /// task's buffer rather than in the sequence's.
     pub runtime: Option<&'a std::sync::Arc<RuntimeState>>,
-    /// Sequence user setters (`--set` / `key=value`), which outrank `params`.
+    /// Sequence user setters (`--set` / `key=value`), which outrank `with`.
     pub user_setters: Option<&'a Value>,
     /// The reserved per-step overlay, which outranks everything.
     pub overlay: Option<&'a Value>,
@@ -355,6 +469,23 @@ pub struct TaskExecution<'a> {
     /// document's first preparation. A serial group member replaces it with
     /// its own run; a parallel member with the group's.
     pub run_evidence: Option<&'a crate::invocation_context::RunEvidence>,
+    /// The document this task runs in, viewed under the environment it
+    /// captured: the step's, or a group leg's own.
+    ///
+    /// Before anything runs, every preflight-approved command is re-resolved
+    /// under this document's environment and refused when its text changed.
+    /// Its `shell:` commands and its stacks' `shell` actions start from this
+    /// document's child-process environment, through the runners'
+    /// `for_child_environment`. `None` runs the approved text unchecked, with
+    /// the runners as given, for callers whose tasks share the environment
+    /// preflight resolved under.
+    pub document: Option<&'a crate::invocation_context::InvocationContext>,
+}
+
+struct ValidatedTask {
+    late: darkmatter::markdown::compose::shell_expansion::template::LateValues,
+    prompt: Option<PromptTaskRequest>,
+    group: Option<group::ValidatedGroup>,
 }
 
 impl TaskExecution<'_> {
@@ -363,7 +494,68 @@ impl TaskExecution<'_> {
     /// Never returns `Err`: every failure is part of the task's reported
     /// outcome, because a scheduler must decide continuation from `fail_fast`
     /// rather than from an error propagating out of one task.
+    ///
+    /// A `when:` guard is evaluated first: a false guard skips the task with
+    /// nothing run and nothing published, and a guard that raises fails it.
     pub fn run(&self) -> TaskOutcome {
+        self.run_guarded(None)
+    }
+
+    /// Run a task whose `when:` guard the caller already evaluated as true.
+    pub fn run_admitted(&self) -> TaskOutcome {
+        self.run_validated(None)
+    }
+
+    /// Evaluate the task's `when:` guard at its turn: against the task's
+    /// state and its `seq`, `loop`, and `group` roots. A task without a guard
+    /// runs.
+    ///
+    /// ## Errors
+    ///
+    /// [`CompositionError::TaskWhenEvaluationFailed`], located at the guard,
+    /// when it raises.
+    pub fn guard(&self) -> Result<bool, CompositionError> {
+        // A preview shows the guard instead of predicting it: the values it
+        // reads may come from tasks a dry run does not run.
+        if self.prompt.is_dry_run() && let Some(condition) = &self.task.when {
+            let name = self.task.name.as_deref().unwrap_or(&self.task.label);
+            self.dry_run_note(&format!("`{name}` runs when `{condition}` (not evaluated in a dry run)"));
+            return Ok(true);
+        }
+        let frontmatter: Map<String, Value> = self.state.data().iter()
+            .map(|(key, value)| (key.clone(), value.clone())).collect();
+        let seq = self.sequence_binding();
+        let context = StackExecutionContext { frontmatter: &frontmatter, seq: Some(&seq), ..self.stack.with_signal(self.stack.signal) };
+        evaluate_task_guard(self.task, &context)
+    }
+
+    fn run_guarded(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
+        match self.guard() {
+            Ok(true) => self.run_validated(validated),
+            Ok(false) => self.unstarted_outcome(TaskStatus::Succeeded, None),
+            Err(error) => self.unstarted_outcome(TaskStatus::Failed,
+                Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error))),
+        }
+    }
+
+    /// The outcome of a task that never started: a skipped one (`error` is
+    /// `None`), or one whose guard raised.
+    fn unstarted_outcome(&self, status: TaskStatus, error: Option<TaskDiagnostic>) -> TaskOutcome {
+        TaskOutcome {
+            result: Value::Null,
+            status,
+            stdout: String::new(),
+            output_committed: false,
+            skipped: error.is_none(),
+            mutations: Vec::new(),
+            duration: Duration::ZERO,
+            error,
+            secondary_errors: Vec::new(),
+            group_tasks: Vec::new(),
+        }
+    }
+
+    fn run_validated(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
         let started = Instant::now();
         let mutations_before = self.mutation_snapshot();
 
@@ -374,34 +566,25 @@ impl TaskExecution<'_> {
             secondary_errors,
             group_tasks,
             group_output,
-        } = self.run_stages();
+            withheld,
+        } = self.run_stages(validated);
 
-        // A serial group's members each committed their own entry as they ran, so
-        // the group must not add a wrapper entry on top of them. A *parallel*
-        // group is the opposite: its members wrote into private buffers that were
-        // discarded, and the group owes one nested entry with a slot per member —
-        // including for members that failed.
-        let commits_output = !matches!(self.task.action, PreflightAction::Group(_));
-        let mut output_committed = false;
-        if let Some(runtime) = self.runtime {
-            // Either way the commit happens here, after `teardown`: a teardown
-            // that failed an otherwise successful task owes no output.
-            if let Some(entry) = group_output {
-                runtime.append_output_entry(entry);
-                output_committed = true;
-            } else if status == TaskStatus::Succeeded && commits_output {
-                // The transport newline was already removed where the text was
-                // produced — per command for a shell task, once for a provider —
-                // so this appends the entry as-is rather than trimming again.
-                runtime.append_output_entry(Value::String(stdout.clone()));
-                output_committed = true;
-            }
+        let container = matches!(self.task.action, PreflightAction::Group(_) | PreflightAction::Sequence(_));
+        let publishes = !withheld && (group_output.is_some() || !container);
+        let result = group_output.unwrap_or_else(|| {
+            if container || withheld { Value::Null } else { Value::String(stdout.clone()) }
+        });
+        let output_committed = status == TaskStatus::Succeeded && publishes && self.runtime.is_some();
+        if output_committed {
+            self.runtime.expect("commit has a runtime").append_output_entry(result.clone());
         }
 
         TaskOutcome {
+            result,
             status,
             stdout,
             output_committed,
+            skipped: false,
             mutations: self.mutation_delta(&mutations_before),
             duration: started.elapsed(),
             error,
@@ -411,11 +594,28 @@ impl TaskExecution<'_> {
     }
 
     /// The stage machine, without output commit or timing bookkeeping.
-    fn run_stages(&self) -> StageOutcome {
+    fn run_stages(&self, validated: Option<&ValidatedTask>) -> StageOutcome {
+        if let PreflightAction::Group(group) = &self.task.action {
+            let outcome = self.run_group_container(group);
+            let (status, error) = match outcome.result {
+                PrimaryResult::Succeeded => (TaskStatus::Succeeded, None),
+                PrimaryResult::Failed(error) => (TaskStatus::Failed, Some(error)),
+                PrimaryResult::Interrupted => (TaskStatus::Interrupted, None),
+            };
+            return StageOutcome { status, error, stdout: outcome.stdout,
+                secondary_errors: outcome.secondary, group_tasks: outcome.group_tasks,
+                group_output: outcome.group_output, withheld: outcome.withheld };
+        }
+        let mut task = self.task.clone();
+        self.graph.settle_task_shell_modes(&mut task);
+        TaskExecution { task: &task, ..*self }.run_settled_stages(validated)
+    }
+
+    fn run_settled_stages(&self, validated: Option<&ValidatedTask>) -> StageOutcome {
         // Parsing precedes setup deliberately: a stack that will not parse is an
         // authoring error, and running teardown for a task that never started is
         // worse than not running it.
-        let stacks = match self.parse_stacks() {
+        let mut stacks = match self.parse_stacks() {
             Ok(stacks) => stacks,
             Err(error) => {
                 return StageOutcome::terminal(
@@ -427,6 +627,45 @@ impl TaskExecution<'_> {
                 );
             }
         };
+        if let Some(refusal) = self.verify_preflight_approvals() {
+            return StageOutcome::terminal(TaskStatus::Failed, Some(refusal));
+        }
+        if let Err(error) = self.verify_template_authorizations() {
+            return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error)));
+        }
+        // The step barrier: every late value the task's commands read is read
+        // and checked now, before any of them runs, so a missing one fails the
+        // task with nothing run and earlier steps' effects intact. Template
+        // dispatch fills each late placeholder from these values; every other
+        // placeholder is read when its own command runs.
+        let owned;
+        let validated = match validated {
+            Some(validated) => validated,
+            None => {
+                owned = match self.validate_task() {
+                    Ok(validated) => validated,
+                    Err(error) => return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error))),
+                };
+                &owned
+            }
+        };
+        let current_prompt;
+        let prompt_request = if validated.prompt.is_none()
+            && let PreflightAction::Prompt { path, reference } = &self.task.action
+        {
+            current_prompt = match self.prompt_request(path, reference).and_then(|request| {
+                self.prompt.validate(&request)?;
+                Ok(request)
+            }) {
+                Ok(request) => request,
+                Err(error) => return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error))),
+            };
+            Some(&current_prompt)
+        } else { validated.prompt.as_ref() };
+        let late_values = &validated.late;
+        if let Err(error) = self.install_template_sites(&mut stacks, late_values) {
+            return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error)));
+        }
 
         if self.interrupted() {
             return StageOutcome::terminal(TaskStatus::Interrupted, None);
@@ -438,6 +677,7 @@ impl TaskExecution<'_> {
         let mut stdout = String::new();
         let mut group_tasks: Vec<GroupTaskResult> = Vec::new();
         let mut group_output: Option<Value> = None;
+        let mut withheld = false;
 
         if let Some(items) = &stacks.setup
             && let Some(diagnostic) = self.run_stack(TaskStage::Setup, items, None)
@@ -450,10 +690,11 @@ impl TaskExecution<'_> {
             if self.interrupted() {
                 status = TaskStatus::Interrupted;
             } else {
-                let primary = self.run_primary();
+                let primary = self.run_primary(late_values, prompt_request, validated.group.as_ref());
                 stdout = primary.stdout;
                 group_tasks = primary.group_tasks;
                 group_output = primary.group_output;
+                withheld = primary.withheld;
                 secondary.extend(primary.secondary);
                 match primary.result {
                     PrimaryResult::Succeeded => {}
@@ -490,6 +731,7 @@ impl TaskExecution<'_> {
             secondary_errors: secondary,
             group_tasks,
             group_output,
+            withheld,
         }
     }
 
@@ -502,7 +744,7 @@ impl TaskExecution<'_> {
     fn run_stack(
         &self,
         stage: TaskStage,
-        items: &[LifecycleStackItem],
+        items: &[LifecycleNode],
         err: Option<&LifecycleErrorInfo>,
     ) -> Option<TaskDiagnostic> {
         // The stack reuses the step's context, so it names its own scope:
@@ -511,17 +753,34 @@ impl TaskExecution<'_> {
             TaskStage::Teardown => LifecycleScope::TaskTeardown,
             TaskStage::Setup | TaskStage::Primary => LifecycleScope::TaskSetup,
         };
-        let with_err;
-        let context = match err {
-            Some(info) => {
-                with_err = self.stack.with_error(info);
-                &with_err
+        // A stack's `shell` actions start from the document's environment.
+        let document_runner = self.document.and_then(|document| {
+            self.stack
+                .shell_runner
+                .for_child_environment(document.env_baseline())
+        });
+        let in_document;
+        let stack = match document_runner.as_deref() {
+            Some(shell_runner) => {
+                in_document = StackExecutionContext {
+                    shell_runner,
+                    ..self.stack.with_signal(self.stack.signal)
+                };
+                &in_document
             }
             None => self.stack,
         };
-        let outcome = context
-            .in_scope(scope)
-            .execute_action_stack(items, &self.stack_property(stage));
+        let with_err;
+        let context = match err {
+            Some(info) => {
+                with_err = stack.with_error(info);
+                &with_err
+            }
+            None => stack,
+        };
+        let seq = self.sequence_binding();
+        let context = StackExecutionContext { seq: Some(&seq), ..context.in_scope(scope) };
+        let outcome = context.execute_action_stack(items);
         outcome
             .evaluation_error
             .or(outcome.action_error)
@@ -568,31 +827,101 @@ impl TaskExecution<'_> {
     }
 
     /// Run the task's executable field.
-    fn run_primary(&self) -> PrimaryOutcome {
+    fn run_primary(&self, late: &darkmatter::markdown::compose::shell_expansion::template::LateValues, prompt_request: Option<&PromptTaskRequest>, group: Option<&group::ValidatedGroup>) -> PrimaryOutcome {
         match &self.task.action {
-            PreflightAction::Prompt { path, reference } => self.run_prompt(path, reference),
-            PreflightAction::Shell { commands } => self.run_shell(commands),
+            PreflightAction::Prompt { .. } => {
+                let mut request = prompt_request.expect("prompt requests pass the step barrier").clone();
+                let deferred = self.graph.prompt_references.iter().find(|reference| reference.path == request.path && reference.position == self.task.position)
+                    .map(|reference| reference.deferred_with.as_slice()).unwrap_or_default();
+                for (key, value) in &self.task.with {
+                    if !deferred.contains(key) {
+                        match self.resolve_with_entry(key, value) {
+                            Ok(value) => { request.with.insert(key.clone(), value); }
+                            Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+                        }
+                    }
+                }
+                request.set_overrides = self.layered_overrides(&request.with);
+                request.runtime = self.runtime.cloned();
+                request.frame_writer = self.live.map(|live| live.rendered_writer());
+                self.run_prompt_request(&request)
+            },
+            PreflightAction::Shell { commands } => self.run_shell(commands, late),
             PreflightAction::SideEffect {
                 action,
                 authored_set_order,
             } => self.run_side_effect(action, authored_set_order.as_deref()),
-            PreflightAction::Group(group) => self.run_group(group),
+            PreflightAction::Sequence(sequence) => self.run_sequence(sequence),
+            PreflightAction::Group(definition) => self.run_group(definition, group.expect("groups pass the step barrier")),
         }
     }
 
-    /// Compose and launch a `prompt:` document through the injected runner.
-    fn run_prompt(&self, path: &std::path::Path, reference: &str) -> PrimaryOutcome {
-        let params = match self.evaluate_params() {
-            Ok(params) => params,
-            Err(error) => {
-                return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
-                    TaskStage::Primary,
-                    &error,
-                ));
-            }
-        };
+    fn validate_task(&self) -> Result<ValidatedTask, CompositionError> {
+        let mut task = self.task.clone();
+        self.graph.settle_task_shell_modes(&mut task);
+        let execution = TaskExecution { task: &task, ..*self };
+        execution.verify_template_authorizations()?;
+        let late = execution.late_values()?;
+        let prompt = if let PreflightAction::Prompt { path, reference } = &task.action {
+            let request = execution.prompt_request(path, reference)?;
+            execution.prompt.validate(&request)?;
+            Some(request)
+        } else { None };
+        // Containers own their preparation after initialize, including when a
+        // parent group freezes its ordinary members' shell inputs.
+        Ok(ValidatedTask { late, prompt, group: None })
+    }
 
-        let request = PromptTaskRequest {
+    /// Allocate a looping container's frame before its `initialize`, or
+    /// `None` when it does not loop. A dry run allocates it too, so its one
+    /// previewed pass reads pass 1's `loop` values, and says that the loop's
+    /// repetition is not evaluated.
+    ///
+    /// A templated `max` resolves once, here, against `state` (the
+    /// container's values under the runtime writes made so far), and the
+    /// runtime cap override replaces the authored one.
+    ///
+    /// ## Errors
+    ///
+    /// The cap template's located error, or a malformed override.
+    pub(super) fn open_loop(
+        &self, preflight: Option<&super::preflight::PreflightLoop>, kind: crate::composition::looping::LoopResultKind,
+        state: &Map<String, Value>, runtime: &RuntimeState,
+    ) -> Result<Option<crate::composition::looping::LoopFrame>, CompositionError> {
+        let Some(preflight) = preflight else { return Ok(None) };
+        let mut config = preflight.config.clone();
+        let mut values = state.clone();
+        values.extend(runtime.snapshot().mutations);
+        let ambient = crate::composition::LoopAmbient::new(1, true, false, kind.empty(), 0);
+        let lookup = crate::composition::LoopExpressionLookup::new(
+            &values, &ambient, self.stack.file_resolution_context, &preflight.location.source_path,
+        )
+        .with_file_ref_fallback_dir(self.stack.ctx_base_dir)
+        .with_prepared_context(self.stack.prepared_context)
+        .with_runtime_state(Some(runtime));
+        crate::composition::resolve_templated_loop_max(&mut config, &lookup, &preflight.location)?;
+        let cap = self.prompt.loop_cap_override(&preflight.location.source_path)?;
+        let frame = crate::composition::looping::LoopFrame::new(
+            &config, cap, kind, &preflight.location.source_path, &preflight.location.property,
+        )?;
+        if self.prompt.is_dry_run() {
+            self.dry_run_note(&crate::composition::looping::dry_run_loop_note(&preflight.location.property, &config, frame.max()));
+        }
+        Ok(Some(frame))
+    }
+
+    fn prompt_request(&self, path: &std::path::Path, reference: &str) -> Result<PromptTaskRequest, CompositionError> {
+        let with = self.evaluate_with()?;
+        Ok(PromptTaskRequest {
+            body_only: false,
+            lifecycle_group: self.stack.group.cloned(),
+            prepared_context: Default::default(),
+            document_epoch: Default::default(),
+            document_shell_values: Default::default(),
+            deferred_shell_roots: self.graph.prompt_references.iter()
+                .find(|candidate| candidate.path == path && candidate.position == self.task.position)
+                .map(|candidate| candidate.deferred_shell_roots())
+                .unwrap_or_else(super::preflight::sequence_deferred_roots),
             path: path.to_path_buf(),
             reference: reference.to_string(),
             // The referenced document's own frontmatter decides the mode: a
@@ -602,9 +931,9 @@ impl TaskExecution<'_> {
                 .graph
                 .prompt_document(path)
                 .is_some_and(|document| document.inline_compose),
-            set_overrides: self.layered_overrides(&params),
-            params,
-            params_origin_path: self.task.origin_path.clone(),
+            set_overrides: self.layered_overrides(&with),
+            with,
+            with_origin_path: self.task.origin_path.clone(),
             operation: self.task.operation.clone(),
             flow: self.task.flow.clone(),
             runtime: self.runtime.map(std::sync::Arc::clone),
@@ -613,20 +942,27 @@ impl TaskExecution<'_> {
             // wrapper already wrote it, so a second emission would double-print.
             frame_writer: self.live.map(|live| live.rendered_writer()),
             run_evidence: self.run_evidence.cloned(),
-        };
+            document: self.document.cloned(),
+            loop_values: self.stack.loop_values.cloned(),
+            task_identity: self.task.identity.clone(),
+        })
+    }
 
-        match self.prompt.run(&request) {
+    fn run_prompt_request(&self, request: &PromptTaskRequest) -> PrimaryOutcome {
+        match self.prompt.run(request) {
             Ok(run) if run.interrupted => {
                 PrimaryOutcome::interrupted(trim_transport_newline(&run.stdout).to_string())
             }
             Ok(run) if run.exit_code == 0 => {
-                PrimaryOutcome::succeeded(trim_transport_newline(&run.stdout).to_string())
+                let mut outcome = PrimaryOutcome::succeeded(trim_transport_newline(&run.stdout).to_string());
+                outcome.withheld = run.withheld;
+                outcome
             }
             Ok(run) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(
                 TaskStage::Primary,
                 &CompositionError::SequenceTaskPromptFailed {
                     task: self.label(),
-                    path: path.to_path_buf(),
+                    path: request.path.clone(),
                     code: run.exit_code,
                 },
             )),
@@ -637,18 +973,20 @@ impl TaskExecution<'_> {
         }
     }
 
-    /// Run every approved command in declaration order.
+    /// Run every command in declaration order.
     ///
-    /// The commands are preflight's resolved bytes and are passed through
-    /// untouched — approved *is* executed. Each command's stdout contributes one
+    /// Exact commands retain their preflight bytes. Template commands prove
+    /// shape membership, then fill against current state and barrier values.
+    /// Each command's stdout contributes one
     /// line-terminated block to the task's output, so a two-command task reads
     /// as its two results in declaration order.
     ///
     /// Display and capture diverge here: the runner streams *both* pipes
     /// through the task's live stream as they are read, while only stdout is
     /// collected into the payload below. A command's stderr is therefore
-    /// attributed on screen and absent from `outputs`.
-    fn run_shell(&self, commands: &[String]) -> PrimaryOutcome {
+    /// attributed on screen and absent from `outputs`, unless an authored
+    /// redirection routes it to the original stdout destination.
+    fn run_shell(&self, commands: &[String], late: &darkmatter::markdown::compose::shell_expansion::template::LateValues) -> PrimaryOutcome {
         let timeout = match self.command_timeout() {
             Ok(timeout) => timeout,
             Err(error) => {
@@ -658,14 +996,57 @@ impl TaskExecution<'_> {
                 ));
             }
         };
+        // A preview renders each command as approved (exact bytes, or the
+        // template of a template-mode command) and runs none of them; its
+        // `timeout:` is still validated. The empty result reaches only the
+        // preview, never `seq.outputs`.
+        if self.prompt.is_dry_run() && !self.prompt.dry_run_shell() {
+            for command in commands {
+                self.dry_run_note(&format!("rendered (dry-run): would run `{command}`"));
+            }
+            return PrimaryOutcome::withheld();
+        }
 
+        // A document's commands start from its own environment.
+        let document_shell = self
+            .document
+            .and_then(|document| self.shell.for_child_environment(document.env_baseline()));
+        let shell = document_shell.as_deref().unwrap_or(self.shell);
         let mut collected: Vec<String> = Vec::with_capacity(commands.len());
-        for command in commands {
+        for (index, command) in commands.iter().enumerate() {
             if self.interrupted() {
                 return PrimaryOutcome::interrupted(collected.join("\n"));
             }
-            let output = match self.shell.run(command, timeout, self.interrupt, self.live) {
+            let chain = match self.prepare_primary_template(index, late) {
+                Ok(chain) => chain,
+                Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+            };
+            let run = match chain {
+                Some(chain) => shell.run_structured(&chain, timeout, self.interrupt, self.live),
+                None => shell.run(command, timeout, self.interrupt, self.live),
+            };
+            let output = match run {
                 Ok(output) => output,
+                Err(TaskShellError::Target { reason, .. }) => {
+                    let site = self.task.shell_sites.iter().find(|site| site.id == format!("primary[{index}]")).expect("structured dispatch has an authored site");
+                    let error = darkmatter::markdown::compose::ShellExpansionError::TemplateTarget {
+                        ctx: Box::new(biscuit_terminal::errors::SourceContext::new(site.source_file.clone(), site.source_file.clone(), site.authored.clone())),
+                        command: site.authored.clone(), reason,
+                        origin: darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter { key: site.property.clone(), line: None },
+                    };
+                    return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &CompositionError::SequenceShellResolution {
+                        command: site.authored.clone(), task: self.label(), message: error.to_string(),
+                        source: Some(Box::new(MarkdownError::ShellExpansion(Box::new(error)))),
+                    }));
+                }
+                Err(error @ TaskShellError::UnsupportedStructured) => {
+                    return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
+                        TaskStage::Primary,
+                        &CompositionError::SequenceShellResolution {
+                            command: command.clone(), task: self.label(), message: error.to_string(), source: None,
+                        },
+                    ));
+                }
                 Err(TaskShellError::Isolation(source)) => {
                     return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
                         TaskStage::Primary,
@@ -757,6 +1138,13 @@ impl TaskExecution<'_> {
 
     /// Dispatch a `side_effect:` action and capture its textual return.
     fn run_side_effect(&self, action: &Value, authored_set_order: Option<&[String]>) -> PrimaryOutcome {
+        // A preview never writes a file or a runtime value, with or without
+        // `--dry-run-shell`: it shows the action and its arguments as
+        // authored, templates unresolved.
+        if self.prompt.is_dry_run() {
+            self.dry_run_note(&format!("rendered (dry-run): would run `{action}`"));
+            return PrimaryOutcome::withheld();
+        }
         let parsed = match parse_single_action_with_order(
             LifecycleSignal::Start,
             action,
@@ -862,79 +1250,216 @@ impl TaskExecution<'_> {
         Ok(ParsedStacks { setup, teardown })
     }
 
-    /// Replace each `shell` command and `on_error` in a parsed stack with the
-    /// bytes sequence approval fixed for that site, and mark the action
-    /// resolved, so execution runs exactly the approved bytes and never
-    /// evaluates the authored text again.
+    /// Refuse the task, before any stage runs, when its document's captured
+    /// environment changes the text of a command sequence preflight resolved.
     ///
-    /// A command with interpolation that approval did not record fails closed.
+    /// Resolved-byte sites use the launch environment, and a task captures its
+    /// own environment later, so resolved text can only vouch for identical
+    /// text. Template-mode sites use their runtime fill instead. Prompt
+    /// documents check membership in their upfront approvals when composing.
+    fn verify_preflight_approvals(&self) -> Option<TaskDiagnostic> {
+        let document = self.document?;
+        let environment = document.document_environment();
+        let writes = self.runtime.map(|runtime| runtime.snapshot().mutations).unwrap_or_default();
+        // In the order the stages would run, so the refusal names the first
+        // command that would have run changed.
+        for stage in [TaskStage::Setup, TaskStage::Primary, TaskStage::Teardown] {
+            for approval in self.task.preflight_approvals.iter().filter(|a| a.stage() == stage) {
+                if let Err(error) = approval.verify(environment, &writes) {
+                    return Some(TaskDiagnostic::from_composition(stage, &error));
+                }
+            }
+        }
+        None
+    }
+
+    /// Read and validate every late value this task's command sites read
+    /// ([`super::preflight::resolve_task_late_values`]), against the task's
+    /// state as it stands now: `outputs` and the step's values from
+    /// [`Self::state`], `group` from the enclosing group, `loop` from the
+    /// innermost looping container around the task.
+    ///
+    /// [`Self::state`]: TaskExecution::state
+    fn sequence_binding(&self) -> Value {
+        let mut snapshot = self.runtime.map_or_else(Default::default, |runtime| runtime.snapshot());
+        if snapshot.seq.is_none() {
+            snapshot.seq = self.overlay.and_then(|overlay| overlay.get("seq")).cloned();
+        }
+        // In-process callers may supply an already frozen sequence value.
+        if self.runtime.is_none() {
+            return snapshot.seq.unwrap_or_else(||
+                crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
+        }
+        snapshot.sequence_value()
+    }
+
+    fn late_values(
+        &self,
+    ) -> Result<darkmatter::markdown::compose::shell_expansion::template::LateValues, CompositionError>
+    {
+        use darkmatter::markdown::compose::expression::EvaluationSession;
+        use darkmatter::markdown::compose::shell_expansion::template::LookupEvaluator;
+        if self.task.late_sites().next().is_none() {
+            return Ok(Default::default());
+        }
+        let resolution = super::super::document_expression_resolution_context(
+            &self.task.origin_path,
+            self.stack.prepared_context,
+            self.stack.file_resolution_context,
+            self.stack.ctx_base_dir,
+        )?;
+        let seq = self.sequence_binding();
+        let (view, globals) = runtime_bindings_in_loop(
+            LifecycleScope::TaskSetup,
+            LifecycleValues {
+                err: None,
+                timing: self.stack.timing,
+                group: self.stack.group,
+                seq: Some(&seq),
+            },
+            self.stack.loop_values,
+        );
+        let session = EvaluationSession::associate(view, self.state, globals)
+            .expect("the task scope's view and its runtime entries agree")
+            .with_resolution_context(resolution);
+        super::preflight::resolve_task_late_values(self.task, &LookupEvaluator::new(&session))
+    }
+
+    /// Replace each `shell` command and `on_error` in a parsed stack with the
+    /// bytes sequence preflight resolved for that site, and each `set`
+    /// `$( … )` value with the value it fixed, marking each resolved, so
+    /// execution runs exactly those bytes and never evaluates the authored
+    /// text again.
+    ///
+    /// A command with interpolation that preflight did not record fails closed,
+    /// unless its template is installed after the late-value barrier.
     fn apply_approved_commands(
         &self,
         stage: TaskStage,
-        items: &mut [LifecycleStackItem],
+        items: &mut [LifecycleNode],
     ) -> Result<(), CompositionError> {
-        for action in items.iter_mut().flat_map(|item| item.actions.iter_mut()) {
-            let LifecycleActionKind::Shell(shell) = &mut action.kind else {
-                continue;
+        let mut result = Ok(());
+        for_each_action_mut(items, &mut |action| {
+            if result.is_ok() {
+                result = self.apply_approved_command(stage, action);
+            }
+        });
+        result
+    }
+
+    /// [`Self::apply_approved_commands`] for one action.
+    fn apply_approved_command(
+        &self,
+        stage: TaskStage,
+        action: &mut LifecycleAction,
+    ) -> Result<(), CompositionError> {
+        if let LifecycleActionKind::RuntimeSet(set) = &mut action.kind {
+            for (key, shell) in set.shell_values_mut() {
+                let fixed = self.task.approved_set_values.iter().find(|approved| {
+                    approved.site.stage() == stage
+                        && approved.key == *key
+                        && approved.site.authored() == shell.authored
+                });
+                // An unfixed value refuses to run at its turn.
+                if let Some(fixed) = fixed {
+                    shell.resolved = Some(fixed.value.clone());
+                }
+            }
+            return Ok(());
+        }
+        let LifecycleActionKind::Shell(shell) = &mut action.kind else {
+            return Ok(());
+        };
+        for expr in std::iter::once(&mut shell.command).chain(shell.on_error.as_mut()) {
+            let literal = match expr {
+                Expr::StringLiteral(text) => !text.contains("{{"),
+                Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
+                _ => false,
             };
-            for expr in std::iter::once(&mut shell.command).chain(shell.on_error.as_mut()) {
-                let literal = match expr {
-                    Expr::StringLiteral(text) => !text.contains("{{"),
-                    Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
-                    _ => false,
-                };
-                if literal {
+            if literal {
+                continue;
+            }
+            let approved = self.task.approved_stack_commands.iter().find(|approved| {
+                approved.site().stage() == stage
+                    && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
+                        .is_ok_and(|authored| authored == *expr)
+            });
+            let template_site = || {
+                self.task.shell_sites.iter().any(|site| {
+                    site.stage == stage
+                        && site.mode == super::preflight::SiteMode::Template
+                        && action_value_to_expr(&Value::String(site.authored.clone()))
+                            .is_ok_and(|authored| authored == *expr)
+                })
+            };
+            let Some(approved) = approved else {
+                if template_site() {
                     continue;
                 }
-                let approved = self.task.approved_stack_commands.iter().find(|approved| {
-                    approved.site().stage() == stage
-                        && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
-                            .is_ok_and(|authored| authored == *expr)
+                return Err(CompositionError::SequenceShellResolution {
+                    command: expr.to_string(),
+                    task: self.label(),
+                    message: format!(
+                        "this `{}` command was not approved at sequence preflight",
+                        stage.key()
+                    ),
+                    source: None,
                 });
-                let Some(approved) = approved else {
-                    return Err(CompositionError::SequenceShellResolution {
-                        command: expr.to_string(),
-                        task: self.label(),
-                        message: format!(
-                            "this `{}` command was not approved at sequence preflight",
-                            stage.key()
-                        ),
-                        source: None,
-                    });
-                };
-                *expr = Expr::StringLiteral(approved.command().to_string());
-            }
-            shell.pre_resolved = true;
+            };
+            *expr = Expr::StringLiteral(approved.command().to_string());
         }
+        shell.pre_resolved = true;
         Ok(())
     }
 
-    /// Evaluate `params` just in time against the caller's effective state.
+    /// Evaluate `with` just in time against the caller's effective state.
     ///
-    /// Whole-value typing survives: `topic: "{{ state.index }}"` binds the
-    /// number, not its rendering.
-    fn evaluate_params(&self) -> Result<Map<String, Value>, CompositionError> {
+    /// Whole-value typing survives: `topic: "{{ seq.index }}"` binds the
+    /// number, not its rendering. Evaluation is atomic: the first failing
+    /// entry fails the task, so no partial mapping reaches its document.
+    fn evaluate_with(&self) -> Result<Map<String, Value>, CompositionError> {
         let mut evaluated = Map::new();
-        for (key, value) in &self.task.params {
+        for (key, value) in &self.task.with {
             if reserved::is_reserved_state_key(key) {
-                return Err(CompositionError::SequenceTaskParamReserved {
+                return Err(CompositionError::SequenceTaskWithReserved {
                     task: self.label(),
                     key: key.clone(),
                 });
             }
-            evaluated.insert(key.clone(), self.resolve_value(value, &format!("params.{key}"))?);
+            evaluated.insert(key.clone(), self.resolve_with_entry(key, value)?);
         }
         Ok(evaluated)
     }
 
+    /// Resolve one `with` entry, failing as the `with` family does: located at
+    /// the task's `with.<key>` in the file that authored it.
+    fn resolve_with_entry(&self, key: &str, value: &Value) -> Result<Value, CompositionError> {
+        self.resolve_value(value, &format!("with.{key}")).map_err(|error| match error {
+            CompositionError::SequenceTaskValueResolution { message, cause, .. } => {
+                CompositionError::LifecycleWithEvaluationFailed {
+                    source_path: self.task.diagnostic.source_path.clone(),
+                    property: self.task.diagnostic.task_property.clone(),
+                    path: format!("with.{key}"),
+                    target: match &self.task.action {
+                        PreflightAction::Prompt { reference, .. } => reference.clone(),
+                        _ => self.label(),
+                    },
+                    message,
+                    cause: Some(cause),
+                }
+            }
+            other => other,
+        })
+    }
+
     /// Fold the four layers into the overrides a prompt task composes against.
     ///
-    /// Precedence, lowest first: task `params`, sequence user setters,
+    /// Precedence, lowest first: task `with`, sequence user setters,
     /// accumulated runtime mutations, the reserved overlay (spec → *Task
-    /// Resolution and Lifecycle Semantics*). `params` were already evaluated
-    /// once against the task's state, so their results are data.
-    fn layered_overrides(&self, params: &Map<String, Value>) -> LayeredOverrides {
-        let mut base = LayeredOverrides::data(Some(&Value::Object(params.clone())));
+    /// Resolution and Lifecycle Semantics*). `with` was already evaluated
+    /// once against the task's state, so its results are data.
+    fn layered_overrides(&self, with: &Map<String, Value>) -> LayeredOverrides {
+        let mut base = LayeredOverrides::data(Some(&Value::Object(with.clone())));
         base.push(OverrideOrigin::Authored, self.user_setters);
         let snapshot = self.runtime.map(|runtime| runtime.snapshot());
         layered_set_overrides(base, snapshot.as_ref(), self.overlay)
@@ -963,7 +1488,7 @@ impl TaskExecution<'_> {
 
     /// Resolve one authored value's `{{ … }}` spans against the effective state.
     ///
-    /// Task values (`params`, `timeout`, group `variables`) evaluate in the
+    /// Task values (`with`, `timeout`, group `variables`) evaluate in the
     /// task's pre-primary scope ([`LifecycleScope::TaskSetup`]): no `err`, and
     /// `group` only inside an established group. A group's own `variables`
     /// resolve before its scope is entered, so they never read `group`, and no
@@ -978,13 +1503,16 @@ impl TaskExecution<'_> {
             self.stack.file_resolution_context,
             self.stack.ctx_base_dir,
         )?;
-        let (view, globals) = runtime_bindings(
+        let seq = self.sequence_binding();
+        let (view, globals) = runtime_bindings_in_loop(
             LifecycleScope::TaskSetup,
             LifecycleValues {
                 err: None,
                 timing: self.stack.timing,
                 group: self.stack.group,
+                seq: Some(&seq),
             },
+            self.stack.loop_values,
         );
         SubtreeCompose::new(value, self.state)
             .with_resolution_context(resolution)
@@ -1036,9 +1564,15 @@ impl TaskExecution<'_> {
         }
     }
 
+    /// One line of a dry run's preview, on the status channel.
+    fn dry_run_note(&self, text: &str) {
+        self.stack.emitter.emit_info(text, self.stack.term);
+    }
+
     fn interrupted(&self) -> bool {
         self.interrupt
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
+            || crate::composition::lifecycle::cancellation::requested()
     }
 
     /// The task's authored `name:`, falling back to its generated label.
@@ -1052,8 +1586,8 @@ impl TaskExecution<'_> {
 
 /// Both parsed action stacks; `None` for an absent or empty one.
 struct ParsedStacks {
-    setup: Option<Vec<LifecycleStackItem>>,
-    teardown: Option<Vec<LifecycleStackItem>>,
+    setup: Option<Vec<LifecycleNode>>,
+    teardown: Option<Vec<LifecycleNode>>,
 }
 
 /// Everything the stage machine decided, before output commit and timing.
@@ -1064,6 +1598,7 @@ struct StageOutcome {
     secondary_errors: Vec<TaskDiagnostic>,
     group_tasks: Vec<GroupTaskResult>,
     group_output: Option<Value>,
+    withheld: bool,
 }
 
 impl StageOutcome {
@@ -1077,6 +1612,7 @@ impl StageOutcome {
             secondary_errors: Vec::new(),
             group_tasks: Vec::new(),
             group_output: None,
+            withheld: false,
         }
     }
 }
@@ -1087,17 +1623,19 @@ impl StageOutcome {
 /// to `outputs`, but a scheduler reporting the task — and a parallel group
 /// keeping a slot per sibling — needs the text the work managed to produce.
 struct PrimaryOutcome {
+    group_binding: Option<super::super::lifecycle::bindings::GroupBinding>,
     stdout: String,
     result: PrimaryResult,
     /// Populated only by a group: one entry per member task that ran.
     group_tasks: Vec<GroupTaskResult>,
-    /// The nested `outputs` entry a completed parallel group owes — one string
-    /// per member in declaration order. `None` for every other task variant,
-    /// including a serial group, whose members each committed their own entry.
+    /// A completed container's native result, retained until its cleanup succeeds.
+    /// `None` for ordinary tasks and skipped containers.
     group_output: Option<Value>,
     /// Diagnostics a member task raised that did not decide the group's
     /// outcome.
     secondary: Vec<TaskDiagnostic>,
+    /// A success with no result to publish (see [`PromptRunOutcome::withheld`]).
+    withheld: bool,
 }
 
 impl PrimaryOutcome {
@@ -1117,13 +1655,20 @@ impl PrimaryOutcome {
         Self::new(stdout, PrimaryResult::Interrupted)
     }
 
+    /// A success with nothing to publish: a dry run's rendered task.
+    fn withheld() -> Self {
+        Self { withheld: true, ..Self::succeeded(String::new()) }
+    }
+
     fn new(stdout: String, result: PrimaryResult) -> Self {
         Self {
+            group_binding: None,
             stdout,
             result,
             group_tasks: Vec::new(),
             secondary: Vec::new(),
             group_output: None,
+            withheld: false,
         }
     }
 

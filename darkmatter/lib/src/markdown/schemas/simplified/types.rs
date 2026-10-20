@@ -17,6 +17,8 @@ use indexmap::IndexMap;
 
 use crate::markdown::span::SourceSpan;
 
+use super::alphanumeric::{AlphanumericOption, AlphanumericOptions};
+
 /// A SimplifiedSchema is either a single object shape or a root-level union of
 /// object shapes.
 #[derive(Debug, Clone, PartialEq)]
@@ -146,15 +148,32 @@ pub enum PropertyDef {
 }
 
 impl PropertyDef {
-    /// Whether any atom marks this property as required.
+    /// Whether this property is effectively required: some atom marks it
+    /// `required` and its whole value does not admit null.
     ///
-    /// Property-level unions hoist `required` from any arm, matching JSON
-    /// Schema lowering. Both value constraints and post-array constraints are
-    /// considered by [`PropertyAtom::is_required`].
-    pub(crate) fn is_required(&self) -> bool {
+    /// This is the one presence calculation shared by lowering, trigger
+    /// matching, optional-property materialization, completion metadata, and
+    /// phase projection. Property-level unions hoist `required` from any arm,
+    /// but a union with a `null` or `unknown` arm is never required, whatever
+    /// its arms, a named type, or `eager`/`generated` say. Expects a
+    /// **resolved** definition: an unresolved reference never admits null.
+    pub fn is_required(&self) -> bool {
+        let marked = match self {
+            Self::Single(atom) => atom.marks_required(),
+            Self::Union(atoms) => atoms.iter().any(PropertyAtom::marks_required),
+        };
+        marked && !self.admits_null()
+    }
+
+    /// Whether the property's whole value admits null: a scalar `null` or
+    /// `unknown`, or a property-level union with such an arm.
+    ///
+    /// Arrays never admit null as a whole (`null[]` is a list of nulls), and a
+    /// nullable child of an object leaves the object non-nullable.
+    pub fn admits_null(&self) -> bool {
         match self {
-            Self::Single(atom) => atom.is_required(),
-            Self::Union(atoms) => atoms.iter().any(PropertyAtom::is_required),
+            Self::Single(atom) => atom.admits_null(),
+            Self::Union(atoms) => atoms.iter().any(PropertyAtom::admits_null),
         }
     }
 
@@ -169,25 +188,41 @@ impl PropertyDef {
             Self::Union(atoms) => atoms.iter().any(PropertyAtom::has_default),
         }
     }
+
+    /// The property-level alternatives of this definition, however they were
+    /// written.
+    ///
+    /// Returns the arms of a [`PropertyDef::Union`], and the arms of a single
+    /// non-array atom whose type is a [`TypeExpr::Union`] (a postfixed union
+    /// reference such as `U(required)`). Returns `None` for any other
+    /// definition, including an array of a union, whose alternatives describe
+    /// its items (see [`PropertyAtom::union_arms`]).
+    pub fn alternatives(&self) -> Option<&[PropertyAtom]> {
+        match self {
+            Self::Union(arms) => Some(arms),
+            Self::Single(atom) if !atom.is_array => atom.union_arms(),
+            Self::Single(_) => None,
+        }
+    }
 }
 
 /// A type expression is a primitive type keyword, an inline object literal
-/// declared with `{ ... }` syntax, or a cross-file named-type import
-/// (`Name@fileref`).
+/// declared with `{ ... }` syntax, a named-type reference (`Name@fileref`
+/// or a bare local `Name`), or, after resolution, the alternatives of a
+/// postfixed union-typed reference.
 ///
-/// `TypeExpr` is `Clone` but not `Copy` because the inline-object and import
-/// arms carry owned data. Call sites that previously matched on
-/// `atom.ty: SimplifiedType` now match on `atom.ty: TypeExpr` and handle the
-/// `Primitive` / `InlineObject` / `Imported` arms.
+/// `TypeExpr` is `Clone` but not `Copy` because the inline-object, import,
+/// and union arms carry owned data.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     /// Built-in primitive type keyword (`string`, `number`, `object`, etc.).
     Primitive(SimplifiedType),
     /// Inline object literal: `{ foo: string, bar: number }`.
     InlineObject(SchemaShape),
-    /// Cross-file named-type import: `Name@fileref` (Feature B). Left of `@`
-    /// is the named type to inline; right is the file reference (`this` = the
-    /// current file). Postfix `[]` and `(constraints)` ride on the enclosing
+    /// Named-type reference: `Name@fileref` (Feature B), or a bare
+    /// non-keyword `Name`, which is `Name@this` ([`TypeExpr::local`]). Left
+    /// of `@` is the named type to inline; right is the file reference
+    /// (`this` = the current file). Postfix `[]` and `(constraints)` ride on the enclosing
     /// [`PropertyAtom`] (`is_array` / `constraints`), so this variant only
     /// carries the two parts that survive until resolution. The resolver
     /// (Phase 4) inline-expands imports before conversion; `to_json_schema`
@@ -198,6 +233,45 @@ pub enum TypeExpr {
         /// The raw file reference (right of `@`); `"this"` is the current file.
         reference: String,
     },
+    /// The ordered, flattened alternatives of a union-typed named type that a
+    /// use site referenced with a postfix (`U[]`, `U[](min(1))`,
+    /// `U(required)`, `U -> text`).
+    ///
+    /// Only the resolver produces this variant; the passive parser keeps the
+    /// authored [`TypeExpr::Imported`] reference. On an atom with `is_array`
+    /// it is the one representation of an array whose items are a union: the
+    /// atom's `array_constraints` and `description` belong to the container
+    /// and each arm keeps its own constraints and description. Without
+    /// `is_array` the atom carries the property's presence/timing markers and
+    /// description over the union. Presence and generation are read through
+    /// the arms rather than copied onto the atom, so an arm lowers exactly as
+    /// it does in a property-level union. A bare reference `U` is still
+    /// inlined as a [`PropertyDef::Union`].
+    Union(Vec<PropertyAtom>),
+}
+
+/// The [`TypeExpr::Imported`] reference that names the current schema's
+/// own named types, written `Name@this` or as a bare `Name`.
+pub const LOCAL_REFERENCE: &str = "this";
+
+impl TypeExpr {
+    /// A reference to the named type `name` in the schema that writes it.
+    ///
+    /// A bare `Name` and `Name@this` parse to this same value: they resolve
+    /// through one namespace, and serialization chooses the spelling (see
+    /// [`TypeExpr::is_local_reference`]).
+    pub fn local(name: impl Into<String>) -> Self {
+        Self::Imported {
+            name: name.into(),
+            reference: LOCAL_REFERENCE.to_string(),
+        }
+    }
+
+    /// Whether this is a reference to a named type of the writing schema,
+    /// in either spelling. A local reference never adds a file dependency.
+    pub fn is_local_reference(&self) -> bool {
+        matches!(self, Self::Imported { reference, .. } if reference == LOCAL_REFERENCE)
+    }
 }
 
 /// One arm of a property-level union (or the body of a non-union property).
@@ -250,16 +324,82 @@ impl PropertyAtom {
         self.constraints.iter().chain(self.array_constraints.iter())
     }
 
-    /// Whether this atom marks its containing property as required.
-    pub(crate) fn is_required(&self) -> bool {
+    /// Whether this atom, standing alone as a property, is effectively
+    /// required: it carries a `required` marker and its whole value does not
+    /// admit null (see [`PropertyDef::is_required`]).
+    pub fn is_required(&self) -> bool {
+        self.marks_required() && !self.admits_null()
+    }
+
+    /// Whether this atom carries a `required` marker, written, inherited, or
+    /// hoisted from a union type's arms, regardless of null admission.
+    pub(crate) fn marks_required(&self) -> bool {
         self.property_constraints()
             .any(|constraint| matches!(constraint, Constraint::Required))
+            || self
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(PropertyAtom::marks_required))
+    }
+
+    /// Whether this atom's whole value admits null: a non-array `null` or
+    /// `unknown`, or a non-array union type with such an arm.
+    pub fn admits_null(&self) -> bool {
+        if self.is_array {
+            return false;
+        }
+        match &self.ty {
+            TypeExpr::Primitive(SimplifiedType::Null | SimplifiedType::Unknown) => true,
+            TypeExpr::Union(arms) => arms.iter().any(PropertyAtom::admits_null),
+            _ => false,
+        }
+    }
+
+    /// Whether this atom marks its containing property as host-generated.
+    /// Like [`PropertyAtom::is_required`], a union type's arms count.
+    pub(crate) fn is_generated(&self) -> bool {
+        self.property_constraints()
+            .any(|constraint| matches!(constraint, Constraint::Generated))
+            || self
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(PropertyAtom::is_generated))
     }
 
     /// Whether this atom supplies a default for its containing property.
+    /// Like [`PropertyAtom::is_required`], a union type's arms count.
     pub(crate) fn has_default(&self) -> bool {
         self.property_constraints()
             .any(|constraint| matches!(constraint, Constraint::Default(_)))
+            || self
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(PropertyAtom::has_default))
+    }
+
+    /// The alternatives of a [`TypeExpr::Union`] type: the item alternatives
+    /// when `is_array` is set, the property alternatives otherwise.
+    pub fn union_arms(&self) -> Option<&[PropertyAtom]> {
+        match &self.ty {
+            TypeExpr::Union(arms) => Some(arms),
+            _ => None,
+        }
+    }
+
+    /// The canonical type options of an `alphanumeric` atom; `None` for every
+    /// other type.
+    pub fn alphanumeric_options(&self) -> Option<AlphanumericOptions> {
+        if !matches!(self.ty, TypeExpr::Primitive(SimplifiedType::Alphanumeric)) {
+            return None;
+        }
+        Some(
+            self.constraints
+                .iter()
+                .filter_map(|constraint| match constraint {
+                    Constraint::Options(options) => Some(options.iter().copied()),
+                    _ => None,
+                })
+                .flatten()
+                .collect::<AlphanumericOptions>()
+                .canonical(),
+        )
     }
 
     /// The scalar const value this atom pins when it is a `literal(x)` type,
@@ -333,8 +473,18 @@ pub enum SimplifiedType {
     /// reference string, inline mapping, or non-empty root union sequence;
     /// semantic validation is parse-only.
     Schema,
-    /// Anything.
-    Any,
+    /// Every value, including `null`, and omission. `any` is an equivalent
+    /// spelling; `unknown` is canonical.
+    Unknown,
+    /// Only an explicit `null` value (or omission).
+    Null,
+    /// A string of ASCII letters and digits, widened or narrowed by the
+    /// [`AlphanumericOption`]s carried in a positional
+    /// [`Constraint::Options`] (keeps this enum `Copy`).
+    Alphanumeric,
+    /// A string holding a shell command: at least one non-whitespace
+    /// character, never parsed, approved, or executed.
+    Shell,
 }
 
 impl SimplifiedType {
@@ -360,8 +510,27 @@ impl SimplifiedType {
             SimplifiedType::Expression => "expression",
             SimplifiedType::TypeDefinition => "type-definition",
             SimplifiedType::Schema => "schema",
-            SimplifiedType::Any => "any",
+            SimplifiedType::Unknown => "unknown",
+            SimplifiedType::Null => "null",
+            SimplifiedType::Alphanumeric => "alphanumeric",
+            SimplifiedType::Shell => "shell",
         }
+    }
+
+    /// Alternative spellings [`SimplifiedType::from_keyword`] accepts for this
+    /// type besides its canonical [`SimplifiedType::as_keyword`].
+    pub fn aliases(self) -> &'static [&'static str] {
+        match self {
+            SimplifiedType::Unknown => &["any"],
+            _ => &[],
+        }
+    }
+
+    /// Whether `name` is a built-in type keyword. Built-ins win over a local
+    /// named type of the same name, so such a type is reachable only as
+    /// `name@this`.
+    pub fn is_keyword(name: &str) -> bool {
+        Self::from_keyword(name).is_some()
     }
 
     /// Parses a type keyword. Returns `None` if `keyword` is not a known type.
@@ -386,7 +555,10 @@ impl SimplifiedType {
             "expression" => SimplifiedType::Expression,
             "type-definition" => SimplifiedType::TypeDefinition,
             "schema" => SimplifiedType::Schema,
-            "any" => SimplifiedType::Any,
+            "unknown" | "any" => SimplifiedType::Unknown,
+            "null" => SimplifiedType::Null,
+            "alphanumeric" => SimplifiedType::Alphanumeric,
+            "shell" => SimplifiedType::Shell,
             _ => return None,
         })
     }
@@ -459,6 +631,16 @@ pub enum Constraint {
     /// Schema `const` (Phase 3).
     LiteralValue(serde_json::Value),
 
+    // ── alphanumeric ─────────────────────────────────────────────────────
+    /// The `alphanumeric` type options written before the first `;`, in
+    /// authored order and possibly redundant. Positional like
+    /// [`Constraint::Members`]; [`Constraint::keyword`] is the first authored
+    /// option, which is how the option list is located in source. Identity
+    /// is [`AlphanumericOptions::canonical`] of the set
+    /// ([`PropertyAtom::alphanumeric_options`]). On a named-type reference
+    /// the list is kept until resolution compares it with the target's.
+    Options(Vec<AlphanumericOption>),
+
     // ── file ─────────────────────────────────────────────────────────────
     /// Glob patterns the resolved path must match. Patterns starting with `!`
     /// exclude.
@@ -517,6 +699,9 @@ impl Constraint {
             Constraint::Suggest(_) => "suggest",
             Constraint::Members(_) => "<members>",
             Constraint::LiteralValue(_) => "<value>",
+            Constraint::Options(options) => options
+                .first()
+                .map_or("<options>", |option| option.as_keyword()),
             Constraint::Match(_) => "match",
             Constraint::Eager => "eager",
             Constraint::Scheme(_) => "scheme",
@@ -587,11 +772,41 @@ mod tests {
             SimplifiedType::Expression,
             SimplifiedType::TypeDefinition,
             SimplifiedType::Schema,
-            SimplifiedType::Any,
+            SimplifiedType::Unknown,
+            SimplifiedType::Null,
+            SimplifiedType::Alphanumeric,
+            SimplifiedType::Shell,
         ] {
             let kw = ty.as_keyword();
             assert_eq!(SimplifiedType::from_keyword(kw), Some(ty));
         }
+    }
+
+    #[test]
+    fn any_is_an_alias_of_canonical_unknown() {
+        assert_eq!(SimplifiedType::from_keyword("any"), Some(SimplifiedType::Unknown));
+        assert_eq!(SimplifiedType::Unknown.as_keyword(), "unknown");
+        assert_eq!(SimplifiedType::Unknown.aliases(), ["any"]);
+        assert!(SimplifiedType::String.aliases().is_empty());
+        for keyword in ["unknown", "any", "null", "alphanumeric", "shell"] {
+            assert!(SimplifiedType::is_keyword(keyword), "{keyword}");
+        }
+    }
+
+    #[test]
+    fn alphanumeric_options_are_canonical_and_only_on_alphanumeric() {
+        let mut atom = PropertyAtom::bare(SimplifiedType::Alphanumeric);
+        assert_eq!(atom.alphanumeric_options(), Some(AlphanumericOptions::base()));
+        atom.constraints.push(Constraint::Options(vec![
+            AlphanumericOption::BlockLeadingDash,
+            AlphanumericOption::AllowPeriods,
+        ]));
+        assert_eq!(
+            atom.alphanumeric_options(),
+            Some(AlphanumericOptions::base().with(AlphanumericOption::AllowPeriods))
+        );
+        assert_eq!(atom.constraints[0].keyword(), "block-leading-dash");
+        assert_eq!(PropertyAtom::bare(SimplifiedType::String).alphanumeric_options(), None);
     }
 
     #[test]
@@ -619,6 +834,57 @@ mod tests {
         assert!(atom.constraints.is_empty());
         assert!(atom.array_constraints.is_empty());
         assert!(atom.description.is_none());
+    }
+
+    fn required(ty: SimplifiedType) -> PropertyAtom {
+        let mut atom = PropertyAtom::bare(ty);
+        atom.constraints.push(Constraint::Required);
+        atom
+    }
+
+    #[test]
+    fn null_admitting_whole_values_are_never_required() {
+        for ty in [SimplifiedType::Null, SimplifiedType::Unknown] {
+            let def = PropertyDef::Single(required(ty));
+            assert!(def.admits_null() && !def.is_required(), "{ty:?}(required)");
+        }
+        let nullable_union = PropertyDef::Union(vec![
+            required(SimplifiedType::String),
+            PropertyAtom::bare(SimplifiedType::Null),
+        ]);
+        assert!(nullable_union.admits_null() && !nullable_union.is_required());
+        let mut postfixed = PropertyAtom::bare(SimplifiedType::Object);
+        postfixed.ty = TypeExpr::Union(vec![
+            required(SimplifiedType::String),
+            PropertyAtom::bare(SimplifiedType::Unknown),
+        ]);
+        postfixed.constraints.push(Constraint::Required);
+        assert!(!PropertyDef::Single(postfixed).is_required(), "postfixed union with `unknown`");
+
+        // Item nullability and child nullability leave the container required.
+        for ty in [SimplifiedType::Null, SimplifiedType::Unknown] {
+            let mut list = PropertyAtom::bare(ty);
+            list.is_array = true;
+            list.array_constraints.push(Constraint::Required);
+            assert!(PropertyDef::Single(list).is_required(), "{ty:?}[](required)");
+        }
+        let mut shape = SchemaShape::new();
+        shape
+            .properties
+            .insert("child".into(), PropertyDef::Single(required(SimplifiedType::Null)));
+        let mut parent = PropertyAtom::bare_inline_object(shape);
+        parent.constraints.push(Constraint::Required);
+        assert!(PropertyDef::Single(parent).is_required());
+
+        // A concrete union and a concrete scalar can still become required.
+        assert!(
+            PropertyDef::Union(vec![
+                required(SimplifiedType::String),
+                PropertyAtom::bare(SimplifiedType::Number),
+            ])
+            .is_required()
+        );
+        assert!(PropertyDef::Single(required(SimplifiedType::String)).is_required());
     }
 
     #[test]

@@ -112,11 +112,12 @@ fn test_compose_remote_expression_function_reads_url() {
 }
 
 #[test]
-fn test_compose_remote_expression_function_denied_host_reads_false() {
+fn test_compose_remote_expression_function_denied_host_fails() {
     let fixture =
-        CliProcessFixture::named("test_compose_remote_expression_function_denied_host_reads_false");
-    // `file_exists` against a host that is not allowed must read as `false`
-    // (the fetch is policy-denied, never issued) rather than failing compose.
+        CliProcessFixture::named("test_compose_remote_expression_function_denied_host_fails");
+    // `file_exists` against a host that is not allowed fails compose: the
+    // fetch is policy-denied and never issued, which says nothing about
+    // whether the file exists, so it must not read as `false`.
     let server = mock_http_server(vec![MockHttpResponse {
         status: 200,
         body: "should not be fetched\n",
@@ -129,8 +130,9 @@ fn test_compose_remote_expression_function_denied_host_reads_false() {
         .args(["compose", "-"])
         .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Exists: false"));
+        .failure()
+        .stdout(predicate::str::contains("Exists: false").not())
+        .stderr(predicate::str::contains("remote read denied"));
 
     assert_eq!(server.request_count(), 0);
     assert!(server.requests().is_empty());
@@ -457,7 +459,7 @@ fn test_compose_unusable_cache_root_warns_and_still_composes() {
 /// R18 and AC36: `--cache-root` persists raw remote bodies only. A warm run
 /// still serves the remote body from the cache, but draws a new execution
 /// identity and recomposes the local `::file` child, the `::code` operation,
-/// and the `current_env` probe instead of replaying the cold run's output,
+/// and the `env` probe instead of replaying the cold run's output,
 /// and no composed, operation, or snapshot manifest is ever written.
 #[test]
 fn test_compose_cache_root_never_replays_composed_local_output() {
@@ -473,7 +475,7 @@ fn test_compose_cache_root_never_replays_composed_local_output() {
     let root = fixture.write_file(
         "cwd/root.md",
         &format!(
-            "# Root\n\nid=[{{{{ ctx.id }}}}] sid=[{{{{ ctx.sid }}}}] env=[{{{{ current_env.AC36_PROBE }}}}]\n\n\
+            "# Root\n\nid=[{{{{ ctx.id }}}}] sid=[{{{{ ctx.sid }}}}] env=[{{{{ env.AC36_PROBE }}}}]\n\n\
              ::file ./child.md\n\n::code ./main.rs\n\n::file {url}\n"
         ),
     );
@@ -693,8 +695,9 @@ fn test_compose_denied_host_never_reads_a_seeded_cache_entry() {
             .args(flags)
             .write_stdin(format!("Exists: {{{{ file_exists(\"{url}\") }}}}\n"))
             .assert()
-            .success()
-            .stdout(predicate::str::contains("Exists: false"));
+            .failure()
+            .stdout(predicate::str::contains("Exists:").not())
+            .stderr(predicate::str::contains("remote read denied"));
 
         assert_eq!(server.request_count(), 1, "{flags:?}: a denied host reached the network");
         assert_eq!(snapshot_tree(cache_dir.path()), seeded, "{flags:?}: the seeded cache changed");

@@ -25,7 +25,7 @@ sequence:
   - alpha
   - beta
 ---
-Step {{state}}
+Step {{seq}}
 "#,
     )
     .unwrap();
@@ -132,7 +132,7 @@ sequence:
   - beta
   - gamma
 ---
-Step {{state}}
+Step {{seq}}
 "#,
     )
     .unwrap();
@@ -161,8 +161,6 @@ exit 0
             "sequence",
             "--goose",
             "--perf",
-            "--fail-fast",
-            "true",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -199,7 +197,7 @@ fn sequence_perf_propagates_startup_timings() {
 sequence:
   - alpha
 ---
-Step {{state}}
+Step {{seq}}
 "#,
     )
     .unwrap();

@@ -67,7 +67,7 @@
           }
         },
         {
-          "name": "ListDirectoryContents",
+          "name": "GetSource",
           "request": {
             "method": "GET",
             "url": {
@@ -112,52 +112,7 @@
                 }
               ]
             },
-            "description": "List directory contents at a specific commit"
-          }
-        },
-        {
-          "name": "GetFileContentRaw",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/src/:commit/:path",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "repositories",
-                ":workspace",
-                ":repo_slug",
-                "src",
-                ":commit",
-                ":path"
-              ],
-              "variable": [
-                {
-                  "key": "workspace",
-                  "value": "<workspace>"
-                },
-                {
-                  "key": "repo_slug",
-                  "value": "<repo_slug>"
-                },
-                {
-                  "key": "commit",
-                  "value": "<commit>"
-                },
-                {
-                  "key": "path",
-                  "value": "<path>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "Accept",
-                "value": "text/plain"
-              }
-            ],
-            "description": "Get raw file content at a specific commit"
+            "description": "Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit"
           }
         },
         {

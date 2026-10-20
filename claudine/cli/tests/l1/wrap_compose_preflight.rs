@@ -291,7 +291,7 @@ fn compose_dry_run_does_not_traverse_a_proxy_handoff() {
     let router = fixture.cwd().join("router.md");
     fs::write(
         &router,
-        "---\ntitle: router\ninitialize:\n  stack:\n    - action: {proxy: \"target.md\"}\n---\nROUTER-BODY\n",
+        "---\ntitle: router\ninitialize:\n  - {proxy: \"target.md\"}\n---\nROUTER-BODY\n",
     )
     .unwrap();
 
@@ -350,7 +350,7 @@ fn compose_dry_run_fires_no_lifecycle_side_effects() {
     let events_log = fixture.cwd().join("events.log");
     let md_file = fixture.cwd().join("doc.md");
     let marker = |event: &str| {
-        format!("{event}:\n  stack:\n    - action: {{append_line: [\"events.log\", \"{event}\"]}}\n")
+        format!("{event}:\n  - {{append_line: [\"events.log\", \"{event}\"]}}\n")
     };
     fs::write(
         &md_file,

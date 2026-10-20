@@ -24,7 +24,9 @@ fn import_petstore_yaml_succeeds() {
         module_path: None,
         output: output.to_string_lossy().to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: true,
         strict: false,
         verbose: false,
@@ -51,7 +53,9 @@ fn import_petstore_generates_models_to_disk() {
         module_path: None,
         output: output.to_string_lossy().to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: false,
         strict: false,
         verbose: false,
@@ -84,7 +88,9 @@ fn import_complex_auth_json_succeeds() {
         module_path: None,
         output: output.to_string_lossy().to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: true,
         strict: false,
         verbose: false,
@@ -110,7 +116,9 @@ fn import_nonexistent_file_returns_error() {
         module_path: None,
         output: "/tmp/out".to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: true,
         strict: false,
         verbose: false,
@@ -132,7 +140,9 @@ fn import_dry_run_does_not_write_files() {
         module_path: None,
         output: output.to_string_lossy().to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: true,
         strict: false,
         verbose: false,
@@ -157,7 +167,9 @@ fn import_with_verbose_includes_diagnostics() {
         module_path: None,
         output: output.to_string_lossy().to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: true,
         strict: false,
         verbose: true,
@@ -181,7 +193,9 @@ fn import_with_api_name_override() {
         module_path: None,
         output: output.to_string_lossy().to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: true,
         strict: false,
         verbose: false,
@@ -206,7 +220,9 @@ fn import_with_module_path_override() {
         module_path: Some("custom_pets".to_string()),
         output: output.to_string_lossy().to_string(),
         definitions_out: None,
+        overlay: None,
         exclude_paths: vec![],
+        request_id_header: None,
         dry_run: true,
         strict: false,
         verbose: false,
@@ -214,4 +230,33 @@ fn import_with_module_path_override() {
 
     let result = run_import(&opts);
     assert!(result.is_ok());
+}
+
+#[test]
+fn an_imported_definition_records_the_supplied_request_id_header() {
+    for (request_id_header, expected) in [
+        (Some("x-request-id"), r#"request_id_header: Some("x-request-id".to_string())"#),
+        (None, "request_id_header: None"),
+    ] {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let definitions = temp_dir.path().join("petstore");
+        let opts = ImportOptions {
+            input: fixture_path("petstore.yaml"),
+            api_name: Some("Petstore".to_string()),
+            module_path: Some("petstore".to_string()),
+            output: String::new(),
+            definitions_out: Some(definitions.to_string_lossy().to_string()),
+            overlay: None,
+            exclude_paths: vec![],
+            request_id_header: request_id_header.map(str::to_string),
+            dry_run: false,
+            strict: false,
+            verbose: false,
+        };
+
+        run_import(&opts).expect("import succeeds");
+
+        let module = std::fs::read_to_string(definitions.join("mod.rs")).expect("definition module written");
+        assert!(module.contains(expected), "{request_id_header:?}: {module}");
+    }
 }

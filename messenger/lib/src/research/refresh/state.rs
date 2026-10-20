@@ -1,12 +1,12 @@
 //! The gitignored per-worktree state area and the run record.
 //!
 //! Layout under `messenger/.research-state/` (architecture record, "Local
-//! state area"): `runs/<platform>/<run_id>/` holds `run.json`, Claudine's
-//! `budget.json` ledger, the prepared `inputs/`, pass `outputs/`, the
-//! `candidate/`, `source-checks.json`, and the check results;
-//! `runs/prepare.lock` serializes preparation; `renewals/` holds routine
-//! unchanged-renewal records. Nothing here is committed, and every record is
-//! written by atomic replacement with LF line endings.
+//! state area"): `runs/<platform>/<run_id>/` holds `run.json`, the prepared
+//! `inputs/`, pass `outputs/`, the `candidate/`, `source-checks.json`, and
+//! the check results; `runs/fleet.lock` is the runner's whole-execution
+//! lock; `runs/prepare.lock` serializes preparation; `renewals/` holds
+//! routine unchanged-renewal records. Nothing here is committed, and every
+//! record is written by atomic replacement with LF line endings.
 
 use std::fs;
 use std::io;
@@ -20,7 +20,7 @@ use crate::research::canonical::xxh64_digest;
 use crate::research::model::{Date, PlatformId};
 use crate::research::paths::Workspace;
 use crate::research::publish::RetryPolicy;
-use crate::research::publish::fsutil::{read_optional, replace_file};
+use crate::research::publish::fsutil::replace_file;
 
 /// The run-record format tag.
 pub const RUN_FORMAT: &str = "messenger-research-run/1";
@@ -78,7 +78,9 @@ impl From<RunId> for String {
 
 crate::research::model::common::string_enum! {
     /// Where a run rests. `active`, `awaiting_review`, and `interrupted` runs
-    /// are protected from cleanup.
+    /// are protected from cleanup. `exhausted` survives only as a readable,
+    /// resumable resting state of ledger-era records (the budget ledger is
+    /// removed); it is never promotable and never shown as successful.
     pub enum RunStatus {
         Active => "active",
         AwaitingReview => "awaiting_review",
@@ -161,6 +163,17 @@ pub struct Decision {
     pub reason: Option<DecisionReason>,
 }
 
+crate::research::model::common::string_enum! {
+    /// What the Messenger-owned runner observed when the attempt's sequence
+    /// command settled. `finished` leaves the status `check-run` decided;
+    /// `interrupted` and `stopped` are recorded with a stop reason.
+    pub enum RunnerOutcome {
+        Finished => "finished",
+        Interrupted => "interrupted",
+        Stopped => "stopped",
+    }
+}
+
 /// `run.json`: identity, configuration, stage results, and outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -178,16 +191,29 @@ pub struct RunRecord {
     pub researched_under: ResearchedUnder,
     /// Resumptions after a failed, interrupted, or exhausted attempt (max 2).
     pub recovery_attempts: u32,
-    /// The ledger's `runs` count when this attempt was prepared: a higher
-    /// count means a sequence has run for this attempt.
-    #[serde(default)]
+    /// The ledger-era budget `runs` count this attempt was prepared under.
+    /// The budget ledger is removed; the field stays deserializable so
+    /// ledger-era records load, and is never written.
+    #[serde(skip_serializing, default)]
     pub ledger_runs: u64,
+    /// Agent admissions across all attempts. Ledger-era records omit this
+    /// field and begin at zero; malformed present values are rejected.
+    #[serde(default)]
+    pub invocations: u64,
+    /// Whether a runner started this attempt's sequence. A launched `active`
+    /// record with no live runner is stale and must be recovered explicitly.
+    #[serde(default)]
+    pub launched: bool,
+    /// What the runner observed when this attempt's sequence settled;
+    /// `None` until a runner runs it.
+    #[serde(default)]
+    pub runner: Option<RunnerOutcome>,
     pub stages: Vec<StageResult>,
     pub stop_reason: Option<String>,
     pub decision: Option<Decision>,
 }
 
-/// The maximum resumptions per run; a resumption never adds budget.
+/// The maximum resumptions per run.
 pub const MAX_RECOVERY_ATTEMPTS: u32 = 2;
 
 impl RunRecord {
@@ -200,28 +226,6 @@ impl RunRecord {
                 .is_none_or(|result| result.status != StageStatus::Complete)
         })
     }
-}
-
-/// A read-only view of Claudine's ledger (`budget.json`); Claudine is its
-/// only writer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LedgerView {
-    pub state: String,
-    #[serde(default)]
-    pub stage: Option<String>,
-    #[serde(default)]
-    pub stop_reason: Option<String>,
-    pub limits: Allowance,
-    pub used: Allowance,
-    /// Budgeted sequence runs opened on this ledger.
-    #[serde(default)]
-    pub runs: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Allowance {
-    pub invocations: u64,
-    pub active_ms: u64,
 }
 
 /// Local-state failures. Paths are repository-relative.
@@ -249,6 +253,11 @@ pub(crate) const RUNS: &str = "messenger/.research-state/runs";
 pub(crate) const RENEWALS: &str = "messenger/.research-state/renewals";
 pub(crate) const PREPARE_LOCK: &str = "prepare.lock";
 
+/// The repository-relative fleet-lock path, for diagnostics.
+pub fn fleet_lock_path() -> String {
+    format!("{RUNS}/fleet.lock")
+}
+
 impl StateArea {
     pub fn new(workspace: &Workspace) -> Self {
         Self { workspace: workspace.clone() }
@@ -270,9 +279,18 @@ impl StateArea {
         self.root().join("renewals")
     }
 
-    /// The lock file every ledger shares, so one platform runs at a time.
+    /// The fleet lock a research runner holds for its whole execution, so one
+    /// research run executes at a time. An OS lock, not the file's existence:
+    /// the OS releases it when the holder dies, so the file left behind never
+    /// blocks a later run.
     pub fn fleet_lock(&self) -> PathBuf {
         self.runs_dir().join("fleet.lock")
+    }
+
+    /// Whether a research runner holds the fleet lock right now. Probing
+    /// creates the lock file; the file itself is inert.
+    pub fn fleet_lock_held(&self) -> bool {
+        crate::research::publish::fsutil::PublicationLock::try_acquire(&self.fleet_lock()).is_err()
     }
 
     /// The lock `prepare` (and `prepare --resume`) holds from selection until
@@ -289,6 +307,13 @@ impl StateArea {
     /// The repository-relative spelling of a run file.
     pub fn run_path(&self, platform: PlatformId, run_id: &RunId, file: &str) -> String {
         format!("{RUNS}/{platform}/{run_id}/{file}")
+    }
+
+    /// Whether a ledger-era `budget.json` sits beside the record. The ledger
+    /// is removed; the artifact is neither read nor deleted, and callers only
+    /// mention it.
+    pub fn has_legacy_ledger(&self, record: &RunRecord) -> bool {
+        self.run_dir(record.platform_id, &record.run_id).join("budget.json").exists()
     }
 
     /// Creates the run directory (refusing an existing one) and its record.
@@ -365,48 +390,6 @@ impl StateArea {
         }
         out
     }
-
-    /// Claudine's ledger for a run, when one was initialized.
-    ///
-    /// ## Errors
-    ///
-    /// [`StateError::Corrupt`] for a ledger that does not parse.
-    pub fn ledger(&self, record: &RunRecord) -> Result<Option<LedgerView>, StateError> {
-        let path = self.run_dir(record.platform_id, &record.run_id).join("budget.json");
-        let display = self.run_path(record.platform_id, &record.run_id, "budget.json");
-        match read_optional(&path).map_err(io_err(format!("read {display}")))? {
-            None => Ok(None),
-            Some(bytes) => serde_json::from_slice(&bytes)
-                .map(Some)
-                .map_err(|error| StateError::Corrupt { path: display, message: error.to_string() }),
-        }
-    }
-}
-
-/// Applies the ledger's resting state to an active run: an exhausted ledger
-/// makes the run `exhausted` (never finished, never an investigated unknown);
-/// a crash-recovered ledger makes it `interrupted`; a sequence that ran for
-/// this attempt and rests `stopped` (a failed step, Ctrl+C, or a refused first
-/// step) without `check-run` deciding the run makes it `failed`. Returns
-/// whether the record changed.
-pub fn apply_ledger(record: &mut RunRecord, ledger: Option<&LedgerView>) -> bool {
-    let Some(ledger) = ledger else { return false };
-    if record.status != RunStatus::Active {
-        return false;
-    }
-    let stage = ledger.stage.as_deref().unwrap_or("unknown");
-    let (status, reason) = match ledger.state.as_str() {
-        "exhausted" => (RunStatus::Exhausted, format!("execution budget exhausted before or during stage {stage}")),
-        "interrupted" => (RunStatus::Interrupted, format!("the runner stopped unexpectedly during stage {stage}")),
-        // `stopped` with no run for this attempt is a prepared, unlaunched run.
-        "stopped" if ledger.runs > record.ledger_runs => {
-            (RunStatus::Failed, "the sequence stopped before its checks passed".to_string())
-        }
-        _ => return false,
-    };
-    record.status = status;
-    record.stop_reason = Some(ledger.stop_reason.clone().unwrap_or(reason));
-    true
 }
 
 fn read_run(path: &Path, display: &str) -> Result<RunRecord, StateError> {
@@ -447,33 +430,22 @@ mod tests {
     }
 
     #[test]
-    fn only_an_active_run_takes_the_ledger_resting_state() {
-        let ledger = |state: &str| LedgerView {
-            state: state.to_string(),
-            stage: Some("reconcile".to_string()),
-            stop_reason: None,
-            limits: Allowance { invocations: 4, active_ms: 1000 },
-            used: Allowance { invocations: 4, active_ms: 900 },
-            runs: 1,
-        };
-        let mut record: RunRecord = serde_json::from_value(serde_json::json!({
+    fn a_ledger_era_record_with_runs_and_ledger_still_loads() {
+        // A record the ledger era wrote: it carries `ledger_runs` and no
+        // `launched`/`runner` fields. It must load unchanged, and a fresh
+        // save never re-writes the removed field.
+        let record: RunRecord = serde_json::from_value(serde_json::json!({
             "format": RUN_FORMAT, "run_id": "2026-09-17-0123abcd", "platform_id": "discord",
-            "created": "2026-09-17", "status": "active", "selected_because": ["forced"],
+            "created": "2026-09-17", "status": "exhausted", "selected_because": ["forced"],
             "limits": {"max_seconds": 60, "max_invocations": 4}, "baseline": null,
             "researched_under": {"fleet_prompt": "a", "schema": "b"}, "recovery_attempts": 0,
-            "stages": [], "stop_reason": null, "decision": null
+            "ledger_runs": 3, "stages": [], "stop_reason": "execution budget exhausted", "decision": null
         }))
         .unwrap();
-        assert!(!apply_ledger(&mut record, Some(&ledger("suspended"))));
-        let mut stopped = record.clone();
-        assert!(!apply_ledger(&mut stopped, Some(&LedgerView { runs: 0, ..ledger("stopped") })), "not launched yet");
-        assert!(apply_ledger(&mut stopped, Some(&ledger("stopped"))));
-        assert_eq!(stopped.status, RunStatus::Failed);
-        assert!(apply_ledger(&mut record, Some(&ledger("exhausted"))));
         assert_eq!(record.status, RunStatus::Exhausted);
-        assert!(record.stop_reason.as_deref().unwrap().contains("reconcile"));
-        // A decided or already-exhausted run never changes again.
-        assert!(!apply_ledger(&mut record, Some(&ledger("interrupted"))));
-        assert_eq!(record.next_stage(), Some(Stage::Discovery));
+        assert_eq!(record.ledger_runs, 3);
+        assert!(!record.launched, "a ledger-era record was never marked launched by the new runner");
+        assert!(record.runner.is_none());
+        assert!(!serde_json::to_value(&record).unwrap().to_string().contains("ledger_runs"), "the removed field is never written");
     }
 }

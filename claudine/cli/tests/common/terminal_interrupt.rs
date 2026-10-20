@@ -144,12 +144,10 @@ impl PaneCompose {
             r#"---
 title: orphan teardown
 model: llamacpp/test-model
-failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
+cancelled:
+  - {append_line: ["events.log", "cancelled"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Prompt body
 "#,
@@ -221,15 +219,12 @@ exit 1
                 r#"---
 title: terminal grace
 failure:
-  stack:
-    - action:
-        - append_line: ["events.log", "failure-started"]
-        - shell: |
-            trap '' INT; {}
-        - append_line: ["events.log", "failure-done"]
+  - append_line: ["events.log", "failure-started"]
+  - shell: |
+      trap '' INT; {}
+  - append_line: ["events.log", "failure-done"]
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Prompt body
 "#,
@@ -387,7 +382,7 @@ impl Drop for PaneCompose {
 }
 
 /// Ctrl+C while the wrapper tears down an OpenCode run's surviving descendant
-/// cuts the 60 s kill grace short and still runs `failure` then `finalize`.
+/// cuts the 60 s kill grace short and still runs `cancelled` then `finalize`.
 pub fn assert_press_during_orphan_teardown_runs_the_lifecycle<H: TerminalHarness>(
     harness: &mut H,
     mut press: impl FnMut(&mut H),
@@ -415,7 +410,7 @@ pub fn assert_press_during_orphan_teardown_runs_the_lifecycle<H: TerminalHarness
     );
     assert_eq!(
         compose.events(),
-        vec!["failure", "finalize"],
+        vec!["cancelled", "finalize"],
         "the interrupted run must still fire its terminal lifecycle; pane:\n{pane}"
     );
 }
@@ -478,7 +473,7 @@ pub fn assert_repeat_press_force_exits_long_lifecycle<H: TerminalHarness>(
 
 /// A repeat Ctrl+C that lands while the wrapper is still tearing down an
 /// OpenCode run's surviving descendant is deferred: no force-exit, and
-/// `failure` then `finalize` still run once the teardown ends.
+/// `cancelled` then `finalize` still run once the teardown ends.
 ///
 /// The binary's `terminal-tests` seam holds the teardown inside its deferring
 /// window until the test releases it, whether the first press cut the 60 s
@@ -506,15 +501,10 @@ pub fn assert_repeat_press_during_orphan_teardown_defers<H: TerminalHarness>(
         !joined(pane).contains(FORCE_EXIT_TEXT),
         "a repeat press during the teardown must be deferred, not force-exit; pane:\n{pane}"
     );
-    assert!(
-        !["0", "130"].contains(&exit.status.as_str()),
-        "a failed, interrupted run exits non-zero but not with the force-exit 130; got {}; \
-         pane:\n{pane}",
-        exit.status
-    );
+    assert_eq!(exit.status, "130", "an interrupted run exits 130; pane:\n{pane}");
     assert_eq!(
         compose.events(),
-        vec!["failure", "finalize"],
+        vec!["cancelled", "finalize"],
         "the deferred press must leave the terminal lifecycle to run; pane:\n{pane}"
     );
 }

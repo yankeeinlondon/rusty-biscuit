@@ -280,8 +280,19 @@ Path resolution inside `when` is identical to dispatch templates and event bindi
 - `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`
 - `os.*`, `hardware.*`, `git.*`, `project.*`
 - Top-level event fields: `provider`, `event`, `tool_name`, etc.
+- `hook` (the whole normalized payload; JSON in a template) and `hook.<path>`
+  (one field: `hook.tool_name` is `tool_name`). A missing `hook.<path>` is
+  absent with no fallback, `hook.env.*` is absent (use `env.*`), and
+  `hook.extra.doc` reaches an extra named `doc`. `hook` is hook-only; hook
+  expressions have no frontmatter `fm` root.
 
-`ctx.*` (e.g. `ctx.today`, `ctx.year`) is the **only** `when`-exclusive surface. It is deliberately unresolved in templates, matchers, and harness validation.
+The payload root was previously `doc`, renamed with no alias: `doc` gets no
+special treatment in hook expressions, so an old `{{ doc.tool_name }}` template
+stays literal and an old `doc.tool_name == 'Bash'` condition is false. The
+before/after table is in
+[Configuring Actions](topics/configuring-actions.md#migrating-from-the-doc-root).
+
+`ctx.*` (e.g. `ctx.today`, `ctx.year`) is the **only** `when`-exclusive surface. It is deliberately unresolved in templates and matchers.
 
 ### Example
 

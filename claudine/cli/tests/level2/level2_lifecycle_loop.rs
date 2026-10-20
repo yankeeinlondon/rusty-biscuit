@@ -165,17 +165,14 @@ loop:
   until: "phase > 2"
   action: "increment(phase)"
   max: 10
-  stack:
-    - action: {append_line: ["events.log", "gate:{{phase}}"]}
+  gate:
+    - {append_line: ["events.log", "gate:{{phase}}"]}
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "initialize"]}
+  - {append_line: ["events.log", "initialize"]}
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;
@@ -242,23 +239,19 @@ fn level2_lifecycle_loop_blocked_first_iteration_exits_before_gate() {
 title: lifecycle loop blocked
 phase: 1
 start:
-  stack:
-    - action: {shell: "rm -rf /tmp/nonexistent"}
+  - {shell: "rm -rf /tmp/nonexistent"}
 loop:
   until: "phase > 2"
   action: "increment(phase)"
   max: 10
-  stack:
-    - action: {append_line: ["events.log", "gate:{{phase}}"]}
+  gate:
+    - {append_line: ["events.log", "gate:{{phase}}"]}
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "initialize"]}
+  - {append_line: ["events.log", "initialize"]}
 blocked:
-  stack:
-    - action: {append_line: ["events.log", "blocked"]}
+  - {append_line: ["events.log", "blocked"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;
@@ -315,18 +308,15 @@ loop:
   until: "phase > 2"
   action: "increment(phase)"
   max: 10
-  stack:
-    - action: {append_line: ["events.log", "gate:{{phase}}"]}
+  gate:
+    - {append_line: ["events.log", "gate:{{phase}}"]}
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "initialize"]}
-    - action: "skip"
+  - {append_line: ["events.log", "initialize"]}
+  - "skip"
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;
@@ -379,18 +369,15 @@ loop:
   until: "phase > 5"
   action: "increment(phase)"
   max: 10
-  stack:
-    - action: {append_line: ["events.log", "gate:{{phase}}"]}
-    - action: {error: "gate rejected final state"}
+  gate:
+    - {append_line: ["events.log", "gate:{{phase}}"]}
+    - {error: "gate rejected final state"}
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "initialize"]}
+  - {append_line: ["events.log", "initialize"]}
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Phase {{phase}}
 "#;
@@ -430,9 +417,15 @@ Phase {{phase}}
     );
 
     // The explicit gate error fails the composition: claudine reports a non-zero
-    // outcome. The authored reason surfaces in the rendered error.
+    // outcome. The authored reason surfaces in the rendered error, which wraps
+    // inside the error panel, so match over a border-free, whitespace-collapsed copy.
+    let flat = pane
+        .split_whitespace()
+        .filter(|word| *word != "┃")
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
-        pane.contains("gate rejected final state"),
+        flat.contains("gate rejected final state"),
         "the gate error reason must surface in the run output; pane:\n{pane}"
     );
 }

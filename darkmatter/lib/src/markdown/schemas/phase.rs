@@ -107,20 +107,23 @@ fn project_def(def: &mut PropertyDef, phase: SchemaPhase) {
     }
 }
 
+/// Rewrites one property atom's presence markers for `phase`.
+///
+/// The arms of a [`TypeExpr::Union`] (`U[]`, `U(required)`) hold presence
+/// markers that hoist to the property, so they are read into the property's
+/// authored presence, stripped from the arms, and re-applied once on the
+/// container. Every other arm constraint, including an inherited
+/// `file(eager)`, is left alone: phase projection changes presence, never an
+/// arm's file-existence semantics. Nested object fields, whether in an
+/// inline-object type or in a union arm, are projected as their own shape.
 fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: bool) {
-    if let TypeExpr::InlineObject(shape) = &mut atom.ty {
-        *shape = project_shape(shape, phase);
+    let authored_required = atom.is_required();
+    match &mut atom.ty {
+        TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
+        TypeExpr::Union(arms) => arms.iter_mut().for_each(|arm| strip_union_arm(arm, phase)),
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => {}
     }
-
-    let authored_required = atom
-        .constraints
-        .iter()
-        .chain(atom.array_constraints.iter())
-        .any(|constraint| matches!(constraint, Constraint::Required));
-    atom.constraints
-        .retain(|constraint| !matches!(constraint, Constraint::Required | Constraint::Generated));
-    atom.array_constraints
-        .retain(|constraint| !matches!(constraint, Constraint::Required | Constraint::Generated));
+    strip_presence(atom);
 
     let phase_required = match phase {
         SchemaPhase::Launch => property_eager && authored_required,
@@ -135,6 +138,33 @@ fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: boo
     }
 }
 
+/// Removes a union arm's hoisted presence markers, recursing into the item
+/// arms of an array-of-union arm, and projects an object arm's own fields.
+fn strip_union_arm(arm: &mut PropertyAtom, phase: SchemaPhase) {
+    match &mut arm.ty {
+        TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
+        TypeExpr::Union(arms) => arms.iter_mut().for_each(|arm| strip_union_arm(arm, phase)),
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => {}
+    }
+    strip_presence(arm);
+}
+
+fn strip_presence(atom: &mut PropertyAtom) {
+    atom.constraints
+        .retain(|constraint| !matches!(constraint, Constraint::Required | Constraint::Generated));
+    atom.array_constraints
+        .retain(|constraint| !matches!(constraint, Constraint::Required | Constraint::Generated));
+}
+
+/// Whether `atom` sets the property's validation timing.
+///
+/// `eager` is property timing in the property's own constraint list: the
+/// postfix `[](…)` list of an array, the value list otherwise, so the
+/// item-level `eager` of `file(eager)[]` times the items, not the property.
+/// A union type's arms count whether or not it is a list (`U(eager)`, `U[]`),
+/// the way a property-level union's arms do and the way
+/// [`PropertyAtom::is_required`] counts them: an arm's markers belong to the
+/// property that holds the union.
 fn atom_has_property_eager(atom: &PropertyAtom) -> bool {
     let constraints = if atom.is_array {
         &atom.array_constraints
@@ -144,4 +174,7 @@ fn atom_has_property_eager(atom: &PropertyAtom) -> bool {
     constraints
         .iter()
         .any(|constraint| matches!(constraint, Constraint::Eager))
+        || atom
+            .union_arms()
+            .is_some_and(|arms| arms.iter().any(atom_has_property_eager))
 }

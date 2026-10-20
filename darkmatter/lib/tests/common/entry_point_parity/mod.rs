@@ -1191,16 +1191,27 @@ impl ParityFixture {
         )
     }
 
-    /// The files a rendered `::file-links` tree links: each `📄` entry's
-    /// `file://` target.
+    /// The files a rendered `::file-links` tree links, resolving portable
+    /// targets in the glob document's context as well as absolute file URLs.
     pub fn file_links_listed(&self, output: &str) -> Vec<PathBuf> {
+        let context = biscuit_file::FileResolutionContext::new(self.depth_dir(GLOB_DEPTH))
+            .with_repository_root(self.repo())
+            .with_home_dir(self.home());
         output
             .lines()
             .filter(|line| line.contains('\u{1f4c4}'))
             .filter_map(|line| {
-                let start = line.find("(file://")? + "(file://".len();
-                let end = start + line[start..].find(')')?;
-                Some(file_url_path(&line[start..end]))
+                let (_, destination) = line.rsplit_once("](")?;
+                let destination = destination.trim_end().strip_suffix(')')?;
+                let destination = destination.trim_start_matches('<').trim_end_matches('>');
+                if let Some(path) = destination.strip_prefix("file://") {
+                    Some(file_url_path(path))
+                } else {
+                    biscuit_file::FileReference::new(destination)
+                        .ok()?
+                        .resolve_in_context(&context)
+                        .ok()?
+                }
             })
             .collect()
     }

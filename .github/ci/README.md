@@ -97,7 +97,7 @@ nowhere else.
 | `validation` | yes | on a `main` push, decides whether successful PR validation covers this tree |
 | `scope` | yes | sources the resolved plan — a matching scope receipt or one selection run — and publishes it |
 | `preflight` | yes | bootstrap prerequisites only, per selected OS. Runs no test suite |
-| `build` | yes | the native build owners; each builds the archives its plan keys name, serially |
+| `build` | yes | the native build owners; each builds the archives its plan keys name, serially, after running schematic's fresh-output guard when it builds `schematic-gen` |
 | `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
 | `area-drift` | yes | checks that the planner's areas match `sniff`; skipped when nothing can move area derivation |
 | `ci-gate` | yes — **the required check** | a policy-free fold of the six above |
@@ -106,6 +106,18 @@ nowhere else.
 There is no job that owns a test suite on CI's behalf. Every suite belongs to a
 package (see [CI's own tooling](#cis-own-tooling)) and runs in that package's
 own cell, so the plan places it once and one owner answers for it.
+
+One package's tests run on the build owner instead of a cell. Schematic's
+fresh-output guard (`just -f schematic/justfile test-fresh-output`, the `slow_`
+tests of `schematic-gen`'s L1 binary) generates client crates and compiles them
+with a child Cargo, which archive consumers do not have. The default L1 filter
+already leaves `slow_` out of every consumer's executed and expected listings,
+so the owner runs the guard before producing the archive, keeps its JUnit
+report as the `fresh-output-schematic-gen-<producer>` artifact, and fails the
+`build` job when a guard test fails. No completion record covers these tests:
+their only accounting is that job's result, which `ci-gate` folds. When CI
+reuses passing evidence instead of building `schematic-gen`, the guard does not
+run in CI.
 
 `preflight` and `area-ci` are both matrix jobs guarded by a **scalar** plan
 output read before matrix expansion — `preflight_os != '[]'` and

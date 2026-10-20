@@ -20,29 +20,59 @@ body alone. Prompts therefore:
   that dominates the prompt — field semantics live in `_schema.yaml` comments and in
   the body-section guidance, stated once.
 
-## Required skeleton (in this order)
+## Coordinator and row prompt
+
+Keep `_fleet.md` as the entrypoint:
+
+```yaml
+---
+sequence: "@claudine/docs/research/_provider-tasks.yaml"
+research_prompt: "@claudine/docs/research/<topic>/_research.md"
+agent: opencode
+model: kimi-for-coding/k2p7
+---
+```
+
+The shared formal task roster adds a `prompt` executable to each canonical
+provider row. `_local-runner-tasks.yaml` does the same for local runners.
+A parity test enforces identical row data and order with the canonical
+rosters; when a roster changes, update its task projection alongside it.
+
+Put row-specific frontmatter, lifecycle hooks, and instructions in
+`_research.md`. Its `seq` root holds that row. Root hooks on `_fleet.md` run
+once for the container, so they must not perform per-provider freshness or
+completion checks. An unhandled row failure stops the fleet; rerunning skips
+rows whose research is already current.
+
+```mermaid
+flowchart LR
+    F[_fleet.md coordinator] --> R[Shared task roster]
+    R --> P[_research.md per row]
+    P --> I[initialize freshness check]
+    I --> W[provider work]
+    W --> V[success validation]
+```
+
+## Row prompt skeleton (in this order)
 
 ```markdown
 ---
-sequence: "@claudine/docs/providers.yaml"
-file: "{{ctx.repo_root}}/claudine/docs/research/<topic>/{{state.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/<topic>/{{seq.file}}"
 # grant: is not implemented — run with --yolo (see model-config/_fleet.md NOTE)
 agent: opencode
 model: kimi-for-coding/k2p7
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
-    stack:
-        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
-          action: [ stderr: "…already up to date — skipping.", skip ]
+    - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
+      then: [ stderr: "…already up to date — skipping.", skip ]
 success:
-    stack:
-        - when: "frontmatter(file, 'last_updated') != ctx.today"
-          action: [ stderr: "…not updated…", error: "research file was not updated" ]
+    - when: "frontmatter(file, 'last_updated') != ctx.today"
+      then: [ stderr: "…not updated…", error: "research file was not updated" ]
 ---
 
 ## Skills            — "Use the 'claudine' skill." (+ topic-relevant skills)
 
-## Scope             — what this topic covers for {{state.name}}, the claudine
+## Scope             — what this topic covers for {{seq.name}}, the claudine
                        consumer it feeds, AND the boundary against every sibling
                        topic that could claim the same ground. Legacy-quarantine
                        paragraph goes here (see below).
@@ -54,7 +84,7 @@ success:
                        1. (update mode ::block) read {{file}} for changelog context
                           only — never substitute old research for new research
                        2. Perform research — WITH the evidence requirement HERE:
-                          "you have read access to {{state.user_dir}}; inspect the
+                          "you have read access to {{seq.user_dir}}; inspect the
                           actual config/logs/sessions there and prefer what you
                           observe over what documentation claims"
                        3. Write the body per Document Structure

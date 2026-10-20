@@ -682,7 +682,10 @@ fn load_validated_frontmatter(path: &Path) -> Result<Value> {
         let problems = report
             .problems
             .iter()
-            .map(|problem| format!("- {}", problem.message))
+            .map(|problem| match problem.path.as_str() {
+                "" => format!("- {}", problem.message),
+                path => format!("- {path}: {}", problem.message),
+            })
             .collect::<Vec<_>>()
             .join("\n");
         bail!(
@@ -787,6 +790,19 @@ fn load_exclusions(path: &Path) -> Result<Vec<OverlapExclusion>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidecar_schema_problems_name_their_instance_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(
+            &doc,
+            "---\n$schema:\n  config: '{ size: number }'\nconfig:\n  size: big\n---\nbody\n",
+        )
+        .unwrap();
+        let error = load_validated_frontmatter(&doc).unwrap_err().to_string();
+        assert!(error.contains("\n- /config/size: "), "{error}");
+    }
 
     #[test]
     fn fixture_key_normalizes_document_relative_evidence() {

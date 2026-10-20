@@ -1,62 +1,106 @@
-//! Typed action model for lifecycle event stacks.
+//! Typed action model for lifecycle stacks.
 //!
-//! Each lifecycle event (`initialize`, `start`, `success`, `blocked`,
-//! `failure`, `finalize`, `loop`) may carry a `stack:` of conditional
-//! actions. This module defines the parsed, typed form of those actions and
-//! the per-event validity matrix that governs where lifecycle control
-//! actions may appear.
+//! A **stack** is any place the lifecycle action grammar is accepted: the seven
+//! events (`initialize`, `start`, `blocked`, `success`, `failure`,
+//! `finalize`, `cancelled`), the `loop:` block's lifecycle concerns, and a sequence task's
+//! `setup:`/`teardown:`. Each parses into an ordered list of
+//! [`LifecycleNode`]s: a leaf [`LifecycleAction`], or a
+//! [`LifecycleConditional`] whose `then`/`else` bodies are themselves ordered
+//! node lists. Dictionary bundles are expanded into that list at parse time,
+//! so the executor never iterates a mapping to choose order.
 //!
-//! ## Parsing
-//!
-//! Raw frontmatter values are turned into [`LifecycleStackItem`] values by
-//! [`super::lifecycle::parse_lifecycle_config`], which calls into the
-//! short-form / long-form parsers in this module. The parsers validate
-//! argument shape and the per-event "Where valid" matrix at parse time so a
-//! malformed stack never reaches runtime execution.
+//! This module is part of the lift-ready parser slice: it names no Claudine
+//! runtime type (settings, providers, messaging, TTS, or Playa).
 //!
 //! ## Categories
 //!
-//! The spec groups actions into five categories; this module mirrors that
-//! split with [`LifecycleActionKind`] variants:
+//! [`LifecycleActionKind`] mirrors the action inventory:
 //!
-//! - [`LifecycleControlAction`] — `Stop`/`Skip`/`Error`/`Proxy`/`Retry`/
-//!   `Resume`/`Defer`. At most one per stack item, always last.
+//! - [`LifecycleControlAction`] — the flow-control directives. Every one
+//!   except `prep` ends the whole event, so it is the last item of its list;
+//!   `prep` returns to the item after it.
 //! - [`CommunicationAction`] — `say`/`speak`/`effect`/`message`/`notify`/
-//!   `stderr`/`info`/`warn`.
+//!   `stderr`/`stdout`/`info`/`warn`/`success`.
 //! - [`ShellAction`] — bespoke shell commands.
 //! - [`SideEffectAction`] — Darkmatter side effects by name.
+//! - [`RuntimeSet`] — invocation-local frontmatter mutations.
 //! - [`ExpressionFunctionAction`] — read-only Darkmatter expression
 //!   functions invoked for their result.
 
-use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder};
+use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 use darkmatter::markdown::compose::{ResolvedShellValue, check_frontmatter_shell_value};
 use indexmap::IndexMap;
 
 use super::LifecycleSignal;
+pub use super::source_map::LifecyclePath;
 
 #[path = "signatures.rs"]
 mod signatures;
 pub use signatures::*;
 
-/// A single stack item: an optional `when:` condition plus one or more
-/// ordered actions.
-///
-/// At parse time the cardinality rule is enforced: at most one action may
-/// be a [`LifecycleActionKind::LifecycleControl`], and that action must be
-/// the last in `actions` (subsequent actions would be unreachable because
-/// a lifecycle control action terminates stack processing for the event).
+/// One entry of a parsed stack, in authored order.
 #[derive(Debug, Clone, PartialEq)]
-pub struct LifecycleStackItem {
-    /// Darkmatter condition expression evaluated against the lifecycle
-    /// execution context. `None` means the item always executes.
-    pub when: Option<Expr>,
-
-    /// Ordered actions executed when `when` evaluates truthy (or is omitted).
-    pub actions: Vec<LifecycleAction>,
+pub enum LifecycleNode {
+    /// A leaf action.
+    Action(LifecycleAction),
+    /// A `when` guard selecting one of two ordered bodies.
+    Conditional(LifecycleConditional),
 }
 
-/// One parsed action with its `no_error` flag.
+/// A guarded list item: `when` with `then` (and optionally `else`), or `when`
+/// with sibling verbs, whose expansion becomes `then`.
+///
+/// The guard is evaluated once, when the item is reached, and only the
+/// selected body runs. Both bodies were parsed and validated before anything
+/// executed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LifecycleConditional {
+    /// The guard, a Darkmatter condition expression.
+    pub when: Expr,
+    /// The body run when the guard is truthy. Never empty.
+    pub then: Vec<LifecycleNode>,
+    /// The body run when the guard is falsy; empty when `else` was omitted
+    /// (an explicitly authored `else` is never empty).
+    pub otherwise: Vec<LifecycleNode>,
+    /// The authored path of the item, e.g. `failure[0]`; the guard is at
+    /// `{path}.when`.
+    pub path: LifecyclePath,
+}
+
+/// Visit every action in `nodes`, in authored order, through both branches of
+/// every conditional.
+///
+/// This is a structural walk: guards are not evaluated, so callers that need
+/// every reachable action regardless of state (shell approval, the
+/// `initialize` shell prohibition) see each one exactly once.
+pub fn for_each_action<'a>(nodes: &'a [LifecycleNode], visit: &mut impl FnMut(&'a LifecycleAction)) {
+    for node in nodes {
+        match node {
+            LifecycleNode::Action(action) => visit(action),
+            LifecycleNode::Conditional(conditional) => {
+                for_each_action(&conditional.then, visit);
+                for_each_action(&conditional.otherwise, visit);
+            }
+        }
+    }
+}
+
+/// [`for_each_action`] with mutable access, for preflight to fix approved
+/// command bytes in place.
+pub fn for_each_action_mut(nodes: &mut [LifecycleNode], visit: &mut impl FnMut(&mut LifecycleAction)) {
+    for node in nodes {
+        match node {
+            LifecycleNode::Action(action) => visit(action),
+            LifecycleNode::Conditional(conditional) => {
+                for_each_action_mut(&mut conditional.then, visit);
+                for_each_action_mut(&mut conditional.otherwise, visit);
+            }
+        }
+    }
+}
+
+/// One parsed action with its `no_error` flag and authored path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LifecycleAction {
     /// The typed action body.
@@ -64,26 +108,32 @@ pub struct LifecycleAction {
 
     /// Suppress dispatch failures and continue the stack. Expression errors
     /// and the prohibition on shells before preflight cannot be suppressed.
-    ///
-    /// Defaults to `false`. The spec extends the existing `shell.no_error`
-    /// flag to every action category.
+    /// Never set on a `set` action.
     pub no_error: bool,
+
+    /// The authored path of the verb key, e.g. `failure[0].else[1].shell` or,
+    /// for a root dictionary, `start.message`. A `speak` action keeps `speak`.
+    pub path: LifecyclePath,
 }
 
 impl LifecycleAction {
-    /// Returns `true` when this action is a lifecycle control action.
-    ///
-    /// Used by the cardinality check (at most one per stack item) and the
-    /// "must be last" check.
+    /// Returns `true` when this action is a flow-control directive.
     pub fn is_lifecycle_control(&self) -> bool {
         matches!(self.kind, LifecycleActionKind::LifecycleControl(_))
+    }
+
+    /// Returns `true` when this action is a directive that ends its event, so
+    /// nothing may follow it unconditionally in its list. `prep` is the one
+    /// directive that returns.
+    pub fn ends_event(&self) -> bool {
+        matches!(&self.kind, LifecycleActionKind::LifecycleControl(control) if !control.returns())
     }
 }
 
 /// The typed body of a lifecycle action.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LifecycleActionKind {
-    /// Lifecycle control action — terminates stack processing for the event.
+    /// Lifecycle control action — a flow-control directive.
     LifecycleControl(LifecycleControlAction),
 
     /// Communication action (TTS / sound / message / status line).
@@ -102,11 +152,13 @@ pub enum LifecycleActionKind {
     ExpressionFunction(ExpressionFunctionAction),
 }
 
-/// A lifecycle control action.
+/// A flow-control directive.
 ///
-/// The first one whose `when:` clause matches **terminates stack
-/// processing** for the current event. The "Where valid" matrix that
-/// governs which events each variant may appear in is encoded in
+/// The first one reached **ends the entire event**, wherever it sits — at a
+/// stack root or inside a nested `then`/`else` body — except `prep`, a
+/// returning call after which the event continues
+/// ([`LifecycleControlAction::returns`]). The "Where valid" matrix
+/// that governs which events each variant may appear in is encoded in
 /// [`LifecycleControlAction::is_valid_for`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum LifecycleControlAction {
@@ -131,9 +183,9 @@ pub enum LifecycleControlAction {
         /// File reference expression resolving to the target prompt path.
         target: Expr,
         /// Transient top-level frontmatter overlay for the immediate target,
-        /// authored as key/value `with:`. Empty when `with:` was omitted or
-        /// authored as `{}`.
-        with: ProxyWith,
+        /// authored as the long-form `with:` parameter. Empty when `with:` was
+        /// omitted or authored as `{}`.
+        with: WithOverlay,
     },
 
     /// `retry` / `retry(N)` — try the current prompt again. Whether re-entry
@@ -147,6 +199,10 @@ pub enum LifecycleControlAction {
         backoff: Option<RetryBackoff>,
         /// Delay duration expression. `None` defaults to zero.
         delay: Option<Expr>,
+        /// Transient top-level frontmatter overlay for the fresh re-read of the
+        /// same document, for that one transition only. Empty when `with:` was
+        /// omitted or authored as `{}`.
+        with: WithOverlay,
     },
 
     /// `resume("message")` — resume the agent session with a follow-up
@@ -168,6 +224,38 @@ pub enum LifecycleControlAction {
         /// Optional human-readable reason.
         reason: Option<Expr>,
     },
+
+    /// `break` / `break: "reason"` — end the nearest enclosing loop.
+    ///
+    /// Firing outside every loop is
+    /// [`CompositionError::LifecycleBreakWithoutLoop`].
+    ///
+    /// [`CompositionError::LifecycleBreakWithoutLoop`]: crate::composition::CompositionError::LifecycleBreakWithoutLoop
+    Break {
+        /// Optional reason recorded as the loop's outcome. An authored `""`
+        /// is an explicit empty reason, distinct from `None`.
+        reason: Option<Expr>,
+        /// Exit code when the loop it ends is the root invocation's; authored
+        /// `0..=255`, `0` when omitted.
+        code: u8,
+    },
+
+    /// `prep: "@target.md"` — run another primitive to completion, then
+    /// continue the event with the next item.
+    ///
+    /// The thread's installed [`PrepRunner`](crate::composition::lifecycle::prep::PrepRunner)
+    /// runs the target; a target that did not return successfully fails the
+    /// event with [`CompositionError::LifecyclePrepFailed`].
+    ///
+    /// [`CompositionError::LifecyclePrepFailed`]: crate::composition::CompositionError::LifecyclePrepFailed
+    Prep {
+        /// File reference expression resolving to the target. A literal is
+        /// never empty.
+        target: Expr,
+        /// Frontmatter overlay for the target, with `proxy.with` semantics.
+        /// Empty when `with:` was omitted or authored as `{}`.
+        with: WithOverlay,
+    },
 }
 
 impl LifecycleControlAction {
@@ -181,27 +269,27 @@ impl LifecycleControlAction {
             Self::Retry { .. } => "retry",
             Self::Resume { .. } => "resume",
             Self::Defer { .. } => "defer",
+            Self::Break { .. } => "break",
+            Self::Prep { .. } => "prep",
         }
+    }
+
+    /// Returns `true` for a directive that returns to the next item instead of
+    /// ending its event: only `prep`.
+    pub fn returns(&self) -> bool {
+        matches!(self, Self::Prep { .. })
     }
 
     /// Returns `true` when this control action is permitted in the given
     /// event per the spec's "Where valid" matrix.
     ///
-    /// Flow control is **universal**: `Stop`, `Error`, `Retry`, `Resume`,
-    /// `Defer`, and `Proxy` are valid in **every** event. Flow control reacts
-    /// to *state* — an error, a missing file, an `env` value, frontmatter — and
-    /// an error is just one kind of state (e.g. a `success` stack may `resume`
-    /// the agent because an expected artifact was not produced).
-    ///
-    /// `Skip` is the **one** placement-restricted action: a whole-document
-    /// opt-out is only coherent at `initialize`, before anything has run.
-    ///
-    /// Differences that look event-specific are **runtime capability**, not
-    /// placement, and are checked at runtime rather than here: `Resume` needs a
-    /// live provider session (pre-launch it surfaces `ResumeWithoutSession`),
-    /// and `Retry`'s re-entry point (re-run pre-flight vs. re-invoke the
-    /// provider) is derived from whether the provider had launched.
+    /// Cancellation cleanup permits only `Stop`. Other events permit recovery
+    /// directives, with `Skip` restricted to initialization. Provider-session
+    /// requirements and recovery re-entry points are checked at runtime.
     pub fn is_valid_for(&self, event: LifecycleSignal) -> bool {
+        if event == LifecycleSignal::Cancelled {
+            return matches!(self, Self::Stop);
+        }
         match self {
             Self::Skip => matches!(event, LifecycleSignal::Initialize),
             _ => true,
@@ -209,7 +297,7 @@ impl LifecycleControlAction {
     }
 }
 
-/// One value inside an authored `proxy.with` mapping, typed at parse time.
+/// One value inside an authored `with:` or `set:` mapping, typed at parse time.
 ///
 /// Leaves are [`Expr`] trees produced by the same rule that types every other
 /// lifecycle action parameter, recursed through arrays and objects. Holding
@@ -217,7 +305,7 @@ impl LifecycleControlAction {
 /// whole-value span's type: `{{ true }}` stays a bool instead of collapsing to
 /// the string `"true"`.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ProxyWithValue {
+pub enum WithValue {
     /// An authored scalar or interpolation-bearing string.
     Scalar(Expr),
     /// An authored YAML `null`. [`Expr`] has no null literal, and `with:`
@@ -225,11 +313,11 @@ pub enum ProxyWithValue {
     /// than forcing authors through `{{ null }}`.
     Null,
     /// An authored YAML sequence; elements follow the same rule.
-    Array(Vec<ProxyWithValue>),
+    Array(Vec<WithValue>),
     /// An authored YAML mapping; values follow the same rule. Its keys are
     /// data, not property names — only the overlay's own top-level keys name
     /// target frontmatter properties, so only those are span-checked.
-    Object(IndexMap<String, ProxyWithValue>),
+    Object(IndexMap<String, WithValue>),
     /// A whole-value `$( … )` assigned by a lifecycle `set`. Only a `set`
     /// mapping's top-level values take this form; a nested or mixed string,
     /// and every `with:` value, stays data.
@@ -240,7 +328,9 @@ pub enum ProxyWithValue {
 ///
 /// The command bytes are fixed once, at preflight, from early-binding values;
 /// the result is produced each time the action executes. See
-/// [`ResolvedShellValue`] for the two lifetimes.
+/// [`ResolvedShellValue`] for the two lifetimes. A value approved by its shape
+/// ([`Self::template`]) runs its template instead, reading its placeholders
+/// when the action executes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetShellValue {
     /// The value as authored (trimmed), suffixes included.
@@ -248,6 +338,10 @@ pub struct SetShellValue {
     /// The approved command bytes; `None` until preflight resolves them. An
     /// unresolved value never runs.
     pub resolved: Option<ResolvedShellValue>,
+    /// The authored command as a typed template, recorded by preflight when
+    /// it holds a placeholder. Its approval decides whether the value runs
+    /// its bytes or its template.
+    pub template: Option<super::shell_template::LifecycleShellTemplate>,
 }
 
 /// The message of a shell-value parse error, without the directive location
@@ -262,7 +356,7 @@ pub(crate) fn shell_value_error_message(error: &ShellExpansionError) -> String {
 
 /// Why an authored `with:` mapping could not be typed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProxyWithError {
+pub enum WithOverlayError {
     /// A top-level key carries an interpolation span. Carries the key verbatim.
     DynamicKey(String),
     /// A value could not be typed by the shared action-value rule.
@@ -296,7 +390,7 @@ pub enum RuntimeSetError {
 /// writes. Values use the same recursive typed tree as `proxy.with`, preserving
 /// native YAML values and whole-value expression types.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct RuntimeSet(IndexMap<String, ProxyWithValue>);
+pub struct RuntimeSet(IndexMap<String, WithValue>);
 
 impl RuntimeSet {
     /// Type a lifecycle `set:` mapping.
@@ -323,7 +417,7 @@ impl RuntimeSet {
             if key.is_empty() {
                 return Err(RuntimeSetError::EmptyKey);
             }
-            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
+            if super::parse::is_dynamic_with_key(key) {
                 return Err(RuntimeSetError::DynamicKey(key.clone()));
             }
         }
@@ -338,16 +432,17 @@ impl RuntimeSet {
                 })?;
                 typed.insert(
                     key,
-                    ProxyWithValue::Shell(Box::new(SetShellValue {
+                    WithValue::Shell(Box::new(SetShellValue {
                         authored: text.trim().to_string(),
                         resolved: None,
+                        template: None,
                     })),
                 );
                 continue;
             }
             let value = type_with_value(&value, &key).map_err(|error| match error {
-                ProxyWithError::DynamicKey(_) => unreachable!("value typing does not inspect keys"),
-                ProxyWithError::Value { path, message } => {
+                WithOverlayError::DynamicKey(_) => unreachable!("value typing does not inspect keys"),
+                WithOverlayError::Value { path, message } => {
                     RuntimeSetError::Value { path, message }
                 }
             })?;
@@ -367,19 +462,19 @@ impl RuntimeSet {
     }
 
     /// The typed value assigned to `key`.
-    pub fn get(&self, key: &str) -> Option<&ProxyWithValue> {
+    pub fn get(&self, key: &str) -> Option<&WithValue> {
         self.0.get(key)
     }
 
     /// Iterate destination keys and typed values in deterministic order.
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &ProxyWithValue)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &WithValue)> {
         self.0.iter()
     }
 
     /// The whole-value shell assignments, in order.
     pub fn shell_values(&self) -> impl Iterator<Item = (&String, &SetShellValue)> {
         self.0.iter().filter_map(|(key, value)| match value {
-            ProxyWithValue::Shell(shell) => Some((key, shell.as_ref())),
+            WithValue::Shell(shell) => Some((key, shell.as_ref())),
             _ => None,
         })
     }
@@ -388,7 +483,7 @@ impl RuntimeSet {
     /// fix their command bytes.
     pub fn shell_values_mut(&mut self) -> impl Iterator<Item = (&String, &mut SetShellValue)> {
         self.0.iter_mut().filter_map(|(key, value)| match value {
-            ProxyWithValue::Shell(shell) => Some((key, shell.as_mut())),
+            WithValue::Shell(shell) => Some((key, shell.as_mut())),
             _ => None,
         })
     }
@@ -399,56 +494,57 @@ impl RuntimeSet {
     }
 }
 
-/// The authored `proxy.with` mapping — a transient top-level frontmatter
-/// overlay for the immediate proxy target.
+/// An authored `with:` mapping on `proxy` or `retry` — a transient top-level
+/// frontmatter overlay for the transition's target (the proxy target, or the
+/// fresh re-read of the same document for `retry`).
 ///
-/// Values are held as typed [`ProxyWithValue`] trees. They are resolved once,
-/// at the source handoff, against the source document's lifecycle context;
-/// this type is the parse-time carrier, not the evaluated overlay.
+/// Values are held as typed [`WithValue`] trees. They are resolved once, when
+/// the directive fires, against the source document's lifecycle context; this
+/// type is the parse-time carrier, not the evaluated overlay.
 ///
-/// Keys are static YAML strings by construction: [`ProxyWith::new`] is the
+/// Keys are static YAML strings by construction: [`WithOverlay::new`] is the
 /// only constructor and rejects a key carrying an interpolation span, so a
 /// downstream consumer never has to re-check for a dynamic key.
 ///
 /// ## Examples
 ///
 /// ```
-/// use claudine::composition::lifecycle::actions::{ProxyWith, ProxyWithError};
+/// use claudine::composition::lifecycle::actions::{WithOverlay, WithOverlayError};
 /// use indexmap::IndexMap;
 ///
 /// let mut authored = IndexMap::new();
 /// authored.insert("iteration".to_string(), serde_json::json!("{{ iteration }}"));
-/// let with = ProxyWith::new(authored).expect("static key");
+/// let with = WithOverlay::new(authored).expect("static key");
 /// assert_eq!(with.len(), 1);
 ///
 /// let mut dynamic = IndexMap::new();
 /// dynamic.insert("{{ key }}".to_string(), serde_json::json!(1));
 /// assert_eq!(
-///     ProxyWith::new(dynamic).unwrap_err(),
-///     ProxyWithError::DynamicKey("{{ key }}".to_string())
+///     WithOverlay::new(dynamic).unwrap_err(),
+///     WithOverlayError::DynamicKey("{{ key }}".to_string())
 /// );
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ProxyWith(IndexMap<String, ProxyWithValue>);
+pub struct WithOverlay(IndexMap<String, WithValue>);
 
-impl ProxyWith {
+impl WithOverlay {
     /// Type an overlay from an authored mapping.
     ///
     /// ## Errors
     ///
-    /// [`ProxyWithError::DynamicKey`] when a top-level key carries a `{{ … }}`
+    /// [`WithOverlayError::DynamicKey`] when a top-level key carries a `{{ … }}`
     /// or `$( … )` span — `with:` keys name target frontmatter properties and
     /// are never interpolated, so a span in a key is an authoring error rather
-    /// than a value to resolve later. [`ProxyWithError::Value`] when a value
+    /// than a value to resolve later. [`WithOverlayError::Value`] when a value
     /// fails the shared action-value rule (e.g. a whole-value span that is not
     /// a parseable expression).
     ///
     /// Keys are checked before values, so an overlay with both faults reports
     /// the key.
-    pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, ProxyWithError> {
+    pub fn new(authored: IndexMap<String, serde_json::Value>) -> Result<Self, WithOverlayError> {
         for key in authored.keys() {
-            if !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(") {
-                return Err(ProxyWithError::DynamicKey(key.clone()));
+            if super::parse::is_dynamic_with_key(key) {
+                return Err(WithOverlayError::DynamicKey(key.clone()));
             }
         }
         let mut typed = IndexMap::with_capacity(authored.len());
@@ -471,7 +567,7 @@ impl ProxyWith {
 
     /// The typed value for `key`, or `None` when the overlay does not set that
     /// property.
-    pub fn get(&self, key: &str) -> Option<&ProxyWithValue> {
+    pub fn get(&self, key: &str) -> Option<&WithValue> {
         self.0.get(key)
     }
 
@@ -482,32 +578,32 @@ impl ProxyWith {
     /// normalized a nested mapping's keys to sorted order before they reach
     /// here. Overlay semantics are per-key, so no consumer may depend on
     /// order for meaning.
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &ProxyWithValue)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &WithValue)> {
         self.0.iter()
     }
 }
 
 /// Recurse the shared action-value rule through arrays and objects, tagging
 /// each failure with its path below `with`.
-fn type_with_value(value: &serde_json::Value, path: &str) -> Result<ProxyWithValue, ProxyWithError> {
+fn type_with_value(value: &serde_json::Value, path: &str) -> Result<WithValue, WithOverlayError> {
     match value {
-        serde_json::Value::Null => Ok(ProxyWithValue::Null),
+        serde_json::Value::Null => Ok(WithValue::Null),
         serde_json::Value::Array(items) => items
             .iter()
             .enumerate()
             .map(|(i, item)| type_with_value(item, &format!("{path}[{i}]")))
             .collect::<Result<Vec<_>, _>>()
-            .map(ProxyWithValue::Array),
+            .map(WithValue::Array),
         serde_json::Value::Object(map) => map
             .iter()
             .map(|(k, v)| {
                 type_with_value(v, &format!("{path}.{k}")).map(|typed| (k.clone(), typed))
             })
             .collect::<Result<IndexMap<_, _>, _>>()
-            .map(ProxyWithValue::Object),
+            .map(WithValue::Object),
         scalar => super::action_shape::action_value_to_expr(scalar)
-            .map(ProxyWithValue::Scalar)
-            .map_err(|message| ProxyWithError::Value {
+            .map(WithValue::Scalar)
+            .map_err(|message| WithOverlayError::Value {
                 path: path.to_string(),
                 message: message.to_string(),
             }),
@@ -547,18 +643,15 @@ impl RetryBackoff {
 pub struct CommunicationAction {
     /// Which channel this action targets.
     pub channel: CommunicationChannel,
-    /// The message expression (text to speak, status line, notification
-    /// body, etc. — interpreted per channel).
-    pub message: Expr,
-    /// Optional route pin for messengers; ignored by other channels.
-    pub route: Option<Expr>,
+    /// The payload (`text`): words to speak, an effect name, a status line, a
+    /// notification title — interpreted per channel.
+    pub text: Expr,
 }
 
-/// Communication channels available as both top-level properties and
-/// discrete stack actions.
+/// Communication channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommunicationChannel {
-    /// TTS via host speech provider (after `effect` when both are present).
+    /// TTS via host speech provider.
     Say,
     /// Alias for [`Self::Say`].
     Speak,
@@ -618,6 +711,8 @@ impl CommunicationChannel {
 /// A shell action.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellAction {
+    /// Authored bytes retained for approval eligibility after interpolation.
+    pub authored_command: Option<String>,
     /// The shell command expression. The spec example uses string literals,
     /// but the model accepts any expression so interpolation can compose the
     /// command at runtime.
@@ -625,10 +720,14 @@ pub struct ShellAction {
     /// Message to emit when the command exits non-zero.
     pub on_error: Option<Expr>,
     /// `true` once pre-flight (C3) has stamped `command` and `on_error` with
-    /// their resolved bytes. Those bytes are what was approved and are run as
+    /// their resolved bytes. A command approved as those bytes runs them as
     /// they stand: anything the resolution inserted is data and is never
     /// interpolated again at event time.
     pub pre_resolved: bool,
+    /// The authored `command` as a typed template, recorded by pre-flight
+    /// when it holds a placeholder. Its approval decides whether the action
+    /// runs the stamped bytes or the template.
+    pub template: Option<super::shell_template::LifecycleShellTemplate>,
 }
 
 /// A side-effect action — a Darkmatter effect verb invoked by name with

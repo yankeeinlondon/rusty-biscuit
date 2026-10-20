@@ -110,6 +110,7 @@ fn execute_frontmatter_shell_expansion(
         runtime,
         &mut provenance,
         &test_ctx(),
+        None,
     )
 }
 
@@ -571,7 +572,7 @@ fn unwrap_ternary(directive: &FrontmatterShellDirective) -> (&str, &Branch, &Bra
             then_branch,
             else_branch,
         } => (condition_source.as_str(), then_branch, else_branch),
-        FrontmatterShellAst::Pipeline(_) => {
+        FrontmatterShellAst::Pipeline(_) | FrontmatterShellAst::Unparsed { .. } => {
             panic!("expected Ternary AST, got Pipeline")
         }
     }
@@ -776,7 +777,7 @@ fn ternary_quote_protected_punctuation_is_not_split() {
         .expect("directive should parse");
     match directive.ast {
         FrontmatterShellAst::Pipeline(_) => {}
-        FrontmatterShellAst::Ternary { .. } => {
+        FrontmatterShellAst::Ternary { .. } | FrontmatterShellAst::Unparsed { .. } => {
             panic!("expected Pipeline AST, got Ternary")
         }
     }
@@ -918,7 +919,7 @@ fn ternary_separator_requires_whitespace_padding() {
         FrontmatterShellAst::Pipeline(ref pipeline) => {
             assert_eq!(pipeline.actions[0].command.executable, "flag?");
         }
-        FrontmatterShellAst::Ternary { .. } => {
+        FrontmatterShellAst::Ternary { .. } | FrontmatterShellAst::Unparsed { .. } => {
             panic!("expected Pipeline AST, got Ternary — separator must require whitespace padding")
         }
     }
@@ -1001,12 +1002,12 @@ fn classify_bare_name_not_on_path_is_a_property_value() {
 }
 
 #[test]
-fn classify_doc_namespace_is_always_a_property_value() {
-    // `doc.*` resolves the frontmatter property even when a same-named
+fn classify_fm_namespace_is_always_a_property_value() {
+    // `fm.*` resolves the frontmatter property even when a same-named
     // executable exists on `PATH`.
-    assert_eq!(super::classify_executed_body("doc.echo"), BodyClass::Value);
-    assert_eq!(super::classify_executed_body("doc.build"), BodyClass::Value);
-    assert_eq!(super::classify_executed_body("doc"), BodyClass::Value);
+    assert_eq!(super::classify_executed_body("fm.echo"), BodyClass::Value);
+    assert_eq!(super::classify_executed_body("fm.build"), BodyClass::Value);
+    assert_eq!(super::classify_executed_body("fm"), BodyClass::Value);
 }
 
 #[test]

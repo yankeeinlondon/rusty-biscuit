@@ -20,7 +20,9 @@ read-side expression surfaces used for local files.
   interpolation passes, and the `$()` shell ternary condition/branch — is
   local-filesystem only, so a remote URL argument to a read-side function in
   frontmatter **fails loudly** rather than silently returning a default (e.g.
-  `file_exists(url)` errors instead of returning `false`).
+  `file_exists(url)` errors instead of returning `false`). In body
+  interpolation, `file_exists(url)` is `true` once the URL is fetched; a
+  denied host or a failed fetch is an error, not `false`.
 - `absolute` and `relative` are **never remote**. They are local-only path
   transforms that require a resolution context for the base directory but never
   contact the network, and are not part of the remote-fetch discovery sweep.

@@ -23,17 +23,24 @@
 //!   invalid, no registry is installed from that scan.
 //! - A root folder whose metadata or entries cannot be read fails the scan
 //!   with an I/O error naming it; it is never treated as absent.
+//! - A host's [`EmbeddedSchemaBundle`]s are a last-resort location after the
+//!   five roots: a bundle trigger is loaded only when no file of the same
+//!   name was enumerated in any root (whatever that file holds), and only a
+//!   bundle file claiming `kind: trigger-schema` becomes a trigger. Its
+//!   payload and imports resolve inside its bundle.
 //!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 
+use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::roots::SchemaRoots;
+use crate::markdown::schemas::simplified::SchemaSourceId;
 
 use super::envelope::{TriggerEnvelope, parse_trigger_envelope_from_str};
 
@@ -42,16 +49,85 @@ const YAML_EXTENSIONS: &[&str] = &["yaml", "yml"];
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-/// A loaded trigger envelope with its source file path.
+/// Where a trigger envelope was loaded from.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TriggerSource {
+    /// A file in one of the five schema roots.
+    File(PathBuf),
+    /// A document in a host's [`EmbeddedSchemaBundle`]. It names no host
+    /// file and is never read, watched, or linked as one.
+    Embedded {
+        /// The bundle's [name](EmbeddedSchemaBundle::name).
+        bundle: String,
+        /// The document's file name inside the bundle.
+        name: String,
+    },
+}
+
+impl TriggerSource {
+    /// The host path of a [`File`](Self::File) source.
+    #[must_use]
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::File(path) => Some(path),
+            Self::Embedded { .. } => None,
+        }
+    }
+
+    /// The file name that shadows and is shadowed by same-named triggers.
+    #[must_use]
+    pub fn file_name(&self) -> Option<&str> {
+        match self {
+            Self::File(path) => path.file_name().and_then(|name| name.to_str()),
+            Self::Embedded { name, .. } => Some(name),
+        }
+    }
+
+    /// The schema-source identity: [`SchemaSourceId::File`] for a file and
+    /// [`SchemaSourceId::Embedded`] with the virtual path `{bundle}/{name}`
+    /// for a bundle document.
+    #[must_use]
+    pub fn source_id(&self) -> SchemaSourceId {
+        match self {
+            Self::File(path) => SchemaSourceId::File(path.clone()),
+            Self::Embedded { bundle, name } => SchemaSourceId::Embedded(format!("{bundle}/{name}")),
+        }
+    }
+}
+
+impl std::fmt::Display for TriggerSource {
+    /// A file displays as its path; a bundle document as
+    /// `embedded:{bundle}/{name}`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::File(path) => write!(f, "{}", path.display()),
+            Self::Embedded { bundle, name } => write!(f, "embedded:{bundle}/{name}"),
+        }
+    }
+}
+
+impl serde::Serialize for TriggerSource {
+    /// Serialized as its [`Display`](std::fmt::Display) text, so a file
+    /// source keeps the plain path string it had before embedded sources.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// A loaded trigger envelope with its source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadedTrigger {
-    /// The filesystem path of the `.trigger.yaml` file.
-    pub source: PathBuf,
+    /// The schema-root file or bundle document the envelope was read from.
+    pub source: TriggerSource,
     /// The parsed, lint-clean trigger envelope.
     pub envelope: TriggerEnvelope,
     /// The `cwd` of the trigger's bare, `./`, and `../` `$path` patterns (see
-    /// [`SearchedRoot::pattern_cwd`](crate::markdown::schemas::roots::SearchedRoot::pattern_cwd)).
+    /// [`SearchedRoot::pattern_cwd`](crate::markdown::schemas::roots::SearchedRoot::pattern_cwd));
+    /// the document's tree root for an embedded trigger.
     pub pattern_cwd: PathBuf,
+    /// The bundle an [`Embedded`](TriggerSource::Embedded) trigger's payload
+    /// resolves in.
+    pub(crate) bundle: Option<EmbeddedSchemaBundle>,
 }
 
 /// A file shadowed by an earlier root's file of the same name.
@@ -75,7 +151,8 @@ pub struct TriggerRegistry {
     /// `md schema triggers` trace.
     pub roots: SchemaRoots,
     /// The ordered, deduped set of loaded triggers (first root first,
-    /// filename-lexicographic within a root). Shadowed filenames are absent.
+    /// filename-lexicographic within a root, then embedded bundle triggers in
+    /// registration and filename order). Shadowed filenames are absent.
     pub triggers: Vec<LoadedTrigger>,
     /// Resolved payloads parallel to [`triggers`](Self::triggers) — one per
     /// trigger, in the same order. Populated by [`scan`] so `effective_for`
@@ -84,6 +161,10 @@ pub struct TriggerRegistry {
     pub(crate) payloads: Vec<super::assemble::ResolvedPayload>,
     /// Files shadowed by an earlier root's file of the same name.
     pub shadowed: Vec<ShadowedFile>,
+    /// Every file name a later embedded trigger of that name defers to: each
+    /// file enumerated in a root (trigger or not, shadowed or not) and each
+    /// embedded trigger already loaded.
+    claimed_names: BTreeSet<String>,
     /// The document context the roots were computed in and `$path` patterns
     /// are judged in.
     context: FileResolutionContext,
@@ -94,13 +175,70 @@ impl TriggerRegistry {
     /// For callers (and tests) that build triggers without discovery.
     #[must_use]
     pub fn new(triggers: Vec<LoadedTrigger>, context: FileResolutionContext) -> Self {
+        let claimed_names = triggers
+            .iter()
+            .filter_map(|trigger| trigger.source.file_name().map(str::to_string))
+            .collect();
         Self {
             roots: SchemaRoots::none(),
             triggers,
             payloads: Vec::new(),
             shadowed: Vec::new(),
+            claimed_names,
             context,
         }
+    }
+
+    /// Appends `bundle`'s triggers after every trigger already loaded.
+    ///
+    /// A bundle document whose file name is already claimed (see
+    /// [`scan_with_embedded`]) is skipped unread. Every other bundle document
+    /// is classified like a root file: one that does not claim
+    /// `kind: trigger-schema` is an import target only. Each embedded
+    /// trigger's payload is resolved now, inside the bundle.
+    ///
+    /// Transactional: on error the registry is unchanged.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::EmbeddedBundle`] for an unusable bundle shape;
+    /// [`SchemaError::EmbeddedTriggerLoad`] naming the first malformed
+    /// unclaimed trigger or unresolvable payload.
+    pub fn append_embedded_bundle(&mut self, bundle: EmbeddedSchemaBundle) -> Result<(), SchemaError> {
+        bundle.check()?;
+        let base_dir = self.context.base_dir().to_path_buf();
+        let mut loaded = Vec::new();
+        for (name, text) in bundle.sorted_files() {
+            if self.claimed_names.contains(name) {
+                continue;
+            }
+            let Some((envelope, payload)) = load_embedded_trigger(bundle, name, text)? else {
+                continue;
+            };
+            let trigger = LoadedTrigger {
+                source: TriggerSource::Embedded {
+                    bundle: bundle.name().to_string(),
+                    name: name.to_string(),
+                },
+                envelope,
+                pattern_cwd: base_dir.clone(),
+                bundle: Some(bundle),
+            };
+            loaded.push((trigger, payload));
+        }
+        // A programmatic registry resolves payloads on demand; keep its
+        // `payloads` empty so the two vectors stay parallel or empty.
+        let keep_payloads = self.payloads.len() == self.triggers.len();
+        for (trigger, payload) in loaded {
+            if let Some(name) = trigger.source.file_name() {
+                self.claimed_names.insert(name.to_string());
+            }
+            self.triggers.push(trigger);
+            if keep_payloads {
+                self.payloads.push(payload);
+            }
+        }
+        Ok(())
     }
 
     /// `true` when no triggers were loaded.
@@ -113,6 +251,92 @@ impl TriggerRegistry {
     pub fn context(&self) -> &FileResolutionContext {
         &self.context
     }
+
+    /// The files an effective schema layered from this registry depends on:
+    /// each file trigger's envelope, and each resolved payload file with its
+    /// imports and examples. Embedded triggers contribute none; a registry
+    /// built without [`scan`] contributes only its envelopes.
+    pub fn dependencies(&self) -> impl Iterator<Item = &Path> {
+        self.triggers
+            .iter()
+            .filter_map(|trigger| trigger.source.path())
+            .chain(
+                self.payloads
+                    .iter()
+                    .flat_map(|payload| payload.dependencies.iter().map(PathBuf::as_path)),
+            )
+    }
+}
+
+/// An embedded trigger's envelope and resolved payload, or `None` for a bundle
+/// document that does not claim `kind: trigger-schema`.
+type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPayload)>;
+
+/// Parses bundle document `name` and resolves its payload inside `bundle`.
+///
+/// Memoized for the process: a bundle's texts are `'static` and its payloads
+/// resolve without the disk or the document context, so the result for one
+/// bundle document depends only on texts. An entry is keyed by the bundle
+/// name, the document name, and its text, and records the text of every
+/// bundle document its payload read (its imports, transitively); it is reused
+/// only while each of those documents still holds the same text. Editing a
+/// bundle document the payload never reads, such as another trigger, keeps
+/// the entry. Only successes are kept; a failure is recomputed (and reported)
+/// on every load.
+fn load_embedded_trigger(
+    bundle: EmbeddedSchemaBundle,
+    name: &str,
+    text: &'static str,
+) -> Result<EmbeddedTriggerLoad, SchemaError> {
+    type Key = (&'static str, String, &'static str);
+    /// The `(virtual path, text)` of each bundle document a payload read.
+    type Reads = Vec<(PathBuf, &'static str)>;
+    type Memo = std::sync::Mutex<HashMap<Key, Vec<(Reads, EmbeddedTriggerLoad)>>>;
+    static LOADED: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
+    let memo = LOADED.get_or_init(Default::default);
+    let current_text = |path: &Path| {
+        bundle.files().iter().find(|(file, _)| Path::new(&bundle.virtual_path(file)) == path).map(|(_, text)| *text)
+    };
+    let key: Key = (bundle.name(), name.to_string(), text);
+    if let Some(entries) = memo.lock().expect("embedded trigger memo poisoned").get(&key)
+        && let Some((_, hit)) = entries
+            .iter()
+            .find(|(reads, _)| reads.iter().all(|(path, read)| current_text(path) == Some(*read)))
+    {
+        return Ok(hit.clone());
+    }
+    let load_error = |source: SchemaError| SchemaError::EmbeddedTriggerLoad {
+        bundle: bundle.name().to_string(),
+        name: name.to_string(),
+        source: Box::new(source),
+    };
+    let (loaded, reads) = match parse_trigger_envelope_from_str(text).map_err(load_error)? {
+        None => (None, Vec::new()),
+        Some(envelope) => {
+            let trigger = LoadedTrigger {
+                source: TriggerSource::Embedded {
+                    bundle: bundle.name().to_string(),
+                    name: name.to_string(),
+                },
+                envelope,
+                pattern_cwd: PathBuf::new(),
+                bundle: Some(bundle),
+            };
+            let (payload, read_paths) =
+                super::assemble::resolve_embedded_trigger_payload(&trigger).map_err(load_error)?;
+            let reads: Reads = read_paths
+                .into_iter()
+                .filter_map(|path| current_text(&path).map(|read| (path, read)))
+                .collect();
+            (Some((trigger.envelope, payload)), reads)
+        }
+    };
+    memo.lock()
+        .expect("embedded trigger memo poisoned")
+        .entry(key)
+        .or_default()
+        .push((reads, loaded.clone()));
+    Ok(loaded)
 }
 
 // ── Per-root file enumeration ───────────────────────────────────────────────
@@ -124,6 +348,59 @@ struct RootFile {
     path: PathBuf,
     /// UTF-8 filename (last path component).
     name: String,
+}
+
+/// The regular `.yaml`/`.yml` files directly in schema root `root`, ordered by
+/// UTF-8 filename bytes.
+///
+/// This is discovery's own enumeration, under the [discovery
+/// contract](self#discovery-contract): symlinks and non-UTF-8 names are
+/// skipped, and two names that collide after case-folding are an error.
+///
+/// ## Errors
+///
+/// [`SchemaError::Io`] when the folder or one of its entries cannot be read;
+/// [`SchemaError::TriggerCaseFoldCollision`] for colliding names.
+pub fn enumerate_root_files(root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
+    Ok(enumerate_root(root)?.into_iter().map(|file| file.path).collect())
+}
+
+/// Where [`scan_with_source`] reads schema-root folders and files from.
+///
+/// [`scan`] reads the filesystem directly. A host that keeps schema-root
+/// contents in memory (DMLS) supplies them here, so its registry is the one
+/// discovery computes from those contents. Either method may read the
+/// filesystem; the trait only decides where the bytes come from.
+pub trait SchemaRootSource {
+    /// The files [`enumerate_root_files`] returns for `root`.
+    ///
+    /// ## Errors
+    ///
+    /// Every [`enumerate_root_files`] error.
+    fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError>;
+
+    /// The UTF-8 text of root file `path`.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::Io`] naming `path` when it cannot be read as UTF-8 text.
+    fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError>;
+}
+
+/// The filesystem [`SchemaRootSource`] that [`scan`] uses.
+struct FilesystemRoots;
+
+impl SchemaRootSource for FilesystemRoots {
+    fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
+        enumerate_root_files(root)
+    }
+
+    fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError> {
+        std::fs::read_to_string(path).map(Into::into).map_err(|source| SchemaError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
 }
 
 /// Enumerates regular `.yaml`/`.yml` files in `root`, rejecting symlinks and
@@ -236,6 +513,45 @@ fn check_case_fold_collision(
 /// Payload resolution runs regardless of whether any current document matches
 /// the trigger, so a registry is never installed with a known-bad payload.
 pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaError> {
+    scan_with_embedded(context, &[])
+}
+
+/// [`scan`], then each of `bundles` in order as a last-resort trigger
+/// location (see [`TriggerRegistry::append_embedded_bundle`]).
+///
+/// A bundle document is skipped when a file of the same name was enumerated
+/// in any searched root — a matching, non-matching, non-trigger, or malformed
+/// one alike — or an earlier bundle loaded a trigger of that name. A
+/// malformed claimed disk trigger stays a [`SchemaError::TriggerLoad`]; the
+/// bundle never stands in for it.
+///
+/// ## Errors
+///
+/// Every [`scan`] error, plus those of
+/// [`TriggerRegistry::append_embedded_bundle`].
+pub fn scan_with_embedded(
+    context: &FileResolutionContext,
+    bundles: &[EmbeddedSchemaBundle],
+) -> Result<TriggerRegistry, SchemaError> {
+    scan_with_source(context, bundles, &mut FilesystemRoots)
+}
+
+/// [`scan_with_embedded`], reading each searched root's file list and file
+/// text from `source` instead of the filesystem.
+///
+/// Everything else is unchanged: the roots come from
+/// [`SchemaRoots::for_document`], and payloads resolve in `context` through
+/// the filesystem. Given a `source` that returns what the filesystem holds,
+/// the result equals [`scan_with_embedded`]'s.
+///
+/// ## Errors
+///
+/// Every [`scan_with_embedded`] error, and any error `source` returns.
+pub fn scan_with_source(
+    context: &FileResolutionContext,
+    bundles: &[EmbeddedSchemaBundle],
+    source: &mut dyn SchemaRootSource,
+) -> Result<TriggerRegistry, SchemaError> {
     let roots = SchemaRoots::for_document(context)?;
 
     // Apply filename shadowing: the first root wins by filename.
@@ -243,7 +559,11 @@ pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaEr
     let mut unshadowed: Vec<(RootFile, &Path)> = Vec::new();
     let mut shadowed: Vec<ShadowedFile> = Vec::new();
     for root in roots.searched() {
-        for file in enumerate_root(&root.path)? {
+        for path in source.root_files(&root.path)? {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let file = RootFile { name: name.to_string(), path };
             if let Some(shadowing_path) = first_by_name.get(&file.name) {
                 shadowed.push(ShadowedFile {
                     path: file.path.clone(),
@@ -258,20 +578,20 @@ pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaEr
 
     // Classify and load each unshadowed file (transactional).
     let mut triggers: Vec<LoadedTrigger> = Vec::new();
+    let mut trigger_paths: Vec<PathBuf> = Vec::new();
     for (file, pattern_cwd) in &unshadowed {
-        let content = std::fs::read_to_string(&file.path).map_err(|e| SchemaError::Io {
-            path: file.path.clone(),
-            source: e,
-        })?;
+        let content = source.root_file_text(&file.path)?;
         match parse_trigger_envelope_from_str(&content) {
             Ok(None) => {
                 // Not a trigger-schema — silently ignored.
             }
             Ok(Some(envelope)) => {
+                trigger_paths.push(file.path.clone());
                 triggers.push(LoadedTrigger {
-                    source: file.path.clone(),
+                    source: TriggerSource::File(file.path.clone()),
                     envelope,
                     pattern_cwd: pattern_cwd.to_path_buf(),
+                    bundle: None,
                 });
             }
             Err(source) => {
@@ -287,24 +607,31 @@ pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaEr
     // cycles, non-mergeable shapes — are hard load errors at scan time,
     // independent of whether any current document matches the trigger.
     let mut payloads = Vec::with_capacity(triggers.len());
-    for trigger in &triggers {
+    for (trigger, path) in triggers.iter().zip(&trigger_paths) {
         let payload = super::assemble::resolve_trigger_payload(trigger, roots.search_paths(), context).map_err(
             |source| SchemaError::TriggerLoad {
-                path: trigger.source.clone(),
+                path: path.clone(),
                 source: Box::new(source),
             },
         )?;
         payloads.push(payload);
     }
 
-    Ok(TriggerRegistry {
+    let mut registry = TriggerRegistry {
         roots,
         triggers,
         payloads,
         shadowed,
+        claimed_names: first_by_name.into_keys().collect(),
         context: context.clone(),
-    })
+    };
+    for bundle in bundles {
+        registry.append_embedded_bundle(*bundle)?;
+    }
+    Ok(registry)
 }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -573,6 +900,8 @@ mod tests {
         // The nearest root's file won.
         assert!(registry.triggers[0]
             .source
+            .path()
+            .unwrap()
             .ends_with("pkg/schemas/claudine.trigger.yaml"));
         assert_eq!(registry.shadowed.len(), 1);
         assert!(registry.shadowed[0]
@@ -633,6 +962,8 @@ mod tests {
         assert_eq!(registry.triggers.len(), 1);
         assert!(registry.triggers[0]
             .source
+            .path()
+            .unwrap()
             .ends_with("trigger.trigger.yaml"));
     }
 
@@ -727,9 +1058,13 @@ mod tests {
         // Order: filename-lexicographic within nearest root.
         assert!(registry.triggers[0]
             .source
+            .path()
+            .unwrap()
             .ends_with("pkg/schemas/a.trigger.yaml"));
         assert!(registry.triggers[1]
             .source
+            .path()
+            .unwrap()
             .ends_with("pkg/schemas/b.trigger.yaml"));
         // Root-level a.trigger.yaml is shadowed.
         assert_eq!(registry.shadowed.len(), 1);

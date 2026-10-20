@@ -20,10 +20,6 @@ const fn option(spellings: &'static [&'static str], partial: &'static str) -> Ow
     OwnedValueOption { spellings, sequence_only: false, partial }
 }
 
-const fn sequence_option(spellings: &'static [&'static str], partial: &'static str) -> OwnedValueOption {
-    OwnedValueOption { spellings, sequence_only: true, partial }
-}
-
 pub(crate) const OWNED_VALUE_OPTIONS: &[OwnedValueOption] = &[
     // Global, accepted after the file.
     option(&["--debug"], "d"),
@@ -42,6 +38,4 @@ pub(crate) const OWNED_VALUE_OPTIONS: &[OwnedValueOption] = &[
     option(&["--use"], "a"),
     option(&["--max-iterations"], "3"),
     option(&["--on-rate-limit"], "a"),
-    sequence_option(&["--fail-fast"], "t"),
-    sequence_option(&["--budget-ledger"], "pr"),
 ];

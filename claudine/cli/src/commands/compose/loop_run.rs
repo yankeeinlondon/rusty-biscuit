@@ -100,7 +100,7 @@ pub(crate) fn build_loop_iteration_output(
 
     let mut output = if outcome.exit_code == 0 {
         // The captured entry this iteration committed to `outputs` is the same
-        // text `_loop_last_output` names, so the two agree by construction
+        // text `loop.last_output` names, so the two agree by construction
         // rather than the ambient reporting a placeholder empty string.
         claudine::composition::LoopIterationOutput::success(
             outcome.final_output.unwrap_or_default(),
@@ -145,10 +145,9 @@ pub(crate) fn build_loop_iteration_output(
 /// recovery took into a failed iteration.
 ///
 /// The provider ran and every terminal event fired, so this is the loop's
-/// "prompt run failed" case — `fail_fast` halts on it, and under
-/// `fail_fast: false` the loop gate still runs — not an iteration that could
-/// not run. The authored `error` carries no classifiable code, so there is no
-/// snapshot to project.
+/// "prompt run failed" case, which ends the loop before its gate, not an
+/// iteration that could not run. The authored `error` carries no classifiable
+/// code, so there is no snapshot to project.
 pub(crate) fn downgraded_loop_iteration_output(
     iteration: usize,
     prompt_path: &std::path::Path,
@@ -274,10 +273,9 @@ where
     )?;
 
     if crate::output::user_interrupt_observed() {
-        // Force the interrupt outcome regardless of fail-fast: under
-        // `fail_fast: false` the engine would have continued past the
-        // first short-circuited iteration, so overwrite the result so
-        // callers see exit code 130 and a `LoopInterrupted` error.
+        // An interrupt observed anywhere in the loop, including after the
+        // engine settled, is the run's outcome: callers see exit code 130
+        // and a `LoopInterrupted` error.
         result.final_exit_code = USER_INTERRUPT_EXIT_CODE;
         result.error = Some(claudine::composition::CompositionError::LoopInterrupted {
             prompt_path: prompt_path.clone(),

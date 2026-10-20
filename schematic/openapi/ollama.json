@@ -491,7 +491,7 @@
       "post": {
         "summary": "Generate embeddings for text",
         "description": "Generate embeddings for text",
-        "operationId": "Embeddings",
+        "operationId": "OllamaOpenAIEmbeddings",
         "requestBody": {
           "content": {
             "application/json": {
@@ -534,7 +534,7 @@
       "get": {
         "summary": "List available models in OpenAI format",
         "description": "List available models in OpenAI format",
-        "operationId": "ListModels",
+        "operationId": "OllamaOpenAIListModels",
         "responses": {
           "200": {
             "description": "Successful JSON response",

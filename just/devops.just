@@ -363,20 +363,9 @@ _install path pkg_name binary="" *args="":
     fi
     just _play drop-4 || exit 0
 
-# commits all the staged changes with the agent and model set in prompts/commit.md
+# Compose the commit prompt with any supplied parameters
 commit *args="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo ""
-    echo -e "Committing staged changes in the {{ bold }}Rusty Biscuit{{ reset }} monorepo to git"
-    echo ""
-    echo -e "{{ bold }}{{ blue }}Staged Files:{{ reset }}"
-    sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
-    # `@` resolves from the repo root; a package area has no prompts/commit.md of its own
-    claudine compose "@prompts/commit.md" -y {{ args }}
-    just _speak "git commits completed in the $(sniff repo package-area) package area of rusty biscuit"
-    sniff repo git-status --compact 2>/dev/null || exit 0
-    echo
+    claudine compose prompts/commit.md {{ args }}
 
 # Lint a package
 _lint pkg: _storage_preflight

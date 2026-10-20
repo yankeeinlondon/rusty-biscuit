@@ -381,7 +381,11 @@ fn run_provider_wrapper_inner(
         collector.mark_substage("launch discovery", launch_discovery_started.elapsed());
     }
     let startup = startup_result?;
-    let invocation = startup.invocation;
+    // One TTS pre-warm worker for the whole command; a document the harness
+    // adopts submits to it, and dropping it on return cancels unfinished
+    // preparation.
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(args.dry_run);
+    let invocation = startup.invocation.with_prewarm(prewarm.handle());
     let env_context = startup.env_context;
     let launch_context = startup.launch_context;
     let launch_workspace = startup.launch_workspace;
@@ -466,6 +470,7 @@ fn run_provider_wrapper_inner(
             args.model.as_deref(),
             non_interactive_requested,
             has_model_env,
+            invocation.document_environment(),
             &mut |key, value| env_overrides.push((key, value)),
             &mut |warn| deferred_warnings.push(warn),
         ) {

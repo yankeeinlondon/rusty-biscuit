@@ -29,7 +29,7 @@ You rarely want _all_ documents listed so typically you would start by narrowing
         - uses the key's to represent the properties you are interested in, and
         - the values are a type borrowed from [`SimplifiedSchema`](^darkmatter/docs/topics/schemas/index.md)
 
-        > **Note:** if you wanted to filter on a properties existence but didn't care about the _type_ of the property you can do that with the `any`/`unknown` type
+        > **Note:** `unknown` (alias `any`) accepts every value and omission, so it cannot filter on a property's existence; use `defines` to filter on existence regardless of type
 
 ### Organizational
 
@@ -56,7 +56,7 @@ You rarely want _all_ documents listed so typically you would start by narrowing
 
             ```yaml
             property: string(required) -> the property being enumerated
-            value: any -> an enumerated value found in the property
+            value: unknown -> an enumerated value found in the property
             children: self[]
             ```
 

@@ -1,4 +1,7 @@
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, FormField, RestMethod};
+use schematic_define::{
+    ApiRequest, ApiResponse, Endpoint, FormField, RestMethod,
+    params::{EndpointParams, QueryParamType},
+};
 
 pub fn all() -> Vec<Endpoint> {
     vec![
@@ -10,7 +13,15 @@ pub fn all() -> Vec<Endpoint> {
             request: None,
             response: ApiResponse::json_type("ListVoicesResponse"),
             headers: vec![],
-            params: None,
+            params: Some(EndpointParams::default().with_query_params(vec![
+                ("page_size", QueryParamType::Integer, false, Some("Voices per page (at most 100)")),
+                (
+                    "page_token",
+                    QueryParamType::String,
+                    false,
+                    Some("The previous page's `next_page_token`"),
+                ),
+            ])),
             oauth_scopes: None,
         },
         Endpoint {

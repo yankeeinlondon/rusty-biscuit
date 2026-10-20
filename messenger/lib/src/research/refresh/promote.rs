@@ -21,7 +21,7 @@ use super::review::{
     AcceptedHashes, Approval, RENEWAL_FORMAT, REVIEW_FORMAT, RenewalRecord, ReviewRecord, review_path, summarize,
 };
 use super::select::{published, researched_under};
-use super::state::{Decision, RunRecord, RunStatus, StateArea, apply_ledger, write_json};
+use super::state::{Decision, RunRecord, RunStatus, StateArea, write_json};
 use crate::research::canonical::text_fingerprint;
 use crate::research::generate::{Generated, generate_with};
 use crate::research::load::Loader;
@@ -71,6 +71,7 @@ struct Planned {
 ///
 /// ## Errors
 ///
+/// [`RefreshError::RunnerLive`] while a research runner holds the fleet lock;
 /// [`RefreshError::WrongStatus`] unless every run awaits review;
 /// [`RefreshError::NotEligible`] for incomplete stages, a stale baseline, two
 /// runs for one platform, or a renewal request that does not qualify;
@@ -79,6 +80,11 @@ struct Planned {
 pub fn promote(loader: &Loader, run_ids: &[String], request: &Request, today: &Date, options: Options) -> Result<Vec<Promoted>, RefreshError> {
     let workspace = loader.workspace();
     let state = StateArea::new(workspace);
+    // Promotion is refused while a research runner is live: the runner may
+    // still settle the very records about to be decided.
+    if state.fleet_lock_held() {
+        return Err(RefreshError::RunnerLive { path: super::state::fleet_lock_path() });
+    }
     let verified = published(workspace)?;
     let under = researched_under(&state, verified.as_ref());
     let mut done = Vec::new();
@@ -86,24 +92,12 @@ pub fn promote(loader: &Loader, run_ids: &[String], request: &Request, today: &D
     for run_id in run_ids {
         let mut record = state.load(run_id)?;
         let eval = evaluate(loader, &record, today)?;
-        if apply_ledger(&mut record, eval.ledger.as_ref()) {
-            state.save(&record)?;
-        }
         if record.status != RunStatus::AwaitingReview {
             return Err(RefreshError::WrongStatus {
                 run_id: record.run_id.to_string(),
                 status: record.status,
                 action: "promotion",
                 needs: "a run awaiting review (all stages checked by `check-run`)",
-            });
-        }
-        if let Some(ledger) = &eval.ledger
-            && matches!(ledger.state.as_str(), "active" | "exhausted")
-        {
-            return Err(RefreshError::Ledger {
-                run_id: record.run_id.to_string(),
-                state: ledger.state.clone(),
-                guidance: "an active or exhausted run cannot be promoted",
             });
         }
         if planned.iter().any(|p| p.record.platform_id == record.platform_id) {
@@ -278,8 +272,6 @@ fn finish_existing(
 pub fn reject(loader: &Loader, run_id: &str, by: &Maintainer, reason: &DecisionReason, today: &Date) -> Result<RunRecord, RefreshError> {
     let state = StateArea::new(loader.workspace());
     let mut record = state.load(run_id)?;
-    let ledger = state.ledger(&record)?;
-    apply_ledger(&mut record, ledger.as_ref());
     if record.status.is_final() || record.status == RunStatus::Active {
         return Err(RefreshError::WrongStatus {
             run_id: record.run_id.to_string(),

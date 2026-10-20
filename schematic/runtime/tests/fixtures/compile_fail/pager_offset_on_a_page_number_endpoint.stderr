@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` is not paginated by offset
+ --> tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.rs
+  |
+  |     let _ = client.send(ListItems).pager().offset(10);
+  |                                            ^^^^^^ `.offset(n)` exists only for offset strategies
+  |
+help: the trait `StartOffset` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition authors a different pagination strategy for `ListItems`
+note: required by a bound in `Pager::<'a, A, R>::offset`
+ --> src/pager/pages.rs
+  |
+  |     pub fn offset(mut self, offset: u64) -> Self
+  |            ------ required by a bound in this associated function
+  |     where
+  |         R: StartOffset,
+  |            ^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::offset`

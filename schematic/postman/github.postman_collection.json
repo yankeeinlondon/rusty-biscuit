@@ -153,59 +153,10 @@
                 "trees",
                 ":tree_sha"
               ],
-              "variable": [
-                {
-                  "key": "owner",
-                  "value": "<owner>"
-                },
-                {
-                  "key": "repo",
-                  "value": "<repo>"
-                },
-                {
-                  "key": "tree_sha",
-                  "value": "<tree_sha>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/vnd.github+json"
-              },
-              {
-                "key": "X-GitHub-Api-Version",
-                "value": "2022-11-28"
-              },
-              {
-                "key": "User-Agent",
-                "value": "schematic-github-client"
-              }
-            ],
-            "description": "Get a Git tree (non-recursive, single level)"
-          }
-        },
-        {
-          "name": "GetGitTreeRecursive",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/repos/:owner/:repo/git/trees/:tree_sha",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "repos",
-                ":owner",
-                ":repo",
-                "git",
-                "trees",
-                ":tree_sha"
-              ],
               "query": [
                 {
                   "key": "recursive",
-                  "description": "Fetch tree recursively (always true for this endpoint)"
+                  "description": "Fetch the tree recursively instead of a single level"
                 }
               ],
               "variable": [
@@ -237,7 +188,7 @@
                 "value": "schematic-github-client"
               }
             ],
-            "description": "Get a Git tree recursively (may truncate at 100k entries or 7MB)"
+            "description": "Get a Git tree; set `recursive` to include every nested entry (may truncate at 100k entries or 7MB)"
           }
         },
         {

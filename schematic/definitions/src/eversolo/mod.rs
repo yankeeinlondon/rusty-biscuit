@@ -21,8 +21,8 @@ pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiResponse, AuthStrategy, Endpoint, EndpointParams, EnvMapping, QueryParamType, RestApi,
-    RestMethod,
+    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, EnvMapping, QueryParamType,
+    RestApi, RestMethod,
 };
 
 /// Creates a schema registry containing all Eversolo response types.
@@ -88,6 +88,11 @@ pub fn define_eversolo_api() -> RestApi {
         request_suffix: None,
         version: None,
         env_mapping: Some(EnvMapping::default()),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 

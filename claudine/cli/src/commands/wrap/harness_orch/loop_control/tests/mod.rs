@@ -21,12 +21,9 @@ fn capture_lifecycle_timing_populates_document_and_total_ms() {
 }
 
 /// The injected globals the harness-loop builder attaches resolve
-/// `timing.document_ms` through Darkmatter's layered lookup (DM2), and the
-/// late-bound environment resolves through the reserved `current_env` root —
-/// proving the wiring reaches expression evaluation, not just the struct
-/// fields.
+/// `timing.document_ms` through Darkmatter's layered lookup (DM2) — proving
+/// the wiring reaches expression evaluation, not just the struct fields.
 #[test]
-#[serial_test::serial(env_loop_control_current)]
 fn attached_globals_resolve_through_lookup() {
     use claudine::composition::LifecycleSignal;
     use claudine::composition::lifecycle::bindings::{
@@ -38,9 +35,6 @@ fn attached_globals_resolve_through_lookup() {
     use darkmatter::markdown::compose::subtree::layered_session;
     use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
 
-    let key = "CLAUDINE_TEST_LOOP_CONTROL_LATE_BIND";
-    // SAFETY: serialized via #[serial]; no other thread reads this var.
-    unsafe { std::env::set_var(key, "ready") };
     let timing = capture_lifecycle_timing(loop_start_now());
 
     let state = EffectiveStateBuilder::new()
@@ -56,12 +50,10 @@ fn attached_globals_resolve_through_lookup() {
     );
     let lookup = layered_session(&state, globals, Some(view), None).expect("the globals associate");
 
-    let when = parse(&format!("current_env.{key} == 'ready'")).expect("parses");
-    let fired = is_truthy(&evaluate(&when, &lookup).expect("evaluates"));
-    unsafe { std::env::remove_var(key) };
+    let when = parse("timing.document_ms >= 0").expect("parses");
     assert!(
-        fired,
-        "the late-bound env value resolves through the reserved current_env root"
+        is_truthy(&evaluate(&when, &lookup).expect("evaluates")),
+        "a `when:` over the attached timing global evaluates"
     );
     assert!(
         lookup.get("timing.document_ms").is_some(),
@@ -137,6 +129,7 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
+        loop_values: None,
         mcp_body_tags: Vec::new(),
     }
 }
@@ -161,7 +154,7 @@ fn unresolvable_commit_error(source_path: &Path) -> claudine::composition::Proxy
         indexmap::IndexMap::new(),
         claudine::composition::ProxyProvenance::new(
             source_path.to_path_buf(),
-            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, claudine::composition::LifecyclePath::root("failure").index(0).field("proxy")),
             vec![source_path.to_path_buf()],
         ),
     );
@@ -194,10 +187,9 @@ struct Fixture {
 
 use std::path::PathBuf;
 
-/// Build a fixture whose `success` and `blocked` stacks each append one
-/// line to `events.log` (a side-effect counter) and carry a top-level
-/// `stderr` communication. When `with_error` is set, the named event's
-/// stack ends in `{error: "downgraded"}` so it routes to `failure`.
+/// Parse `frontmatter`'s lifecycle into a fixture rooted in a fresh temp
+/// directory, whose `events.log` the tests' `append_line` actions use as a
+/// side-effect counter.
 fn fixture(frontmatter: serde_json::Value) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let source_path = dir.path().join("prompt.md");
@@ -234,11 +226,13 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         source_path: source.to_path_buf(),
         original_ref: source.display().to_string(),
         base_prompt: None,
-        overlay: indexmap::IndexMap::new(),
+        overlay: Default::default(),
+        pending_retry_overlay: None,
         prompt_tail: Vec::new(),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
         last_final_output: None,
+        launched_providers: Vec::new(),
         input_layers: claudine::composition::CallerInputLayers::new(crate::request::test_context_at(
             source.parent().unwrap(),
         )),

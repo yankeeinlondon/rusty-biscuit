@@ -13,6 +13,7 @@ use quote::quote;
 /// - `auth_policy` - effective authentication policy
 /// - `env_username` - environment variable for Basic auth username
 /// - `headers` - Headers builder with env mapping
+/// - `api_key_param` - explicit API-key parameter credential, if set
 /// - `variant_hooks` - variant-specific hooks for response customization
 pub(super) fn generate_field_list() -> TokenStream {
     quote! {
@@ -28,6 +29,8 @@ pub(super) fn generate_field_list() -> TokenStream {
         env_username: Option<String>,
         /// Headers builder with environment variable support for credentials.
         headers: schematic_define::Headers,
+        /// Explicit `ApiKeyParam` key (query or cookie); never printed by `Debug`.
+        api_key_param: Option<schematic_define::SensitiveString>,
         /// Variant-specific hooks for response customization.
         variant_hooks: crate::shared::VariantHooks,
     }

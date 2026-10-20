@@ -46,9 +46,9 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 /// Present a multi-step review screen for sequence execution.
 ///
 /// Built on [`biscuit_tui::InputTable`] + [`biscuit_tui::run_standalone`].
-/// Each supplied draft becomes one row; the caller passes only the steps
-/// offered for review, so shell and side-effect steps have no row. A row has
-/// three columns:
+/// Each supplied draft becomes one row; the caller passes one draft per
+/// provider-launching task, so shell and side-effect tasks have no row. A row
+/// has three columns:
 ///
 /// 1. **Step label** (`StaticText`) — the draft's original one-based step
 ///    position and name, read-only.
@@ -61,8 +61,12 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 ///    is empty/unavailable, a free-form `TextInput`; when locked, a
 ///    read-only display of the locked model.
 ///
+/// A draft with [`SequenceStepDraft::read_only`] set is a read-only row: its
+/// provider and model cells show the decided values and cannot be focused.
+///
 /// On [`EventOutcome::Submitted`] (Ctrl+S), the typed row values are
-/// decoded into one [`ResolvedExecutionTarget`] per draft, in draft order.
+/// decoded into one [`ResolvedExecutionTarget`] per editable draft, in draft
+/// order; read-only rows return nothing.
 /// On [`EventOutcome::Cancelled`] (Esc), an abort error is returned. Empty
 /// `drafts` return an empty vector without opening the table.
 ///
@@ -84,22 +88,28 @@ pub fn review_sequence(
 
     let rows: Vec<Row> = run_standalone(InputTable::new(), state, None)?;
 
-    // Decode each row back into a ResolvedExecutionTarget.
+    // Decode each editable row back into a ResolvedExecutionTarget.
     let mut targets = Vec::with_capacity(rows.len());
-    for row in &rows {
-        targets.push(decode_execution_target(row)?);
+    for (row, draft) in rows.iter().zip(&drafts) {
+        if draft.read_only.is_none() {
+            targets.push(decode_execution_target(row)?);
+        }
     }
 
     Ok(targets)
 }
 
-/// Determine whether all drafts share a single unified provider.
+/// Determine whether all editable drafts share a single unified provider.
 ///
-/// Returns `Some(provider)` when every row resolves to the same
-/// provider (either because it is locked or because every draft's
-/// default plan points to the same provider).  This lets the model
+/// Read-only drafts are ignored. Returns `Some(provider)` when every
+/// editable row resolves to the same provider (either because it is locked
+/// or because every such draft's default plan points to the same
+/// provider).  This lets the model
 /// column use a `ChooseOne` backed by that provider's catalog.
 fn determine_unified_provider(drafts: &[SequenceStepDraft]) -> Option<Provider> {
+    let editable: Vec<SequenceStepDraft> =
+        drafts.iter().filter(|d| d.read_only.is_none()).cloned().collect();
+    let drafts = editable.as_slice();
     if drafts.is_empty() {
         return None;
     }
@@ -137,6 +147,8 @@ fn build_columns(
 ) -> Vec<InputTableColumn> {
     let provider_locked = drafts.first().map(|d| d.provider_locked).unwrap_or(false);
     let model_locked = drafts.first().map(|d| d.model_locked).unwrap_or(false);
+    // Read-only rows carry no picker plan; the editable rows share one.
+    let plan_draft = drafts.iter().find(|d| d.read_only.is_none()).unwrap_or(&drafts[0]);
 
     // Provider column
     let provider_column = if provider_locked {
@@ -147,7 +159,7 @@ fn build_columns(
     } else {
         InputTableColumn::ChooseOne(
             ChoiceInput::new("provider", "Provider").with_options(
-                drafts[0]
+                plan_draft
                     .provider_plan
                     .options
                     .iter()
@@ -216,6 +228,22 @@ fn build_initial_rows(
     drafts
         .iter()
         .map(|draft| {
+            let step = RowCell::new(
+                "step",
+                CellValue::StaticText(format!("{} {}", draft.step_index + 1, draft.step_name)),
+            );
+            if let Some(provider) = &draft.read_only {
+                return Row::new(vec![
+                    step,
+                    RowCell::new("provider", CellValue::StaticText(provider.clone())),
+                    RowCell::new(
+                        "model",
+                        CellValue::StaticText(
+                            draft.proposed_model.clone().unwrap_or_else(|| "(default)".into()),
+                        ),
+                    ),
+                ]);
+            }
             let provider_value = if provider_locked {
                 CellValue::StaticText(
                     draft
@@ -258,10 +286,7 @@ fn build_initial_rows(
             };
 
             Row::new(vec![
-                RowCell::new(
-                    "step",
-                    CellValue::StaticText(format!("{} {}", draft.step_index + 1, draft.step_name)),
-                ),
+                step,
                 RowCell::new("provider", provider_value),
                 RowCell::new("model", model_value),
             ])
@@ -370,6 +395,7 @@ mod tests {
             } else {
                 None
             },
+            read_only: None,
         }
     }
 
@@ -536,6 +562,34 @@ mod tests {
         );
         let target = decode_execution_target(&row).unwrap();
         assert_eq!(target.model, None);
+    }
+
+    /// A task that names its own provider is shown, never edited: its
+    /// provider and model cells are static, and the table still builds with
+    /// the editable rows' picker.
+    #[test]
+    fn read_only_drafts_render_static_provider_and_model_cells() {
+        let own = SequenceStepDraft {
+            step_index: 0,
+            step_name: "review".into(),
+            read_only: Some("Codex".into()),
+            proposed_model: Some("gpt-5".into()),
+            ..make_draft(Provider::Codex, false, false, None)
+        };
+        let missing = SequenceStepDraft {
+            step_index: 1,
+            step_name: "draft".into(),
+            ..make_draft(Provider::Claude, false, false, None)
+        };
+        let catalog = ModelCatalogService::new();
+        let drafts = [own, missing];
+        let rows = build_initial_rows(&drafts, &catalog);
+        assert_eq!(rows[0].get("provider"), Some(&CellValue::StaticText("Codex".into())));
+        assert_eq!(rows[0].get("model"), Some(&CellValue::StaticText("gpt-5".into())));
+        assert_eq!(rows[1].get("provider"), Some(&CellValue::ChosenOne(Some("claude".into()))));
+        let state = InputTableState::try_new(build_columns(&drafts, &catalog), rows)
+            .expect("a read-only row fits the editable columns");
+        assert_eq!(state.focus().0, 1, "focus starts on the editable row");
     }
 
     #[test]

@@ -90,6 +90,11 @@ pub const DARKMATTER_URL_SCHEME_KEYWORD: &str = "x-darkmatter-url-scheme";
 /// Keyword emitted for the `type-definition` semantic meta-type.
 pub const DARKMATTER_TYPE_DEFINITION_KEYWORD: &str = "x-darkmatter-type-definition";
 
+/// Non-validating annotation naming the SimplifiedSchema type of a lowered
+/// fragment whose JSON shape does not identify it (`alphanumeric`). Coercion
+/// reads it to keep native numbers and booleans from becoming text.
+pub const DARKMATTER_TYPE_ANNOTATION: &str = "x-darkmatter-type";
+
 /// Keyword emitted for the `schema` semantic meta-type.
 pub const DARKMATTER_SCHEMA_KEYWORD: &str = "x-darkmatter-schema";
 
@@ -109,6 +114,12 @@ pub const DARKMATTER_JSON_FORMAT: &str = "darkmatter-json";
 /// superset of the value dialect (`&&` added, `||` re-lowered), so a string
 /// valid in either dialect passes.
 pub const DARKMATTER_EXPRESSION_FORMAT: &str = "darkmatter-expression";
+
+/// Format name registered for the `shell` string type. The value must contain
+/// at least one non-whitespace character (Rust's `char::is_whitespace`); it is
+/// never parsed as shell syntax, approved, or executed. A validator that
+/// ignores unknown formats cannot enforce this check.
+pub const DARKMATTER_SHELL_FORMAT: &str = "darkmatter-shell";
 
 /// Format name registered for the `datetime` SimplifiedSchema type.
 ///
@@ -261,6 +272,15 @@ pub(crate) fn register_darkmatter_formats_with(
                 return true;
             }
             crate::markdown::compose::expression::parse_condition(value).is_ok()
+        })
+        // The `shell` string type: passive, never parsed or executed. Literal
+        // decoding and pending-value deferral mirror `expression`.
+        .with_format(DARKMATTER_SHELL_FORMAT, |value: &str| {
+            let has_text = |text: &str| text.chars().any(|ch| !ch.is_whitespace());
+            if let Some(Ok(decoded)) = crate::markdown::literal_token::decode_leaf(value) {
+                return has_text(&decoded);
+            }
+            is_pending_expression_value(value) || has_text(value)
         })
         // ISO 8601 date/time types with an optional zone offset (the built-in
         // `date-time` / `time` formats require one; see the const docs).

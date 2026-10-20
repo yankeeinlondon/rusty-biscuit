@@ -64,7 +64,8 @@ pub(crate) fn materialize_passthrough_harness_seed(
     let context = document_epoch.capture_launch_context(&requirements);
     let options = claudine::composition::bind_agent_workspace(
         darkmatter::markdown::compose::ComposeOptions::new_with_context(context.clone())
-            .with_context_authority(document_epoch.compose_context_authority()),
+            .with_context_authority(document_epoch.compose_context_authority())
+            .with_shell_child_environment(document_epoch.env_baseline().shell_child_environment()),
         source_path,
         shell_cwd,
     );
@@ -94,6 +95,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         live_frontmatter,
         runtime_state,
         lifecycle: None,
+        loop_values: None,
         // A direct-wrapper passthrough records `mcp_body_tags: Vec::new()` as its
         // whole invocation facet set (`wrapper_stages::passthrough_launch_intent`)
         // — its MCP set comes from `--mcp-use`, not from a document body. Lexing

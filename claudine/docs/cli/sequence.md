@@ -48,9 +48,9 @@ Error: missing file reference: expected exactly one file reference plus optional
   `tags='["a","b"]'` is an array.
 - `--set '{"key": "value"}'` sets several values at once. An inline setter
   wins over `--set` for the same key.
-- Setters sit above the document's frontmatter and below runtime mutations
-  and the reserved per-step keys (`state`, `previous`, `next`, `outputs`,
-  `sequence_id`). See
+- Setters sit above the document's frontmatter and below runtime mutations.
+  The read-only `seq` root carries the current row, neighbors, outputs, and
+  run ID separately from frontmatter. See
   [Phase 2 — Just-in-time composition](../topics/flow-control/sequences.md#phase-2--just-in-time-composition)
   for the full order.
 
@@ -71,12 +71,12 @@ sequence:
       topic: parsing
     - name: review
       prompt: "@prompts/review.md"
-      params:
-          topic: "{{ state.topic }}"
+      with:
+          topic: "{{ seq.topic }}"
     - name: stage
       shell: git add .
 ---
-Research {{ state.topic }} and write up what you find.
+Research {{ seq.topic }} and write up what you find.
 ```
 
 The `research` step has no executable, so it composes this document's body.
@@ -86,145 +86,210 @@ groups are covered in [Sequences](../topics/flow-control/sequences.md).
 
 ## Choosing providers
 
-A provider is chosen twice: once for the whole run before any step starts,
-and again for each step when it launches.
+Every task that launches a provider (a `prompt:` task, or a step that runs
+the sequence body) chooses its own. Before any task starts, preflight
+predicts each one's provider from its own `agent`, the same way its launch
+will choose it:
 
 ```mermaid
 flowchart TD
-    A["provider flag given? (--claude, --provider …)"] -- yes --> F["every step uses it; no review screen"]
-    A -- no --> B["sequence document's agent, after agent= / --set"]
-    B -- "resolves to one installed provider" --> P["planned target"]
-    B -- "missing, invalid, not installed, or several choices" --> C{"stderr is a terminal?"}
-    C -- yes --> R["review screen: one row per step that can launch a provider"]
-    C -- no --> E["run fails before any step starts"]
-    R --> P
-    P --> L{"at launch: does the step's document name an agent?"}
-    L -- yes --> S["the step runs on that agent"]
-    L -- no --> T["the step runs on the planned target"]
+    A["provider flag given? (--claude, --provider …)"] -- yes --> F["every task uses it; no review screen"]
+    A -- no --> B{"does the task name its own agent?"}
+    B -- "yes, a static value" --> P["predicted: resolved now"]
+    P -- "not installed, unknown, or wrong type" --> X["run fails before any task starts"]
+    B -- "yes, but it reads a later value" --> D["decided at launch"]
+    B -- no --> N{"does an enclosing sequence document's agent resolve?"}
+    N -- yes --> S["the task runs on that agent"]
+    N -- no --> C{"stderr is a terminal?"}
+    C -- yes --> R["review screen: an editable row for this task"]
+    C -- no --> E["run fails before any task starts"]
 ```
 
-**Before the run**, the sequence plans a target from the sequence
-document's own `agent` and `model`:
+A task's own `agent` comes, lowest first, from its prompt document's
+frontmatter, its `with:`, and a caller setter (`agent=…` or
+`--set '{"agent": …}'`, which therefore overrides every task). A runtime
+`set` of `agent` outranks all three when the task runs. `--claude`,
+`--codex`, …, or `--provider <name>` decides every task and skips the rest.
 
-- `--claude`, `--codex`, …, or `--provider <name>` sets the provider for
-  every step and skips everything below. `--model` does the same for the
-  model.
-- Otherwise the sequence document's `agent` is used. An `agent=…` setter or
-  `--set '{"agent": …}'` replaces it.
-- If that doesn't settle on one installed provider, for example when the
-  document has no `agent`, a terminal gets the **review screen** described
-  below. Without a terminal, the run fails before any step starts, even
-  when no step would get a row.
+```yaml
+# No document `agent`: every task names its own, so the run just starts.
+sequence:
+    - name: implement
+      prompt: "@prompts/implement.md"
+      with: { agent: codex }          # runs on Codex
+    - name: review
+      prompt: "@prompts/review.md"    # declares agent: opencode, so it runs on OpenCode
+    - name: stage
+      shell: git add .                # launches no provider, needs none
+```
 
-**At launch**, a step that runs a prompt document uses that document's own
-`agent` if it has one. That value can come from the prompt's frontmatter or
-from the step's `params`, and a caller setter overrides both. The planned
-target is only the fallback for a step whose document names no agent.
+Each task falls into one of three classes:
 
-The model follows the same order: `--model` first, then the step document's
-own `model`, then the planned model. The planned model is used only while
-the step runs on the planned provider; a step whose document moves it to
-another provider gets that provider's own default. A `MODEL` or
-provider-specific model variable in the environment outranks a document's
-`model`, as it does for `compose`, but not the planned model, which already
-started from it.
+| Class | When | What happens |
+| :--- | :--- | :--- |
+| **predicted** | its `agent` is known now | checked now; an unusable one fails the run, naming the task, the property, and the enclosing containers |
+| **decided at launch** | its `agent` reads `seq.outputs`, `loop.*`, `group.*`, `current.*`, a key a lifecycle `set` writes (even one with no value before that write), or a `$( … )` | evaluated when the task is prepared; an unusable value fails that task before it spawns, after earlier tasks ran |
+| **missing a provider** | no `agent` of its own: absent, or `null` in whichever layer decides it (a caller's `agent=[]` too) | takes the nearest enclosing sequence document's `agent` (a referenced sequence file's own first, then outward to the root); with none, a terminal reviews it and anything else fails |
+
+`null` is not a hint, so an `agent: null` in a task's `with:` or a caller's
+`agent=null` hides a lower layer's `agent` and leaves the task missing one.
+An empty string `""` is an invalid provider name, not an empty hint. A caller
+setter also applies to the sequence document, so `agent=null` or `agent=[]`
+leaves nothing to inherit.
+
+`agent: []` in a task's prompt frontmatter or its `with:` is not an empty
+hint: the [launch schema](../topics/schemas.md#when-the-schemas-apply) requires
+an agent list to have at least one entry, so the run fails before any task
+launches, naming where the list was written (`tasks[1].with.agent`, or
+`agent` in the prompt file). A body step of a referenced sequence file whose
+`agent` is `[]` fails the same way, naming that file, unless a caller's
+`agent=` replaces it. A root sequence document's `agent: []` fails its own
+schema check before any task launches. `model: []` is valid and means no model.
+
+A task naming a provider that isn't installed fails before any task
+launches, even when its `when:` is false:
+
+```text
+⤫ CompositionError: task provider selection failed
+  step 2 (`later`) in seq.md names its provider with tasks[1].with.agent in seq.md.
+```
+
+A hint that reads the provider it selects (`agent: "{{ env.AGENT }}"`, or
+`env.MODEL` for `model`) is rejected the same way, unless something above it
+decides that key. Provider and model are decided separately:
+
+| Hint | Made irrelevant by |
+| :--- | :--- |
+| `agent: "{{ env.AGENT }}"` (or `ctx.agent`) | `--claude`, `--provider claude`, or a caller's `agent=` |
+| `model: "{{ env.MODEL }}"` (or `ctx.model`) | `--model`, a `MODEL` or provider-specific model variable (`CLAUDE_MODEL` for Claude), or a caller's `model=` |
+
+So `claudine sequence seq.md --claude` runs a task whose prompt says
+`agent: "{{ env.AGENT }}"` on Claude, and the prompt reads `claude` there.
+A provider flag does not excuse a circular `model`.
+
+An `agent` or `model` whose expression is simply wrong is rejected too,
+under any flag, because the task's prompt still evaluates it when it
+composes; so is an `agent: []`. Wherever it is written, a typo is not a
+later value, so `with: { agent: "{{ no_such_function() }}" }` on the second
+task stops the run before the first launches, naming `tasks[1].with.agent`.
+A document hint reading a `with` entry that fails is located at that entry. Prediction runs no shell,
+lifecycle event, or `prep` target, composes no prompt body, and refreshes no
+model catalog. A graph of only `shell:` and `side_effect:` tasks needs no
+provider at all.
+
+A body step composes the sequence document itself, so its `agent` is the
+document's. A group has no `agent`: each task in it chooses its own.
+
+**The model** follows its own order: `--model` first, then a `MODEL` or
+provider-specific model variable in the environment, then the task's own
+`model`, then the enclosing document's `model`, then the provider's
+default. An inherited model goes only with the provider it belongs to: a
+task that switches provider gets that provider's own default, and its
+process gets no stale `MODEL`.
 
 ```yaml
 agent: claude
-model: claude-opus-4-8              # the planned model
+model: claude-opus-4-8              # Claude's model
 sequence:
     - name: draft
-      prompt: "@prompts/draft.md"   # names no model: runs claude-opus-4-8
-    - name: polish
-      prompt: "@prompts/polish.md"  # declares model: sonnet, so it runs sonnet
+      prompt: "@prompts/draft.md"   # runs claude-opus-4-8
+    - name: other
+      prompt: "@prompts/draft.md"
+      with: { agent: codex }        # Codex's default model, not Claude's
 ```
+
+**What a step reports is what launched.** The step's status line names the
+provider that spawned, and lists every attempt when a `retry` or `proxy`
+switched provider:
+
+```text
+✓ step 1/2 succeeded (via Codex)
+✓ step 2/2 succeeded (via Codex; attempts: Claude → Codex)
+```
+
+A skipped task, a preview, and a task that launched nothing claim no
+provider. `{{ env.AGENT }}` and `{{ env.MODEL }}` in a task's composed
+prompt name the provider and model the task launches with, and so does the
+child's environment. That holds for a task decided at launch too: its
+document's frontmatter is evaluated first, the provider is chosen from it,
+and only then does the body render. It holds when an earlier task rewrote the
+prompt document to name another provider: the task launches on the fresh
+`agent`, and its prompt says so.
 
 ```yaml
-agent: claude                  # plans the run; also runs body steps
 sequence:
-    - name: review
-      prompt: "@prompts/review.md"
-      params: { agent: codex } # this step runs on Codex
-    - name: commit
-      prompt: "@prompts/commit.md"   # declares agent: opencode, so it runs on OpenCode
+  - name: pick
+    shell: echo goose
+  - name: run
+    prompt: report.md              # body: "You are {{ env.AGENT }}."
+    with: { agent: "{{ seq.outputs[0] }}" }
+# Goose launches, with AGENT=goose, and reads "You are goose."
 ```
 
-That split has some surprising effects:
+An `agent` or `model` that comes from a `$( … )` in the prompt's
+frontmatter agrees too. The command runs once; its answer chooses the
+provider and model after the frontmatter resolves and before the body
+renders, and a retry of the task rereads the document under that choice.
+A task's `with:` value that only looks like a command, such as
+`model: "$(echo x)"`, is data: nothing runs it, and the body and the child
+both receive it as written.
 
-- **A sequence document with no `agent` stops the run** (review screen or
-  error), even when every step names its own provider. Give the sequence
-  document an `agent` of its own to avoid this.
-- **A review-screen choice is ignored** for a step whose document names an
-  agent. It takes effect only for steps that name none. A model choice is
-  likewise ignored for a step whose document names a model.
-- **An `agent=` setter overrides every step**, because caller setters outrank
-  `params` and the prompt's frontmatter.
-- **The step's status line reports the planned target**, not the provider
-  that launched, so a step that ran on Codex can print
-  `succeeded (via Claude)`. The same goes for `{{ env.AGENT }}` and
-  `{{ env.MODEL }}` inside the composed prompt, which differ from the launch
-  only when the step's document names its own agent or model. The provider's
-  own process gets the correct `AGENT` and `MODEL`.
-- **A step naming a provider that isn't installed fails at its turn**, after
-  earlier steps have already run.
+```markdown
+---
+agent: '$(echo goose)'
+---
+You are {{ env.AGENT }}.
+```
+
+The task above launches Goose, with `AGENT=goose`, and its prompt reads
+"You are goose." A frontmatter value that itself reads `env.AGENT` resolves
+before that command runs, so it sees the identity the rest of the
+frontmatter names without the command's answer.
 
 ### The review screen
 
-The review screen is a table with a provider picker and a model picker for
-each step that can launch a provider, all starting on the same default.
-Whether a step gets a row depends only on the kind of step, read from the
-sequence document; nothing is composed or run to decide it:
+The screen opens only on a terminal, and only when some task is missing a
+provider (or names a list with more than one installed provider). It shows
+one row per provider-launching task, labeled with its root step's position
+and its name:
 
-| Step | Row? | What the row's choice sets |
-| :--- | :--- | :--- |
-| `prompt` | Yes | The fallback target for the prompt document |
-| `task` | Yes | The fallback target for the task |
-| `group` | Yes | The fallback target for the whole group; its tasks get no rows of their own |
-| no executable (runs the sequence body) | Yes | The target for the body |
-| `shell` | No | Nothing; the step launches no provider |
-| `side_effect` | No | Nothing; the step launches no provider |
-
-A `task` or `group` gets a row even when the work it points to turns out to
-be only shell commands.
-
-Each row is labeled with the step's position in the whole sequence and its
-name, so hidden steps leave gaps in the numbering:
+| Task | Row |
+| :--- | :--- |
+| missing a provider | editable: a provider picker and a model picker |
+| names its own provider | read-only, showing it |
+| decided at launch | read-only, showing `decided at launch` |
+| `shell`, `side_effect` | no row |
 
 ```yaml
 sequence:
     - name: implement
-      prompt: "@prompts/implement.md"   # row "1 implement"
+      prompt: "@prompts/implement.md"   # row "1 implement", editable
     - name: stage
       shell: git add .                  # no row
     - name: review
-      prompt: "@prompts/review.md"      # row "3 review"
+      prompt: "@prompts/review.md"      # declares agent: codex: row "3 review" shows Codex, read-only
 ```
 
-A choice on row `3 review` applies to the third step and nothing else,
-even when two steps share a name. Steps without a row keep the default the
-screen started from.
+A choice is stored for that one task, so two tasks with the same name in
+different containers never share it. It is a fallback, not an `agent`: if
+the task's document names an `agent` when it launches (a `proxy` target,
+say), that wins.
 
 - `Ctrl+S` accepts every row and starts the run.
-- `Esc` or Ctrl+C leaves the screen, starts no step, and exits `130`.
-- When no step would get a row (every step is `shell` or `side_effect`), the
-  screen doesn't open, the note explaining why a choice was needed (such
-  as `Invalid Agent:`) isn't printed, and the run starts on the default.
-  The rule above that a headless run without a provider fails still applies
-  first.
+- `Esc` or Ctrl+C leaves the screen, starts no task, and exits `130`.
 - Shell commands are approved before the screen opens, and `--dry-run` never
   opens it.
 
-## Fail-fast and exit codes
+## Failures and exit codes
 
-A failing step stops the run when fail-fast is on. The setting comes from, in
-order: `--fail-fast <bool>` (`true`/`false`, `1`/`0`, `yes`/`no`), the
-document's `fail_fast`, and then the default, `true`.
+An unhandled failing step stops the run. The old `--fail-fast` flag and a
+sequence document's `fail_fast:` key are rejected with a replacement hint.
+Use `failure:` lifecycle handling for recovery; `fail_fast` belongs only to
+group objects. Claudine no longer injects `CLAUDINE_FAIL_FAST` into a step.
 
-The exit code is `0` when every executed step succeeded, `1` when at least one
-failed, and `130` after Ctrl+C, including `Esc` or Ctrl+C on the review
-screen, which starts no step. A preflight failure aborts the run whatever
-the fail-fast setting. See
-[Fail-fast, exit codes, and dry-run](../topics/flow-control/sequences.md#fail-fast-exit-codes-and-dry-run).
+The exit code is `0` when every executed step succeeded, `1` after an
+unhandled failure, and `130` after Ctrl+C, including cancellation on the
+provider review screen. A preflight failure starts no step.
 
 ## Interactive sessions
 
@@ -242,7 +307,6 @@ Each step's provider session gets these variables:
 
 | Variable | Value |
 |---|---|
-| `CLAUDINE_FAIL_FAST` | the effective fail-fast setting |
 | `AGENT` | the provider that launched, such as `codex` |
 | `MODEL` | the model that launched, when one was chosen |
 | `YOLO` | `true` when `--yolo` is set |
@@ -251,18 +315,33 @@ Each step's provider session gets these variables:
 ## Dry run
 
 `--dry-run` runs the full preflight and then composes every step against the
-starting state, without launching a provider. **Shell work still runs**:
-`$( … )` expansions and `shell:` steps execute for real, so a dry run of a
-sequence with `shell: git commit …` will commit.
+starting state, without launching a provider. It runs no lifecycle event and
+no `prep` target, previews each loop body once with pass 1's `loop` values,
+and shows each task guard instead of evaluating it. `shell:` and
+`side_effect:` tasks are rendered, not run:
+
+```text
+ℹ rendered (dry-run): would run `git add .`
+ℹ rendered (dry-run): would run `{"append_line":["note.txt","noted {{ loop.count }}"]}`
+```
+
+Before the steps, a preview lists each provider-launching task and its
+predicted provider (`--verbose` lists them for a live run too):
+
+```text
+ℹ Providers:
+ℹ implement → Codex
+ℹ notes → Claude (from the sequence)
+ℹ review → decided at launch
+```
+
+**Composition still runs its `$( … )` expansions**, so their side effects
+happen. `--dry-run --dry-run-shell` also runs each `shell:` task once during
+the preview, for real (`git add` stages); it never launches a provider, runs
+no `side_effect:` task, and turns no loop or lifecycle event back on.
+`--dry-run-shell` without `--dry-run` is a usage error.
 
 ## Flags
-
-Flags specific to `sequence`:
-
-| Flag | Effect |
-|---|---|
-| `--fail-fast <BOOL>` | overrides the document's `fail_fast` |
-| `--budget-ledger <PATH>` | enforces one shared invocation and active-time budget across every agent launch, retry, and wait in the run; see [Shared execution budgets](budget.md) |
 
 Flags shared with `compose`:
 
@@ -275,7 +354,7 @@ Flags shared with `compose`:
 | System prompt | `--append-system-prompt`/`--asp <FILE>`, `--replace-system-prompt`/`--rsp <FILE>` |
 | Output | `-o`/`--output <FORMAT>`, `-q`/`--quiet`, `--silent`, `--perf` |
 | Values | `--set <JSON>`, `--operation`/`--op <OP>` |
-| Rehearsal | `--dry-run` |
+| Rehearsal | `--dry-run`, `--dry-run-shell` |
 
 `-y` is `--yolo`, not "answer yes". It turns on each provider's own
 auto-approval mode, and it approves every shell command during preflight
@@ -292,6 +371,6 @@ provider review screen.
   averaged across steps. The note line gives both the average and the
   minimum latency.
 
-An interrupted run, or one stopped by fail-fast, still prints the report,
+An interrupted run, or one stopped by a step failure, still prints the report,
 with a `partial sequence metrics` note. `--perf` overrides `--quiet` and
 `--silent`.

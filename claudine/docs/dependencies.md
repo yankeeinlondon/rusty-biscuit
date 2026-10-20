@@ -13,6 +13,11 @@
 - The `claudine` library and `claudine-cli` reach Playa's worker and queue locks
   through `test-toolkit`'s `LockedAudioSpool` fixture while device-free tests
   inspect durable queued audio. Neither crate declares `fs4` itself.
+- `claudine-cli`'s `test-fixtures` feature also enables `test-toolkit` as an
+  optional dependency for the `claudine-argv-recorder` fixture binary
+  (`test_toolkit::argv_recorder`), a native program that records its argument
+  vector for the shell template tests. It adds no crate: `test-toolkit` is
+  already a dev dependency.
 - `claudine-gen` keeps its optional `terminal-tests` dependency on
   `test-toolkit` and also declares it as a dev dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. The dev entry adds
@@ -45,13 +50,13 @@
   Playa dependency; test-only worker-lock ownership comes from `test-toolkit`.
   `biscuit-speaks/playa` carries the same native feature edge for TTS.
 
-## Budget Ledger Process Identity
+## Process-Start Identity
 
 - `claudine-cli` depends on `sysinfo` (`0.38`, the version `sniff` already
-  brings into the graph). Budget-ledger crash recovery uses it to read a
-  recorded worker's process start time, and signals the PID only when that
-  start time still matches, because PIDs are reused. On Windows it also
-  terminates a verified survivor. See [Shared execution budgets](cli/budget.md).
+  brings into the graph). Process identity reads a recorded worker's process
+  start time and signals the PID only when that start time still matches,
+  because PIDs are reused (`cli_utils::process_start`; descendant
+  enumeration in `wrap/exec/spawn/descendants.rs` shares the edge).
 
 ## Executable Lookup
 
@@ -109,8 +114,8 @@ See [Steering Routing](topics/steering-routing.md).
   `rendezvous-daemon`) for the owner's outbound `SteeringControl` request
   stream. Its dev-dependency on `tokio` adds `test-util` so the control link's
   retry backoff is asserted on a paused clock. The wrapper's process-start
-  identity reuses the `sysinfo` edge described under Budget Ledger Process
-  Identity (`cli_utils::process_start`).
+  identity reuses the `sysinfo` edge described under Process-Start Identity
+  (`cli_utils::process_start`).
 - `rendezvous-client` adds `tokio-stream` as a dev-dependency for the
   steering round-trip test's owner stream.
 
