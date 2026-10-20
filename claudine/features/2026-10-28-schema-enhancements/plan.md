@@ -555,8 +555,8 @@ complete diagnostics, and order-independent overloads.
 - [ ] **Context handlers** — **parallel**, own filesystem/repository/network/
   provider/composition handler bodies and corresponding fixture rows.
   - Migrate all context handlers to bound arguments, including refined count
-    limits, content types, and null predicate behavior. `file_exists(42)` binds
-    `"42"`; keep request-owned `FileReference` resolution and existing policy.
+    limits, content types, and null predicate behavior. `file_exists(42)` is
+    `false` (`any`, inspected without conversion; spec decision 82); keep request-owned `FileReference` resolution and existing policy.
   - Implement `validate_schema` override merge and repeated nonmutating
     validation. Keep I/O/domain failures typed and separate from binding errors;
     use fake adapters and private filesystem fixtures, never real providers.

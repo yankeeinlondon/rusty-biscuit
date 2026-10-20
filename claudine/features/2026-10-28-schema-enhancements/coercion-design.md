@@ -44,7 +44,8 @@ this contract, not an authority for preserving its current broad types.
 >
 > **Updated per 2026-09-25 clarification round 6:** the strict-mode setting
 > is confirmed as `expressions.strict`; `file_exists` has no exception to the
-> engine (`file_exists(42)` checks for a file named `"42"`); and any tie the
+> engine (since 2026-10-20 it inspects its argument: `file_exists(42)` is
+> `false`; spec decision 82); and any tie the
 > two tie-breakers do not settle is confirmed as an ambiguity type error.
 
 The central rule is:
@@ -286,9 +287,9 @@ them as plain `string` would lose their validation.
 
 _Updated per 2026-09-25 clarification round 3:_ refined text types (including
 string literals) accept text, including the text produced by number → text
-and boolean → text, and then apply their own validation. `file_exists(2026)`
-against `file_exists(value: string | file | null): boolean` binds `"2026"` and
-checks for a file of that name, with no design-time warning; the parent spec's
+and boolean → text, and then apply their own validation. `file_exists` is not
+one of them: it declares `any` and returns `false` for `file_exists(2026)`
+without conversion (_updated 2026-10-20, spec decision 82_); the parent spec's
 advisory always-false exception for known unsupported types is retired
 (updated per 2026-09-25 clarification round 6, spec decision 63). A number sent to a `date` becomes text and then fails the date
 check normally. Constraints (`min`, `max`, `pattern`, `integer`) are enforced
