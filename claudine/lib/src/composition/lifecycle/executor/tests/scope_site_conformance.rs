@@ -69,7 +69,6 @@ listed_enum! {
         HostGlobalTypes => "host_global_types",
         NestedUnionProjection => "nested_union_projection",
         FunctionResultNarrowing => "function_result_narrowing",
-        ConvertedFileExists => "converted_file_exists",
     }
 }
 
@@ -127,8 +126,6 @@ const NO_TASK_WRITE: &str =
 const HOST_TYPES: &str = "host types for `seq`/`loop`/`group`: a guard proves a host value present but projects no type";
 const NESTED_UNION: &str = "nested-union and discriminant projection: a guard on `x.kind` narrows only `x.kind`";
 const FUNCTION_RESULT: &str = "function-result narrowing: a guard on `len(x)` or `upper(x)` proves nothing about `x`";
-const CONVERTED_FILE_EXISTS: &str =
-    "conversion-aware `file_exists`: the fact holds for the original string argument only until conversion lands";
 
 /// The matrix. Lifecycle and sequence sites are Claudine's; document sites
 /// are Darkmatter's [`DARKMATTER_MATRIX`]. The match on `site` is exhaustive,
@@ -143,7 +140,6 @@ fn cell(site: ScopeSite, case: GuardCase) -> Cell {
         C::HostGlobalTypes => Some(HOST_TYPES),
         C::NestedUnionProjection => Some(NESTED_UNION),
         C::FunctionResultNarrowing => Some(FUNCTION_RESULT),
-        C::ConvertedFileExists => Some(CONVERTED_FILE_EXISTS),
         _ => None,
     };
     let claudine = |rows: fn(GuardCase) -> Cell| planned.map_or_else(|| rows(case), Planned);
@@ -218,9 +214,9 @@ fn declares_test(file: TestFile, name: &str) -> bool {
 #[test]
 fn the_matrix_has_every_site_and_case() {
     assert_eq!(ScopeSite::ALL.len(), 9);
-    assert_eq!(GuardCase::ALL.len(), 22);
+    assert_eq!(GuardCase::ALL.len(), 21);
     let cells = ScopeSite::ALL.iter().flat_map(|site| GuardCase::ALL.iter().map(move |case| cell(*site, *case))).count();
-    assert_eq!(cells, 9 * 22);
+    assert_eq!(cells, 9 * 21);
 }
 
 #[test]

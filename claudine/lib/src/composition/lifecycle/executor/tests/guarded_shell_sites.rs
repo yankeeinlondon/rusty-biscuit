@@ -306,3 +306,21 @@ fn a_value_a_set_changed_to_an_unapproved_type_is_refused_unsuppressibly() {
     assert!(!format!("{error:?}").contains("SECRET-ITEM"), "{error:?}");
     assert!(shell.chains().is_empty());
 }
+
+/// A guard cannot make a global the event never binds available: the
+/// command is refused as the unguarded one is, never deferred as a guarded
+/// missing value.
+#[test]
+fn a_guard_on_an_unavailable_global_leaves_its_refusal_unchanged() {
+    let refusal = |stack: Value| match resolve(&json!({ "start": stack })) {
+        Err(CompositionError::LifecycleShellResolution { message, .. }) => message,
+        other => panic!("expected the late-binding refusal, got {other:?}"),
+    };
+
+    let guarded = refusal(json!([{ "when": "err.message", "then": [{ "shell": "tool {{ err.message }}" }] }]));
+    let unguarded = refusal(json!([{ "shell": "tool {{ err.message }}" }]));
+
+    assert!(guarded.contains("late-binding reference `err`"), "{guarded}");
+    assert!(!guarded.contains("which is missing"), "{guarded}");
+    assert_eq!(guarded, unguarded);
+}

@@ -1,8 +1,9 @@
 //! Shell values a `when:` guard proves present, through `claudine compose`
 //! and `claudine sequence`: pre-flight accepts a guarded command whose value
 //! is missing now once its template is approved, a false guard launches
-//! nothing, a selected command reads its live value as one argument, and the
-//! same command outside any guard still fails pre-flight.
+//! nothing, a selected command reads its live value as one argument (again
+//! on every loop pass and retried attempt), and the same command outside any
+//! guard still fails pre-flight.
 //!
 //! Every command is the `claudine-argv-recorder` fixture copied into the
 //! fixture `bin` as `argv-recorder`, so "what ran" is the argument vectors the
@@ -48,17 +49,22 @@ impl Run {
     /// `claudine <command> --goose doc.md <setters>`; the recorder is cleared
     /// first, so [`Self::runs`] holds this run's commands only.
     fn run(&self, command: &str, setters: &[&str]) -> Outcome {
+        self.run_with_plan(command, setters, None)
+    }
+
+    /// [`Self::run`], with the fake provider following `plan` (its
+    /// `FAKE_PLAN`) instead of succeeding on every launch.
+    fn run_with_plan(&self, command: &str, setters: &[&str], plan: Option<&str>) -> Outcome {
         let _ = std::fs::remove_file(&self.records);
-        let output = self
-            .fixture
-            .command()
+        let mut claudine = self.fixture.command();
+        claudine
             .env(ARGV_RECORDER_FILE, &self.records)
-            .env("FAKE_DIR", self.fixture.cwd().join("provider-records"))
-            .env("PROVIDER_MARKER", self.fixture.cwd().join("launches.txt"))
-            .args([command, "--goose", "doc.md"])
-            .args(setters)
-            .output()
-            .expect("claudine runs");
+            .env("FAKE_DIR", self.fixture.cwd().join("provider-records"));
+        match plan {
+            Some(plan) => claudine.env("FAKE_PLAN", plan),
+            None => claudine.env("PROVIDER_MARKER", self.fixture.cwd().join("launches.txt")),
+        };
+        let output = claudine.args([command, "--goose", "doc.md"]).args(setters).output().expect("claudine runs");
         assert!(!self.fixture.audio_spool().exists(), "shell acceptance must publish no audio");
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
         Outcome {
@@ -384,4 +390,70 @@ Body.
     assert!(outcome.stderr.contains("was refused before it ran"), "{}", outcome.stderr);
     assert!(!outcome.stderr.contains("SECRET-ITEM"), "{}", outcome.stderr);
     assert_eq!(document.runs(), vec![argv(&["first"])], "no segment of the refused chain ran");
+}
+
+/// A `start` stack that runs the guarded command, then writes `msg` with
+/// `next`; the document loops twice.
+fn two_passes(next: &str) -> String {
+    format!(
+        "---\nmsg: msg-1\nloop:\n    until: \"loop.count >= 2\"\nstart:\n    - when: msg\n      then:\n          - shell: argv-recorder guarded {{{{ msg }}}}\n    - set:\n          msg: {next}\n---\nBody.\n"
+    )
+}
+
+const GUARDED_RULE: &str = "template argv-recorder guarded {{ string }}\n";
+
+/// AC 12: a guard's proof does not outlive its pass. Each pass's guarded
+/// command reads the value live, so pass 2 passes the value pass 1 wrote.
+#[test]
+fn each_loop_pass_reads_the_guarded_value_live() {
+    let document = Run::new("guarded-loop-passes", &two_passes("msg-2"), GUARDED_RULE);
+
+    let outcome = document.run("compose", &[]);
+
+    assert!(outcome.success, "{}", outcome.stderr);
+    assert_eq!(document.runs(), vec![argv(&["guarded", "msg-1"]), argv(&["guarded", "msg-2"])]);
+}
+
+/// A list written in pass 1 still selects pass 2's guard, but is no scalar
+/// argument: pass 2's command is refused and launches nothing.
+#[test]
+fn a_list_written_in_one_pass_refuses_the_next_passes_guarded_command() {
+    let document = Run::new("guarded-loop-retyped", &two_passes("[SECRET-ITEM]"), GUARDED_RULE);
+
+    let outcome = document.run("compose", &[]);
+
+    assert!(!outcome.success, "{}", outcome.stderr);
+    assert!(outcome.stderr.contains("was refused before it ran"), "{}", outcome.stderr);
+    assert!(!outcome.stderr.contains("SECRET-ITEM"), "{}", outcome.stderr);
+    assert_eq!(document.runs(), vec![argv(&["guarded", "msg-1"])], "pass 2 launched nothing");
+}
+
+/// A guard's proof does not outlive its attempt: the retried attempt's
+/// guarded command passes the `retry.with` overlay's value.
+#[test]
+fn a_retried_attempt_dispatches_the_overlays_guarded_value() {
+    let document = Run::new(
+        "guarded-retry-overlay",
+        r#"---
+msg: first
+start:
+    - when: msg
+      then:
+          - shell: argv-recorder guarded {{ msg }}
+failure:
+    - retry:
+        max_attempts: 1
+        with:
+            msg: retried
+---
+Body.
+"#,
+        GUARDED_RULE,
+    );
+
+    let outcome = document.run_with_plan("compose", &[], Some("fail"));
+
+    assert!(outcome.success, "{}", outcome.stderr);
+    assert!(document.fixture.cwd().join("provider-records/done-2.txt").exists(), "the provider launched twice");
+    assert_eq!(document.runs(), vec![argv(&["guarded", "first"]), argv(&["guarded", "retried"])]);
 }

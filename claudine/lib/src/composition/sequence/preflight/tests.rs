@@ -1844,7 +1844,7 @@ mod template_position {
 
     /// Approve `graph` against the policy files in `policy`, with no handler:
     /// whatever no rule covers fails as it does without a terminal.
-    fn approve(graph: &PreflightGraph, policy: &TempDir) -> Result<ShellPreApprovals, CompositionError> {
+    pub(super) fn approve(graph: &PreflightGraph, policy: &TempDir) -> Result<ShellPreApprovals, CompositionError> {
         let options = ShellApprovalOptions {
             policy_root: Some(policy.path().to_path_buf()),
             ..Default::default()
@@ -2840,6 +2840,47 @@ mod task_guards {
         let graph = graph_for(&unguarded).unwrap();
         assert!(graph.prompt_references[0].deferred_with.is_empty());
         assert_eq!(graph.prompt_references[0].with.get("message"), Some(&Value::Null));
+    }
+
+    /// A guard naming a `with:` key reads the caller's bindings, where that
+    /// key is not yet bound: it proves nothing about the value the key gets.
+    #[test]
+    fn a_tasks_own_with_value_cannot_prove_its_guard() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("doc.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        let source = sequence(
+            dir.path(),
+            json!([{ "name": "one", "when": "message", "prompt": "doc.md", "with": { "message": "{{ msg }}" } }]),
+        );
+
+        let graph = graph_for(&source).unwrap();
+
+        let reference = &graph.prompt_references[0];
+        assert!(reference.deferred_with.is_empty(), "{:?}", reference.deferred_with);
+        assert_eq!(reference.with.get("message"), Some(&Value::Null), "the value is read now");
+    }
+
+    /// The referenced document has its own scope: the caller's `when: msg`
+    /// does not prove `msg` for the document's unguarded command.
+    #[test]
+    fn a_callers_guard_does_not_narrow_the_referenced_document() {
+        let dir = TempDir::new().unwrap();
+        for (row, document) in [
+            ("lifecycle", "---\nstart:\n    - shell: tool {{ msg }}\n---\n\nBody.\n"),
+            ("body", "---\ntitle: t\n---\n\n::shell tool {{ msg }}\n"),
+        ] {
+            fs::write(dir.path().join("doc.md"), document).unwrap();
+            let source = sequence(dir.path(), json!([{ "name": "one", "when": "msg", "prompt": "doc.md" }]));
+            let graph = graph_for(&source).expect("the graph reads no document command");
+            assert!(graph.prompt_references[0].deferred_with.is_empty(), "{row}");
+
+            let policy = TempDir::new().unwrap();
+            fs::write(policy.path().join(".darkmatter-shell-whitelist"), "template tool {{ string }}\n").unwrap();
+            let error = super::template_position::approve(&graph, &policy).expect_err(row);
+
+            let message = error.to_string();
+            assert!(message.contains("msg") && message.contains("which is missing"), "{row}: {message}");
+        }
     }
 }
 
