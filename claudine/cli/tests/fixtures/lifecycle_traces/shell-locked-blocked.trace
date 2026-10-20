@@ -1,0 +1,15 @@
+# scenario: shell-locked-blocked
+# doc: shell-locked-blocked.md
+# given: invoked as `claudine compose --claude --yolo shell-locked-blocked.md` from the directory holding the fixture documents
+# given: shell approval is granted by --yolo
+# given: the body transcludes a file that does not exist, so preflight fails after initialize
+# given: the blocked shell is reached before start, while shells are locked
+# given: the provider never launches
+event initialize
+event blocked
+err composition.failed
+event failure
+err uncoded: shell commands are forbidden during initialize and before preflight completes; move the command to start or a later event
+event finalize
+err uncoded: shell commands are forbidden during initialize and before preflight completes; move the command to start or a later event
+exit 1

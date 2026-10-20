@@ -1,0 +1,16 @@
+# scenario: resume-admitted
+# doc: resume-admitted.md
+# given: invoked as `claudine compose --claude resume-admitted.md` from the directory holding the fixture documents
+# given: launch 1 reports session session-1 and exits 1 with no result; launch 2 (the resume of session-1) exits 0 with a result
+# given: failure returns resume
+event initialize
+event start
+work fresh 1
+event failure
+err provider.exited
+event start
+work resume 0
+event success
+event finalize
+err none
+exit 0

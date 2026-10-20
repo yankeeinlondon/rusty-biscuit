@@ -1,0 +1,15 @@
+# scenario: catch-loop
+# doc: catch-loop.md
+# given: invoked as `claudine compose --claude catch-loop.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: loop: until false, max 2
+# given: the loop gate guard raises an evaluation error (frontmatter() of a missing file) after pass 1
+event initialize
+event start
+state loop.count=1
+work fresh 0
+event success
+event finalize
+err none
+event loop
+exit 1

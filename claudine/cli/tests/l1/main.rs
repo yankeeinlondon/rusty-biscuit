@@ -126,6 +126,10 @@ mod lifecycle_directive_matrix;
 mod lifecycle_prep;
 mod lifecycle_downgrade_outcome;
 mod lifecycle_literal_escapes;
+// Records launches with the Unix-only `launch_recorder`; its fixture shells are
+// POSIX `sh`.
+#[cfg(unix)]
+mod lifecycle_traces;
 mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;

@@ -1,0 +1,17 @@
+# scenario: resume-incompatible
+# doc: resume-incompatible.md
+# given: invoked as `claudine compose --claude resume-incompatible.md` from the directory holding the fixture documents
+# given: launch 1 reports session session-1 and exits 1 with no result
+# given: failure rewrites the document's model on disk, then returns resume
+# given: the refreshed launch identity changes the model facet, so the resume is refused as session-incompatible after start re-fires; no second launch
+event initialize
+event start
+work fresh 1
+event failure
+err provider.exited
+event start
+event failure
+err composition.failed
+event finalize
+err composition.failed
+exit 1

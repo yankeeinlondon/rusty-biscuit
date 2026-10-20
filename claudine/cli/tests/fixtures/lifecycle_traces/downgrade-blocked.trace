@@ -1,0 +1,14 @@
+# scenario: downgrade-blocked
+# doc: downgrade-blocked.md
+# given: invoked as `claudine compose --claude downgrade-blocked.md` from the directory holding the fixture documents
+# given: the start shell is not approved (no --yolo, no whitelist, no terminal), so the shell audit denies it during preflight
+# given: blocked raises an explicit error
+# given: the provider never launches
+event initialize
+event blocked
+err composition.shell_approval
+event failure
+err uncoded: blocked downgraded
+event finalize
+err uncoded: blocked downgraded
+exit 1

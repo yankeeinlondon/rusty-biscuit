@@ -1,0 +1,16 @@
+# scenario: retry-admitted
+# doc: retry-admitted.md
+# given: invoked as `claudine compose --claude retry-admitted.md` from the directory holding the fixture documents
+# given: launch 1 exits 1 with no result; launch 2 exits 0 with a result
+# given: failure returns retry with one extra attempt
+event initialize
+event start
+work fresh 1
+event failure
+err provider.exited
+event start
+work fresh 0
+event success
+event finalize
+err none
+exit 0
