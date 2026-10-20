@@ -176,10 +176,9 @@ earlier reviews. Observations are not findings and are not carried.
   changed prerequisite that unblocked it; newly unblocked work that is already
   repaired can be verified fixed.
 - Carry every remaining defect into `## Unblocked Findings` or `## Blocked
-  Findings` with its original ID and what remains. Its priority still decides
-  whether it blocks `ready` (see "What blocks readiness"): an open high finding
-  keeps `ready: false`; an open medium or low one does not, and a pending human
-  review alone does not.
+  Findings` with its original ID and what remains. Any open finding, whatever
+  its priority, keeps `ready: false` (see "What blocks readiness"); a pending
+  human review alone does not.
 ::end-block
 
 ## Task
@@ -245,9 +244,10 @@ Read the specification and any supplied design document, then review the impleme
 ## What blocks readiness
 
 A review's job is to find the defects that matter, not to find every defect
-it can construct. A blocking finding costs a full fix cycle and adds code; a
-missed contrived edge case costs little in a repository with no external
-users.
+it can construct. The review/fix cycle is complete only when every finding,
+high, medium, and low, is fixed, so every finding costs a fix cycle and adds
+code; a missed contrived edge case costs little in a repository with no
+external users.
 
 Every finding cites its **authority**, in its first paragraph:
 
@@ -265,18 +265,25 @@ behave.
 | Priority | Meaning | Blocks `ready` |
 |---|---|---|
 | high | has authority and a realistic input gives a wrong result, or an acceptance criterion is unmet or untested at the level it needs | yes |
-| medium | has authority, but only an unusual input reaches it | no |
-| low | polish, naming, ergonomics | no |
+| medium | has authority, but only an unusual input reaches it | yes |
+| low | polish, naming, ergonomics | yes |
+
+Priority orders the repair work (high first); it never decides whether the
+cycle can end.
 
 List observations under `## Observations`, one short paragraph each, after the
 findings. Defects in code this spec did not add or change are always
-observations, unless this spec's change made them reachable. An observation
-is information for the spec's author, who either schedules a fix or lets it
-go; it never asks this cycle to repair it.
+observations, unless this spec's change made them reachable. Observations do
+not block `ready`, but the implementation repairs every observation that
+describes a defect in the same cycle. So write each one as a defect report:
+where it is, the input that reaches it, and the wrong result. An observation
+that describes no defect (a note about future work, a naming remark) says so
+in its first sentence.
 
 When a fix for a finding would be large next to the harm it prevents (a new
 escaping or protection layer, new syntax in generated output, a matrix of
-synthetic payloads), say so and recommend documenting the limitation instead.
+synthetic payloads), say so and describe the smallest repair that removes the
+harm; the implementation fixes it either way.
 
 ## Sweep the class before you write
 

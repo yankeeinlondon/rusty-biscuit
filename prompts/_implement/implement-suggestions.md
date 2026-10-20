@@ -15,8 +15,8 @@ review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
 log: {{ dirname(spec) + '/log.md' }}
 # is the review "production ready"?
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
-# open medium/low findings and observations on a ready review, before its
-# follow-up pass marks the review `implemented`
+# findings and observations on a ready review, before its follow-up pass
+# marks the review `implemented`
 followups: |-
     {{
         ready == true && frontmatter(review, 'implemented') != true
@@ -34,9 +34,15 @@ initialize:
 start:
     message: "🏃 implementing _findings_ from review #{{ file_index(review) }} in `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
 success:
-    - when: "ready == true && frontmatter(review, 'implemented') == true"
+    - when: "ready == true && frontmatter(review, 'implemented') == true && frontmatter(review, 'human_review') != true"
       then:
-          - message: "🧹  follow-up pass for review #{{ file_index(review) }} of `{{ parent_dir(review) }}` finished; anything left is in the area's `fixes/_unscheduled/` backlog"
+          - message: "🧹  follow-up pass for review #{{ file_index(review) }} of `{{ parent_dir(review) }}` fixed every remaining finding and observation"
+    - when: "ready == true && frontmatter(review, 'implemented') == true && frontmatter(review, 'human_review') == true"
+      then:
+          - message: |-
+                🧹  follow-up pass for review #{{ file_index(review) }} of `{{ parent_dir(review) }}` fixed every remaining finding and observation; confirm or reverse these decisions:
+
+                {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
     - when: "ready == true && frontmatter(review, 'implemented') != true"
       then:
           - message: "review #{{ file_index(review) }} of `{{ parent_dir(review) }}` is production ready; no repair was needed"
@@ -132,20 +138,17 @@ The review marked the {{feature_or_fix}} **production ready**, so no further rev
 ::block when="followups > 0"
 ### Follow-up pass
 
-This is one pass with no review after it. In the log, build a `### Finding Ledger` table (`| ID | Finding | Disposition | Evidence or reason |`) with one row for every medium and low finding in the review's `findings` list and every entry in its `observations` list, then:
+This is one pass with no review after it, so it ends with every item fixed and proven by a test. Nothing is left behind: a defect the review found and this pass did not fix is a defect in this implementation.
 
-- **fix every medium and low finding whose repair is small and inside the code this spec added or changed**. This is the default, not an option. Name the defect class and fix its sibling sites in the same code too, with a test for each; a fixed instance whose sibling is left is still open
-- record as **deferred**, with a one-sentence reason, a finding whose repair is large next to its harm, needs a design decision, or reaches outside the spec's code
-- do not repair observations in this pass; carry each one to the backlog below
+In the log, build a `### Finding Ledger` table (`| ID | Finding | Disposition | Evidence or reason |`) with one row for every finding in the review's `findings` list and every entry in its `observations` list, then:
+
+- **fix every finding and every observation that describes a defect**, whatever its size and whether or not it sits in code this spec added or changed. Name the defect class and fix its sibling sites too, with a test for each; a fixed instance whose sibling is left is still open. Before repairing an observation the review did not reproduce, reproduce it with a test first
+- an observation that describes no defect (a note, a wrong label nobody reads, a remark about future work) needs no repair: record it as **no action** with a one-sentence reason
+- this pass runs non-interactively, so never stop to ask. When a repair needs a decision the spec does not settle, such as two reasonable fixes with different user-visible results, make it: choose the option that best fits the spec, the area's `docs/`, and existing behavior, and implement it with tests. Record the decision, the alternatives, and why in the ledger row, add a one-line summary to the review's `human_review_items`, and set its `human_review` to `true`, so the author can confirm or reverse it afterward
+- never create a backlog, follow-up, or `_unscheduled` spec for open work
 - run the focused tests for each repair, then `just test` and `just lint` once in each affected package area after the final change
 
-Then record everything still open, so it reaches planning instead of a log:
-
-- write a backlog entry at `fixes/_unscheduled/{{ kebab_case(without_date(parent_dir(spec))) }}-follow-ups/spec.md` inside the package area that owns the spec (the directory containing the spec's `features/` or `fixes/` directory); append to it if it exists, and match the frontmatter of the other specs in that `_unscheduled/` directory
-- give each deferred finding and each observation its own section: its ID and title, the defect in a sentence or two, where it is, why it was not fixed now, and what fixing it looks like. Link to {{review}} for detail
-- when nothing is left open, write no backlog entry
-
-Finish by setting the review's `implemented` to `true` and `implemented_by` to `{{ ctx.agent }}/{{ ctx.model }}`, so later repair steps in the loop do not repeat this pass, and report what was fixed, what was deferred, and the backlog entry's path.
+Finish by setting the review's `implemented` to `true` and `implemented_by` to `{{ ctx.agent }}/{{ ctx.model }}`, so later repair steps in the loop do not repeat this pass, and report what was fixed and every decision you made for the author to confirm.
 ::end-block
 
 ::block when="followups == 0"
@@ -178,13 +181,13 @@ Create a `### Finding Ledger` in this iteration's log section before editing cod
 - Record blockers and whether they have been removed by an accepted decision or
   changed prerequisite. Complete all unblocked work while genuine blockers remain.
 - Finish each row as **fixed**, **already fixed**, **clean**, **blocked**,
-  **deferred**, **unresolved**, or **disputed**. `clean` is for checked sibling sites,
+  **unresolved**, or **disputed**. `clean` is for checked sibling sites,
   not a finding that requires repair. Record evidence for fixed/already-fixed/clean
   rows and a concrete reason for every open row.
 - A parent finding is fixed only when every required child is verified and no
   discovered defect remains open. Use already fixed only if no repair was needed
   and all required checks passed. Any partial repair remains unresolved unless
-  the remaining work is explicitly blocked or deferred. Count parent findings
+  the remaining work is explicitly blocked. Count parent findings
   separately from instance rows.
 
 From this point on in the task be sure to log progress on the task:
@@ -235,7 +238,7 @@ uncached equivalence checks must also assert the independently expected facts.
 The following are not permitted for anything that is itself a defect against
 the specification: "flagged for the reviewer", "left unchanged", "deliberately
 left tolerant", "out of scope for this finding", "possible follow-up". Either
-fix it in this cycle, or record it as blocked, deferred, unresolved, or disputed
+fix it in this cycle, or record it as blocked, unresolved, or disputed
 in the ledger and closing report with the reason. These outcomes do not count
 as fixed.
 
@@ -249,17 +252,20 @@ do not implement it. Record it in the ledger and closing report as
 **disputed**, with one sentence naming the authority it lacks; the next review
 must cite that authority or drop the finding.
 
-Also dispute, rather than build, a repair that is large next to the harm it
-prevents: a new escaping or protection layer, new syntax in generated output,
-or code that exists only to satisfy synthetic payloads. Propose documenting
-the limitation instead. Each such layer is new surface the next review can
-find an edge in.
+When the review's suggested repair is large next to the harm it prevents (a
+new escaping or protection layer, new syntax in generated output, or code that
+exists only to satisfy synthetic payloads), build the smallest repair that
+removes the harm instead, and record the choice in the ledger. Each such layer
+is new surface the next review can find an edge in, but the harm itself is
+never left in place.
 
-Fix medium and low findings in this cycle too when the repair is small and
-inside the spec's code; that is the default, and it never needs another
-review. Record a larger one as **deferred** with its reason. Observations are
-not repaired here; the follow-up pass on the ready review carries them to the
-backlog.
+Fix every finding in this cycle, high, medium, and low, whatever the size of
+the repair: the cycle is complete only when every finding is fixed. When a repair needs a decision the spec does not settle, make it as
+the follow-up pass does (the best fit with the spec, `docs/`, and existing
+behavior), and record it in the ledger for the author to confirm; never leave
+it for later and never stop to ask. Repair every observation that describes
+a defect in this cycle too, with a test, exactly as the follow-up pass does: a
+later review does not carry observations forward, so one left now is lost.
 
 ::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
 **This review reports a recurring finding class.** Its `## Recurrence` section
@@ -308,7 +314,7 @@ Now your task is to:
       documented, and all required checks passing.
       Blocked means all remaining work depends on unavailable prerequisites;
       otherwise an incomplete cycle is partial.
-    - count parent findings: `total = fixed + already fixed + blocked + deferred
+    - count parent findings: `total = fixed + already fixed + blocked
       + unresolved + disputed`. No parent may remain pending, be counted twice, or be
       reported fixed while any required instance/consumer remains open.
     - summarize verified repairs and list every open finding/child ID, what

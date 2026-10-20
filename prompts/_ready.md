@@ -1,5 +1,5 @@
 - set `ready` to whether you think this feature is **ready for production** (boolean)
-    - `ready` is `false` exactly when the review has at least one **high** finding (see "What blocks readiness"); medium and low findings and observations never make it `false`
+    - `ready` is `false` exactly when the review has at least one finding of any priority, high, medium, or low (see "What blocks readiness"); observations never make it `false`
     - things that contribute to **readiness** include:
         - incomplete implementation of the contract that the spec file (or design file when you have one) had asked for
         - defect in the implementation that will cause problems due to flakiness or incorrect results for input a real caller produces
@@ -19,7 +19,7 @@
         - inputs only a contrived or adversarial test can produce
 - set the `findings` frontmatter property to every finding in the review, high, medium, and low, whether or not `ready` is `true`:
     - write each entry as `<ID> (<priority>): <title>`, for example `R2-F3 (medium): absent cap reads as zero`; no details
-    - the repair step reads this list: it fixes high findings first, and fixes medium and low findings even when the review is ready, so a finding missing from it is a finding nobody repairs
+    - the repair step reads this list: it fixes high findings first, then medium and low ones, and the cycle continues until the list is empty, so a finding missing from it is a finding nobody repairs
 - set the `observations` frontmatter property to a list of the titles of the review's `## Observations` (an empty list when there are none)
 - set `human_review` to a boolean value to indicate whether human review is required prior to this specification being fully complete
     - the goal of this flag is to allow agents to do as much work as possible (aka, until the `ready` flag has been set to true) before they need to involve the human in review
