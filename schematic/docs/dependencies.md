@@ -35,7 +35,7 @@
 
 - `url` v2 validates HTTP(S) base URLs at REST API build.
 - `schemars` v1 generates provider-neutral typed registrations with OpenAPI 3.0 settings.
-- `serde_json` v1 is an unconditional production dependency for descriptor wire schemas and transfer data.
+- `serde_json` v1 is an unconditional production dependency for schema component wire schemas and transfer data.
 
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [📄](https://serde.rs)
 

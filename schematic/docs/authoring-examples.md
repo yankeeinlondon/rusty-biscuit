@@ -60,24 +60,25 @@ compiling the generated crate checks public visibility. Without an alias,
 `context.register::<Item>()?` uses the module supplied to `types_in` and the
 identifier supplied by `definition_type!`.
 
-A provider returns both API and registry through
+A provider assembles its APIs through
 `schematic_definitions::registry::assemble_module_group(module_path, assembly)`;
 the assembly closure receives the context and returns `Result<Vec<RestApi>,
-DefinitionError>`. The adapter preserves registration order and extracts nested
-schemas. Register explicit components before endpoint discovery when their
-order matters. Do not fill a second registry by hand.
+DefinitionError>`. Every returned API carries the finished context's components
+in `RestApi::schemas`, in registration order with nested schemas flattened in.
+Register explicit components before endpoint discovery when their order
+matters. Do not maintain a second list of schemas by hand.
 
 ```mermaid
 flowchart LR
     C[Context and explicit typed registration] --> E[Fallible endpoint builds]
     E --> A[API build validates references and auth]
-    A --> G[Module group: APIs and ordered registry]
+    A --> G[Module group: APIs carrying ordered components]
     G --> O[Rust, OpenAPI and Postman output]
 ```
 
 Missing descriptions, success shapes, or API auth choices prevent compilation.
 Invalid values, repeated success/auth declarations, conflicting environment
-names, collisions, and destination mismatches return `DefinitionError`.
+names, collisions, and unresolved references return `DefinitionError`.
 A path containing `?` and every GET body fail validation. Use `.query(...)`,
 `.header_param(...)`, `.cookie(...)`, path placeholders, and request body methods
 to state input location. Two declarations with the same method and normalized

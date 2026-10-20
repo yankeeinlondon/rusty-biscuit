@@ -29,7 +29,7 @@ colliding with generated `*Request` wrappers. Body models need meaningful
 Declare nominal `Registration` implementations beside models with
 `definition_type!` (or an explicit implementation for concrete generic models).
 
-Expose `module_group() -> Result<ModuleGroup, DefinitionError>` through
+Expose `module_group() -> Result<Vec<RestApi>, DefinitionError>` through
 `schematic_definitions::registry::assemble_module_group`. Its closure receives
 one mutable `DefinitionContext` and returns all APIs sharing that module.
 Register explicit models in the intended component order before endpoints.
@@ -93,7 +93,7 @@ is intentionally exhaustive.
 ## Verification and report
 
 Map behaviors to public-result tests before implementation. Cover valid and
-invalid declarations, registry order, export shapes, and generated wire behavior
+invalid declarations, component order, export shapes, and generated wire behavior
 at the appropriate fidelity. Do not rely on tests that merely repeat literals.
 
 Run in `schematic/`:

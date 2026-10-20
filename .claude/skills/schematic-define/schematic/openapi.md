@@ -124,16 +124,15 @@ schematic-gen generate --api all --openapi-out specs/
 ```rust
 use schematic_define::openapi::{export, ExportOptions, ExportFormat};
 use schematic_definitions::openai::define_openai_api;
-use schematic_definitions::registry::get_registry;
 
+// Components come from `api.schemas`; there is no separate registry argument.
 let api = define_openai_api();
-let registry = get_registry("openai").unwrap();
 
 let options = ExportOptions::new()
     .with_version("1.0.0")
     .with_format(ExportFormat::Yaml);
 
-let openapi_doc = export(&api, &registry, &options)?;
+let openapi_doc = export(&api, &options)?;
 ```
 
 ### Schematic Extensions

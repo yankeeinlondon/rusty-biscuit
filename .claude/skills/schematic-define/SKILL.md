@@ -27,7 +27,7 @@ Pick the right `ApiResponse`, because the generated `EndpointSpec` impl takes it
 
 | `ApiResponse` | `type Decoder` | `type Success` |
 |---|---|---|
-| `Json(Schema)` | `schematic_runtime::Json<T>` | `T` |
+| `Json(TypeRef)` | `schematic_runtime::Json<T>` | `T` |
 | `Binary` | `schematic_runtime::Binary` | `bytes::Bytes` |
 | `Text` | `schematic_runtime::Text` | `String` |
 | `Empty` | `schematic_runtime::Empty` | `()` |
@@ -253,15 +253,14 @@ Schematic defines three extension structs, but exporter emission is currently:
 Document-level extension carries API-wide config (`module_path`, `request_suffix`, `env_mapping`, `headers`).
 Operation-level extension carries endpoint config (`request`, `response`, `headers`).
 
-Serialized response shape uses enum tagging. This excerpt omits the typed
-descriptor and shortens the qualified Rust path; full transfer data retains both:
+Serialized response shape uses enum tagging. A JSON response holds the stored
+`TypeRef` (component names plus wrappers), never a Rust path:
 
 ```yaml
 x-schematic:
   response:
     Json:
-      type_name: ListModelsResponse
-      module_path: null
+      Named: ListModelsResponse   # or Array: { Named: Model }, Primitive: Json
 ```
 
 `Text`/`Binary`/`Empty` appear as scalar enum values.
@@ -328,7 +327,7 @@ The generator's tmux capture suite is L2 behind its internal
 
 `schematic-gen import` turns an OpenAPI document into either a standalone client
 (`--output`) or a definitions-crate module (`--definitions-out`). The second form
-writes `mod.rs` (a `define_{api}_api()` plus `openapi_registry()`) and `types.rs`,
+writes `mod.rs` (a `define_{api}_api()` plus the fallible `module_group()` it unwraps) and `types.rs`,
 so the imported API flows through the normal `generate` pipeline.
 
 - `--exclude-path <PREFIX>` drops endpoints by path prefix (repeatable).
@@ -381,7 +380,7 @@ For the focused definition and generation reference notes, see:
 
 ## Definition snapshots
 
-REST definitions and parameter types now derive plain Serde, including policy and pagination evidence types. Optional fields define omission/null as None; required collections reject missing/null input. This is data transfer, not semantic validation or a self-contained schema bundle. `just -f schematic/justfile migration-check` compares historical JSON values and regenerates all artifacts into temporary directories without mutating fixtures. Baselines use biscuit-hash BLAKE3 on canonical JSON above the 5 MB raw threshold; see `schematic/docs/definition-snapshots.md`.
+REST definitions and parameter types now derive plain Serde, including policy and pagination evidence types. Optional fields define omission/null as None; required collections reject missing/null input. A `RestApi` carries its schema components (`schemas`); this is data transfer, so call `validate_references` on a deserialized API before use. `just -f schematic/justfile migration-check` compares historical JSON values and regenerates all artifacts into temporary directories without mutating fixtures. Baselines use biscuit-hash BLAKE3 on canonical JSON above the 5 MB raw threshold; see `schematic/docs/definition-snapshots.md`.
 
 ## Typed registration
 
@@ -390,13 +389,23 @@ REST definitions and parameter types now derive plain Serde, including policy an
 beside model declarations; no blanket JsonSchema dispatcher or type_name parsing.
 Register exceptional aliases first: first canonical registration fixes name/path/order.
 Containers recurse, primitives/Value stay inline, and explicit unused components survive.
-Call `validate_reference(api, endpoint, &desc)` on transfer data: the destination must
-have registered the whole matching wrapper shape. Reserved Option<TypeRef> structure
-is always None for authored registrations; non-null data fails validation.
-`schematic-definitions::registry::{assemble_module_group, SchemaRegistry::from_context}`
-produce definitions and ordered schemas from one context for every shipped REST
-provider and import. Explicitly register models in the intended order before
-building endpoints; destination-context validation checks every typed reference. Read `schematic/docs/typed-registration.md`. Ollama progress aliases use explicit typed alias registration. `just doctest` runs descriptor compile-fail
+`TypeDesc` is an authoring handle (`type_ref()`, `rust_path()`), with no serde.
+Endpoints store its `TypeRef`: component names plus wrappers (`Named`, `Array`,
+`Optional`, `Map`, `KeyedMap { key, value }` for non-`String` Rust keys,
+`Primitive(..)` incl. `I8`..`I128`/`U8`..`U128`/`Isize`/`Usize`/`F32`/`Char`/`Unit`,
+and `Primitive(Json)` for free-form JSON). `RestApi::schemas` holds
+`SchemaComponent { name, rust_path: Option<String>, schema }` for the whole
+context, nested `$defs` flattened (nested-only entries have `rust_path: None` and
+cannot be referenced). `RestApi::{component, rust_type, validate_references}` and
+`Endpoint::json_references` are the readers; `validate_references` rejects
+dangling names (`DefinitionError::UnresolvedReference { api, endpoint, name }`),
+duplicate/empty/malformed components, and empty map keys, for built and
+deserialized APIs alike. `schematic_definitions::registry::assemble_module_group`
+returns `Result<Vec<RestApi>, DefinitionError>` and gives every member the
+finished context's components. `registry_key_for` is only the per-API artifact
+key. Explicitly register models in the intended order before building endpoints.
+Read `schematic/docs/typed-registration.md`. Ollama progress aliases use explicit
+typed alias registration. `just doctest` runs registration compile-fail
 examples; the existing fresh-output misuse guard also checks their diagnostic codes.
 
 ## Required-fact REST builders
@@ -408,20 +417,21 @@ with `RestApi::builder(&ctx, name, base_url)`. API description and one explicit
 no_auth/bearer_env/basic_env/authentication choice are required. Repeated success
 or auth choices fail; explicit env mappings must agree independent of setter order.
 `Success` and `ErrorSet` are non-exhaustive placeholders; only `ErrorSet::none()`
-is available. Typed Schema descriptor evidence survives lowering and is validated
-at API build; JSON schemas without evidence fail the builder too. OpenAPI export consumes its wire shape. Root typed Vec responses
+is available. JSON bodies lower to a `TypeRef`; API build stores the context's
+components and runs `validate_references`. OpenAPI export writes `Named` as a
+`$ref` and takes `components.schemas` from `api.schemas`. Root typed Vec responses
 retain GET list inference, while Option/nominal wrappers do not. All shipped REST
 providers and the importer use builders; Endpoint/RestApi are non-exhaustive, so
-external literals cannot compile. REST Schema.module_path remains None; qualified
-type_name plus descriptors carry REST identity. The field is retained for
-WebSocket readers only. Endpoint oauth_scopes is removed; auth_policy is retained. Read
+external literals cannot compile. `Schema { type_name, module_path }` is used
+only by WebSocket messages. Endpoint oauth_scopes is removed; auth_policy is retained. Read
 `schematic/docs/definition-builders.md` for accepted forms and the Default allow-list.
 
 ## Imported builder assemblies
 
 `import --definitions-out` emits fallible Endpoint/RestApi builders and a public
-`module_group() -> Result<ModuleGroup, DefinitionError>`. Its API and registry
-share one ordered DefinitionContext; catalog factories unwrap that assembly.
+`module_group() -> Result<Vec<RestApi>, DefinitionError>`. Its API and schema
+components come from one ordered DefinitionContext; catalog factories unwrap that
+assembly. A standalone (`--output`) import gets one component per generated model.
 Nominal generated models implement Registration; aliases reuse their underlying
 implementation, so containers/primitives/Value create no components. The emitter
 bounds debug stack use with small endpoint helpers and batches of registrations.

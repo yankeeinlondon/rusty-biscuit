@@ -79,8 +79,7 @@ paths:
       x-schematic:
         response:
           Json:
-            type_name: ListModelsResponse
-            module_path: null
+            Named: ListModelsResponse
         headers: []
 ```
 
@@ -92,30 +91,39 @@ paths:
 | `response` | `object \| string` | Response specification. See [Response Types](#response-types). |
 | `headers` | `array<[string, string]>` | Endpoint-specific headers. |
 
-### Typed REST schema evidence
+### Schema references
 
-REST JSON schemas contain a qualified `type_name` and typed `descriptor`.
-`module_path` is null for REST; its remaining use is WebSocket compatibility.
-The descriptor preserves wire component identity separately from Rust identity:
+A JSON body or response stores a `TypeRef`, never a Rust path or a copy of the
+schema. A reference is one or more component names plus wrapper shape:
+`Named`, `Array`, `Optional`, `Map`, `KeyedMap` (a map whose Rust key type is
+not `String`), or `Primitive` for an inline type such as `String`, `U32`, or
+free-form `Json`. Each name resolves through the API's `schemas`, which also
+supply the Rust path and become `components.schemas`:
 
 ```yaml
-response:
-  Json:
-    type_name: ::my_definitions::models::Item
-    module_path: null
-    descriptor:
-      shape:
-        Named:
-          schema_name: Item
-          rust_path: ::my_definitions::models::Item
-      structure: null
+x-schematic:
+  response:
+    Json:
+      Array:
+        Named: Item            # resolves to components.schemas.Item
 ```
 
-This is transfer data, not an authoring constructor. Build with typed JSON
-methods and validate against the destination context. The request/response
-excerpts below omit descriptor blocks and shorten Rust paths for readability;
-they are not complete definition-builder inputs. The endpoint OAuth scope field
-is removed; API authentication policy remains supported.
+```yaml
+# The matching entry in the definition's `schemas` (RestApi::schemas)
+schemas:
+  - name: Item
+    rust_path: ::my_definitions::models::Item
+    schema: { type: object, properties: { id: { type: string } } }
+```
+
+Generated Rust spells this response `Vec<::my_definitions::models::Item>`; the
+OpenAPI response schema is an array of `$ref: '#/components/schemas/Item'`.
+`Schema { type_name, module_path }` remains only for WebSocket messages.
+
+This is transfer data, not an authoring constructor. Build with the typed JSON
+methods; a deserialized definition is checked with `RestApi::validate_references`
+before use. The endpoint OAuth scope field is removed; API authentication policy
+remains supported.
 
 ### Request Types
 
@@ -123,8 +131,7 @@ is removed; API authentication policy remains supported.
 # JSON body
 request:
   Json:
-    type_name: CreateMessageBody
-    module_path: null
+    Named: CreateMessageBody
 
 # Multipart form data
 request:
@@ -139,8 +146,7 @@ request:
       - name: metadata
         kind:
           Json:
-            type_name: FileMetadata
-            module_path: null
+            Named: FileMetadata
         required: false
 
 # URL-encoded form
@@ -171,8 +177,18 @@ request:
 # JSON response
 response:
   Json:
-    type_name: MessageResponse
-    module_path: null
+    Named: MessageResponse
+
+# JSON array of a component
+response:
+  Json:
+    Array:
+      Named: Model
+
+# Free-form JSON
+response:
+  Json:
+    Primitive: Json
 
 # Binary response (audio, images)
 response: Binary
@@ -235,8 +251,7 @@ paths:
       x-schematic:
         response:
           Json:
-            type_name: ListModelsResponse
-            module_path: null
+            Named: ListModelsResponse
       responses:
         "200":
           description: Successful JSON response
@@ -252,8 +267,7 @@ paths:
       x-schematic:
         response:
           Json:
-            type_name: Model
-            module_path: null
+            Named: Model
       responses:
         "200":
           description: Successful JSON response
@@ -274,8 +288,7 @@ paths:
       x-schematic:
         response:
           Json:
-            type_name: DeleteModelResponse
-            module_path: null
+            Named: DeleteModelResponse
       responses:
         "200":
           description: Successful JSON response
@@ -345,7 +358,7 @@ To generate OpenAPI documents without vendor extensions (for maximum compatibili
 use schematic_define::openapi::{export, ExportOptions};
 
 let options = ExportOptions::new().skip_extensions();
-let doc = export(&api, &registry, &options)?;
+let doc = export(&api, &options)?;
 ```
 
 Or via CLI:

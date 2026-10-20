@@ -22,19 +22,26 @@ files are never hand-edited. See [generation workflow](../generation/workflow.md
 
 Author nominal types with `definition_type!` and register them in a
 `DefinitionContext`. Build endpoints, then build the API against that context.
-`assemble_module_group` returns APIs and their ordered `SchemaRegistry` together;
-`SchemaRegistry::from_context` is the checked adapter, including nested-schema
-extraction. There is no separate string registry to maintain.
+API build stores that context's components in `RestApi::schemas`, and
+`assemble_module_group` gives every API of a module group the finished
+context's components. Export reads nothing else: `openapi::export(api, options)`
+writes `RestApi::schemas` as `components.schemas`, in the same order, with
+types that appear only nested inside a registered type flattened into
+components of their own. There is no separate registry to maintain.
 
-REST schemas carry a qualified Rust path and typed descriptor evidence. Export
-uses the descriptor's wire shape: `Vec<Item>` is an inline array referencing the
-Item component, `Option` preserves nullability, and primitives/free-form JSON do
-not invent components. Public aliases use typed `register_as` before ordinary
-registration. Schema names and generated Rust paths remain distinct.
+An endpoint's JSON body is a `TypeRef` naming components, and export turns it
+into a wire schema: `Named("Item")` becomes `$ref: '#/components/schemas/Item'`,
+`Array(Named("Item"))` an inline array of that reference, `Optional(..)` a
+nullable schema, and primitives and free-form JSON (`Primitive(Json)`) stay
+inline without inventing components. Public aliases use typed `register_as`
+before ordinary registration. Schema names and generated Rust paths remain
+distinct.
 
-API assembly rejects mismatched destination references and collisions. Strict
-export completeness rejects missing component references rather than emitting
-incomplete documents. Explicit unused registrations and their order are retained.
+API assembly rejects a reference naming no registered component, and the
+generator reports it as `invalid-schema-reference` before writing anything.
+Strict export completeness also rejects a `$ref` with no matching component
+rather than emitting an incomplete document. Explicit unused registrations and
+their order are retained.
 See [typed registration](../typed-registration.md) and
 [the compiling example](../authoring-examples.md).
 
@@ -67,19 +74,21 @@ The same naming convention applies to single-API modules such as
 `samsung_smart_tv.json`, and `UnfoldedCircleCoreRest` ->
 `unfolded_circle_core_rest.json`.
 
-Registry coverage is intentionally strict. Missing a schema registry for a
-module fails generation so incomplete OpenAPI artifacts are not written. Use
-`--no-openapi` when generating Rust clients during a registry migration.
+Component coverage is intentionally strict. A reference that does not resolve
+in its API's `schemas` fails generation for both Rust and OpenAPI output, so
+neither a broken client nor an incomplete OpenAPI artifact is written.
 
 ## Grouped Export
 
 APIs sharing a module (`ollama`, `emqx`) produce grouped OpenAPI documents that merge:
 
+- **Components** — Every member carries the same `schemas`, so the
+  documents' `components.schemas` collapse into one
 - **Paths** — Union of all endpoints from all APIs. An operation that two
   members declare identically apart from authentication appears once; two
   different operations on one method and path fail the OpenAPI output.
-- **operationId** — Unique across the document. The first member in registry
-  order keeps an id; a later clash is prefixed with its API name
+- **operationId** — Unique across the document. The first member in module
+  group order keeps an id; a later clash is prefixed with its API name
   (`OllamaOpenAIListModels`), with a numeric suffix if that is taken too.
 - **Security schemes** — Union keyed by scheme name; a same-named scheme with
   different content is renamed `<scheme>_<api_snake>` for the later API
@@ -91,9 +100,9 @@ APIs sharing a module (`ollama`, `emqx`) produce grouped OpenAPI documents that 
 The full rule, including link updates and the final duplicate scan, is in
 [Generation Validation](../generation/validation.md#openapi-documents-of-a-module-group).
 
-## Schema Registries
+## Schema Components
 
-All 18 shipped REST API views assemble typed schema registries; nominal models implement `Registration` with `JsonSchema`. Missing a registry for a new API produces an error (use `--no-openapi` to skip).
+All 18 shipped REST APIs carry their components in `RestApi::schemas`; nominal models implement `Registration` with `JsonSchema`. A new API gets its components by building through a `DefinitionContext`, so there is nothing extra to register for export.
 
 ## Default Artifact Generation
 

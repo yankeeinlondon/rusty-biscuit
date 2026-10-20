@@ -60,8 +60,9 @@ compile the generated crate and test its wire behavior.
 `schematic-gen import --definitions-out <dir>` writes a definitions-crate
 module instead of a standalone client: `<dir>/types.rs` holds the models and
 `<dir>/mod.rs` holds `define_{module}_api()`, which rebuilds the imported
-`RestApi` as a value, plus `openapi_registry()`. The imported API then joins
-the catalog and flows through `schematic-gen generate` like a hand-written one.
+`RestApi` as a value, plus the fallible `module_group()` it unwraps. The
+imported API then joins the catalog and flows through `schematic-gen generate`
+like a hand-written one.
 
 ```bash
 schematic-gen import --input specs/openai/openapi.yaml --api-name OpenAI \
@@ -96,11 +97,18 @@ fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError>
 }
 ```
 
-Generated `module_group()` registers models in source order and assembles both
-the API and registry from that context. The infallible catalog factory and
-`openapi_registry()` unwrap this checked assembly. Nominal models implement
-`Registration` beside their declarations; aliases reuse their underlying type,
-and containers, primitives, and free-form JSON remain inline.
+Generated `module_group()` registers models in source order and returns
+`Result<Vec<RestApi>, DefinitionError>`. The API it builds carries every
+registered model in `RestApi::schemas`, and its endpoints name those components.
+The infallible catalog factory unwraps this checked assembly. Nominal models
+implement `Registration` beside their declarations; aliases reuse their
+underlying type, and containers, primitives, and free-form JSON remain inline
+(free-form JSON is the reference `Primitive(Json)`).
+
+A standalone import (`--output`) has no definitions module, so the import
+pipeline gives its API one schema component per generated model, with the bare
+model name as the Rust path. That lets the generator resolve the same
+references without a registration context.
 
 
 ```mermaid

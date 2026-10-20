@@ -109,7 +109,7 @@ header.
 
 | Schematic | Postman Mode | Content-Type |
 |-----------|-------------|--------------|
-| `Json(Schema)` | `raw` | `application/json` |
+| `Json(TypeRef)` | `raw` | `application/json` |
 | `FormData` | `formdata` | — |
 | `UrlEncoded` | `urlencoded` | — |
 | `Text` | `raw` | declared content type |

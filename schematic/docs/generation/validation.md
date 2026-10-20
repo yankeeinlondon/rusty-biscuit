@@ -124,10 +124,10 @@ The same fields are available to code as
 | `invalid-identifier`: an API name, endpoint id, or parameter name cannot become the Rust identifier generated from it | ✓ | | | error |
 | `invalid-request-suffix`: `request_suffix` is empty or not alphanumeric | ✓ | | | error |
 | `invalid-module-path`: the module path is not one Rust identifier | ✓ | | | error |
-| `invalid-type-syntax`: a body, response, or form JSON type is not a Rust type | ✓ | | | error |
+| `invalid-type-syntax`: a body, response, or form JSON type, spelled through the API's schema components, is not a Rust type | ✓ | | | error |
 | `generated-name-collision`: two generated items, fields, or client methods share a name, including two endpoints whose methods get one name and a call type named like another item | ✓ | | | error |
 | `endpoint-method-rename`: an endpoint method or call-type setter was renamed to avoid a method every API struct or call type has (see below) | ✓ | | | warning |
-| `incomplete-schema-registry`: a JSON type has no schema in the module's registry | | ✓ | | error |
+| `invalid-schema-reference`: a body, response, or form JSON reference names no registered component in the API's `schemas`, or a component is malformed (see below) | ✓ | ✓ | | error |
 | `duplicate-method-path` across a module group: two member APIs declare different operations on one method and path | | ✓ | | error (found while building the document) |
 | `duplicate-operation-id`: a finished document declares one `operationId` twice | | ✓ | | error (found while building the document) |
 | `unresolved-link-operation`: a link in a finished document names an `operationId` no operation declares | | ✓ | | error (found while building the document) |
@@ -169,13 +169,40 @@ EndpointParams::default().with_query_param(
 ```
 
 Rust-only rules are never applied to the exports. An export carries type
-names and endpoint ids as data, so a name that is not valid Rust syntax still
-produces a valid OpenAPI document and Postman collection:
+names and endpoint ids as data, so a component whose Rust path is not valid
+Rust syntax still produces a valid OpenAPI document and Postman collection:
 
 ```rust
-// Fails the Rust client only; OpenAPI and Postman are still written.
-response: ApiResponse::json_type("Vec<Model"),
+// Fails the Rust client only (`invalid-type-syntax`); OpenAPI and Postman are still written.
+response: ApiResponse::json_type("Model"),
+// ...where the API's `schemas` holds:
+SchemaComponent { name: "Model".into(), rust_path: Some("Vec<Model".into()), schema: json!({}) },
 ```
+
+### Schema references
+
+A JSON body, response, or form part stores a `TypeRef` that names schema
+components, for example `Array(Named("Model"))`. The Rust client spells it
+through the API's `schemas` (`Vec<::my_models::Model>`), and the OpenAPI export
+writes it as a `$ref` to `#/components/schemas/Model`. Both outputs therefore
+need every name to resolve, and both report `invalid-schema-reference` when one
+does not:
+
+```text
+severity=error api=Items endpoint=ListItems feature=invalid-schema-reference output=rust: schema reference `Model` does not name a registered component of API `Items`; register the type in the API's definition context
+```
+
+Each dangling name is reported once per endpoint, including every name inside
+a wrapped reference. A name that exists only nested inside another component
+(its entry has no Rust path) cannot be referenced directly. When every name
+resolves, `RestApi::validate_references` still runs, so an empty or duplicate
+component name, a schema that is not a JSON Schema object or boolean, or an
+empty map key is reported under the same feature. The Postman collection never
+reads a schema, so it is written regardless.
+
+An API built with `RestApi::builder` has already passed the same check, so
+in practice the diagnostic catches a definition that was deserialized or
+edited after it was built.
 
 ### Pagination rules
 
@@ -208,9 +235,9 @@ The rules, by feature id:
 An API default's own shape is reported once, with `endpoint=<none>`; each
 endpoint that inherits it is checked only for what depends on the endpoint.
 An item type named by an endpoint collection must be valid Rust type syntax, and a
-single identifier other than a primitive must be a schema of the API's
-registry (nested schemas count). An item location is checked against the
-response type's registered schema when there is one; when the registry cannot
+single identifier other than a primitive must be a component in the API's
+`schemas` (nested schemas count). An item location is checked against the
+response type's component schema when there is one; when the components cannot
 describe the type, the generated client checks the location at run time
 instead, and nothing is reported.
 
@@ -315,7 +342,7 @@ whole OpenAPI directory untouched.
   must be unique, so a clash is renamed rather than rejected.
 
 The rename rule walks the operations in a fixed order: member APIs in
-registry order, each API's paths in declaration order, and methods in the
+module group order, each API's paths in declaration order, and methods in the
 order GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE. The first
 operation to declare an id keeps it. A later operation with a taken id gets
 its own API's name prefixed (PascalCase). If that name is taken too, or is
@@ -368,8 +395,7 @@ for diagnostic in validate_rust_client(&batch) {
 }
 ```
 
-`validate_openapi_registry(module, apis, registry)` adds the schema-registry
-check for one module. `pipeline::generate_batch` runs every validator,
+`pipeline::generate_batch` runs every validator,
 publishes the outputs that pass, and returns a `GenerationReport` naming the
 succeeded and failed outputs.
 

@@ -5,12 +5,13 @@ kind: canonical-documentation
 # Typed type registration
 
 Use `schematic_define::DefinitionContext` to collect the types for one generated
-module. Registration returns a `TypeDesc` with separate component and Rust names.
-Every shipped REST provider and imported module uses one typed module-group
-assembly for its APIs and ordered registry.
+module. Registration returns a `TypeDesc`: the `TypeRef` an endpoint stores
+(component names plus wrapper shape) and its Rust spelling. Every shipped REST
+provider and imported module uses one typed module-group assembly, and every
+API it builds carries the context's schema components in `RestApi::schemas`.
 
 ```rust
-use schematic_define::{definition_type, DefinitionContext};
+use schematic_define::{definition_type, DefinitionContext, TypeRef};
 use schemars::JsonSchema;
 
 definition_type! {
@@ -20,7 +21,11 @@ definition_type! {
 
 let mut context = DefinitionContext::types_in("::my_definitions::models");
 let response = context.register::<Option<Vec<Model>>>()?;
-context.validate_reference("Catalog", "ListModels", &response)?;
+// Stored reference: Optional(Array(Named("Model")))
+assert_eq!(response.type_ref(), &TypeRef::Optional(Box::new(
+    TypeRef::Array(Box::new(TypeRef::Named("Model".into()))))));
+assert_eq!(response.rust_path(),
+    "::std::option::Option<::std::vec::Vec<::my_definitions::models::Model>>");
 context.finish()?;
 ```
 
@@ -72,58 +77,92 @@ representation is a string. Boolean and floating-point keys fail before the
 value type is registered. Use `register_for::<T>(api, endpoint)` for contextual
 registration errors.
 
+## From registration to references
+
+`DefinitionContext::components()` turns the registrations into the list an API
+stores as `RestApi::schemas`. Each `SchemaComponent` has a `name` (the
+`#/components/schemas/{name}` target), a `rust_path`, and a `schema` with its
+nested definitions removed. Types that appear only nested inside a registered
+type (`$defs`) become components of their own with `rust_path: None`; they are
+exported to OpenAPI but cannot be referenced by an endpoint. Components follow
+registration order, with a nested-only type placed after the first type that
+contains it; registering that type later takes over its entry in place.
+Explicit registrations survive even when no endpoint uses them.
+
+Endpoints never store a Rust path. They store a `TypeRef`, and every reader
+resolves its names through the API's `schemas` (Rust spellings abbreviated):
+
+| Stored reference | Rust spelling (`RestApi::rust_type`) | OpenAPI wire schema |
+| --- | --- | --- |
+| `Named("Model")` | `::my_definitions::models::Model` | `$ref: '#/components/schemas/Model'` |
+| `Array(Named("Model"))` | `::std::vec::Vec<…::Model>` | array of that `$ref` |
+| `Optional(Named("Model"))` | `::std::option::Option<…::Model>` | nullable `$ref` |
+| `Map(Named("Model"))` | `::std::collections::HashMap<::std::string::String, …::Model>` | object with `additionalProperties` |
+| `KeyedMap { key: "u32", value: Named("Model") }` | `::std::collections::HashMap<u32, …::Model>` | same as `Map` |
+| `Primitive(U32)`, `Primitive(Json)` | `u32`, `::serde_json::Value` | inline, no component |
+
+`KeyedMap` holds the one Rust spelling a reference ever carries, because a map
+key type has no component of its own. The primitive widths cover `i8`–`i128`,
+`u8`–`u128`, `isize`, `usize`, `f32`, `f64`, `bool`, `char`, `String`, `()`,
+bytes (`Vec<u8>`), and free-form `serde_json::Value` (`Json`).
+
 ```mermaid
 flowchart LR
     D[Model declarations] --> C[One module-group context]
-    C --> T[Private typed descriptors]
-    T --> V[Destination reference validation]
     C --> F[Collision check]
-    F --> R[Ordered SchemaRegistry adapter]
-    R --> E[Existing nested-schema export]
+    C --> T["TypeDesc → TypeRef stored on endpoints"]
+    F --> S["RestApi::schemas (components)"]
+    T -->|names resolve through| S
+    S --> R[Rust paths in the generated client]
+    S --> O["OpenAPI components.schemas and $ref"]
 ```
 
 `schematic_definitions::registry::assemble_module_group` calls an author-supplied
-assembly function with one context and returns `ModuleGroup { apis, registry }`.
-There is no separate API inventory in the adapter. `SchemaRegistry::from_context`
-checks collisions before adapting entries, preserving both insertion order and
-the existing nested-schema extraction. Explicit registrations survive even when
-no endpoint uses them. Shared API variants use one context; isolated modules
-may reuse component names.
+assembly function with one context and returns `Result<Vec<RestApi>,
+DefinitionError>`. There is no separate API inventory. Because a module group's
+APIs are built one at a time, an early member's build sees only the types
+registered so far; assembly therefore gives every member the finished context's
+components and re-runs `validate_references`, so all members carry identical
+`schemas`. Collisions are checked first, even if the callback swallowed one.
+Shared API variants use one context; isolated modules may reuse component names.
 
-A `TypeDesc` derives Serde but has no public string constructor or structural
-setter. Deserialized descriptors are untrusted transfer data. Call
-`validate_reference(api, endpoint, &descriptor)` before lowering them into a
-definition. The destination must have registered the complete matching shape,
-including schema name, Rust path, key type, wrappers, and inline schema. This
-accepts matching data from another context without serializing process identity.
-An unrelated context or changed wrapper fails with API, endpoint, and type
-context. The reserved `structure: Option<TypeRef>` is always `None` in authored
-registrations; valid non-null structural data can round-trip through Serde but
-is rejected by reference validation.
+## References in transferred definitions
 
-Descriptor JSON uses these field contracts. All malformed cells reject through
-JSON reading or public destination validation, rather than silently clearing data.
-The named, inline, and map controls are produced by real registration calls.
+`TypeDesc` is an authoring handle only: it has no Serde derives and no public
+constructor. A `RestApi` does serialize, and its references and components
+travel with it. Treat a deserialized definition as untrusted and call
+`RestApi::validate_references` before using it. It is the same check API build
+runs:
 
-| JSON shape | shape discriminator/wrapper | Named.schema_name | Named/Inline.rust_path | Inline.schema | Map.key | Map.value | structure |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Control | Registered shape | Registered name | Registered path | Exact inline schema | Registered key | Registered nested shape | null accepts |
-| Absent | Reject | Reject | Reject | Reject | Reject | Reject | Accept None |
-| Null | Reject | Reject | Reject | Reject | Reject | Reject | Accept None |
-| Wrong type | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| Mixed invalid array | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| All-invalid array | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| Empty | Reject | Reject | Reject | Reject for the String control; explicit Value uses {} | Reject | Reject | Reject |
-| Duplicate key | Reject | Reject | Reject | Reject | Reject | Reject | Reject |
-| Trailing/invalid content | Reject document | Reject document | Reject document | Reject document | Reject document | Reject document | Reject document |
+- every name in every JSON body, response, and form-part reference resolves to
+  a component with a Rust path, or the error is
+  `DefinitionError::UnresolvedReference { api, endpoint, name }`
+- component names are nonempty and unique, Rust paths are nonempty, and each
+  schema is a JSON Schema object or boolean
+- compositions, `Unknown`, and empty map keys are rejected
 
-Unknown fields and variants are rejected. Missing and null are equivalent only
-for reserved structure. The focused `typed_registration` integration target
-covers the matrix and repeated read/write/read transfer round trips. Existing
-shipped definition snapshots and artifact drift tests continue to exercise the
-unchanged catalog through normal generation.
+```json
+{
+  "name": "Fixture",
+  "endpoints": [{ "id": "Get", "response": { "Json": { "Array": { "Named": "Model" } } } }],
+  "schemas": [{ "name": "Model", "rust_path": "::models::Model", "schema": { "type": "object" } }]
+}
+```
 
-[Definition builders](definition-builders.md) retain descriptor evidence in typed schemas and validate it against the destination module context at API build. REST JSON schemas without that evidence fail API build; WebSocket schemas retain their separate compatibility representation.
+Renaming the component to `Renamed` in this excerpt fails with
+`Fixture endpoint Get: unresolved schema reference "Model"`; changing its
+`rust_path` to `::other::Model` changes the generated Rust spelling and nothing
+else. Components reject unknown fields, a missing `name` or `schema`, wrong
+types, duplicate keys, and trailing content while reading JSON. An absent or
+null `rust_path` reads as a nested-only component, which a reference cannot
+name. The `builders` integration target covers this matrix; shipped definition
+snapshots and artifact drift tests exercise the catalog through normal
+generation.
+
+[Definition builders](definition-builders.md) describe how endpoint builders
+lower a registration to its reference and how API build stores the components.
+WebSocket messages keep their separate `Schema { type_name, module_path }`
+representation.
 
 A nominal generic model needs a concrete Rust path for each instantiation it
 registers. For example, Bitbucket registers `PaginatedResponse<Repository>` with

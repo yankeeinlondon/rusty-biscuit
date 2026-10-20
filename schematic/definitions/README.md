@@ -2,13 +2,15 @@
 
 Pre-built REST and WebSocket API definitions for Schematic's generated clients.
 REST modules expose a fallible `module_group()` that builds their API definitions
-and ordered schema registry together. Compatibility factories such as
-`define_github_api()` and `openapi_registry()` use that same assembly.
+from one registration context. Every API it returns carries that context's
+schema components in `RestApi::schemas`, and each endpoint's JSON body names
+those components. Infallible factories such as `define_github_api()` unwrap the
+same assembly.
 
 ```rust
-let group = schematic_definitions::github::module_group()?;
-let api = &group.apis[0];
-assert!(group.registry.validate_completeness(api).is_ok());
+let apis = schematic_definitions::github::module_group()?;
+let api = &apis[0];
+assert!(api.validate_references().is_ok());
 ```
 
 ## Available APIs

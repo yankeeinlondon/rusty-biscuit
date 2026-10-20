@@ -44,7 +44,8 @@ contracts. Current behavior lives in `schematic/docs/definition-builders.md`,
 `schematic/docs/typed-registration.md`, and `schematic/docs/pagination.md`.
 
 Every shipped REST provider uses a fallible `module_group()` assembly with one
-ordered `DefinitionContext` for its APIs and registry. Explicitly register types
+ordered `DefinitionContext` for its APIs; every API carries that context's
+components in `RestApi::schemas`. Explicitly register types
 in component order, build endpoints, then build APIs against the same context.
 `Endpoint` and `RestApi` are non-exhaustive; external literals do not compile.
 
@@ -65,15 +66,21 @@ let api = RestApi::builder(&context, "Items", "https://example.com")
 
 - Description and one success shape are required for endpoints; description
   and one explicit auth choice are required for APIs. Builds validate values,
-  auth/env coherence, and destination descriptors. GET bodies fail.
+  auth/env coherence, and that every schema reference resolves
+  (`RestApi::validate_references`). GET bodies fail.
 - Use typed JSON methods, `Success`, request body builders, and `ParamDef`
   locations. Do not author response/request/Schema constructors or string types.
 - `definition_type!` supplies nominal registration. Aliases/re-exports use
   `register_as::<T>(rust_path!(Alias))` before the first canonical registration;
   add `schema_name` only when the component name differs. Containers recurse
   into leaves; primitive/Value responses remain inline, with no fake component.
-- REST schema identity is qualified type_name plus descriptor evidence;
-  Schema.module_path is retained only for WebSocket readers.
+- REST JSON bodies store a `TypeRef` (component names plus wrappers:
+  `Named`, `Array`, `Optional`, `Map`, `KeyedMap`, `Primitive`), never a Rust
+  path. Names resolve through `RestApi::schemas`
+  (`SchemaComponent { name, rust_path, schema }`); `api.rust_type(&reference)`
+  spells the Rust type. A dangling name fails API build with
+  `DefinitionError::UnresolvedReference` and generation with
+  `invalid-schema-reference`. `Schema { type_name, module_path }` is WebSocket-only.
 - Paths cannot contain `?`: endpoint/API build, shared validators, and import
   reject it with API, endpoint, and path context. Query/header/cookie/body
   locations never distinguish two endpoints with the same method/path.

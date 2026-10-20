@@ -28,16 +28,40 @@ flowchart LR
     C[Register types in module context] --> E[Build endpoints with description and success]
     E --> A[Declare API description and authentication]
     A --> V[Check destination references and auth coherence]
-    V --> R[RestApi and ordered context registry]
+    V --> R[RestApi carrying the context's schema components]
 ```
 
 `Endpoint::new(id, method, path)` covers every `RestMethod`. Named constructors cover `get`, `post`, `put`, `patch`, `delete`, `head`, and `options`. Empty ids/descriptions and paths without a leading `/` fail at build. API names/descriptions must be nonempty and the base URL must have an HTTP(S) scheme and host. Paths containing `?` fail shared validation and endpoint/API build; declare query inputs with `.query(ParamDef::new(...))`. Endpoint identity is `(method, path)`, with placeholder names normalized for duplicate checks. Query values and response shapes do not create separate routes.
 
 Choose one success with `returns(Success::json(desc))`, `Success::text()`, `Success::binary()`, or `Success::empty()`. Shorthands are `returns_json::<T>(&mut ctx)`, `returns_text()`, `returns_binary()`, and `returns_empty()`. A second success declaration fails with “several success shapes arrive with response model v2.” `errors(ErrorSet::none())` and API `default_errors(ErrorSet::none())` reserve the response vocabulary; no other error-set constructor exists yet.
 
-Requests use `request_json::<T>(&mut ctx)`, `request_form(fields)`, `request_urlencoded(fields)`, `request_text()`, or `request_binary()`. `FormField::json_desc("metadata", desc)` authors typed JSON metadata without naming the stored Schema type. Forms retain field names, required flags, descriptions, file MIME patterns, and file-count limits. Text and binary defaults are `text/plain` and `application/octet-stream`; their content type can be stated explicitly with the corresponding `_with_content_type` method. These declarations preserve output-specific transport validation; generated text and binary request fields are sent as raw bodies. A GET endpoint rejects every request-body form at endpoint build. API build also rejects a transferred GET body with destination API, endpoint and method context. HEAD keeps its existing behavior.
+Requests use `request_json::<T>(&mut ctx)`, `request_form(fields)`, `request_urlencoded(fields)`, `request_text()`, or `request_binary()`. `FormField::json_desc("metadata", desc)` authors a typed JSON form part from a registration. Forms retain field names, required flags, descriptions, file MIME patterns, and file-count limits. Text and binary defaults are `text/plain` and `application/octet-stream`; their content type can be stated explicitly with the corresponding `_with_content_type` method. These declarations preserve output-specific transport validation; generated text and binary request fields are sent as raw bodies. A GET endpoint rejects every request-body form at endpoint build. API build also rejects a transferred GET body with destination API, endpoint and method context. HEAD keeps its existing behavior.
 
-Typed `Schema` values retain optional descriptor evidence alongside their Rust path. API build validates this evidence, including component names, wrappers, reserved structure, and agreement with the lowered path. Missing destination registrations, missing descriptor evidence on JSON schemas, forged descriptors, and collected collisions fail. Typed OpenAPI export uses the descriptor's wire schema, so Rust qualification does not erase component references or wrappers. A root typed `Vec<T>` retains automatic GET list recognition; `Option<Vec<T>>` and nominal collection wrappers still require authored collection information. Passing an untyped JSON schema into the API builder fails. REST schemas store a qualified `type_name` plus descriptor evidence; `Schema.module_path` is retained only for WebSocket compatibility. See [typed registration](typed-registration.md).
+A JSON request, response, or form part stores a `TypeRef`: the names of schema components plus their wrapper shape, with no Rust path and no copy of the schema. API build copies the context's components into `RestApi::schemas`, where each component's Rust path and wire schema is stored once. A reference therefore cannot disagree with its component; it can only fail to resolve.
+
+```rust
+let mut ctx = DefinitionContext::types_in("::my_models");
+let endpoint = Endpoint::get("ListItems", "/items")
+    .describes("List items")
+    .returns_json::<Vec<Item>>(&mut ctx) // registers Item
+    .build()?;
+assert_eq!(endpoint.response, ApiResponse::json_vec_type("Item")); // Array(Named("Item"))
+
+let api = RestApi::builder(&ctx, "Items", "https://example.com")
+    .describes("Item service").no_auth().endpoints([endpoint]).build()?;
+// api.schemas: [SchemaComponent { name: "Item", rust_path: Some("::my_models::Item"), schema: {..} }]
+let reference = api.endpoints[0].json_references()[0];
+assert_eq!(api.rust_type(reference).as_deref(), Some("::std::vec::Vec<::my_models::Item>"));
+```
+
+```mermaid
+flowchart LR
+    R["Endpoint reference<br/>Array(Named(&quot;Item&quot;))"] --> S["RestApi::schemas<br/>Item"]
+    S --> P["Rust: Vec&lt;::my_models::Item&gt;"]
+    S --> O["OpenAPI: array of $ref #/components/schemas/Item"]
+```
+
+API build runs `RestApi::validate_references`: every name must resolve to a registered component, or the build fails with `DefinitionError::UnresolvedReference { api, endpoint, name }`. It also rejects empty, duplicate, or malformed components. Call the same method on a definition read from JSON before using it. A name that exists only nested inside another component has no Rust path of its own and cannot be referenced directly. OpenAPI export writes `Named` as a `$ref`, so Rust qualification never erases component references or wrappers. A root typed `Vec<T>` retains automatic GET list recognition; `Option<Vec<T>>` and nominal collection wrappers still require authored collection information. `Schema { type_name, module_path }` is used only by WebSocket messages. See [typed registration](typed-registration.md).
 
 For authentication, `no_auth()`, `bearer_env(names)`, and `basic_env(username, password_names)` make coherent declarations. `authentication(strategy, names)` supports API keys, parameter keys, OAuth2, and custom bearer headers. The stored auth types are unchanged. A second authentication declaration fails even if it repeats the same strategy. An explicit `env_mapping(mapping)` must agree with each environment value supplied by the auth declaration, in either setter order. For example, declaring `bearer_env(["TOKEN"])` and mapping bearer credentials to `OTHER_TOKEN` fails. Extra mappings support an intentional multi-method `auth_policy(policy)`; that policy remains authoritative through `effective_auth_policy()`.
 
@@ -108,8 +132,8 @@ is an error, including when no strategy resolves. A matching required input with
 no sent default reports `pager-managed-required-without-default`.
 
 Imported definition modules use these builders too. Their public
-`module_group()` returns a fallible assembly containing the API and registry
-from one ordered context; the catalog factory and registry helper unwrap it.
+`module_group()` returns `Result<Vec<RestApi>, DefinitionError>` built from one
+ordered context; the catalog factory unwraps it.
 The importer emits nominal Registration implementations beside generated
 models. Aliases reuse their underlying registration; containers and inline
 primitive/JSON types do not become extra components. See
@@ -134,7 +158,7 @@ An explicit environment mapping may leave credential fields unset. An empty mapp
 `Success` and `ErrorSet` are non-exhaustive. Lowering retains the existing
 single stored response; `ErrorSet::none()` does not disable runtime errors.
 Several successes, status/range error declarations, streaming success constructors,
-content-type setters on success descriptors, and GraphQL are **planned**.
+content-type setters on success declarations, and GraphQL are **planned**.
 The names `path_param`, `public`, `auth`, `deprecated`, and `rate_limit` are
 reserved for **planned** vocabulary. Request content-type setters already work;
 they do not add success content negotiation. There is no route selector API.

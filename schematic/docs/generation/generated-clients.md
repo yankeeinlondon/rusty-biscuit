@@ -1015,9 +1015,8 @@ Per-output validators; each takes the whole batch and returns
 
 | Function | Description |
 |----------|-------------|
-| `validate_rust_client(&apis)` | Routes plus Rust-only rules: identifiers, suffixes, module paths, type syntax, generated-name collisions, request-input names and content types |
-| `validate_openapi(&apis)` | Routes, embedded queries, document file names |
-| `validate_openapi_registry(module, &apis, registry)` | JSON types missing from a module's schema registry |
+| `validate_rust_client(&apis)` | Routes, schema references, plus Rust-only rules: identifiers, suffixes, module paths, type syntax, generated-name collisions, request-input names and content types |
+| `validate_openapi(&apis)` | Routes, embedded queries, schema references, document file names |
 | `validate_postman(&apis)` | Routes, embedded queries, collection file names |
 | `endpoint_uniqueness_key(&endpoint)` | The `(method, normalized path)` identity two endpoints of one API may not share |
 
@@ -1241,13 +1240,13 @@ schematic-gen generate --api openai --openapi-out specs/
 schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 ```
 
-Exported specs include `x-schematic` extensions preserving Schematic-specific metadata (module path, request suffix, env mapping, per-endpoint type names) for round-trip fidelity.
+Exported specs include `x-schematic` extensions preserving Schematic-specific metadata (module path, request suffix, env mapping, per-endpoint schema references) for round-trip fidelity.
 
 APIs that share a generated Rust module are exported as one OpenAPI document
 using the module filename. For example, `OllamaNative` and `OllamaOpenAI`
 produce `ollama.json`, while `EmqxBasic` and `EmqxBearer` produce `emqx.json`.
 
-> **Note**: Every API has a complete schema registry for OpenAPI export. Missing a registry for a new API will produce an error (use `--no-openapi` to skip).
+> **Note**: OpenAPI `components.schemas` come from each API's own `RestApi::schemas`, so there is nothing separate to register for export. A JSON reference that names no component fails both the Rust and OpenAPI outputs with `invalid-schema-reference`.
 
 ### Module Reference: `import_pipeline`
 
@@ -1259,9 +1258,9 @@ produce `ollama.json`, while `EmqxBasic` and `EmqxBearer` produce `emqx.json`.
 
 | Function | Description |
 |----------|-------------|
-| `write_openapi(&api, &registry, &options, &dir)` | Export a single API definition to an OpenAPI spec file named from its resolved module |
-| `write_openapi_grouped(&apis, &module_name, &registry, &options, &dir)` | Export all APIs in a shared module to one module-named OpenAPI spec file |
-| `build_openapi_grouped(&apis, &module_name, &registry, &options)` | Build a module's merged OpenAPI document (unique `operationId`s) without writing it |
+| `write_openapi(&api, &options, &dir)` | Export a single API definition to an OpenAPI spec file named from its resolved module |
+| `write_openapi_grouped(&apis, &module_name, &options, &dir)` | Export all APIs in a shared module to one module-named OpenAPI spec file |
+| `build_openapi_grouped(&apis, &module_name, &options)` | Build a module's merged OpenAPI document (unique `operationId`s) without writing it |
 | `write_openapi_document(&doc, &file_stem, format, &dir)` | Write a built OpenAPI document |
 | `operation_id_diagnostics(&doc, &apis)` | Report duplicate `operationId`s and links to undeclared operations in a document |
 
