@@ -11,6 +11,8 @@ skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
     - claudine
+    - dmls
+    - claudine-cli
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
     - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
@@ -55,6 +57,84 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/tests/l1/shell_template_body_guards.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/shell_template.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+    - claudine/cli/tests/l1/guarded_shell_values.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/cli-commands.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/tests/common/type_scope_cases.rs
+    - darkmatter/lib/tests/common/type_scope_guard.rs
+    - darkmatter/lib/tests/l1/scope_site_conformance.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/guarded_shell_values.rs
+    - claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Shared type scope implementation plan
@@ -286,7 +366,7 @@ integrated before consumer work begins.
 
 ### Wave 5 — Consumer tracks (parallel by package/module)
 
-- [ ] **Integrate document scopes**
+- [x] **Integrate document scopes**
   - In Darkmatter compose, thread true-side body-block scopes through body
     shells, shell blocks, and transclusion targets; nest scopes lexically.
     Route standalone frontmatter shell values through an explicit unguarded
@@ -298,7 +378,7 @@ integrated before consumer work begins.
     a separate intentional-absence warning policy for fallbacks/predicate
     arguments. Preserve warning identity and actual evaluation reachability.
     Sibling paths and false ternary branches must not inherit true-side facts.
-- [ ] **Integrate host scopes**
+- [x] **Integrate host scopes**
   - In Claudine preflight, replace the flattened lifecycle action walk where
     necessary with a scope-carrying traversal: explicit `then`, `else`, inline
     guarded actions, five conditional levels, and ordered `set` invalidation.
@@ -315,7 +395,7 @@ integrated before consumer work begins.
   - Start fresh at each event/re-entry boundary and keep prior action effects
     when a later selected action fails. Preserve authored command identity
     through rereads, retries, and closed approval settlement.
-- [ ] **Integrate editor scopes**
+- [x] **Integrate editor scopes**
   - In DMLS expression overlays and hover/completion/diagnostic providers, build
     lexical scopes from passive source regions and call the same library.
     Carry spans through frontmatter scalar projection and nested expressions.
@@ -336,7 +416,7 @@ effect-free. Each track reviews comments for behavior drift in its own edits.
 
 ### Wave 6 — Test and enforcement tracks (parallel authorship)
 
-- [ ] **Complete conformance matrix**
+- [x] **Complete conformance matrix**
   - Implement the exhaustive site enum and a compact reusable case table:
     body `::shell`, `::shell-block`, transclusion target, frontmatter `$()`,
     lifecycle shell, inline lifecycle guard, whole-value lifecycle `set` shell,
@@ -351,7 +431,7 @@ effect-free. Each track reviews comments for behavior drift in its own edits.
   - Run shared applicable cases through public composition/preflight APIs and
     DMLS analysis, asserting type, location, diagnostics, and availability.
     Assert passive `file_exists` analysis invokes no filesystem/network handler.
-- [ ] **Guard analysis ownership**
+- [x] **Guard analysis ownership**
   - Add a source guard auditing the named static decision functions and scope
     construction sites inventoried in Phase 1, including both Claudine
     preflight modules. Reject competing static classifiers and unreviewed
@@ -360,7 +440,7 @@ effect-free. Each track reviews comments for behavior drift in its own edits.
     Permit runtime `is_null`, predicate implementations, and warning-policy
     absence handling. Prove the guard rejects representative forbidden snippets
     and permits legitimate runtime validation without editing production files.
-- [ ] **Prove invocation behavior**
+- [x] **Prove invocation behavior**
   - Through hermetic L1 command builders, run the frozen motivating prompt with
     a recording fake executable. Prove absent-message template preflight,
     false-guard no launch, and selected-message exact single-argument delivery.
