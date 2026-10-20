@@ -32,7 +32,7 @@ use crate::markdown::compose::shell_expansion::store::{
     self, load_ruleset, resolve_policy_paths,
 };
 use crate::markdown::compose::shell_expansion::template::{
-    ModeRequirement, OfferedChoices, ShellCandidate, ShellPreApprovals,
+    ModeRequirement, OfferedChoices, ShellCandidate, ShellPreApprovals, SuggestedRules,
 };
 use crate::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellCommandEntry,
@@ -193,13 +193,19 @@ impl SitePolicy<'_> {
         }
     }
 
-    fn approval_required(&self, command: &str, origin: &ShellCommandOrigin) -> ShellExpansionError {
+    fn approval_required(
+        &self,
+        command: &str,
+        origin: &ShellCommandOrigin,
+        suggested_rules: SuggestedRules,
+    ) -> ShellExpansionError {
         ShellExpansionError::ApprovalRequired {
             ctx: Box::new(self.ctx.clone()),
             command: command.to_string(),
             whitelist_path: Box::new(self.paths.whitelist.clone()),
             blacklist_path: Box::new(self.paths.blacklist.clone()),
             origin: origin.clone(),
+            suggested_rules: Box::new(suggested_rules),
         }
     }
 
@@ -287,7 +293,13 @@ impl SitePolicy<'_> {
         }
 
         let Some(handler) = self.handler else {
-            return Err(self.approval_required(&command, origin));
+            let rules = SuggestedRules::new(
+                candidate.offered(),
+                resolved.map(Vec::as_slice),
+                shape.as_ref(),
+                &executables,
+            );
+            return Err(self.approval_required(&command, origin, rules));
         };
         let first = resolved
             .and_then(|keys| keys.first())
@@ -375,7 +387,13 @@ impl SitePolicy<'_> {
             return Ok(());
         }
         let Some(handler) = self.handler else {
-            return Err(self.approval_required(&entry.normalized, &entry.origin));
+            let rules = SuggestedRules::new(
+                OfferedChoices::resolved_bytes(),
+                Some(std::slice::from_ref(&entry.normalized)),
+                None,
+                std::slice::from_ref(&entry.executable),
+            );
+            return Err(self.approval_required(&entry.normalized, &entry.origin, rules));
         };
         let request = ShellApprovalRequest {
             source: self.source.clone(),

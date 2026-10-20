@@ -153,7 +153,12 @@ pub fn validate_and_approve_command_parts(
     source_file: Option<&Path>,
     source_line: Option<usize>,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
-    let raw = parts.join(" ");
+    // The display form is the exact key, so a quoted or empty argument reads
+    // as the bytes it approves (`git commit -m ""`), not as a bare join.
+    let raw = match parts.split_first() {
+        Some((executable, args)) => normalize_command(executable, args),
+        None => String::new(),
+    };
     let _span = info_span!(
         "harness_shell_validate",
         command = %raw,
@@ -170,7 +175,7 @@ pub fn validate_and_approve_command_parts(
 
     let executable = &parts[0];
     let args: Vec<String> = parts[1..].to_vec();
-    let normalized = normalize_command(executable, &args);
+    let normalized = raw.clone();
     let approved = || ApprovedRuntimeCommand {
         raw: raw.clone(),
         executable: executable.to_string(),

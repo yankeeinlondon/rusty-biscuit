@@ -22,6 +22,7 @@ fn walks_past_wrapper_error_to_typed_inner() {
         whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
         blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
         origin: ShellCommandOrigin::Body { line: 7 },
+        suggested_rules: Box::default(),
     };
     let md: MarkdownError = shell.into();
     let cli_err = claudine::error::ClaudineError::SystemPromptComposition(md);

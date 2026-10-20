@@ -519,22 +519,9 @@ pub fn run_compose(
                 ShellExpansionError::ApprovalRequired {
                     command,
                     whitelist_path,
+                    suggested_rules,
                     ..
-                } => {
-                    let executable = command.split_whitespace().next().unwrap_or(&command);
-                    // Backslash-escape underscores so Prose (used by `main` to
-                    // render error chains) does not mistake `_..._` patterns in
-                    // paths or command names for italic markdown.
-                    let escape_prose = |s: &str| s.replace('_', "\\_");
-                    let path = whitelist_path.display().to_string();
-                    eyre!(
-                        "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
-                        escape_prose(&command),
-                        escape_prose(&path),
-                        escape_prose(&command),
-                        escape_prose(executable),
-                    )
-                }
+                } => approval_required_report(&command, &whitelist_path, &suggested_rules),
                 other => eyre!("{other}"),
             },
             other => other.into(),
@@ -810,6 +797,32 @@ fn escape_table_cell(value: &str) -> String {
         .replace('\n', " ")
 }
 
+/// The non-interactive "add one of these" report for a command that needs
+/// approval. The rules are the ones its approval prompt would offer (exact
+/// bytes, template shape, program prefixes), so each copies into the
+/// whitelist as a rule that approves the command.
+fn approval_required_report(
+    command: &str,
+    whitelist_path: &std::path::Path,
+    rules: &darkmatter::markdown::compose::shell_expansion::template::SuggestedRules,
+) -> color_eyre::eyre::Report {
+    // Backslash-escape backslashes and underscores so Prose (used by `main`
+    // to render error chains) neither consumes a key's `\\` escapes nor reads
+    // `_..._` in paths or command names as italic markdown: a printed rule
+    // must copy into the whitelist byte for byte.
+    let escape_prose = |s: &str| s.replace('\\', "\\\\").replace('_', "\\_");
+    let path = whitelist_path.display().to_string();
+    if rules.is_empty() {
+        return eyre!("Approval required for '{}'.", escape_prose(command));
+    }
+    eyre!(
+        "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n{}",
+        escape_prose(command),
+        escape_prose(&path),
+        escape_prose(&rules.render()),
+    )
+}
+
 /// Renders a pre-flight approval lifecycle error as a `color_eyre` report.
 ///
 /// Mirrors the formatting the compose-error mapper applies to the
@@ -838,19 +851,9 @@ fn preflight_approval_error(
         ShellExpansionError::ApprovalRequired {
             command,
             whitelist_path,
+            suggested_rules,
             ..
-        } => {
-            let executable = command.split_whitespace().next().unwrap_or(&command);
-            let escape_prose = |s: &str| s.replace('_', "\\_");
-            let path = whitelist_path.display().to_string();
-            eyre!(
-                "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
-                escape_prose(&command),
-                escape_prose(&path),
-                escape_prose(&command),
-                escape_prose(executable),
-            )
-        }
+        } => approval_required_report(&command, &whitelist_path, &suggested_rules),
         other => eyre!("{other}"),
     }
 }

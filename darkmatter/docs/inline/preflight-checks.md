@@ -293,6 +293,25 @@ With `exact ls a b/build` this runs `ls` with the two arguments `a` and
 `b/build`. With `template ls {{ string }}/build` it runs `ls` with the one
 argument `a b/build`.
 
+When the bytes are split into words, a quoted empty word (`""` or `''`) is
+one empty argument, and the exact key spells it `""`. An unquoted placeholder
+that resolves to an empty string adds no word, as in a shell:
+
+```md
+---
+msg: ""
+---
+::shell git commit -m "{{ msg }}"
+::shell git commit -m {{ msg }}
+```
+
+The first line's exact key is `git commit -m ""`, and `git` receives an empty
+third argument. The second line's key is `git commit -m`, and `git` receives
+two arguments. Neither key approves the other command, and an older
+`exact git commit -m` rule never approves the quoted form. The same spelling
+is used for every key a resolved command or a filled template is matched
+against, blacklist `exact` rules included.
+
 In template mode, before anything runs:
 
 1. **Every placeholder expression is evaluated once** against the document's
@@ -527,6 +546,29 @@ the guard (for example through a `set`) fails with `TemplateValueRejected`.
 A host's late-value barrier never reads a guarded placeholder, and checks a
 late value only against its declaration, leaving the narrowed type to the
 command that is reached.
+
+The whole path, from the guard to the command that runs:
+
+```mermaid
+flowchart TD
+    A["placeholder {{ x }} in a command"] --> B["type scope at the site:<br/>declaration + enclosing guards"]
+    B -->|"x proven present by a guard"| C["hole waits for its command<br/>(HoleTiming::Guarded)"]
+    B -->|"x not proven present, value missing"| F["pre-flight fails: MissingValue"]
+    B -->|"x present at pre-flight"| D["resolved bytes or template"]
+    C --> E["approved only as a template,<br/>typed with the narrowed type"]
+    D --> G["approved by exact, template, or prefix rule"]
+    E --> H{"guard at run time"}
+    H -->|"false"| I["region removed: nothing read, nothing runs"]
+    H -->|"true"| J["read the live value"]
+    J -->|"null"| K["MissingValue: no segment starts"]
+    J -->|"fails declaration or narrowed type"| L["TemplateValueRejected: no segment starts"]
+    J -->|"passes"| M["fill one argument per hole,<br/>blacklists, then run"]
+    G --> M
+```
+
+Which guard forms prove what, how equality treats missing values, and when a
+write ends a fact are in
+[What a Guard Proves](../topics/darkmatter-expressions.md#what-a-guard-proves).
 
 A host that places commands where their values may change before they run (a sequence task after the first) also calls `DeferredShellRoots::with_placeholders_template_required()`. Every command with a placeholder is then `TemplateRequired`, even when all its values are known: it contributes no resolved bytes, is never offered "this exact command", and an `exact` rule for its current bytes does not cover it. Its approval-time placeholders are still evaluated and checked for missing values, and a command with a placeholder that is not a valid template fails with `TemplateGrammar`. A command with no placeholder is unaffected.
 

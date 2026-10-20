@@ -628,6 +628,9 @@ pub enum ShellExpansionError {
         /// Boxed for the same size reason as `whitelist_path`.
         blacklist_path: Box<PathBuf>,
         origin: ShellCommandOrigin,
+        /// The whitelist rules that would approve this command, from the
+        /// choices its approval prompt would offer. Boxed for size.
+        suggested_rules: Box<super::template::SuggestedRules>,
     },
 
     #[error("Command denied: '{command}' at {origin}")]
@@ -896,6 +899,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 whitelist_path,
                 blacklist_path,
                 origin,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "approval required"))
                 .body(vec![

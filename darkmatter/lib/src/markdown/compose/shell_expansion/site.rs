@@ -23,7 +23,7 @@
 
 use super::template::{
     self, ApprovalKey, CommandTemplate, HoleEvaluator, ModeRequirement, OfferedChoices, ShellCandidate,
-    TemplateShape,
+    SuggestedRules, TemplateShape,
 };
 use super::types::{
     CommandAction, ErrorHandling, PipelineAction, ShellApprovalDecision, ShellApprovalRequest, ShellCommandOrigin,
@@ -336,12 +336,22 @@ fn approve_template_only(
     policy_paths: &ShellPolicyPaths,
     runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
-    let approval_required = || ShellExpansionError::ApprovalRequired {
-        ctx: Box::new(site.ctx.clone()),
-        command: site.authored().to_string(),
-        whitelist_path: Box::new(policy_paths.whitelist.clone()),
-        blacklist_path: Box::new(policy_paths.blacklist.clone()),
-        origin: site.origin().clone(),
+    // No value is known as bytes, so the exact choice is never offered.
+    let offered = OfferedChoices {
+        exact: false,
+        shape: true,
+        prefix: true,
+    };
+    let approval_required = || {
+        let programs: Vec<String> = programs.iter().map(|program| (*program).to_string()).collect();
+        ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(site.ctx.clone()),
+            command: site.authored().to_string(),
+            whitelist_path: Box::new(policy_paths.whitelist.clone()),
+            blacklist_path: Box::new(policy_paths.blacklist.clone()),
+            origin: site.origin().clone(),
+            suggested_rules: Box::new(SuggestedRules::new(offered, None, Some(shape), &programs)),
+        }
     };
     let Some(handler) = options.shell_approval_handler.as_ref() else {
         return Err(approval_required());
@@ -361,11 +371,6 @@ fn approve_template_only(
         .filter(|program| distinct.insert(**program))
         .map(|program| (*program).to_string())
         .collect();
-    let offered = OfferedChoices {
-        exact: false,
-        shape: true,
-        prefix: true,
-    };
     let request = ShellApprovalRequest {
         source: options.source.clone(),
         origin: site.origin().clone(),

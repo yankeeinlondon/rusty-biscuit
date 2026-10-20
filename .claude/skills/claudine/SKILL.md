@@ -465,7 +465,11 @@ fails when preflight refuses a `MissingValue` without asking `placeholder_guard`
 A new host site adds an entry with its reason. Runtime `is_null` checks are not
 restricted. The guard/site conformance matrix is
 `composition/lifecycle/executor/tests/scope_site_conformance.rs` plus its
-sequence sibling in `sequence/preflight/tests.rs`.
+sequence sibling in `sequence/preflight/tests.rs`. A guard fact is pre-flight
+evidence only: it never crosses an event, loop pass, retry, resume, or proxy
+handoff, and the live value is always checked again at the command. User docs:
+[Lifecycle → What a guard proves](topics/flow-control/lifecycle.md#what-a-guard-proves-to-the-actions-it-selects)
+and [Sequences → Task guards](topics/flow-control/sequences.md#task-guards-when).
 
 Late roots are `seq`, `loop`, and `group`; sequence and container terminal
 event shells participate in the same closed graph audit. Both group schedulers

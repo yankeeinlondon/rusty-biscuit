@@ -28,7 +28,7 @@ mod typing;
 #[cfg(test)]
 mod tests;
 
-pub use approval::{ApprovalKey, OfferedChoices, ShellPreApprovals, TemplateApprovalView};
+pub use approval::{ApprovalKey, OfferedChoices, ShellPreApprovals, SuggestedRules, TemplateApprovalView};
 pub use canonical::TemplateRuleError;
 pub use candidate::{CommandSite, DeferredShellRoots, ModeRequirement, ShellCandidate, derived_deferred_keys};
 pub use fill::{

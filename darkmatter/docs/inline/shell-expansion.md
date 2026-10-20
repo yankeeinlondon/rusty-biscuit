@@ -199,7 +199,26 @@ Reason: 'rm' is a dangerous command
 Error: Approval required for 'just ci-local --plan'.
 To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-whitelist:
   exact just ci-local --plan
+  prefix just
 ```
+
+Each suggested line is a whitelist rule that approves the command as it is
+now, and the list holds only the choices an interactive approval would
+offer. A command with a placeholder also gets its shape, and its `exact` line
+holds the resolved bytes, never the `{{ }}` text:
+
+```text
+Error: Approval required for 'git commit -m "{{ msg }}"'.
+To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-whitelist:
+  exact git commit -m ""
+  template git commit -m {{ string }}
+  prefix git
+```
+
+A command whose value is not known yet, or whose value holds command syntax,
+gets no `exact` line. A chain needs one `exact` or `prefix` line per command,
+so each alternative is then headed by a `# all of:` or `# or all of:`
+comment, which the whitelist loader ignores.
 
 An approved program that is not installed is reported separately, so the two are easy to tell apart:
 

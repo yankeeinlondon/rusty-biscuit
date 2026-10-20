@@ -274,6 +274,43 @@ A guard never hides a task from [static preflight](#phase-1--static-preflight):
 a task whose guard will be false is still validated, and its shell commands are
 still approved before step 1.
 
+**What a guard proves to its task.** Pre-flight does use what the guard proves
+for the values the sequence itself evaluates for that task: its `shell:`
+command and its `with:` values. A value the guard proves present may be
+missing before step 1:
+
+```yaml
+sequence:
+    - name: tag
+      when: "release_tag"
+      shell: git tag {{ release_tag }}
+```
+
+With no `release_tag`, pre-flight passes once the shape
+`git tag {{ string }}` is approved. A false guard skips the task without
+reading `release_tag`. A true guard reads it when the command starts; a `null`
+then fails the task with `MissingValue` and nothing launches. Without the
+`when:`, the missing value fails pre-flight. Which guards prove presence, and
+how equality treats a missing value, is in Darkmatter's
+[What a Guard Proves](../../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
+
+- The guard reads the bindings visible when it is evaluated. The task's own
+  `with:` values cannot prove their own guard.
+- A `prompt:` task's document has its own schema and its own guards; the
+  task's `when:` does not narrow its body. A `with:` value written as one
+  `{{ … }}` that the guard proves present, but that is missing at pre-flight,
+  becomes a late value of that document, checked by the document's own
+  barrier.
+- **Late values keep their barrier.** An ordinary late value (one reading
+  `seq`, `loop`, or `group`) is still checked when its task is reached, before
+  any of that task's commands run (`SequenceShellLateValue`). A value the
+  guard proves present is not part of that barrier: it is checked by its
+  command once the guard has selected the task. That is why a task, or a
+  group member, whose guard is false is skipped without failing the barrier,
+  while an unguarded late value that is missing still fails it.
+- The proof lasts for that task's turn only. Every pass of an enclosing loop,
+  and every retry, evaluates the guard and checks the value again.
+
 ## Step state
 
 Every step gets a row exposed through `seq`. A bare string is shorthand for `{name: <string>}`:

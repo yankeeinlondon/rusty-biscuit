@@ -212,7 +212,7 @@ cannot know which one runs; this says nothing about which branch compose
 reads. Guards are never evaluated: `file_exists(x)` makes `x` a present string
 inside its block without checking any file or URL.
 
-Not applied (current limits):
+Not applied yet (**planned**):
 
 - A lifecycle `when` (with its `then` / `else` actions) and a sequence task
   `when` in frontmatter do not narrow the actions they select. DMLS analyzes

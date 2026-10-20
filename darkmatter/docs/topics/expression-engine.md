@@ -17,4 +17,4 @@ Let's start with a few simple examples of how you might leverage the expression 
 
 ### Type Aware Parsing
 
-One important attribute of Darkmatter's expression engine is that it is _type aware_ and can not only know what type a variable was when it was first defined but also has the ability to understand when a union type has been "narrowed" because
+One important attribute of Darkmatter's expression engine is that it is _type aware_ and can not only know what type a variable was when it was first defined but also has the ability to understand when a union type has been "narrowed" because a guard such as `::block when="is_string(x)"` encloses the place it is read. See [What a Guard Proves](./darkmatter-expressions.md#what-a-guard-proves).

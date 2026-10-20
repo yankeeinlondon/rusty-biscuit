@@ -282,11 +282,69 @@ or not that branch will be selected:
   ([`LifecycleNestedSpanInLiteral`](#lifecyclenestedspaninliteral));
 - literal `effect` names against the sound-effect catalog;
 - shell approval: `shell` commands in **both** branches are resolved and
-  approved at pre-flight, so the approved bytes are the executed bytes.
+  approved at pre-flight, so the approved bytes are the executed bytes. A
+  command whose placeholder its guard proves present, but which is missing at
+  pre-flight, is approved by its shape instead (see
+  [What a guard proves](#what-a-guard-proves-to-the-actions-it-selects)).
 
 `initialize` refuses a `shell` action, and a `set` value written as a
 whole-value `$( … )`, even in a branch that can never be selected
 (`LifecycleActionPlacement`).
+
+### What a guard proves to the actions it selects
+
+A guard is evaluated only when its item is reached, but pre-flight still uses
+it: a value the guard proves present may be missing when commands are
+approved. The `then:` body, and actions written beside `when:`, get what the
+guard proves when true. The `else:` body gets what it proves when false.
+Nested items combine their guards.
+
+```yaml
+success:
+  - when: "ctx.dirty_files && commit_message"
+    then:
+      - shell: git commit -m "{{commit_message}}"
+    else:
+      - shell: just commit
+```
+
+With no `commit_message`, pre-flight passes once the shape
+`git commit -m {{ string }}` is approved (a `template` whitelist rule or the
+approval prompt). When `success` runs:
+
+- a false guard selects `else:`; `commit_message` is never read and
+  `git commit` never starts;
+- a true guard reads `commit_message` as the command starts and passes it as
+  one argument, whatever spaces or `;` it holds;
+- a `commit_message` that is `null` by then (an earlier `set` cleared it)
+  fails that action with `MissingValue`, and no part of the command launches.
+  `no_error` does not suppress it. Effects of earlier actions stand.
+
+Without the guard, the same missing `commit_message` fails pre-flight before
+anything runs. A guard excuses only the values it proves present: `when: msg`
+does not excuse a missing `other` in the same command, a read of `msg`
+outside the guarded body, or a value under the `else:` side. Which guard forms
+prove presence (`x`, `!is_null(x)`, `is_string(x)`, `file_exists(x)`, `x != ''`,
+`a && x`; not `!x`, `x || y`, or `x == null`) is listed in Darkmatter's
+[What a Guard Proves](../../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
+Pre-flight reads `file_exists(x)` without touching the filesystem: it proves
+only that `x` is a present string, because today's `file_exists` accepts
+nothing else, never that the file exists when the command runs.
+
+**What ends a guard's proof.** A `set` of a key ends
+what guards proved about that key for every later action in the event,
+including after the item that held the `set`. Writing `fm.msg` ends a proof
+about `msg` and the reverse, and writing `obj` ends one about `obj.field`. A
+`set` inside an inner branch ends the proof after its outer item too, since
+the branch may have run. A destination that is not a constant path, and any
+Darkmatter side effect (such as `set_frontmatter`), ends every proof about
+document properties. A proof never
+carries over to another event, a later loop pass, a retry, a resume, or a
+proxy target: each one checks its guards again.
+
+The check that the value is present and of the approved type is always made
+again when the command runs. A guard is evidence for pre-flight, not a
+promise about the live value.
 
 ### Dictionary bundles and canonical order
 
