@@ -1,0 +1,19 @@
+---
+source: worktree/cli/tests/remove_recovery_report.rs
+expression: rendered
+---
+Removal stopped: the result could not be verified.
+
+Original: /work/fix-path-spelling
+Moved to: /work/.wt-remove-fix-path-spelling-a91c
+Deleted before stopping: nothing
+Remaining: 9 entries in the moved directory
+Git registration: now points to the moved directory
+Watching stopped before the move: delivery of earlier changes on the folder holding the checkout at /work could not be confirmed within 4.5 s.
+  Nothing is known to have been lost; wt stops because it cannot confirm that every change arrived.
+  Confirmed checks took up to 2.4 s before this.
+
+Stop any tasks using either path. Inspect both locations and save new work.
+Retry: wt remove fix/path-spelling
+  Run it from the base checkout at /repo.
+Full report: /repo/.git/wt-removal/a91c0000000000000000000000000000/report.json

@@ -79,20 +79,27 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   buffers override disk until `close_buffer`. Diagnostics that depend on which paths
   exist are withheld while `WorkspaceGraph::listing()` is `Pending`
   (`router::listing_gates`).
-- Startup order (one background thread, `router::spawn_startup`; the
-  overlay lock is not held across preparation I/O): prepare
-  each workspace scope's trigger registry
-  (`OverlayState::prepare_workspace_registries` over `workspace_probes`: a
-  probe document `.dmls-workspace` in each folder, catalog package and
-  area inside it, and monorepo first-directory fallback area with a
-  `schemas` folder, `fallback_areas`) → the file-list walk (its
+- Startup (the overlay lock is not held across preparation I/O): the
+  registry worker owns all preparation. `PendingRegistries::begin_startup`
+  queues `RegistryJob::Startup(StartupPhase::Initial)` (a pass over
+  `OverlayState::workspace_probes`: a probe document `.dmls-workspace` in
+  each folder, catalog package and area inside it, and monorepo
+  first-directory fallback area with a `schemas` folder, `fallback_areas`)
+  while `router::spawn_startup` runs only the file-list walk at once (its
   `filter_entry` also records each directory holding `.git` as
-  `DiscoveryReport::repositories`) → the same preparation for those
-  repositories (`OverlayState::set_workspace_repositories`) →
-  `Internal::RegistryReady` (logs `schema registry ready`, or
-  `… initialized with failures` when `failed_scopes > 0`; one line, after
-  the walk, `elapsed_ms` excludes it) → `Internal::FileList` (logs
-  `workspace files listed markdown yaml duplicates elapsed_ms`). A re-list
+  `DiscoveryReport::repositories`). `Internal::FileList` is installed as
+  soon as it arrives (`ServerState::install_file_list`, logs `workspace
+  files listed markdown yaml duplicates elapsed_ms`); the dispatch thread
+  queues `StartupPhase::Discovered` only after **both** that and
+  `Internal::StartupPhase{Initial}`, and only when
+  `set_workspace_repositories` changed the set. After the last phase
+  `Router::finish_startup` logs `schema registry ready` (or `… initialized
+  with failures` when `failed_scopes > 0`; one line; `elapsed_ms` is
+  probe-preparation time only) then sends `RegistryReady` and
+  `RegistryPrepared{Startup}`. Startup counts as **one** outstanding job
+  from server start to that line, so `flush_server`/`registry_jobs_until_idle`
+  wait for it; shutdown (`PendingRegistries::shut_down`) closes the queue,
+  drops startup, and zeroes the count. A re-list
   (`ServerState::relist`: rescan, config or ignore-file change) logs
   `workspace rescan complete` with the same fields, and queues
   `RegistryJob::Workspace` when its repository set changed (as does a
@@ -139,16 +146,40 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   worker (`spawn_registry_worker`); schema-dependent requests
   (`SCHEMA_DEPENDENT`) park as `Waiter`s on it (`Router::proceed` checks the
   index build, then the registry), `refresh_diagnostics` holds the
-  document's publish until it installs, and refreshes queue
-  `RegistryJob::Workspace` (`ServerState::prepare_workspace_registries`).
-  Preparation is `begin` (lock) → `Preparation::run` (no lock) → `install`
+  document's publish until it installs, and refreshes schedule a workspace
+  pass (`ServerState::prepare_workspace_registries`). `RegistryQueue` has a
+  document lane, a startup-phase lane, and one workspace slot
+  (`Idle`/`Queued`/`Running`/`RequestedAgain`, changed under one lock by both
+  threads): documents always go first, then startup phases, then the
+  workspace pass; schedules merge into one queued pass or one follow-up, and
+  a running pass (`RegistryWorker::run_pass`, for both kinds) runs waiting
+  document jobs before each probe. `outstanding` counts each queued document
+  job, the queued/running pass and its follow-up, and startup (one). No two
+  server preparations overlap (one worker thread;
+  `work_counters::peak_concurrent_registry_scans` proves it in tests). A
+  `didChangeConfiguration` with an unchanged effective config invalidates no
+  registry and schedules nothing (`update_config`); `is_fresh` comparing the
+  context re-prepares a document whose context rebuilt differently. Test
+  seams: `StartupHooks::registry_gate` holds each job,
+  `registry_probe_gate` (`LspFixture::start_with_registry_probe_gate`,
+  `StartupEvent::WorkspaceProbePreparing`) holds each workspace-pass probe,
+  `startup_probe_gate` (`start_with_startup_probe_gate`,
+  `StartupEvent::StartupProbePreparing(phase)`) holds each startup probe
+  preparation **after its reads, before its install** (so a change then
+  leaves the scope stale; a fresh probe never waits),
+  `StartupEvent::StartupPhaseFinished(phase)` marks each phase handled,
+  `LspFixture::startup_events_until` reads the event sequence, and
+  `LspFixture::registry_jobs_until_idle` returns the finished job kinds in
+  order. Preparation is `begin` (lock) → `Preparation::run` (no lock) → `install`
   (lock; an older `seq` is dropped, a change since `begin` leaves it
   stale). `OverlayState::for_document` (no server) prepares inline; the
   router uses `for_document_timed`, lookup only. Cancelling a registry
   waiter keeps the job; shutdown answers waiters `ServerCancelled`.
 - L1 sessions: `LspFixture::initialize` waits for the list
-  (`StartupEvent::FileListInstalled`, which follows `RegistryReady`),
-  `initialize_unlisted` for neither; `start_with_file_list_gate` holds the walk and
+  (`StartupEvent::FileListInstalled`, which now **precedes** `RegistryReady`)
+  and for the startup `RegistryPrepared` (`wait_for_startup_events`),
+  `initialize_unlisted` for neither (a test that holds the walk must not
+  `flush_server` before releasing it: startup is still outstanding); `start_with_file_list_gate` holds the walk and
   `start_with_index_round_gate` holds each build round after its store pass
   (`wait_for_event(IndexRoundRead)`, `release_index_round`,
   `open_index_round_gate`); `start_with_registry_gate` holds each registry
@@ -265,8 +296,11 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   Rescan mode diffs `scan_manifests` fingerprints; config reload clears all.
   The workspace registration also watches `**/*.yaml|yml` and the discovery
   inputs (`.gitignore`, `.ignore`, `.dmls.toml`: re-list). Schema-location
-  watches (`schema_watch_registration`, one `<parent>` + `<folder>/*` per
-  folder in `OverlayState::trigger_watch_folders`) are re-synced after every
+  watches (`schema_watch_registration` over `watch::WatchedFolder`s from
+  `OverlayState::trigger_watch_folders`: `<parent>` + `<folder>/*` for a
+  present folder; nearest existing ancestor + `<rel>` and `<rel>/*` for one
+  absent at preparation, its `absent_base` recorded then so syncing reads
+  nothing and a folder appearing changes the set) are re-synced after every
   message when the client has `relativePatternSupport`; without it, or on a
   rejected registration, `schema_watch_fallback` makes every save mark the
   registries stale. A rejected workspace registration switches to
@@ -307,7 +341,16 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `didSave`, including an open buffer) and
   `invalidate_all_trigger_registries` (rescan, config reload, manifest
   change). A test that edits a schema file on disk must send one of those,
-  or the edit is invisible by design. Failure logging and trigger-file
+  or the edit is invisible by design. `Dependencies::searched` holds the
+  normalized `TriggerRegistry::searched_locations()`; an event at a
+  candidate, or at a folder above one (`candidate.starts_with(event)`),
+  affects the scope. A failed preparation carries the replaced scope's
+  `searched` and `folders` (`Preparation::carried`) so the broken file's
+  folder stays watched. A directory event for `schemas/shared` is already
+  covered by the folder rule (its parent holds the payload), so a test of the
+  folder-above-a-candidate rule needs a nested absent folder
+  (`schemas/shared/deep/` under an existing `schemas/shared/`). Protocol tests:
+  `tests/l1/searched_candidates.rs`. Failure logging and trigger-file
   diagnostics share one transition record per (workspace boundary,
   document folder): `warn` when new, `debug` on a repeat, `info` on
   recovery; a cold failure logs `trigger registry unavailable`. Root I/O
@@ -319,6 +362,32 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   new measured work in `timings.time(Stage::…, ..)`, call
   `record_wait(Wait::…)` when a request blocks on the file list or the
   index build (`Wait::Index`), and call `OverlayState::for_document_timed` from dispatch paths.
+  A request parked on a registry job uses `begin_registry_wait`; `proceed`
+  and `answer_waiter` call `end_registry_wait`, so `trigger_registry_wait_ms`
+  sums every parked interval (requeue, cancel, shutdown included).
+- Payload memo (`triggers/assemble.rs::file_payload_memo`, process-wide,
+  32-entry true LRU, successes only): keyed by what resolution reads, never
+  the requester's folder — trigger path, payload value, schema roots, the
+  requester's tree (`base_dir` + origin), `for_cwd(trigger folder)`, and
+  `for_trusted_external_cwd(root)` per root; reuse also needs an unchanged
+  fingerprint: dependency bytes, listings of roots, dependency folders, and
+  every `ResolvedPayload::searched` candidate's folder, plus each candidate's
+  kind (absent/file/dir/other). Only `NotFound`/`NotADirectory` are expected
+  absence; any other read error yields no fingerprint (no hit, nothing
+  stored). Tests inject that failure with the `#[cfg(test)]`
+  `assemble::fail_observing(path)` guard, never permission bits. A test that
+  a new nearer candidate misses must put it where no root or dependency
+  folder listing changes (e.g. `shared/deep/` under an existing `shared/`),
+  or it passes without the searched folding. Keying on the requester's
+  context again makes every package folder miss (the original incident). Its
+  tests are `payload_memo_tests.rs` (rely on nextest's process per test).
+- Pass line: `run_pass` starts a `PayloadMemoTally` (thread-scoped, from
+  `darkmatter::markdown::schemas::triggers`) for the pass, and `run_document`
+  starts its own so an interrupting document job is excluded;
+  `run_workspace` logs `trigger registries prepared` at `debug` with
+  `prepare_workspace_probe`'s `ProbeOutcome` counts. Startup phases do not
+  log it. Tests: `tests/l1/registry_observability.rs`
+  (`LspFixture::start_with_registry_gate_and_clock` for a `ManualClock`).
   `RunOptions::with_clock` injects the clock. Never log text, frontmatter
   values, or payloads; `lsp_server`'s own debug trace already prints full
   payloads, so a leak test must scope to `dmls`/`darkmatter` records.

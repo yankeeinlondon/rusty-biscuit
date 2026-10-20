@@ -28,9 +28,11 @@ pub mod envelope;
 pub mod grammar;
 pub mod lint;
 pub mod matcher;
+#[cfg(test)]
+mod payload_memo_tests;
 
 pub use assemble::{
-    TriggerArmTrace, TriggerEvaluation, TriggerTrace, TriggerTraceEntry, evaluate_registry,
+    PayloadMemoCounts, PayloadMemoTally, TriggerArmTrace, TriggerEvaluation, TriggerTrace, TriggerTraceEntry, evaluate_registry,
     matched_triggers, trace_registry,
 };
 pub use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;

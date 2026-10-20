@@ -282,7 +282,7 @@ fn an_interrupt_before_the_move_removes_nothing() {
     assert_eq!(status.signal(), None, "not killed by the signal: {stderr}");
     assert_eq!(status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("Nothing was removed."), "{stderr}");
-    assert!(stderr.contains("interrupted before anything was moved"), "{stderr}");
+    assert!(stderr.contains("interrupted before it changed anything"), "{stderr}");
     assert!(wt.join("README.md").is_file());
     assert!(fixture.quarantine().is_none());
     assert!(fixture.branch_exists("feat/x"));
@@ -428,4 +428,90 @@ fn a_new_worktree_at_the_original_path_is_ambiguous_with_the_pending_removal() {
     assert!(wt.join("README.md").exists(), "the new worktree is untouched");
     assert!(fixture.quarantine().unwrap().join("new-work.txt").exists(), "the moved checkout is untouched");
     assert!(fixture.branch_exists("feat/x") && fixture.branch_exists("feat/again"));
+}
+
+/// A first removal of `feat-x` that deleted the clean tracked file
+/// `deep/sub/tracked.txt`, then stopped one level up on a directory it
+/// cannot write into (`locked/`, made writable again afterwards). Returns the
+/// moved checkout, or `None` when this user can write into a read-only
+/// directory and no such stop can be made.
+fn stopped_after_deleting_a_tracked_file(fixture: &Fixture, wt: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    for file in ["deep/sub/tracked.txt", "locked/kept.txt"] {
+        fs::create_dir_all(wt.join(file).parent().unwrap()).unwrap();
+        fs::write(wt.join(file), "committed\n").unwrap();
+    }
+    git(wt, &["add", "deep", "locked"]);
+    git(wt, &["commit", "-q", "-m", "nested files"]);
+    let locked = wt.join("locked");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(locked.join("probe"), "").is_ok() {
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        eprintln!("skipped: this user can write into a read-only directory");
+        return None;
+    }
+
+    let output = fixture.remove(&["feat-x"], None);
+
+    let quarantine = fixture.quarantine();
+    for dir in [Some(wt.to_path_buf()), quarantine.clone()].into_iter().flatten() {
+        let _ = fs::set_permissions(dir.join("locked"), fs::Permissions::from_mode(0o755));
+    }
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("Removal stopped:"), "{stderr}");
+    let quarantine = quarantine.expect("the moved checkout is kept");
+    assert!(!quarantine.join("deep/sub/tracked.txt").exists(), "deleted before the stop");
+    assert!(quarantine.join("locked/kept.txt").is_file(), "kept by the stop");
+    assert_eq!(fixture.pending(), 1);
+    Some(quarantine)
+}
+
+/// The retry after a stop that deleted a tracked file: Git lists the file as
+/// an unstaged deletion, but this removal's own confirmed deletion explains
+/// it, so the noninteractive retry needs no `--force-worktree` and says how
+/// many files it did not ask about.
+#[test]
+fn a_retry_needs_no_consent_for_files_the_removal_already_deleted() {
+    let (fixture, wt) = Fixture::new("feat/x", "feat-x");
+    let Some(quarantine) = stopped_after_deleting_a_tracked_file(&fixture, &wt) else { return };
+    // An unstaged deletion and nothing staged: porcelain ` D`.
+    assert_eq!(git(&quarantine, &["diff", "--name-status"]), "D\tdeep/sub/tracked.txt");
+    assert_eq!(git(&quarantine, &["diff", "--cached", "--name-status"]), "");
+
+    let finished = fixture.remove(&["feat-x"], None);
+
+    let stderr = stderr_of(&finished);
+    assert_eq!(finished.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Continuing an earlier removal of feat-x"), "{stderr}");
+    assert!(stderr.contains("1 tracked file this removal already deleted is not asked about again."), "{stderr}");
+    assert!(!stderr.contains("tracked.txt"), "not listed as work to discard: {stderr}");
+    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(!quarantine.exists());
+    // The fixture's commit is not merged, so the branch is kept without
+    // `--force-branch`; only the checkout's consent changed.
+    assert!(fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 0);
+}
+
+/// The same retry with new work in the moved checkout still asks for it:
+/// without `--force-worktree` it refuses (exit 3) and keeps everything.
+#[test]
+fn a_retry_with_new_work_beside_files_the_removal_already_deleted_refuses() {
+    let (fixture, wt) = Fixture::new("feat/x", "feat-x");
+    let Some(quarantine) = stopped_after_deleting_a_tracked_file(&fixture, &wt) else { return };
+    fs::write(quarantine.join("new-work.txt"), "written after the stop\n").unwrap();
+
+    let refused = fixture.remove(&["feat-x"], None);
+
+    let stderr = stderr_of(&refused);
+    assert_eq!(refused.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("new-work.txt"), "the new file is reported: {stderr}");
+    assert!(!stderr.contains("tracked.txt"), "{stderr}");
+    assert!(stderr.contains("Nothing was removed."), "{stderr}");
+    assert_eq!(fs::read_to_string(quarantine.join("new-work.txt")).unwrap(), "written after the stop\n");
+    assert!(quarantine.join("locked/kept.txt").is_file());
+    assert!(fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 1);
 }

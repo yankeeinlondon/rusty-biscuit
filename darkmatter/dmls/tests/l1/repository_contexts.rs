@@ -446,12 +446,45 @@ fn a_configuration_change_drops_every_context() {
     fixture.flush_server();
 
     let before = context_build_count();
-    fixture.notify("workspace/didChangeConfiguration", json!({ "settings": {} }));
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "formatting": { "markdown": { "unwrap": true } } } } }),
+    );
     current_diagnostics(&mut fixture, &uri(&first));
     current_diagnostics(&mut fixture, &uri(&second));
     // Plus the workspace folder's own context, rebuilt to prepare its
-    // trigger registry.
+    // trigger registry in the workspace pass the change queues.
     assert_eq!(context_build_count() - before, 3, "both repositories and the folder rebuild");
+    fixture.shutdown();
+}
+
+/// An unchanged configuration still drops every context, so both open
+/// documents' repositories rebuild, but it queues no workspace pass, so the
+/// folder's own context is not rebuilt.
+#[test]
+fn an_unchanged_configuration_drops_every_context_and_prepares_no_workspace_scope() {
+    let workspace = LspWorkspace::new();
+    let first_repo = workspace.path().join("first");
+    let second_repo = workspace.path().join("second");
+    init_repository(&first_repo);
+    init_repository(&second_repo);
+    let first = first_repo.join("a.md");
+    let second = second_repo.join("b.md");
+    write(&first, "# A\n");
+    write(&second, "# B\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(&[workspace.path()]));
+    fixture.wait_for_startup_complete();
+    open(&fixture, &uri(&first), "# A\n");
+    open(&fixture, &uri(&second), "# B\n");
+    fixture.flush_server();
+
+    let before = context_build_count();
+    fixture.notify("workspace/didChangeConfiguration", json!({ "settings": {} }));
+    current_diagnostics(&mut fixture, &uri(&first));
+    current_diagnostics(&mut fixture, &uri(&second));
+    fixture.flush_server();
+    assert_eq!(context_build_count() - before, 2, "only the two repositories rebuild");
     fixture.shutdown();
 }
 

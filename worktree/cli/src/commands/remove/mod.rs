@@ -46,7 +46,7 @@ use worktree::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
 use worktree::remove::lifecycle::{
     Approval, BranchActions, Environment, ExitClass, Finished, Inspection, LocalBranchDeletion, RecordApproval,
     Removal, RemovalRequest, RemoteBranchDeletion, Resolution, ResolveError, ResumeRequest, Target, inspect,
-    native_observation, release_unstarted, remove_checkout, resolve_target, resolve_target_in, resume,
+    native_observation, release_unstarted, remove_checkout, resolve_target, resolve_target_in, resume, resume_consent,
 };
 use worktree::remove::outcome::{BranchState, BranchTarget};
 use worktree::remove::recovery::record::BranchBinding;
@@ -134,9 +134,13 @@ struct Facts {
     /// the first run, and when remote deletion was approved in the second.
     remote: Option<RemoteState>,
     /// [`fingerprint`] of the files as reported, taken before the report
-    /// for every checkout that exists. Discarding files is approved for this
-    /// state only, and the removal lifecycle refuses if it changed.
+    /// for every checkout that exists (on a retry of a moved checkout,
+    /// [`resume_consent`]'s). Discarding files is approved for this state
+    /// only, and the removal lifecycle refuses if it changed.
     reported: Option<String>,
+    /// On a retry of a moved checkout: the unstaged deletions left out of
+    /// `inventory` because this removal's earlier attempts deleted them.
+    excluded: usize,
     /// What the user typed, for retry commands. In a handoff's second run,
     /// which never sees it, the directory name.
     requested_name: String,
@@ -190,6 +194,7 @@ impl Facts {
             has_origin: false,
             remote: None,
             reported: None,
+            excluded: 0,
             retry: None,
             branch_only: false,
         })
@@ -222,6 +227,7 @@ impl Facts {
             has_origin: false,
             remote: None,
             reported: None,
+            excluded: 0,
             retry: None,
             branch_only: true,
         }
@@ -405,14 +411,22 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     facts.display_name = display;
     facts.retry = retry;
     // The removal lifecycle binds the approval to this fingerprint, so every
-    // checkout that exists has one, not only those that need consent.
-    if facts.missing().is_none() && !facts.branch_only {
+    // checkout that exists has one, not only those that need consent. A
+    // moved checkout's consent is the library's, which the lifecycle
+    // repeats under the operation lock.
+    if let Some(inspection) = facts.retry.as_ref().filter(|inspection| inspection.resolution == Resolution::Quarantined) {
+        let consent = resume_consent(&base, &inspection.id)
+            .map_err(|refusal| recovery::refusal_error(&refusal, &facts.display_name, name, true))?;
+        facts.inventory = consent.inventory;
+        facts.excluded = consent.excluded.len();
+        facts.reported = Some(consent.fingerprint);
+    } else if facts.missing().is_none() && !facts.branch_only {
         facts.reported = Some(fingerprint(&facts)?);
     }
     facts.assess(flags.force_remote);
     if let Some(inspection) = &facts.retry {
         eprintln!();
-        print(&terminal, retry_markup(inspection));
+        print(&terminal, retry_markup(inspection, facts.excluded));
     }
     eprintln!("{}", facts.render_report(&terminal));
     if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
@@ -470,7 +484,7 @@ fn resolve(
                 Resolution::NotStarted | Resolution::MovedUnassociated => {
                     let display = original_name(&inspection);
                     release_unstarted(base, &inspection.id)
-                        .map_err(|refusal| recovery::refusal_error(&refusal, &display, name))?;
+                        .map_err(|refusal| recovery::refusal_error(&refusal, &display, name, false))?;
                     eprintln!();
                     print(
                         terminal,
@@ -553,13 +567,19 @@ fn original_name(inspection: &Inspection) -> String {
         .unwrap_or_else(|| original.display().to_string())
 }
 
-/// The line before a retry's report: which earlier removal it continues and
-/// where its checkout is.
-fn retry_markup(inspection: &Inspection) -> String {
+/// The line before a retry's report: which earlier removal it continues,
+/// where its checkout is, and how many of its own confirmed deletions are
+/// not asked about again.
+fn retry_markup(inspection: &Inspection, excluded: usize) -> String {
     let record = &inspection.record;
+    let excluded = match excluded {
+        0 => String::new(),
+        1 => "\n  1 tracked file this removal already deleted is not asked about again.".to_string(),
+        n => format!("\n  {n} tracked files this removal already deleted are not asked about again."),
+    };
     format!(
         "<b>Continuing</b> an earlier removal of <blue>{}</blue> that stopped.\n  \
-        <dim>Original: {}\n  Moved to: {}\n  Everything left is checked and asked about again.</dim>",
+        <dim>Original: {}\n  Moved to: {}\n  Everything left is checked and asked about again.{excluded}</dim>",
         usage::visible(&original_name(inspection)),
         usage::visible(&record.original.display()),
         usage::visible(&record.quarantine.display())
@@ -759,7 +779,12 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     // Opened only now: an interrupt while asking keeps its default effect.
     let window = interrupt::Window::open();
     let interrupted = || window.interrupted();
-    let env = Environment { usage: &usage, interrupted: &interrupted, observe: &native_observation };
+    let env = Environment {
+        usage: &usage,
+        interrupted: &interrupted,
+        observe: &native_observation,
+        slow_startup: &|startup| print(terminal, recovery::slow_startup_markup(startup)),
+    };
     let approval = facts.reported.clone().map(|fingerprint| Approval {
         inventory: facts.inventory.clone(),
         fingerprint,
@@ -798,7 +823,7 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
     drop(window);
     match removal {
         Removal::Refused(refusal) => Err(with_note(
-            recovery::refusal_error(&refusal, &facts.display_name, &facts.requested_name),
+            recovery::refusal_error(&refusal, &facts.display_name, &facts.requested_name, facts.retry.is_some()),
             &facts.kept_link_note(),
         )),
         Removal::Finished(finished) => report_finished(terminal, facts, &actions, &finished),

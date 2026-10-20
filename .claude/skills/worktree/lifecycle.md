@@ -17,10 +17,17 @@ README's exit-code table together. The pieces it calls are in
 | `inspect(base, &id) -> Inspection` | what a pending operation left, with a `Resolution` |
 | `resume(&ResumeRequest, &Environment) -> Removal` | retry `Quarantined`, `ContentRemoved`, `CheckoutRemoved`; anything else is `Refusal::Recovery` |
 | `release_unstarted(base, &id)` | close a `NotStarted` record, or move a `MovedUnassociated` checkout back first |
-| `consent_state(base, checkout, branch)` | the `(Inventory, fingerprint)` an `Approval` binds; runs `git status` |
+| `consent_state(base, checkout, branch)` | the `(Inventory, fingerprint)` a first attempt's `Approval` binds; runs `git status` |
+| `resume_consent(base, &id) -> ResumeConsent` | a `Quarantined` retry's consent: `raw`, explained `inventory`, `excluded`, bound `fingerprint` |
 
-`Environment` injects the `UsageSource`, the interrupt poll, and the observer
-starter (`native_observation`, or `Observation::injected*` in tests).
+`Environment` injects the `UsageSource`, the interrupt poll, the observer
+starter (`native_observation`, or `Observation::injected*` in tests), and
+`slow_startup: &dyn Fn(Duration)`. `report_slow_startup` calls that hook at
+most once per attempt, right after the observer starts and before the move
+(on a resumed attempt, before further deletion), when
+`ObservationDiagnostics::startup_ms` exceeds `SLOW_STARTUP` (1 s); the CLI
+prints `recovery::slow_startup_markup` and the removal continues. Tests pass
+a no-op or a recording closure.
 `Removal::exit_class()` gives `Success`/`Failure`/`Refused`/`Blocked`
 (0/1/3/4); the CLI maps that, not the outcome.
 
@@ -28,7 +35,8 @@ starter (`native_observation`, or `Observation::injected*` in tests).
 
 `plan_move` → no pending record for this admin name → observer start →
 `DeletionInventory::capture` → `register_handles` + `check_usage` →
-`recheck` (tip, then `consent_state` fingerprint and dirty list) → drain +
+`recheck` (tip, then `consent_state` fingerprint and dirty list; on resume
+`resume_consent`'s) → drain +
 `confirm_unchanged(.., admin_allowed = true)` → `bind_index` → `begin` →
 drain + `confirm_unchanged(.., admin_allowed = false)` → `move_to_quarantine`
 → `moved_to_quarantine()` → drain and explain the move's own events →
@@ -51,7 +59,10 @@ actions → `Operation::complete`.
   `preflight_runs` records the first report as a `WindowsSearchHold`
   discovery run before the `Preflight` one, and the `Discovery` timeline
   event carries `SearchRecheck::summary` (the retry pushes that event only
-  when it rechecked). `REPORT_VERSION` 4 added the purpose.
+  when it rechecked). `REPORT_VERSION` 4 added the purpose; 5 added the
+  optional `observation` diagnostics on the report and on each
+  `EarlierAttempt` (absent or `null` reads as unknown, so v4 reports still
+  load).
 - **The recheck runs `git status`, which may rewrite the index**, so its admin
   events are drained before `bind_index` and allowed; any admin event after
   the binding refuses (before the move) or stops (after it).
@@ -99,8 +110,9 @@ registration from the admin `gitdir` (`registration_state`), then:
   is `Ambiguous`. Pending records match by `requested_name`, `aliases`, and
   the original's directory name (dasherized too). Unreadable records match
   nothing here, but `remove_checkout` refuses while any exists.
-- **`resume` re-collects everything.** `Quarantined` needs an `Approval` read
-  from the quarantine (`consent_state(base, quarantine, branch)`), starts the
+- **`resume` re-collects everything.** `Quarantined` needs an `Approval` of
+  `resume_consent`'s `inventory` and `fingerprint` (never `consent_state` of
+  the quarantine: its fingerprint does not match), starts the
   observer with `moved = true`, takes a fresh inventory, queries usage of the
   quarantine, rechecks, binds the index, then `RecoveryStore::reopen`, which
   copies the old journal to `journal-<n>.jsonl`, builds the new one (fresh
@@ -109,7 +121,26 @@ registration from the admin `gitdir` (`registration_state`), then:
   published:** `recover` reads only that file, so that gap once made a
   pending operation unrecoverable. `store::fault::inject` stops `reopen` at
   each `ReopenStep` in tests; the `*_stopped_while_replacing_*` lifecycle
-  tests drive every caller through it. `ContentRemoved` needs a `RecordApproval` (the
+  tests drive every caller through it.
+- **Resume consent: raw versus explained.** `resume_consent` reads and
+  validates every attempt's journal first (an unreadable one is
+  `Refusal::Store`, no exclusion), runs `consent_state` on the quarantine
+  (`raw`), and drops from `inventory` only porcelain-exact ` D` entries whose
+  path (component-equal, so Windows `\` matches Git's `/`) has a durable
+  `Deleted` result and is absent by a no-follow inspection through the
+  verified quarantine handle. Git still reports ` D` for a file replaced by
+  an empty directory, so that inspection is load-bearing. `fingerprint` is
+  `bind_excluded(raw fingerprint, excluded)`; the lifecycle recheck under the
+  operation lock calls the same function (`resume_consent_in`) and compares
+  the explained dirty list and that fingerprint, so a file recreated or a
+  change staged after the report is `Refusal::Changed`. The CLI swaps
+  `Facts::inventory`/`reported` for the explained view and prints
+  `excluded.len()` in `retry_markup`; excluded paths stay `Deleted` in the
+  journal and report. Never filter rows in the CLI alone. Tests:
+  `lifecycle/tests/resume_consent.rs`; a deterministic CLI stop after a real
+  confirmed deletion uses a read-only directory one level above a tracked file
+  (`remove_recovery.rs`, Unix, skipped when the user can write it anyway).
+- `ContentRemoved` needs a `RecordApproval` (the
   `inspect_missing` result shown to the user) and goes through
   `remove_missing_record`. `CheckoutRemoved` runs only the branch actions in
   the request; saved approvals are never reused.
@@ -173,8 +204,15 @@ registration from the admin `gitdir` (`registration_state`), then:
   `ctrlc` (with `termination`) allows one handler per process: it is
   installed on the first open, sets a static flag while a window is open, and
   exits 130 once the window has closed. The lifecycle polls the flag once
-  just before the move (`Refusal::Interrupted`, exit 1, record discarded) and
-  at every deletion entry boundary (`Stop::Interrupted`, stopped report).
+  just before the move (`Refusal::Interrupted`, exit 1, record discarded), at
+  every deletion entry boundary (`Stop::Interrupted`, stopped report), and in
+  every delivery wait. `Refusal::Interrupted` reads "the removal was
+  interrupted before it changed anything". A resumed attempt refuses with it
+  only when the interrupt ends observer startup; the record stays pending,
+  and `refusal_error` (`resumed`) says "stopped before deleting more of
+  worktree …", never "stopped before moving". The resumed pre-deletion
+  drains (`checked_drain`) clear `interrupted`, so a later Ctrl-C reaches the
+  deletion engine's first drain and ends with the stopped report.
   The handler runs on `ctrlc`'s own thread, so a test cannot assume the flag
   is set when `kill` returns: `cli/tests/remove_recovery.rs`'s
   `interrupter` shim waits for the handler's `Interrupted:` line on `wt`'s

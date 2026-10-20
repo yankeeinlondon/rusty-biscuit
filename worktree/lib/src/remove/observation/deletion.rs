@@ -18,8 +18,11 @@
 //! - each drained event is resolved by checking its exact path: an entry this
 //!   operation deleted must still be absent, an approved entry not yet
 //!   reached must still match its record, and anything else is activity;
-//! - a lost watch or a full queue stops the operation, as does an interrupt
-//!   request.
+//! - any [`CoverageLost`] (dropped notifications, a lost watch, a full queue,
+//!   or a delivery wait that stalled or reached its ceiling) stops the
+//!   operation, as does an interrupt request; the observer records the loss
+//!   at its deletion stage, with the entries processed since the previous
+//!   drain.
 //!
 //! The checks narrow the window in which a concurrent write can be lost; they
 //! cannot close it. A write that lands between an entry's final check and its
@@ -38,13 +41,21 @@ use cap_std::fs::Dir;
 use sniff::filesystem::query::NativeString;
 
 use super::inventory::{self, Change, Content, DeletionInventory, InventoryEntry, InventoryRefusal, LookError, Shape};
-use super::{CoverageLost, EventKind, Observation, Scope};
+use super::{CoverageLost, EventKind, Observation, ObservationStage, Scope};
 use crate::remove::outcome::{ActivityKind, ActivityLocation, ObservedActivity, OperationReport, RemovalOutcome, ReportNote};
 use crate::remove::recovery::journal::{EntryKind, JournalSink, JournalWriteError, JournalWriter, MAX_BATCH_ENTRIES, PlannedEntry, ResultState};
 
-/// How many entries may be deleted between two drains. A deletion causes one
-/// or two events, so this keeps the observer's queue
-/// ([`super::DEFAULT_QUEUE_CAPACITY`]) far from full.
+/// How many entries may be processed between two drains, on every platform.
+/// The interval is checked after each journal batch, so a drain can come up
+/// to one batch minus one entry later.
+///
+/// macOS once drained every 512 entries to pace FSEvents, which dropped
+/// events during bursts of about 7,000 deletions a second. A same-host
+/// comparison of 2,048, 512 and 256 saw no drop at any of them, while each
+/// smaller interval roughly doubled deletion time, so macOS uses the common
+/// value. No interval rules a drop out: FSEvents is shared with every other
+/// process, and a deleted entry is not a count of queued platform events,
+/// since FSEvents coalesces and delivers late.
 pub const DEFAULT_DRAIN_EVERY: usize = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +141,7 @@ impl OperationReport {
 /// Deletes the inventory of the checkout `observation` watches, which must
 /// already be at the quarantine, then the quarantine directory itself, and
 /// confirms that neither location exists. `journal` records every batch.
-/// `interrupted` is polled at every entry boundary.
+/// `interrupted` is polled at every entry boundary and by every drain's wait.
 pub fn delete_content<S: JournalSink>(
     observation: &mut Observation,
     journal: &mut JournalWriter<S>,
@@ -151,6 +162,7 @@ pub(crate) fn delete_content_with<S: JournalSink>(
 ) -> Deletion {
     let inventory = std::sync::Arc::clone(journal.inventory());
     let quarantine = observation.targets().quarantine().to_path_buf();
+    observation.enter_stage(ObservationStage::Deletion);
     let mut engine = Engine {
         quarantine: &quarantine,
         inventory: &inventory,
@@ -368,10 +380,13 @@ impl<S: JournalSink> Engine<'_, S> {
     /// Drains the observer and resolves every event against the actual state
     /// of its exact path. `root` is `None` once the quarantine is removed.
     fn drain_and_check_optional(&mut self, root: Option<&Dir>) -> Result<(), Stop> {
-        self.since_drain = 0;
-        let drain = self.observation.drain();
+        let processed = std::mem::take(&mut self.since_drain) as u64;
+        let drain = self.observation.drain_after(processed, self.interrupted);
         if let Some(lost) = drain.lost {
             return Err(Stop::CoverageLost(lost));
+        }
+        if drain.interrupted {
+            return Err(Stop::Interrupted);
         }
         let mut by_scope: HashMap<Scope, (Vec<EventKind>, SystemTime)> = HashMap::new();
         let mut order = Vec::new();
