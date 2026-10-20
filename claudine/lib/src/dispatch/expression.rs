@@ -14,7 +14,7 @@
 //!   `ctx.*` unresolved.
 //! - [`EventMetaConditionLookup`] — used by hook `when` evaluation. Layers
 //!   Darkmatter's lazy `ctx.*` capture on top of [`EventMetaExpressionLookup`]
-//!   so that conditions like `ctx.today != ''` resolve correctly.
+//!   so that conditions like `!is_empty(ctx.today)` resolve correctly.
 //!
 //! ## Resolution Order (both adapters)
 //!

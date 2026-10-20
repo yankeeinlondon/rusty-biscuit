@@ -161,6 +161,7 @@ mod preflight_child_state_parity;
 mod preflight_repository_sigils;
 mod shell_probe_preflight;
 mod span_compat;
+mod strict_equality_composition;
 mod style_features_baseline;
 mod style_features_phase5;
 mod style_frontmatter;

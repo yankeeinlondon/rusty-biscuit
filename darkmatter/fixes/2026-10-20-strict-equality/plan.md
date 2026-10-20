@@ -11,6 +11,8 @@ skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
     - claudine
+    - dmls
+    - claudine-cli
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/equality.rs
     - darkmatter/lib/src/markdown/compose/expression/mod.rs
@@ -34,6 +36,31 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/lib/tests/l1/shell_template_body_guards.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/strict_equality_composition.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+docs_updated_during_phase_4:
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - darkmatter/lib/tests/l1/strict_equality_composition.rs
+    - claudine/lib/src/dispatch/runner/tests.rs
+    - claudine/lib/src/dispatch/expression.rs
+    - prompts/code-comment-quality.md
+docs_updated_during_phase_5:
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/hook-actions.md
 ---
 
 # Implementation Plan — Strict equality for `==` and `!=`
@@ -313,24 +340,24 @@ the consumers' own public entry points.
 
 ### Wave 6 — Consumer verification (concurrent)
 
-- [ ] **Preflight and placeholders**
+- [x] **Preflight and placeholders**
     - Extend preflight collection tests (`lib/src/markdown/compose/preflight/`
       collect paths) and `AbsenceScope` branch-fact tests: `x != ''` must not
       excuse a missing shell placeholder; `x != null` must supply the presence
       evidence that authorizes it. Preserve undeclared-property warning
       handling and scope invalidation after writes.
-- [ ] **Blocks and transclusion**
+- [x] **Blocks and transclusion**
     - `page_blocks/guards.rs` (`BodyGuards`) and `directive_targets.rs`
       (nullable-target classification, `narrowed_paths`): extend tests for both
       sides of each presence guard; nullable transclusion targets are excused
       by `x != null`, never by `x != ''`.
-- [ ] **DMLS static twin**
+- [x] **DMLS static twin**
     - DMLS diagnostics and hover (`dmls/src/overlay/expressions.rs`, hover via
       `expression::branch_scope`) must display the same facts without
       executing conditions; add/extend tests asserting the narrowed hover text
       and diagnostics for the new guard table, including container-family
       refinement.
-- [ ] **Claudine conditions**
+- [x] **Claudine conditions**
     - Claudine lifecycle and sequence conditions (they consume darkmatter's
       evaluator; no new evaluator): verify through existing normal invocation
       tests. Add the acceptance-5 regression: with dirty files, null/empty
@@ -338,7 +365,7 @@ the consumers' own public entry points.
       message the supplied-message route (a harmless command substitute
       receives the message as one argument); with no dirty files neither
       commit route runs; a false branch launches no command from that branch.
-- [ ] **Composition-level checks**
+- [x] **Composition-level checks**
     - Representative changed comparisons through ordinary composition:
       frontmatter and body interpolation, ternaries, `::block when`,
       conditional transclusion (acceptance 4). Use frozen fixtures and the
@@ -359,14 +386,14 @@ implementation log.
 
 ### Wave 7 — Shipped artifacts (concurrent)
 
-- [ ] **Root prompts rewrite**
+- [x] **Root prompts rewrite**
     - Apply the worksheet to root `prompts/` (all `_implement/*`, `_pr/*`,
       `_reviews/*`, `_prompt.md`, `feature.md`, `fix.md`,
       `_interactive-prompting.md`, `code-comment-quality.md`, and any other
       audited site) using the spec's migration table and each document's
       declared intent. Keep `ctx.dirty_files && commit_message` and every
       *keep*-classified exact comparison unchanged.
-- [ ] **Area prompts, skills, schemas, fixtures**
+- [x] **Area prompts, skills, schemas, fixtures**
     - Apply the worksheet to `darkmatter/prompts/`, `claudine/prompts/`,
       `.claude/commands/`, `.claude/skills/` teaching examples, schema
       examples, and test fixtures. For intentional rendered-text comparison
@@ -376,13 +403,13 @@ implementation log.
 
 ### Wave 8 — Frozen copies and log (after Wave 7 decisions)
 
-- [ ] **Frozen copy sync**
+- [x] **Frozen copy sync**
     - Migrate both frozen copies of `_implement/implement-plan.md` (under
       `claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/` and
       `.../shipped_implement_route/_implement/`) together with their original;
       where the original needed no change, verify the copy still mirrors it.
       Re-run the frozen-prompt preflight tests.
-- [ ] **Implementation log**
+- [x] **Implementation log**
     - Record in `implementation-log.md` (this fix's directory): every
       inspected location, every rewritten site, and every intentionally
       retained comparison with its reason, plus the Phase 1 worksheet outcome

@@ -218,6 +218,7 @@ fn block_guards_narrow_targets_through_the_shared_type_scope() {
         ("(x)", json!({"x": "value"}), true, &["x"][..]),
         ("x != null", json!({"x": "value"}), true, &["x"][..]),
         ("x != null", json!({"x": null}), false, &["x"][..]),
+        ("null != x", json!({"x": "value"}), true, &["x"][..]),
         ("x == ''", json!({"x": ""}), true, &["x"][..]),
         ("!(x == null)", json!({"x": "value"}), true, &["x"][..]),
         ("a && b", json!({"a": true, "b": true}), true, &["a", "b"][..]),
@@ -236,6 +237,7 @@ fn block_guards_narrow_targets_through_the_shared_type_scope() {
         ("is_null(x)", json!({"x": null}), true, &[][..]),
         // `null != ''` and `null == null`, so neither admits only present values.
         ("x != ''", json!({"x": null}), true, &[][..]),
+        ("'' != x", json!({"x": null}), true, &[][..]),
         ("x == null", json!({"x": null}), true, &[][..]),
         ("length(x) > 0", json!({"x": [1]}), true, &[][..]),
     ];

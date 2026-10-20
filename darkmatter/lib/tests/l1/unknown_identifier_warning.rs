@@ -204,6 +204,13 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         // "Direct" only: a comparison in the condition is an ordinary operand.
         ("{{ x == \"a\" ? \"1\" : \"2\" }}", "2", &["x"]),
         ("{{ !x ? \"1\" : \"2\" }}", "1", &["x"]),
+        // Strict equality picks the branch: a missing `x` is `null`, which
+        // equals only `null`, and `blank` is a known `""`.
+        ("{{ x == null ? \"1\" : \"2\" }}", "1", &["x"]),
+        ("{{ x != '' ? \"1\" : \"2\" }}", "1", &["x"]),
+        ("{{ x == '' ? \"1\" : \"2\" }}", "2", &["x"]),
+        ("{{ blank == null ? \"1\" : \"2\" }}", "2", &[]),
+        ("{{ blank == '' ? \"1\" : \"2\" }}", "1", &[]),
         // Path access on a handled value is still that value's absence check.
         ("{{ x.deep || \"d\" }}", "d", &[]),
         ("{{ x[0] || \"d\" }}", "d", &[]),
@@ -242,6 +249,12 @@ fn static_reads_use_the_shared_branch_facts() {
         ("x.a ? x.a : \"none\"", &[]),
         ("x.a ? x.b : \"none\"", &["x"]),
         ("x.a || x.b", &["x"]),
+        // `null` is a reserved root: listed as a read here, never warned by
+        // a consumer.
+        ("x != null && x.name", &["x", "null"]),
+        // `null != ''`, so the left operand leaves the right one unproven.
+        ("x != '' && x.name", &["x", "x"]),
+        ("x == null ? 'none' : x.name", &["x", "null"]),
     ];
     for (source, expected) in rows {
         let expr = parse_spanned(source).unwrap();

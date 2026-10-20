@@ -199,6 +199,61 @@ fn hover_inside_a_body_block_guard_shows_the_library_type() {
     session.shutdown();
 }
 
+/// Strict equality at body sites: inside `target != null` the hover drops
+/// `null`; `target != ''` proves nothing because a missing value is `null`
+/// and `null != ''`; `target == null` leaves only `null`; and equality with
+/// an array literal keeps only the array arm of a `string[] | string` union.
+/// Each expected text is hard-coded as well as read from the library, so the
+/// two cannot agree on a wrong answer.
+#[test]
+fn hover_inside_strict_equality_guards_shows_the_library_type() {
+    const TAGS: &str = "tags: [\"string[]\", string]\n";
+    let body = concat!(
+        "::block when=\"target != null\"\n",
+        "Present {{ target }}.\n",
+        "::end-block\n",
+        "::block when=\"target != ''\"\n",
+        "Nonempty {{ target }}.\n",
+        "::end-block\n",
+        "::block when=\"target == null\"\n",
+        "Null {{ target }}.\n",
+        "::end-block\n",
+        "::block when=\"tags == []\"\n",
+        "Tags {{ tags }}.\n",
+        "::end-block\n",
+    );
+    let text = document(&format!("  {TAGS}"), body);
+    let schema = parse_yaml_schema(&serde_yaml_ng::from_str(&format!("{SCHEMA}{TAGS}")).unwrap()).unwrap();
+    let declared = DeclaredTypes::new(Some(&schema));
+    let guards = BodyGuards::scan(&text);
+    let library = |offset: usize, path: &str| {
+        guards
+            .scope_at(TypeScope::unguarded(&declared), offset)
+            .type_of(&subject(path))
+    };
+
+    let workspace = LspWorkspace::new();
+    let mut session = Session::open(&workspace, &text);
+
+    let present = offset_of(&text, "Present {{", "target", 0);
+    assert_shows(&session.hover(present), &library(present, "target"), "string | number");
+
+    let nonempty = offset_of(&text, "Nonempty {{", "target", 0);
+    let nonempty_type = library(nonempty, "target");
+    assert!(nonempty_type.guard_presence().is_none(), "{nonempty_type:?}");
+    assert!(!nonempty_type.is_refined(), "{nonempty_type:?}");
+    assert_eq!(type_text(&nonempty_type), "string | number | null");
+    let nonempty_hover = session.hover(nonempty);
+    assert!(!nonempty_hover.contains("Type here"), "{nonempty_hover}");
+
+    let null = offset_of(&text, "Null {{", "target", 0);
+    assert_shows(&session.hover(null), &library(null, "target"), "null");
+
+    let tags = offset_of(&text, "Tags {{", "tags", 0);
+    assert_shows(&session.hover(tags), &library(tags, "tags"), "string[]");
+    session.shutdown();
+}
+
 /// Acceptance 7, expression-internal sites: a ternary branch and a later `&&`
 /// operand show the library's `TypeScope::assume` type for that side, in a
 /// body interpolation and in an Expression-typed frontmatter value (whose
@@ -244,13 +299,17 @@ fn hover_inside_ternary_and_conjunction_shows_the_library_type() {
 }
 
 /// `dm.transclusion.nullable_target` follows the library's predicate
-/// registry: aliases, `!isNull`, `!is_empty`, and equality with a non-empty
+/// registry: aliases, `!isNull`, `!is_empty`, and equality with a non-null
 /// literal each prove the target present, as `file_exists` always did.
+/// Equality is strict and a missing value is `null`, so `x != null` and
+/// `!(x == null)` prove `x` present, while `x != ''` (`null != ''` holds) and
+/// `x == null` do not.
 #[test]
 fn nullable_target_is_suppressed_by_registry_predicate_guards() {
     let text = concat!(
         "---\n$schema:\n",
         "  optional: file\n  a: file\n  b: file\n  c: file\n  d: file\n  e: file\n",
+        "  f: file\n  g: file\n  h: file\n  i: file\n",
         "---\n\n",
         "::file {{optional}}\n\n",
         "::block when=\"fileExists(a)\"\n::file {{a}}\n::end-block\n",
@@ -259,13 +318,19 @@ fn nullable_target_is_suppressed_by_registry_predicate_guards() {
         "::block when=\"!is_empty(d)\"\n::file {{d}}\n::end-block\n",
         "::block when=\"e == 'main.md'\"\n::file {{e}}\n::end-block\n",
         "::block when=\"is_null(a)\"\n::file {{a}}\n::end-block\n",
+        "::block when=\"f != null\"\n::file {{f}}\n::end-block\n",
+        "::block when=\"!(g == null)\"\n::file {{g}}\n::end-block\n",
+        "::block when=\"h != ''\"\n::file {{h}}\n::end-block\n",
+        "::block when=\"i == null\"\n::file {{i}}\n::end-block\n",
     );
     let workspace = LspWorkspace::new();
     let session = Session::open(&workspace, text);
 
     let unguarded = position(text, text.find("{{optional}}").unwrap());
     let false_side = position(text, text.rfind("{{a}}").unwrap());
-    let expected: Vec<(u64, u64)> = [unguarded, false_side]
+    let not_empty_string = position(text, text.find("{{h}}").unwrap());
+    let equals_null = position(text, text.find("{{i}}").unwrap());
+    let expected: Vec<(u64, u64)> = [unguarded, false_side, not_empty_string, equals_null]
         .into_iter()
         .map(|(line, character)| (u64::from(line), u64::from(character)))
         .collect();
@@ -276,7 +341,9 @@ fn nullable_target_is_suppressed_by_registry_predicate_guards() {
 /// `dm.expression.undeclared_property` reports exactly the reads the
 /// library's static walk leaves unhandled: a later `&&` operand is covered by
 /// the earlier one, a false ternary branch is not covered by its condition,
-/// and a fact about `bar.a` does not cover its sibling `bar.b`.
+/// a fact about `bar.a` does not cover its sibling `bar.b`, and under strict
+/// equality `baz != null` covers `baz.name` while `qux != ''` does not cover
+/// `qux.name` (a missing `qux` is `null`, and `null != ''`).
 #[test]
 fn undeclared_property_findings_match_the_library_branch_facts() {
     let text = concat!(
@@ -284,15 +351,27 @@ fn undeclared_property_findings_match_the_library_branch_facts() {
         "A {{ foo && foo }}\n",
         "B {{ foo ? 'x' : foo }}\n",
         "C {{ bar.a && bar.b }}\n",
+        "D {{ baz != null && baz.name }}\n",
+        "E {{ qux != '' && qux.name }}\n",
     );
     let workspace = LspWorkspace::new();
     let session = Session::open(&workspace, text);
 
     let mut library: Vec<(u64, u64)> = Vec::new();
-    for (prefix, inner) in [("A {{ ", "foo && foo"), ("B {{ ", "foo ? 'x' : foo"), ("C {{ ", "bar.a && bar.b")] {
+    for (prefix, inner) in [
+        ("A {{ ", "foo && foo"),
+        ("B {{ ", "foo ? 'x' : foo"),
+        ("C {{ ", "bar.a && bar.b"),
+        ("D {{ ", "baz != null && baz.name"),
+        ("E {{ ", "qux != '' && qux.name"),
+    ] {
         let base = text.find(prefix).unwrap() + prefix.len();
         let expr = parse_spanned(inner).unwrap();
-        for read in static_variable_reads(&expr).into_iter().filter(|read| !read.handles_absence) {
+        // `null` parses as a read of the reserved root, never a property.
+        for read in static_variable_reads(&expr)
+            .into_iter()
+            .filter(|read| !read.handles_absence && read.root() != "null")
+        {
             let (line, character) = position(text, base + read.span.start);
             library.push((u64::from(line), u64::from(character)));
         }
@@ -304,6 +383,9 @@ fn undeclared_property_findings_match_the_library_branch_facts() {
         offset_of(text, "B {{", "foo", 1),
         offset_of(text, "C {{", "bar.a", 0),
         offset_of(text, "C {{", "bar.b", 0),
+        offset_of(text, "D {{", "baz", 0),
+        offset_of(text, "E {{", "qux", 0),
+        offset_of(text, "E {{", "qux.name", 0),
     ]
     .into_iter()
     .map(|offset| {

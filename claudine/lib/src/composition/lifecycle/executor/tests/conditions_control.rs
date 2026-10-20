@@ -35,6 +35,51 @@ fn when_false_skips_item_when_true_runs() {
     assert_eq!(recorder.events(), vec![Emitted::Speech("matched".to_string())]);
 }
 
+/// Equality is strict: an absent property reads as `null`, which equals
+/// `null` and differs from `''`, so `!= ''` selects its branch and `!= null`
+/// does not.
+#[test]
+fn when_equality_compares_an_absent_property_as_null() {
+    let config = parse_lifecycle_config(
+        &json!({
+            "success": [
+                { "when": "missing != ''", "then": [{ "say": "differs from empty" }] },
+                { "when": "missing != null", "then": [{ "say": "never" }] },
+                { "when": "missing == null", "then": [{ "say": "equals null" }] },
+                { "when": "missing == ''", "then": [{ "say": "never" }] },
+            ],
+        }),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+
+    let outcome = context.execute_event(&config);
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(
+        recorder.events(),
+        vec![
+            Emitted::Speech("differs from empty".to_string()),
+            Emitted::Speech("equals null".to_string()),
+        ]
+    );
+}
+
 #[test]
 fn omitted_when_always_runs() {
     let config = parse_lifecycle_config(

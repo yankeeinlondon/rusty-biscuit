@@ -286,7 +286,7 @@ Only call a policy engine when `ctx.today` is available:
 {
   "type": "call",
   "command": "policy-engine",
-  "when": "ctx.today != ''"
+  "when": "!is_empty(ctx.today)"
 }
 ```
 

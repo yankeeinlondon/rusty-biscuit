@@ -312,9 +312,11 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
 - `dm.transclusion.nullable_target` ranges the complete `{{ ... }}` target
   expression. DMLS suppresses it when an enclosing `::block when` proves the
   same property present, using the same guard rules as compose: truthy `x`,
-  `!!x`, `x != null`, `x != ''`, `file_exists(x)`, `is_string(x)` and the
-  other type predicates, `!is_null(x)`, `!is_empty(x)`, equality with a
-  non-empty literal (`x == 'main.md'`), parentheses, and conjunctions.
+  `!!x`, `x != null`, `!(x == null)`, `file_exists(x)`, `is_string(x)` and
+  the other type predicates, `!is_null(x)`, `!is_empty(x)`, equality with a
+  non-null literal (`x == 'main.md'`, `x == ''`), parentheses, and
+  conjunctions. Equality is strict and a missing value is `null`, which
+  equals only `null`, so `x != ''` and `x == null` prove nothing.
   Predicates match through the function registry, so aliases and case
   (`fileExists`, `isString`, `!isNull`) count too. A guard is never evaluated:
   `file_exists(x)` proves `x` is a present string inside the block without

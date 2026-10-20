@@ -10,31 +10,30 @@ skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
     - claudine
+    - dmls
+    - claudine-cli
 human_review: false
 message_to_agent: |-
-    Phase 3 rebuilt the guard analysis on `equality::values_equal`:
-    `scope/shape.rs` now has `Shape::equal_to(value)` / `Shape::differs_from(value)`
-    (the text_* helpers are gone), and `scope/facts.rs` feeds them literal operands,
-    `Container(Family)` operands (array/object literals -> `of_family`), and finite
-    other-side values including a lone `null` (no both-null routes remain). Literal
-    numbers come from the evaluator's own `expression/mod.rs::number_literal`.
-    darkmatter `just test` (10793) and claudine `just test` (10600) are fully green;
-    both lints are clean.
-    Behavior change for Phase 4 consumers: an UNDECLARED value compared with a
-    scalar literal now narrows to that literal (`mode == 'release'` ->
-    `literal(release)`, `x == ''` -> `literal('')`, `x == null` -> null only),
-    where it used to be `unknown(present)`. That changes the shell TemplateShape
-    discovered under such guards. Claudine's `assert_runs_only_when_selected`
-    helper (lifecycle scope_site_conformance.rs) was rebuilding the approval from
-    an unguarded scope; it now approves the discovered site's shape. Look for the
-    same unguarded-approval pattern in any consumer test you extend.
-    The shared rows in darkmatter/lib/tests/common/type_scope_cases.rs (read by the
-    lib and DMLS conformance suites) already assert `x != ''` / `x == null` do NOT
-    prove presence while `x != null`, `!(x == null)`, `x == ''` do. Phase 4 still owns
-    the per-consumer proofs (shell preflight messages, `::file` targets, absence
-    warnings, DMLS hover/diagnostics, Claudine lifecycle/sequence).
-    The two claudine-cli tests Phase 2 called pre-existing failures passed in the
-    full claudine `just test` this phase; treat them as load-sensitive.
+    Phase 5 settled the worksheet's two verify questions. Number-declared values
+    (`phase`, `total_phases`) reach `==` as numbers after schema coercion, even when
+    quoted or passed on the CLI; this is pinned by
+    `strict_equality_composition::a_number_declared_value_compares_as_a_number_after_coercion`.
+    Boolean flags read through `frontmatter()` stay YAML booleans. Every such site is kept.
+    Rewritten in Phase 5: `prompts/code-comment-quality.md` (now
+    `!is_empty(ctx.current_packages)`, because `ctx.package` does not exist), the
+    `ctx.today != ''` examples in the claudine skill (`hook-actions.md`) and in
+    `configuring-actions.md`, the claudine `lifecycle.md` guard list, and three
+    claudine runner tests that had become vacuous.
+    Phase 6 still owns all darkmatter equality prose: `interpolation.md:90-93`
+    (the "6" auto-convert note and its malformed `color || blue == "blue"`
+    example, in one bullet), `lsp/features.md:45`, `darkmatter-expressions.md`,
+    `schemas/definition.md:2596`, `transclusion-design.md:374`,
+    `expression-engine.md`, and `.claude/skills/darkmatter/expressions.md`.
+    `just test-prompts` has two failures that predate this fix: root prompts
+    validated without arguments fail on missing required properties, and the
+    claudine test `shipped_implement_plan_prepares_with_unset_optional_commit_message`
+    fails because the live `implement-plan.md` declares `commit_message: ""`
+    (added 2026-10-15). Don't treat either as a regression.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/expression/equality.rs
     - darkmatter/lib/src/markdown/compose/expression/mod.rs
@@ -58,6 +57,31 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/lib/tests/l1/shell_template_body_guards.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/strict_equality_composition.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+    - claudine/cli/tests/l1/sequence_grammar_matrix.rs
+docs_updated_during_phase_4:
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - darkmatter/lib/tests/l1/strict_equality_composition.rs
+    - claudine/lib/src/dispatch/runner/tests.rs
+    - claudine/lib/src/dispatch/expression.rs
+    - prompts/code-comment-quality.md
+docs_updated_during_phase_5:
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/hook-actions.md
 ---
 
 # Implementation Log for 2026-10-20-strict-equality (6 phases)
@@ -541,3 +565,170 @@ There are no users yet, so no migration was added.
 - Skill: no darkmatter skill edit in this phase. The stale equality prose in
   `.claude/skills/darkmatter/expressions.md:86,107-108` belongs to Phase 6
   (worksheet row), together with the docs that teach the old guard table.
+
+## Phase 4
+
+- Started 2026-10-20. Scope: verify that the strict-equality guard facts
+  reach every consumer through its own public entry point. This phase made
+  test changes and one DMLS doc correction. No production code changed, and
+  no consumer gained equality logic of its own.
+
+### Requirement-to-test mapping
+
+All tests are L1 and F1, meaning synthetic inputs with hand-written
+expected results. The boundaries crossed are in-process compose and
+preflight APIs, a real DMLS LSP session, and the spawned `claudine compose`
+CLI. The CLI cells use `claudine-argv-recorder` as `git`/`just` and
+`claudine-fake-goose` as the provider, so nothing commits or launches an
+agent. No new terminal, browser, or OS tier was needed: the semantics are
+platform-independent value comparisons.
+
+| Requirement | Test |
+| --- | --- |
+| Shell preflight, undeclared value: `!(x == null)`, `null != x`, `x == ''` excuse a missing placeholder (guarded template hole) | `darkmatter::l1 shell_template_body_guards::a_missing_value_its_block_proves_present_waits_as_a_template` (new rows) |
+| Shell preflight: `x != ''`, `'' != x`, `x == null`, `!(x != null)` do **not** excuse it (`MissingValue` for `x`) | `shell_template_body_guards::a_missing_value_no_enclosing_block_proves_still_fails` (new rows) |
+| Shell, shell-block, and `::file` sites for a declared value, both sides of each presence guard | unchanged shared rows (`tests/common/type_scope_cases.rs` `NotNull`), run by `scope_site_conformance.rs` |
+| `::file` target narrowing, reversed operands (`null != x` narrows, `'' != x` does not) | `directive_target_analysis::block_guards_narrow_targets_through_the_shared_type_scope` (new rows) |
+| `BodyGuards`: its in-module tests have no equality rows, and the shared rows already exercise it at the body sites, so no duplicate was added | — |
+| Absence warnings are preserved: a comparison stays an ordinary operand and warns, while the rendered branch follows strict equality (`x == null` → `1`, `x != ''` → `1`, `x == ''` → `2`, `blank == null` → `2`, `blank == ''` → `1`) | `unknown_identifier_warning::every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root` (new rows) |
+| Static absence walk: `x != null && x.name` proves the right-hand read; `x != '' && x.name` does not; `x == null ? … : x.name` proves the false side | `unknown_identifier_warning::static_reads_use_the_shared_branch_facts` (new rows) |
+| Composition (acceptance 4): frontmatter and body interpolation, ternaries, native vs. quoted YAML `true`, `[]` vs. `'[]'`, `::block when` both ways for absent vs. `""`, a guarded `::file` transclusion, an operand error preserved, a skipped branch never evaluated | new `darkmatter::l1 strict_equality_composition::{interpolation_compares_typed_values, block_conditions_select_by_strict_equality, a_null_guard_transcludes_only_a_present_part, an_operand_failure_survives_the_comparison_and_a_skipped_branch_never_runs}` |
+| DMLS `dm.transclusion.nullable_target`: `f != null` and `!(g == null)` suppress it; `h != ''` and `i == null` report it | `dmls::l1 expression_scopes::nullable_target_is_suppressed_by_registry_predicate_guards` (extended) |
+| DMLS hover, checked against the library `BodyGuards` oracle and hard-coded text: `target != null` → `string \| number`; `target != ''` → no "Type here"; `target == null` → `null`; container family `tags == []` → `string[]` | new `expression_scopes::hover_inside_strict_equality_guards_shows_the_library_type` |
+| DMLS undeclared-property findings: `baz != null && baz.name` covers `baz.name`; `qux != '' && qux.name` reports it | `expression_scopes::undeclared_property_findings_match_the_library_branch_facts` (extended; the oracle now skips the reserved `null` root, which DMLS never treats as a property) |
+| Claudine lifecycle `when` with an absent property: `!= ''` and `== null` are selected; `!= null` and `== ''` are not | new `claudine composition::lifecycle::executor::tests::conditions_control::when_equality_compares_an_absent_property_as_null` |
+| Claudine sequence step `when` through normal CLI invocation: `missing != ''` runs the step; `missing != null` skips it | new `claudine-cli::l1 sequence_grammar_matrix::yaml_frontmatter::{step_when_absent_not_equal_to_empty_runs_the_step, step_when_absent_not_equal_to_null_skips_the_step}` |
+| Acceptance 5, explicit `commit_message: null` takes the generated route (`git add <root>`, `just commit`) and launches no `git commit -m` | new `claudine-cli::l1 implement_plan_commit_message::a_null_commit_message_takes_the_just_commit_branch` |
+| Acceptance 5, no dirty files: neither commit route runs, for the empty default and for a passed message; nothing is recorded; the "made no file changes" message is shown | new `implement_plan_commit_message::{a_clean_tree_with_the_empty_default_runs_neither_commit_route, a_clean_tree_with_a_passed_commit_message_runs_neither_commit_route}` |
+| Acceptance 5, empty/absent → generated route; a supplied message reaches `git` as one argument; an unapproved shape is refused at preflight | existing `implement_plan_commit_message` cells, re-run |
+| Both frozen copies pass preflight | `implement_plan_commit_message` (copy under `frozen_prompts/prompts/`), `compose_initialize_acceptance::the_shipped_router_*` (copy under `frozen_prompts/shipped_implement_route/`) |
+
+### Notes
+
+- **Clean-tree fixture.** `ctx.dirty_files` comes from sniff's
+  `GitRepo::file_changes()` (gix, in process), and gix skips ignored
+  untracked files. The clean cell writes `*` to `.git/info/exclude`, so no
+  real commit and no `git` spawn is needed. It is split into two tests
+  because, as one test, it took 3.1 s against the 5 s L1 budget.
+- **`number('abc')` returns 0, not an error**, so the operand-error row uses
+  `(flag + 1) == 5` with `flag: true`, the same failure the evaluator's
+  failure-contract tests use.
+- **Doc drift fixed:** `darkmatter/dmls/docs/diagnostics.md` listed
+  `x != ''` as a guard that proves a nullable target present. The guard
+  list is corrected, and it now states that `x != ''` and `x == null` prove
+  nothing. The stale `darkmatter/docs/topics/darkmatter-expressions.md`
+  lines (≈180, 287–288, 587–592) belong to Phase 6 and were left alone.
+- **Frozen-copy drift, for Phase 5.** Both frozen copies still carry the
+  unchanged `ctx.dirty_files && commit_message` guard, but they differ from
+  the live `prompts/_implement/implement-plan.md`. Both copies lack the
+  final-phase `implemented` warn block and the `start:` message, and both
+  add `in_loop` handling (`frontmatter(spec, 'implemented') == true`,
+  `phase != 1`). Both of those comparisons are typed bool and number, so
+  their results are unchanged. The `shipped_implement_route` copy has no
+  commit-route `shell:` commands at all. This drift predates this fix.
+
+### Gates
+
+- `darkmatter/` `just test`: **10798/10798 passed** (10 skipped), first run,
+  no reruns. `just lint`: clean (including the zed-dmls wasm check).
+  `just check-tier-coverage darkmatter` and `claudine`: 0 stranded.
+- Claudine (downstream). This phase changed no darkmatter production code,
+  so the only Claudine-relevant changes are its own edited test files. Those
+  were run by filter: `cargo nextest run -p claudine-cli --features
+  test-fixtures --test l1 -E 'test(implement_plan_commit_message) |
+  test(compose_initialize_acceptance) | test(sequence_grammar_matrix)'` →
+  244/244, and `cargo nextest run -p claudine --lib -E
+  'test(conditions_control::) | test(scope_site_conformance)'` → 88/88.
+  `claudine/` `just lint`: clean.
+- Gate-skip check: `git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` →
+  `packages: ['claudine', 'claudine-cli', 'darkmatter', 'dmls',
+  'test-toolkit']`, `change_class: package`. Gates were required, and they
+  were run.
+- No skipped tests and no pre-existing failures. No cross-OS check: the new
+  tests add no path, process, or platform logic beyond fixtures already
+  used cross-OS. The `.git/info/exclude` write is a plain file write.
+- Skill: no darkmatter skill change in this phase. Its equality prose
+  (`expressions.md`) is Phase 6's.
+
+## Phase 5
+
+- Started 2026-10-20. This phase migrates the authored expressions the Phase 1 worksheet flagged, then settles its two open `verify` questions by observing the composed values.
+
+### Verify questions settled (evidence)
+
+Both were checked with the worktree's `md` (`target/debug/md compose`) on scratch documents:
+
+1. **Do `number`-declared values reach `==` as numbers?** Yes. Schema coercion runs after frontmatter interpolation pass 1, so the following all compare as numbers:
+   - a computed whole-value `{{ frontmatter(plan,'total_phases') || 0 }}`;
+   - a quoted `total_phases: "3"` in the plan file;
+   - a CLI `phase=3` key/value;
+   - `--set '{"phase":"3"}'`.
+
+   `phase == total_phases` is true only for the final phase. Every `phase == total_phases`, `phase != 1`, `iteration == 1` / `!= 1`, and `expected_iteration` site is therefore **keep**. This is now pinned by `strict_equality_composition::a_number_declared_value_compares_as_a_number_after_coercion`, which also asserts that an *undeclared* quoted `"3"` no longer equals `3`.
+2. **Do the boolean flags compare as booleans?** `frontmatter(file,'ready'|…)` returns the YAML scalar unchanged, and a whole-value `"{{ true }}"` default (for example `implement-suggestions.md`'s `ready:`) keeps the boolean type, so `r == true` is true. The prompts tell agents to write YAML booleans (`ready: true`). Under the spec, a quoted `"true"` now fails these checks, which is the intended behavior. `!= true` on a missing or null flag is true under both semantics, because the old `''` text was not `true` either. Every boolean `verify` site is **keep**: the root prompts' `feature-review.md`, `cross-platform.md`, `review.md`, `triage.md`, `implement-plan.md:92`, and `implement-suggestions.md`; the fixtures; and both frozen copies.
+
+### Rewritten sites
+
+| Site | Before | After | Reason |
+| --- | --- | --- | --- |
+| `prompts/code-comment-quality.md:15` | `ctx.area == ctx.package \|\| null` | `!is_empty(ctx.current_packages)` | See the note below the table. |
+| `.claude/skills/claudine/hook-actions.md:310` | `ctx.today != ''` | `!is_empty(ctx.today)` | A presence check on a string-or-null value. Under strict equality `null != ''` is true. The spec's migration table gives `!is_empty` as the replacement that matches the old result. |
+| `claudine/docs/topics/configuring-actions.md:289` | `ctx.today != ''` | `!is_empty(ctx.today)` | Same as the skill example. |
+| `claudine/docs/topics/flow-control/lifecycle.md:327-328` | guard list: `x != ''` proves presence | `x != null` proves presence; `x != ''` listed as not proving it | The prose drifted after Phase 3 and was fixed now (Rule 5). It matches the dmls doc corrected in Phase 4. |
+| `claudine/lib/src/dispatch/runner/tests.rs` (`when_ctx_fields_do_not_require_precomputed_event_metadata`, `when_ctx_today_resolves`, `when_ctx_year_resolves`) | `ctx.today != ''`, `ctx.year != ''` | `!is_empty(ctx.today)`, `ctx.year != null` | These tests prove that `ctx.*` resolves through `EventMetaConditionLookup`. Under strict equality, the unresolved value `null != ''` (and the number `ctx.year != ''`) is always true, so the tests had become vacuous. The new conditions are true only when the value resolves. |
+| `claudine/lib/src/dispatch/expression.rs:17` (module doc) | example `ctx.today != ''` | `!is_empty(ctx.today)` | The comment had drifted from the tests it describes. |
+
+**Note on `code-comment-quality.md:15`.** `ctx.package` is not a context variable: it is always null, and composing the prompt warned `unknown context variable 'ctx.package'`. Inside a package area the old condition was `'darkmatter' == null`, which is false, so the "this package area has the following Rust packages" list never rendered there. It rendered only at the repo root, where `ctx.area` is `''`. With strict equality it would never render anywhere. The rewrite follows the block's stated intent.
+
+Composing the prompt from `darkmatter/` now renders that area's five packages and no warning; `md schema validate` accepts the file.
+
+### Retained after inspection
+
+- `claudine/docs/topics/flow-control/lifecycle.md:1168` `err.detail.response_text != null`: a planned-behavior example. Strict `!= null` is the correct presence check; an empty answer prints nothing, which is harmless.
+- `claudine/docs/topics/flow-control/flow-control.md:291` (`== true`) and `looping.md:324` (`done == true`): boolean comparisons, kept as answered by question 2.
+- All other worksheet **keep** rows: re-read, unchanged.
+- `claudine/cli/tests/l1/agent_text_is_data.rs:~743` `total_phases != ''`: kept. The test is about agent text being treated as data, not about this comparison, and the value is still a present number.
+
+### Left for Phase 6 (prose)
+
+These worksheet rows were deliberately not touched, because their wording belongs to the Phase 6 doc rewrite:
+- `darkmatter/docs/inline/interpolation.md:90-93`: the claim that `"6"` auto-converts, and its malformed `color || blue == "blue"` example, sit in one bullet;
+- `darkmatter/docs/lsp/features.md:45`;
+- `darkmatter/docs/topics/darkmatter-expressions.md`;
+- `schemas/definition.md:2596`;
+- `transclusion-design.md:374`;
+- `expression-engine.md`;
+- `.claude/skills/darkmatter/expressions.md`.
+
+### Frozen copies
+
+The original `prompts/_implement/implement-plan.md` did not change in this fix (`git log 8393dde93~1..HEAD -- prompts/` is empty, and the working-tree diff touches only `code-comment-quality.md`). Both frozen copies therefore stay as they are. Their four comparisons are unchanged under strict equality:
+- `frontmatter(spec,'implemented') == true` is boolean;
+- `phase != 1` and 2× `phase == total_phases` are numbers, per question 1.
+
+The copies' pre-existing drift from the live prompt is recorded in Phase 4. No other frozen copy mirrors a rewritten prompt: `code-comment-quality.md` has no frozen copy or fixture.
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+| --- | --- |
+| `number`-declared quoted/computed values compare as numbers, so the `phase == total_phases` blocks select the final phase (keep ruling) | `darkmatter` L1 `strict_equality_composition::a_number_declared_value_compares_as_a_number_after_coercion` (new; native vs quoted, computed `frontmatter()` from a quoted plan value, non-final control, undeclared negative) |
+| Hook `when` on `ctx.*` resolves (no longer vacuous) | `claudine` lib `dispatch::runner::tests::when_ctx_*` (3, rewritten conditions) |
+| Frozen `implement-plan` preflight and the commit-message guard | `claudine-cli` L1 `implement_plan_commit_message`, `sequence_frozen_graph` (19/19) |
+| Migrated prompt composes through normal invocation | `md compose` from `darkmatter/` (manual, above), and `just test-prompts` schema validation of `code-comment-quality.md` (passes). Root prompts stay opt-in and are not added to CI. |
+
+### Opt-in prompt checks (`just test-prompts`, root)
+
+- `claudine-cli` prompts: 87/87 passed. `claudine-cli` L2 `shipped_implement`: 3/3. `darkmatter` prompts: 10/10.
+- **Schema validation step: failed. These failures predate this fix and are unrelated to equality.** Many root prompts validated with no arguments report missing required properties (for example `spec is a required property`) and one invalid `{{ }}` file default (`prompts/plan.md:19`). `code-comment-quality.md` validates.
+- **`claudine` `composition::schema::tests::shipped_implement_plan_prepares_with_unset_optional_commit_message`: failed. This predates this fix.** The live prompt declares `commit_message: ""` as a default; it was added in `b47947b1c` (2026-10-15). The test expects null. Prompts are drafts, so this step is informational. Nothing in this fix changed that prompt.
+
+### Gates
+
+- `darkmatter/` `just test`: **10799/10799 passed** (10 skipped), first run, no reruns. `just lint`: clean (including the zed-dmls wasm check).
+- `claudine/` `just lint`: clean. Claudine's changes are a test edit and a module-doc line, and their targeted tests ran (above).
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Gate-skip check: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `packages: ['claudine', 'claudine-cli', 'darkmatter', 'dmls', 'test-toolkit']` and `change_class: package`, so the gates were required and were run.
+- No cross-OS check: no path, process, or platform logic changed.
+- Skill: the darkmatter skill needed no change in this phase. Its equality prose is Phase 6's. The claudine skill example was migrated (above).

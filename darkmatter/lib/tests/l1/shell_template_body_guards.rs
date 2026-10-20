@@ -98,6 +98,10 @@ fn a_missing_value_its_block_proves_present_waits_as_a_template() {
         ("`fm.` read", "::block when=\"fm.x\"\n::shell git --version {{ x }}\n::end-block\n"),
         ("predicate guard", "::block when=\"is_string(x)\"\n::shell git --version {{ x }}\n::end-block\n"),
         ("comparison guard", "::block when=\"x != null\"\n::shell git --version {{ x }}\n::end-block\n"),
+        ("negated null equality", "::block when=\"!(x == null)\"\n::shell git --version {{ x }}\n::end-block\n"),
+        ("reversed comparison guard", "::block when=\"null != x\"\n::shell git --version {{ x }}\n::end-block\n"),
+        // Strict equality: `null == ''` is false, so only a present `x` equals `''`.
+        ("empty-string equality", "::block when=\"x == ''\"\n::shell git --version {{ x }}\n::end-block\n"),
         ("conjunction guard", "::block when=\"a && x\"\n::shell git --version {{ x }}\n::end-block\n"),
         // The guard is never evaluated, so no filesystem is read for it.
         ("file guard", "::block when=\"file_exists(x)\"\n::shell git --version {{ x }}\n::end-block\n"),
@@ -128,6 +132,11 @@ fn a_missing_value_no_enclosing_block_proves_still_fails() {
         ("negated guard", "::block when=\"!x\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
         ("absence predicate", "::block when=\"is_null(x)\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
         ("disjunction", "::block when=\"x || y\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
+        // Strict equality: a missing `x` is `null`, and `null != ''` is true.
+        ("empty-string inequality", "::block when=\"x != ''\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
+        ("reversed empty-string inequality", "::block when=\"'' != x\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
+        ("null equality", "::block when=\"x == null\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
+        ("negated null inequality", "::block when=\"!(x != null)\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
         ("sibling member", "::block when=\"x.a\"\n::shell git --version {{ x.b }}\n::end-block\n", "x.b"),
         ("parent of a member", "::block when=\"x.a\"\n::shell git --version {{ x }}\n::end-block\n", "x"),
         (

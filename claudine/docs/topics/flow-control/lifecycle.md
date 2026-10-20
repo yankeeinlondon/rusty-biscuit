@@ -324,8 +324,8 @@ Without the guard, the same missing `commit_message` fails pre-flight before
 anything runs. A guard excuses only the values it proves present: `when: msg`
 does not excuse a missing `other` in the same command, a read of `msg`
 outside the guarded body, or a value under the `else:` side. Which guard forms
-prove presence (`x`, `!is_null(x)`, `is_string(x)`, `file_exists(x)`, `x != ''`,
-`a && x`; not `!x`, `x || y`, or `x == null`) is listed in Darkmatter's
+prove presence (`x`, `!is_null(x)`, `is_string(x)`, `file_exists(x)`, `x != null`,
+`a && x`; not `!x`, `x || y`, `x != ''`, or `x == null`) is listed in Darkmatter's
 [What a Guard Proves](../../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
 Pre-flight reads `file_exists(x)` without touching the filesystem: it proves
 only that `x` is a present string, because today's `file_exists` accepts
