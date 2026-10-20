@@ -557,18 +557,17 @@ fn windows_absolute_inputs_keep_a_portable_drive_anchor() {
 }
 
 #[test]
-fn file_exists_takes_an_optional_string() {
+fn file_exists_inspects_its_argument_without_converting_it() {
     let f = fixture();
+    write(&under(&f.repo, &["123"]), "");
+    write(&under(&f.repo, &["true"]), "");
     let lookup = Lookup { context: ResolutionContext::new(repo_context(&f)), reference: String::new() };
     let call = |argument: &str| evaluate(&parse(&format!("file_exists({argument})")).unwrap(), &lookup);
 
-    // An optional reference that was never supplied names no file.
-    assert_eq!(call("null").unwrap(), Value::Bool(false));
-    for argument in ["123", "true", "false"] {
-        let error = call(argument).unwrap_err();
-        assert!(
-            error.to_string().contains("file_exists() requires string arguments"),
-            "file_exists({argument}) must be a type error, not false: {error}"
-        );
+    assert_eq!(call("'123'").unwrap(), Value::Bool(true), "the fixture names a file `123`");
+    // An optional reference that was never supplied names no file, and a
+    // non-text value names none either: `123` is not converted to "123".
+    for argument in ["null", "123", "true", "false", "[\"123\"]", "{ a: '123' }"] {
+        assert_eq!(call(argument).unwrap(), Value::Bool(false), "file_exists({argument})");
     }
 }

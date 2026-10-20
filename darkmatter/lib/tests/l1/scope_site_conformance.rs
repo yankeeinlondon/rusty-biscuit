@@ -92,7 +92,6 @@ const NO_TASK_WRITES: &str = "nothing writes between a task's `when:` and its `s
 const NESTED_UNION: &str = "nested-union and discriminant projection: a guard on `x.kind` narrows only `x.kind`";
 const FUNCTION_RESULT: &str = "function-result narrowing: a guard on `f(x)` proves nothing about `x`";
 const HOST_TYPES: &str = "typed projections of the host globals `seq`, `loop`, `group`";
-const CONVERSION_FILE_EXISTS: &str = "conversion-aware `file_exists`: the true side is a string, whatever the argument converted from";
 
 /// The planned state shared by every site a guard can reach.
 fn planned(case: GuardCase) -> Option<State> {
@@ -100,7 +99,6 @@ fn planned(case: GuardCase) -> Option<State> {
         GuardCase::NestedUnionProjection => Some(State::Planned(NESTED_UNION)),
         GuardCase::FunctionResultNarrowing => Some(State::Planned(FUNCTION_RESULT)),
         GuardCase::HostGlobalTypes => Some(State::Planned(HOST_TYPES)),
-        GuardCase::ConversionAwareFileExists => Some(State::Planned(CONVERSION_FILE_EXISTS)),
         _ => None,
     }
 }
@@ -127,7 +125,7 @@ fn state(site: ScopeSite, case: GuardCase) -> State {
             | C::OtherValueNotDeferred
             | C::RuntimeSelection => State::Run,
             C::WriteInvalidation => State::Inapplicable(NO_BODY_WRITES),
-            C::NestedUnionProjection | C::FunctionResultNarrowing | C::HostGlobalTypes | C::ConversionAwareFileExists => {
+            C::NestedUnionProjection | C::FunctionResultNarrowing | C::HostGlobalTypes => {
                 planned(case).expect("planned case")
             }
         },
@@ -149,8 +147,7 @@ fn state(site: ScopeSite, case: GuardCase) -> State {
             | C::RuntimeSelection
             | C::NestedUnionProjection
             | C::FunctionResultNarrowing
-            | C::HostGlobalTypes
-            | C::ConversionAwareFileExists => State::Inapplicable(FRONTMATTER_UNGUARDED),
+            | C::HostGlobalTypes => State::Inapplicable(FRONTMATTER_UNGUARDED),
         },
         ScopeSite::LifecycleShell | ScopeSite::LifecycleInlineGuard | ScopeSite::LifecycleSetShell => match case {
             C::TrueGuard
@@ -169,7 +166,7 @@ fn state(site: ScopeSite, case: GuardCase) -> State {
             | C::OtherValueNotDeferred
             | C::WriteInvalidation
             | C::RuntimeSelection => State::Claudine(LIFECYCLE_OWNER),
-            C::NestedUnionProjection | C::FunctionResultNarrowing | C::HostGlobalTypes | C::ConversionAwareFileExists => {
+            C::NestedUnionProjection | C::FunctionResultNarrowing | C::HostGlobalTypes => {
                 planned(case).expect("planned case")
             }
         },
@@ -190,7 +187,7 @@ fn state(site: ScopeSite, case: GuardCase) -> State {
             | C::RuntimeSelection => State::Claudine(SEQUENCE_OWNER),
             C::NestedGuards => State::Inapplicable(ONE_TASK_GUARD),
             C::WriteInvalidation => State::Inapplicable(NO_TASK_WRITES),
-            C::NestedUnionProjection | C::FunctionResultNarrowing | C::HostGlobalTypes | C::ConversionAwareFileExists => {
+            C::NestedUnionProjection | C::FunctionResultNarrowing | C::HostGlobalTypes => {
                 planned(case).expect("planned case")
             }
         },
@@ -315,7 +312,6 @@ fn every_site_and_case_has_one_explicit_state() {
         GuardCase::NestedUnionProjection,
         GuardCase::FunctionResultNarrowing,
         GuardCase::HostGlobalTypes,
-        GuardCase::ConversionAwareFileExists,
     ] {
         for &site in ScopeSite::ALL {
             if site != ScopeSite::FrontmatterShell {
@@ -582,17 +578,20 @@ fn frontmatter_value_stays_unguarded(case: GuardCase) {
 // ── passive analysis and planned projections ────────────────────────────
 
 /// Acceptance 13 at the body shell and transclusion sites: a `file_exists`
-/// guard is analyzed, never run. Evaluating this guard would fetch an
-/// unreachable URL and then fail on a number, so analysis passing proves no
-/// handler ran; no engine is built, no network is attempted, and the
-/// directory is unchanged.
+/// guard is analyzed, never run. Evaluating this guard would fail on its
+/// unreachable URL, so analysis passing proves no handler ran; no engine is
+/// built, no network is attempted, and the directory is unchanged.
 #[test]
 fn file_exists_guards_are_analyzed_without_running_a_handler() {
     let guard = "file_exists(remote) && file_exists(n) && file_exists(x)";
     let tripwire = TempDir::new().unwrap();
     assert!(
-        evaluate_condition_against("file_exists(n)", &serde_json::json!({ "n": 5 }), &biscuit_file::FileResolutionContext::new(tripwire.path()))
-            .is_err(),
+        evaluate_condition_against(
+            "file_exists(remote)",
+            &serde_json::json!({ "remote": "https://127.0.0.1:9/never-fetched.md" }),
+            &biscuit_file::FileResolutionContext::new(tripwire.path())
+        )
+        .is_err(),
         "the tripwire is armed: running the guard fails"
     );
 
@@ -628,9 +627,9 @@ fn file_exists_guards_are_analyzed_without_running_a_handler() {
 }
 
 /// The planned cells are not claimed: today a function result proves nothing
-/// about its argument, a discriminant guard does not prove its parent, and
-/// `file_exists` narrows a converting argument to `string`. When one of these
-/// projections lands, this fails until its matrix cells are updated.
+/// about its argument, and a discriminant guard does not prove its parent.
+/// When one of these projections lands, this fails until its matrix cells are
+/// updated.
 #[test]
 fn planned_projections_stay_unclaimed_at_body_shell() {
     for (case, guard, read) in [
@@ -642,8 +641,12 @@ fn planned_projections_stay_unclaimed_at_body_shell() {
         let error = Doc::new(&text).preflight().expect_err(guard);
         assert_eq!(missing_value(&error).map(|(expression, _)| expression), Some(read), "{case:?}: {error:?}");
     }
+}
 
-    assert!(matches!(state(ScopeSite::BodyShell, GuardCase::ConversionAwareFileExists), State::Planned(_)));
+/// `file_exists` inspects its argument without converting it, so only text
+/// can make it true: its true side narrows a mixed declaration to `string`.
+#[test]
+fn file_exists_true_side_narrows_a_mixed_declaration_to_string() {
     let text = format!(
         "{}::block when=\"file_exists(target)\"\n::shell git --version {{{{ target }}}}\n::end-block\n",
         frontmatter("")

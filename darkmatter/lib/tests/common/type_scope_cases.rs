@@ -66,8 +66,6 @@ guard_cases! {
     FunctionResultNarrowing,
     /// Planned: typed projections of the host globals `seq`, `loop`, `group`.
     HostGlobalTypes,
-    /// Planned: `file_exists` facts that follow argument conversion.
-    ConversionAwareFileExists,
 }
 
 /// The declarations every [`BlockCase`] reads against, as `$schema` lines.

@@ -1620,27 +1620,29 @@ pub fn absolute_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
     Ok(Value::String(path.to_string_lossy().to_string()))
 }
 
-/// `file_exists(file: string | null) -> bool` — whether a reference names an
-/// existing file.
+/// `file_exists(value: any) -> bool` — whether a reference names an existing
+/// file.
 ///
 /// A well-formed reference with no matching regular file (including one that
 /// names a directory) is `false`, and so is `null`: an optional reference that
-/// was never supplied names no file.
+/// was never supplied names no file. The argument is inspected, never
+/// converted: a number, boolean, array, or object is `false`, so `42` does not
+/// name a file called `42`. Only text can be `true`, which is what lets a
+/// `file_exists(x)` guard prove `x` a present string.
 ///
 /// ## Errors
 ///
-/// An argument that is neither a string nor `null` is a type error, never
-/// `false`. A failure to answer is never reported as absence. An invalid reference, a
+/// A failure to answer is never reported as absence. An invalid reference, a
 /// tree escape, a missing home/vault/repository anchor, and a candidate probe
 /// I/O failure (a permission error, for example) are typed file-reference
 /// errors. An HTTP(S) URL is `true` once fetched; a denied or failed fetch is
 /// an error, and so is any URL in a local-only context (no remote runtime).
 pub fn file_exists_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("file_exists", args, 1)?;
-    if any_null(args) {
+    let Value::String(raw) = &args[0] else {
         return Ok(Value::Bool(false));
-    }
-    let raw = require_string_expr("file_exists", &args[0])?;
+    };
+    let raw = raw.as_str();
     if is_remote_url(raw) {
         return match ctx.fetch_remote_text(raw) {
             Ok(Some(_)) => Ok(Value::Bool(true)),

@@ -100,6 +100,13 @@ and `analyze_directive_targets`' `narrowed_paths` read the scope), and
 `AbsenceScope`'s branch facts. `expression::branch_scope(expr, span, site)`
 gives the scope at one node inside an expression (ternary/`&&`/`||` sides,
 same routing as `walk_static`); DMLS hover uses it. Never add another guard walker.
+`lib/tests/l1/type_scope_ownership_guard.rs` (and the DMLS twin) fails on an
+unlisted `TypeScope::unguarded` site, a stale allowlist entry, or a retired
+classifier; the site × guard-case matrix is `lib/tests/l1/scope_site_conformance.rs`
+over `lib/tests/common/type_scope_cases.rs`. Equality follows the evaluator:
+a missing operand compares as `''`, so `x == null` proves nothing and
+`x == ''`'s *false* side proves presence. User docs:
+[What a Guard Proves](../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
 
 Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
 model in `expression/binding.rs`, never through a lookup override. A root

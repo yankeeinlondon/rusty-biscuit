@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 
 use darkmatter::markdown::compose::expression::{
-    Availability, BindingView, DeclaredType, DeclaredTypes, EvaluationLookup, Polarity, ScopeId, ScopedType, Shape,
-    Subject, TypeScope, UnavailabilityReason, WriteSet, evaluate, parse,
+    Availability, BindingView, DeclaredType, DeclaredTypes, EvaluationLookup, Polarity, ResolutionContext, ScopeId,
+    ScopedType, Shape, Subject, TypeScope, UnavailabilityReason, WriteSet, evaluate, parse,
 };
 use darkmatter::markdown::schemas::simplified::serialize_property_atom;
 use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
@@ -319,11 +319,16 @@ fn equality_between_two_subjects_narrows_against_a_finite_other_side() {
 
 // ── differential soundness against the evaluator ────────────────────────
 
-struct Values(HashMap<String, Value>);
+/// The sample values, and the directory `file_exists` resolves against.
+struct Values(HashMap<String, Value>, Option<ResolutionContext>);
 
 impl EvaluationLookup for Values {
     fn get(&self, path: &str) -> Option<Value> {
         self.0.get(path).cloned()
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.1.clone()
     }
 }
 
@@ -355,7 +360,7 @@ fn samples() -> Vec<Value> {
 /// takes admits both values, and a side that proves presence never sees
 /// `null`.
 #[track_caller]
-fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str) {
+fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str, files: &ResolutionContext) {
     let site = TypeScope::unguarded(declared);
     let parsed = expr(guard);
     let sides = [
@@ -365,7 +370,10 @@ fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str) {
     let mut reached = [false, false];
     for x in samples().into_iter().filter(|value| type_at(&site, "x").admits(value)) {
         for y in samples().into_iter().filter(|value| type_at(&site, "y").admits(value)) {
-            let lookup = Values(HashMap::from([("x".to_string(), x.clone()), ("y".to_string(), y.clone())]));
+            let lookup = Values(
+                HashMap::from([("x".to_string(), x.clone()), ("y".to_string(), y.clone())]),
+                Some(files.clone()),
+            );
             let Ok(outcome) = evaluate(&parsed, &lookup) else {
                 continue;
             };
@@ -425,6 +433,8 @@ const GUARDS: &[&str] = &[
     "or(x == 'a', y == 'b')",
     "x == 'a' || x == 'b'",
     "!(x == 'a' || x == 4)",
+    "file_exists(x)",
+    "!fileExists(x)",
 ];
 
 /// The declarations the differential guards run against; `None` is no
@@ -446,8 +456,23 @@ fn assert_differential(name: &str) {
     let (_, text) = DIFFERENTIAL_SCHEMAS.iter().find(|(row, _)| *row == name).expect("a declared row");
     let schema = text.map(schema);
     let declared = DeclaredTypes::new(schema.as_ref());
+    // Only the sample `a` names a file, so `file_exists(x)` reaches both sides.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("a"), "").unwrap();
+    let files = ResolutionContext::new(biscuit_file::FileResolutionContext::new(dir.path()));
+    let named = Values(HashMap::from([("x".to_string(), json!("a"))]), Some(files.clone()));
+    assert_eq!(evaluate(&expr("file_exists(x)"), &named).unwrap(), json!(true));
     for guard in GUARDS {
-        assert_sound(&declared, guard);
+        assert_sound(&declared, guard, &files);
+    }
+    // Where a string is declared, `file_exists(x)` holding leaves nothing
+    // else: the evaluator answers false for every non-text value.
+    let site = TypeScope::unguarded(&declared);
+    if type_at(&site, "x").admits(&json!("a")) {
+        let exists = type_at(&site.assume(&expr("file_exists(x)"), Polarity::True), "x");
+        for other in [Value::Null, json!(4), json!(true), json!(["a"]), json!({ "k": "v" })] {
+            assert!(!exists.admits(&other), "{name}: the true side ({}) admits {other}", shape_text(&exists));
+        }
     }
 }
 
@@ -488,7 +513,7 @@ differential!(
 #[test]
 fn two_nulls_are_neither_equal_nor_unequal() {
     let declared = DeclaredTypes::new(None);
-    let lookup = Values(HashMap::new());
+    let lookup = Values(HashMap::new(), None);
     assert_eq!(evaluate(&expr("x == y"), &lookup).unwrap(), json!(false));
     assert_eq!(evaluate(&expr("x != y"), &lookup).unwrap(), json!(false));
     // So `x != y` holding proves neither side null-free, but its false side

@@ -1064,13 +1064,14 @@ functions:
       order: 58
       description:
           Returns true when the file exists (local or remote URL) and false when
-          it is absent or the argument is null; a non-string argument, an invalid
+          it is absent or the argument is not text (null, a number, a boolean, an
+          array, or an object; the argument is never converted); an invalid
           reference, missing context, probe failure, or failed remote fetch is an
           error.
       overloads:
           - parameters:
                 - name: file
-                  type: file
+                  type: any
             returns:
                 type: boolean
                 fallible: true

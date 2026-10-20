@@ -229,6 +229,119 @@ Note that the string `"false"` is still truthy — it is a non-empty string.
 Prefer explicit comparisons (`flag == 'true'`) when working with stringly-typed
 flags.
 
+## What a Guard Proves
+
+A condition that guards a region tells Darkmatter something about the values
+read inside that region. Shell pre-flight, transclusion-target warnings,
+absence warnings, and DMLS hover all use this, without running the condition.
+The guarded regions are:
+
+- the body of a `::block when="…"` (nested blocks combine);
+- the branches of a ternary `c ? a : b`, and the right operand of `&&`, `||`,
+  `and(…)`, and `or(…)`;
+- a host's own guards, such as Claudine's lifecycle `when:` items and
+  sequence task `when:` (see Claudine's
+  [Pre-flight Checks](../../../claudine/docs/topics/pre-flight-checks.md)).
+
+```md
+---
+release_tag: string | null
+---
+::block when="release_tag"
+::shell git tag {{ release_tag }}      <!-- release_tag is present here -->
+::end-block
+
+::shell git tag {{ release_tag }}      <!-- not guarded: a missing value fails pre-flight -->
+```
+
+Each site has one **type scope**: the type of each value at that site. It has
+three layers, which stay separate:
+
+| Layer | Comes from | Example |
+| --- | --- | --- |
+| Declaration | the document's schema | `tag: string \| null`; an optional property includes `null`, and a `default(…)` binds no value |
+| Refinement | every guard enclosing the site | under `when="tag"`, `tag` is `string` |
+| Approval fallback | shell templates only | a placeholder of unknown or non-string type approves as `{{ string }}` |
+
+The fallback is only the shape a shell command is approved by. It is not a
+declaration: an undeclared name stays unknown to functions, warnings, and
+DMLS. An undeclared value is unknown, which proves nothing about presence
+until a guard does.
+
+### Guard forms
+
+What each form proves on its true side (the region it guards) and on its
+false side (an `else`, a ternary's second branch, or `!` around it):
+
+| Guard | True side | False side |
+| --- | --- | --- |
+| `x` | `x` is present and not a falsy literal | nothing |
+| `!g` | the false side of `g` | the true side of `g` |
+| `a && b`, `and(a, b)` | everything `a` and `b` prove | what every way of failing has in common |
+| `a \|\| b`, `or(a, b)` | what every way of holding has in common | the false sides of both |
+| `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_object(x)` | `x` has that type | `x` does not have that type |
+| `is_null(x)` | `x` is missing | `x` is present |
+| `is_empty(x)` | nothing | `x` is present |
+| `file_exists(x)` | `x` is a present string | nothing |
+| `x == 'debug'` | `x` is present with that text; an enum narrows to that member | `x` is not that member |
+| `x != ''`, `x != null` | `x` is present | nothing |
+| `x == ''` | nothing (a missing `x` compares as `''`) | `x` is present |
+| `x == y` | `x` can only be one of `y`'s possible values, when `y`'s type lists them (an enum or literals) | nothing, unless `y` has a single possible value |
+| `<`, `>`, `<=`, `>=`, a comparison with `[]` or `{}`, any other function | nothing | nothing |
+
+Predicate aliases (`isString`, `fileExists`) and case resolve to the same
+function and prove the same facts. Equality follows the evaluator exactly
+(see [Equality and Inequality](#equality-and-inequality)): both comparisons are
+false when both sides are missing, and a missing value compares as empty text.
+That is why `x == null` proves nothing useful and `is_null(x)` is the presence
+check.
+
+A fact is about one **stable subject**: a variable, or a path with constant
+members and indices (`x`, `fm.x`, `x.a`, `items[0]`). `x` and `fm.x` share a
+fact when they name the same document property. A guard on a computed value
+proves nothing about its inputs: `is_number(length(x))` says nothing about
+`x`, and `items[i]` is not a stable subject. A guard on `x.a` proves nothing
+about `x` or about a sibling `x.b`. A guard that contradicts itself
+(`mode == 'a' && mode == 'b'`) is not treated as dead code: every check still
+applies to the region.
+
+### How long a fact lasts
+
+- A fact ends where its region ends. After a conditional, only what every
+  branch agrees on remains.
+- A write ends the facts about what it writes: a Claudine lifecycle `set` of
+  `x` ends what guards proved about `x`, `fm.x`, every path below `x`, and
+  every path above it, for the actions after it. A write whose destination is
+  not a constant path ends every fact about document properties. A write
+  inside an inner branch still ends the fact after the outer branch joins.
+- Facts never carry across a lifecycle event, a loop pass, a retry, a resume,
+  or a proxy handoff. Entering a guard again proves its facts again.
+
+### Facts are static; live values are still checked
+
+Building a scope reads the expressions only. It evaluates nothing, runs no
+function, and touches no file or network: `file_exists(x)` checks nothing on
+disk while pre-flight or DMLS analyzes it. A fact is evidence about the region,
+not a promise about the value. When a guarded command runs, its value is read
+and checked against both its declaration and the guard's refinement. A `null`
+fails with `MissingValue`, and a value of another type fails with
+`TemplateValueRejected`, before any part of the command starts. Narrowing never
+changes a stored value, never proves that a file exists, and never grants
+access. See [Guarded values](../inline/preflight-checks.md#guarded-values) for
+how pre-flight approves and runs a guarded command.
+
+### Planned
+
+These are not built yet. Until they are, the guards involved prove only what
+the table above says:
+
+- **planned:** narrowing an object from a guard on one of its members
+  (`x.kind == 'a'` narrowing `x`), and nested unions;
+- **planned:** typed host values for `seq`, `loop`, and `group`;
+- **planned:** function arguments checked against the scope;
+- **planned:** DMLS narrowing of Claudine lifecycle `then:`/`else:` actions and
+  sequence task bodies.
+
 ## Literals and Grouping
 
 - string literals use double or single quotes: `"claude"`, `'claude'`
@@ -473,7 +586,12 @@ Edge cases:
 
 - if both sides are missing, `a == b` is false
 - if both sides are missing, `a != b` is also false
-- if one side is defined and the other is missing, `==` is false and `!=` is true
+- if only one side is missing, it compares as empty text: `missing == ''` is
+  true, `missing == 'x'` is false, and `missing != 'x'` is true
+- `x == null` therefore holds only for a present `x` with empty text (such as
+  `""`), and `x != null` only for a present `x` with nonempty text; a missing
+  `x` makes both false. Use `is_null(x)` or `!is_null(x)` to ask about presence
+- arrays and objects compare by their JSON text, so `[] == '[]'` is true
 
 ### Numeric Comparisons
 
@@ -602,7 +720,7 @@ refresh it after changing the catalog.
 | Math | `round(x, [default])` | Rounds a value to the nearest integer, with an optional default. | `round(3.7)` ⇒ `4` |
 | Filesystem | `absolute(file)` | Returns the absolute path a file reference names, in native spelling; a missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs. |  |
 | Filesystem | `relative(file)` | Returns a best-effort relative path from the document base directory. | `relative("fixture.md")` ⇒ `fixture.md` |
-| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL) and false when it is absent or the argument is null; a non-string argument, an invalid reference, missing context, probe failure, or failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
+| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL) and false when it is absent or the argument is not text (null, a number, a boolean, an array, or an object; the argument is never converted); an invalid reference, missing context, probe failure, or failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
 | Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
 | Filesystem | `frontmatter(file, prop)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
 | Filesystem | `try_frontmatter(file)` | Reads the frontmatter of a Markdown file as `{ok, value, error}`; a missing, unreadable, or unparsable file gives `ok` false and its reason instead of failing. | `try_frontmatter("fixture.md").value.title` ⇒ `Fixture Title` |
