@@ -1,5 +1,6 @@
 ---
 total_phases: 4
+implemented: true
 created: 2026-10-19
 phase: 1
 agent: claude/sonnet
@@ -32,13 +33,13 @@ This is a **manual measurement**, not a feature. It ships no code. The work is:
 
 The work is done when:
 
-- [ ] the implementation log exists beside `spec.md` and holds the run plan, build
+- [x] the implementation log exists beside `spec.md` and holds the run plan, build
       identities, per-run observations, deviations, and one conclusion;
-- [ ] `git diff` on `lib/` is empty (baseline source restored, no flag, env var,
+- [x] `git diff` on `lib/` is empty (baseline source restored, no flag, env var,
       or setting added);
-- [ ] no shipped default, test, or doc changed (that needs a separate author
+- [x] no shipped default, test, or doc changed (that needs a separate author
       decision, see Phase 4);
-- [ ] runs that were not valid interval trials (startup loss, refusal,
+- [x] runs that were not valid interval trials (startup loss, refusal,
       interruption) are listed, not dropped or counted as successes.
 
 Nothing here needs `just test` or `just lint` because no source is retained.
@@ -59,7 +60,7 @@ Gate: the author has confirmed the run budget. Without it, stop after this phase
 Rulings needed before execution. Each carries a proposed answer so the author can
 accept it quickly.
 
-- [ ] **R1: run budget (the spec's Open Question).** Proposal: option 1, one quick
+- [x] **R1: run budget (the spec's Open Question).** Proposal: option 1, one quick
       comparison. 3 intervals × 2 settle conditions (0 s, 90 s) × 2 runs = 12
       runs, fixed up front, no extension on a preferred or disappointing outcome.
       The author may instead pick option 2 (larger fixed count) or option 3
@@ -97,7 +98,7 @@ nothing.
 
 ### Tasks
 
-- [ ] **Confirm budget** (blocks all later phases)
+- [x] **Confirm budget** (blocks all later phases)
     - put R1 to the author; record the answer in the implementation log
     - if option 3, record "deferred, 512 retained" and close the plan
 - [x] **Write run plan**
@@ -114,13 +115,13 @@ Depends on Phase 1. Wave 1 and Wave 2 are independent, so run them concurrently.
 
 ### Wave 1: fixture and recording tooling
 
-- [ ] **Fixture generator**
+- [x] **Fixture generator**
     - script that creates a repo plus linked worktree holding 1,000 directories × 100
       files plus a seed file (101,002 entries), fresh per run
     - keep the script outside the repo (or in a temp directory) because nothing
       ships; load the `worktree` skill's `fixtures.md` first for fixture facts
     - emit the end-of-creation timestamp
-- [ ] **Run recorder**
+- [x] **Run recorder**
     - wrapper that sleeps the target settle delay, samples load average and
       fseventsd CPU (R4), launches `wt remove`, records elapsed time, then copies
       the removal report and journal to a results directory before any fixture
@@ -133,14 +134,14 @@ Depends on Phase 1. Wave 1 and Wave 2 are independent, so run them concurrently.
 
 ### Wave 2: interval builds (sequential within the wave; one source tree)
 
-- [ ] **Build three binaries**
+- [x] **Build three binaries**
     - change only `DEFAULT_DRAIN_EVERY`'s macOS arm to 2048, build release, copy to
       `wt-2048`; repeat with 512 (unmodified baseline) and 256
     - same source revision, build settings, and target directory each time
     - record per build: git SHA, the interval, and a binary hash (use `biscuit-hash`,
       e.g. `md hash`)
     - never add a flag, env var, or setting to choose the interval
-- [ ] **Restore baseline**
+- [x] **Restore baseline**
     - `git diff -- lib/` must be empty afterward; confirm in the log
 
 Checkpoint: three identified binaries; a smoke run of each against a small throwaway
@@ -151,17 +152,17 @@ tree completes and records every field; source clean.
 Depends on Phase 2. Strictly sequential, one run at a time, so runs do not load
 each other.
 
-- [ ] **Run the budget in planned order**
+- [x] **Run the budget in planned order**
     - for each slot: generate a new tree, wait the settle delay, run the matching
       binary through the recorder
     - never use a retry as an independent trial; a retry may be run as recovery
       evidence only and is labeled so
     - note background activity (Spotlight, Time Machine, builds) as context only;
       do not induce load or restart fseventsd
-- [ ] **Classify every run** using R6; keep invalid trials visible in the table
+- [x] **Classify every run** using R6; keep invalid trials visible in the table
     - if a startup loss or refusal happens, log it and run the slot again only if R1
       explicitly allows replacement slots; otherwise leave the gap and say so
-- [ ] **Preserve artifacts** (reports and journals) under the results directory
+- [x] **Preserve artifacts** (reports and journals) under the results directory
       before deleting each fixture
 
 Checkpoint: every budgeted slot has a row (valid or classified invalid); no
@@ -171,22 +172,22 @@ extra runs beyond the budget.
 
 Depends on Phase 3.
 
-- [ ] **Tabulate results**
+- [x] **Tabulate results**
     - per interval and settle condition: runs, completions, drops, and
       elapsed-time spread
     - for drops: stage, reason, flags, `entries_since_drain`, and the deletion count
       at loss; remember `entries_since_drain` can exceed the configured interval by
       up to 255 (so 256 can mean about 300)
-- [ ] **Choose a conclusion** (evidence-limited)
+- [x] **Choose a conclusion** (evidence-limited)
     - **Keep 512**: no reason to change the accepted mitigation
     - **Recommend another interval**: describe loss behavior and elapsed-time
       trade-off, including contradictory runs; a recommendation, not a change
     - **Inconclusive**: no clear difference or confounded runs; keep 512, state what
       remains unknown; never claim "no effect"
     - prior samples (the spec's table) are cited as context only, not pooled
-- [ ] **Finish the implementation log** with run plan, build identities, per-run
+- [x] **Finish the implementation log** with run plan, build identities, per-run
       table, deviations, and conclusion
-- [ ] **Final check**: `git status` shows only the log (and this plan) changed
+- [x] **Final check**: `git status` shows only the log (and this plan) changed
       under the fix directory; `lib/` is clean
 
 Checkpoint: the log is complete and the conclusion matches the data.
