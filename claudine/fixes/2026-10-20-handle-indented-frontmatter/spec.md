@@ -3,11 +3,34 @@ kind: fix
 created: 2026-10-20
 status: draft-spec
 clarified: false
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-20
+review_iterations: 0
 implemented: false
 completed: false
 area: claudine
 human_review: false
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
 ---
 
 # Indented frontmatter: repair it, refuse it clearly, and refuse it before the agent runs
@@ -48,7 +71,7 @@ time is spent.
 
 ## Root cause
 
-Darkmatter's frontmatter text-edit layer (`darkmatter/lib/src/markdown/hash/write.rs`)
+Darkmatter's [frontmatter text-edit layer](../../../darkmatter/lib/src/markdown/hash/write.rs)
 assumes every top-level key starts at column 0:
 
 - `locate_node` and `locate_all_nodes` skip any line that starts with
@@ -64,9 +87,9 @@ assumes every top-level key starts at column 0:
 - `validate_block_mapping`, the gate both paths share, accepts the indented
   root because it only checks that the YAML parses to a mapping.
 
-Claudine (`claudine/lib/src/composition/closure.rs`,
-`reconcile_inline_artifact_with_evidence`) runs that stamp only after the
-agent finishes. On failure it calls `restore_inline_baseline`, which correctly
+Claudine's [reconcile_inline_artifact_with_evidence](../../../claudine/lib/src/composition/closure.rs),
+which validates and persists an agent's edited document, runs that stamp only
+after the agent finishes. On failure it calls `restore_inline_baseline`, which correctly
 puts the document back, so the user is left with the original file and no
 record of the work. The baseline frontmatter is the same before and after the
 run, so the failure was predictable at launch.
@@ -79,33 +102,63 @@ flowchart LR
     A -. this fix: dry-run stamp and restore on the baseline .-> E[refuse before launch]
 ```
 
-## Decisions
+## Design decisions
 
-### D1. biscuit-file: a `yaml.root-indentation` repair
+### Normalize root indentation with a proven YAML repair
 
-Add a parse-equivalent (S1) candidate to biscuit-file's YAML analyzer
-(`biscuit-file/lib/src/yaml/analyze/engine.rs`, `s1_candidates`), a sibling of
-the existing `yaml.tab-indentation` recovery:
+In biscuit-file, add `YamlDiagnosticCode::RootIndentation`, serialized as
+`yaml.root-indentation`, to the [diagnostic catalog](../../../biscuit-file/lib/src/yaml/analyze/diagnostic.rs),
+including its complete-code inventory and string conversion. Add the repair
+through [s1_candidates](../../../biscuit-file/lib/src/yaml/analyze/engine.rs),
+which collects whitespace edits for already-parseable YAML. These are called
+S1 repairs: they are accepted only if parsing the edited text produces exactly
+the original YAML value.
 
-- **Trigger:** the source parses, and every non-blank, non-comment line shares
-  a common leading-space indent greater than zero. The first such line is the
-  root's first key.
-- **Repair:** remove that common indent from every line that has it. Blank
-  lines with only whitespace lose up to that many spaces. Comment lines that
-  are indented less than the common indent are left as they are.
-- **Proof:** the standard S1 rule. The repair is attached only when the patched
-  source reparses to a `serde_yaml_ng::Value` equal to the original's. Block
-  scalars keep their content, since YAML strips their indentation relative to
-  the parent key, so moving key and content together leaves the value
-  unchanged.
-- **Code:** a new `YamlDiagnosticCode::RootIndentation`, serialized as
-  `yaml.root-indentation`.
+- Limit the new repair to a nonempty block-style root mapping. Root sequences,
+  scalar roots, flow-style roots, and empty or comment-only sources produce no
+  root-indentation repair. This does not change which YAML forms readers accept.
+- For an eligible mapping, calculate the minimum leading ASCII-space count
+  across nonblank, non-comment lines. Offer a repair only when this is greater
+  than zero and the first content line identifies an ordinary mapping key.
+  Leave directives, explicit document markers, and complex-key or tagged-root
+  syntax outside this repair's initial scope; do not guess where their root starts.
+- Remove that many spaces from each nonblank line that has them, including
+  comments. Leave less-indented comments untouched. A whitespace-only line
+  inside block-scalar content (`LineKind::BlockContent`) also loses up to that
+  many spaces: YAML keeps any spaces beyond the content indent as scalar text,
+  so a blank line left at the old content indent would gain spaces once the
+  indent shrinks. Leave whitespace-only lines outside block scalars to the
+  existing trailing-whitespace repair.
+  Preserve key spelling, scalar text, ordering, and comments; do not serialize
+  the parsed mapping to generate replacement YAML.
+- Represent removals as leading-prefix byte edits, rather than a replacement
+  of the entire block. They must coexist with existing line-ending, trailing
+  whitespace, and final-newline edits without overlapping. The existing
+  combined-edit proof remains authoritative; do not weaken it to retain a repair.
+- Reparse the combined edits and require value equality through the existing
+  proof machinery. Block scalars, explicit indentation indicators, multiline
+  quoted strings, and lines beginning with `#` inside scalar content can make
+  naive whitespace removal unsafe. Suppress the repair whenever equality cannot
+  be proven; unchanged parsed content is a requirement, not an assumption.
 
-Darkmatter's `cleanup::frontmatter::repair_frontmatter` applies analyzer
-repairs, so `md clean` and DMLS formatting pick this up with no further
-wiring. Confirm during implementation that S1 repairs reach that path for a
-document that parses; if they are report-only there, wire this code in
-alongside the others `repair_frontmatter` already applies.
+Reader's note: valid indentation is not a YAML syntax error. This is an
+intentional formatting normalization so that Darkmatter's text-preserving
+editors can work on the document. Review proposed leaving every
+whitespace-only line intact to avoid overlapping existing whitespace repairs.
+That holds outside block scalars, where the trailing-whitespace repair already
+owns those lines; it does not hold inside them, which that repair skips. There,
+a blank line at the old content indent changes the scalar's value unless it is
+dedented with its neighbors (verified: a `|-` block's blank line left at 8
+spaces after a 4-space dedent gains four spaces of content). Without the
+dedent, the proof would refuse the repair in the common editor case.
+
+Darkmatter's [repair_frontmatter](../../../darkmatter/lib/src/markdown/cleanup/frontmatter.rs)
+already applies analyzer repairs to parseable sources and rescans after a
+successful first pass. No separate cleanup dispatch is needed. Verify that
+`md clean` and Darkmatter's language-server formatting receive this repair through their shared cleanup
+path, including after tab recovery. A second cleanup must make no further
+root-indentation edit. Other existing cleanup rules may still change body
+formatting or line endings; the new prefix edits themselves preserve terminators.
 
 ```text
 before                      after md clean
@@ -115,67 +168,103 @@ before                      after md clean
 ---                         ---
 ```
 
-### D2. darkmatter: refuse an indented root before editing
+### Reject unsupported indentation before any text edit
 
-The text-edit layer does not learn to edit indented roots. D1 makes the shape
-transient, and supporting it would add a second indentation model to every
-locate and insert routine. Instead:
+Darkmatter's [validate_block_mapping](../../../darkmatter/lib/src/markdown/hash/write.rs)
+is the shared shape check for its text-preserving frontmatter editors. Extend
+it to reject a parsed block mapping whose first key is indented. Ignore blank
+lines and YAML comments when finding that key, retaining the original leading
+spaces to calculate its column. Preserve existing errors for invalid YAML and
+unsupported root forms, and continue to accept empty/comment-only frontmatter.
+Do not mistake a nested value or a comment for the root key.
 
-- `validate_block_mapping` refuses a root whose first key line is indented,
-  with a message that names the cause and the remedy:
+For the supported repairable case, return `MarkdownError::FrontmatterTextEdit`
+with this reason:
 
-  ```text
-  frontmatter root mapping is indented by 4 spaces; top-level keys must
-  start at column 0 (run `md clean --save` to fix)
-  ```
+```text
+frontmatter root mapping is indented by 4 spaces; text-preserving edits require
+top-level keys at column 0 (run `md clean --save <file>` to fix)
+```
 
-- Every caller is covered through the shared gate: `apply_hash_save_text`
-  (and so `md hash --save` and the inline stamp), `parse_text_frontmatter`
-  (and so `restore_properties_text`), and `locate_frontmatter_leaves` if it
-  does not already go through the gate. Verify the full caller set with
-  GitNexus `impact` on `validate_block_mapping` and `locate_all_nodes`.
-- The error stays `MarkdownError::FrontmatterTextEdit`. No new variant is
-  needed; the improvement is the reason text.
-- The claudine closure's `repair_agent_frontmatter` (`top_level_nodes`) has the
-  same column-0 assumption; it is reached only after D3's preflight has
-  passed, so it needs no separate change. Note this in its doc comment.
+This requirement belongs to the editor, not to YAML generally. The check must
+happen before locating or inserting keys, even if the requested operation
+would otherwise be a no-op. Cover both the current document and the snapshot
+passed to [restore_properties_text](../../../darkmatter/lib/src/markdown/hash/write.rs),
+which restores closure-owned values. The same gate already covers
+`apply_hash_save_text`, `parse_text_frontmatter`, and `locate_frontmatter_leaves`
+in that Darkmatter source file. Audit callers with a text search; GitNexus may
+help, but is not a prerequisite. Keep read-only parsing and hash computation
+unchanged. Do not broaden this work into support for other unsupported YAML shapes.
 
-### D3. claudine: dry-run the closure's frontmatter edits before launch
+Claudine's [repair_agent_frontmatter](../../../claudine/lib/src/composition/closure/persist.rs)
+repairs certain agent-authored scalar mistakes; its internal `top_level_nodes`
+scanner also expects column-0 keys. A launch check establishes this condition
+only for the baseline, not for the later agent candidate. Retain the closure's
+Darkmatter validation and rollback: an agent that introduces root indentation
+must still fail safely before persistence. Document that limitation accurately;
+do not claim preflight guarantees every later edit will succeed.
 
-When `prepare` builds the `InlineClosurePlan` (`claudine/lib/src/composition/prepare.rs`,
-next to the `original_hash` capture), run the two baseline-dependent closure
-edits against `source.original_text` and discard their output:
+### Check the captured baseline before composing the inline prompt
 
-1. `restore_properties_text(original, original, CLOSURE_OWNED_PROPERTIES)`
-2. `stamp_baseline(original, &inline_hash_options(), now, Change::Known)`
+In Claudine's [prepare_inline_on](../../../claudine/lib/src/composition/prepare.rs),
+validate `source.original_text` before `compose_selecting`, guardrail creation,
+or any other preparation work that can execute prompt commands or write files.
+The same preparation helper serves ordinary inline runs and previews; neither
+should present an uneditable baseline as runnable. Keep existing early grammar
+validation ordering where it has no side effects.
 
-If either fails, preparation fails with a typed `CompositionError` before
-any provider is launched (no agent process, no cost), naming the document and
-carrying the darkmatter reason from D2. Reuse `InlineArtifactEditFailed` /
-`InlineHashMalformed` if their rendered text reads correctly at launch time;
-otherwise add one `InlineBaselineUnstampable { path, source }` variant.
+Reader's note: the original placement beside the hash capture is too late.
+Prompt composition happens earlier and can execute commands. The check belongs
+before that work so an unusable baseline is rejected without running its prompt.
+This check does not promise that earlier command bootstrap performed no reads
+or unrelated setup.
 
-This dry-runs the real closure code, not an indentation check. Any present or
-future failure that depends only on the baseline text, not on the agent's
-edit, is caught at launch by the same path.
+Use a small shared closure helper to rehearse the actual baseline-dependent
+operations, keeping closure settings and the managed-property list in one place:
 
-The check is in-memory, with no file write. Its cost is two frontmatter parses.
+1. Restore `prompt`, `hash`, and `last_updated` from the original into itself
+   using Darkmatter's `restore_properties_text` and Claudine's existing
+   `CLOSURE_OWNED_PROPERTIES` list.
+2. Parse the returned text as Markdown, then call Darkmatter's
+   [stamp_baseline](../../../darkmatter/lib/src/markdown/hash/baseline.rs) with that text,
+   Claudine's existing `inline_hash_options()`, a caller-supplied timestamp,
+   and `Change::Known`, matching an accepted inline closure.
+3. Discard all output. Do not invoke reconciliation itself: it writes the file.
+
+Return a dedicated `CompositionError::InlineBaselineUnstampable { path, source }`
+with a typed Darkmatter cause, a launch-appropriate explanation, and the source
+path. Existing closure errors describe malformed hashes or post-agent edits and
+would obscure the launch failure. Integrate the new error with Claudine's
+existing diagnostic rendering and typed-cause conventions, including relevant
+exhaustive matches; do not flatten the cause into a string.
+
+Run this check each time inline preparation captures a baseline, including
+re-entry after a retry or proxy when it uses this path. Do not add it to ordinary
+`compose` or `sequence` documents that do not use inline closure. Successful
+preflight does not protect against subsequent file changes or agent edits;
+existing closure validation and rollback remain necessary.
+
+The check performs no file writes or command execution. It scans and parses
+the document several times and computes a hash through the existing stamping
+path; it is not just two YAML parses. Its work is bounded by document size and
+occurs once per inline preparation. No performance spike or benchmark suite is
+required for this fix.
 
 ## Out of scope
 
 - **Keeping the agent's candidate when the closure fails** (for example, a
   sidecar file next to the document). This would also cover failures the
   agent itself causes, and it changes rollback behavior, so it gets its own fix.
-- Teaching the text-edit layer to edit indented roots in place (rejected in D2).
+- Teaching the text-edit layer to edit indented roots in place (rejected above).
 
 ## Success criteria
 
 - `md clean --save` on the frontmatter above produces column-0 keys and an
-  unchanged parsed value. DMLS formatting offers the same edit.
-- `md hash --save` on an indented-root document fails with the D2 message,
+  unchanged parsed value. Darkmatter's language-server formatting offers the same edit.
+- `md hash --save` on an indented-root document fails with the editor-specific indentation message,
   not "more than one document". The file is unchanged.
 - `claudine inline-compose` on an indented-root document fails during
-  preparation with the D2 reason, and the stub provider is **never launched**.
+  preparation with the indentation reason, and the stub provider is **never launched**.
 - After `md clean --save`, the same `inline-compose` run completes and stamps
   `hash` at column 0.
 
@@ -183,11 +272,27 @@ The check is in-memory, with no file write. Its cost is two frontmatter parses.
 
 | Package | Test | Tier |
 | --- | --- | --- |
-| biscuit-file | `root_indentation` analyzer tests beside `tab_indentation.rs`: common indent removed; block scalar value preserved; mixed indent (no common indent) yields no candidate; an indented comment above the root; CRLF terminators kept; already column-0 yields no diagnostic | L1 |
-| darkmatter | `apply_hash_save_text` and `restore_properties_text` on an indented root return `FrontmatterTextEdit` with the indentation reason and leave text untouched | L1 |
+| biscuit-file | `root_indentation` analyzer tests beside `tab_indentation.rs`: common indent removed; block scalar value preserved; column-0 roots yield no candidate; less-indented comments; whitespace-only lines inside a block scalar at, below, and above the content indent (value preserved) and outside one (left to trailing-whitespace); LF/CRLF prefix edits preserve terminators; empty, sequence, scalar, flow, and unsupported root forms yield no candidate; combined whitespace edits remain applicable and parse-equivalent | L1 |
+| biscuit-file | Scalar safety cases: literal/folded blocks, explicit indentation indicators, blank scalar lines, multiline quoted values, and scalar content beginning with `#`; either preserve the exact value or offer no repair; diagnostic serialization and full-code inventory stay consistent | L1 |
+| darkmatter | `apply_hash_save_text` and `restore_properties_text` on an indented root return `FrontmatterTextEdit` with the indentation reason and leave text untouched; test indentation in either restore input, comments before keys, and empty/comment-only accepted roots; leaf location returns the same cause | L1 |
 | darkmatter | `md clean --save` end-to-end on the reproduction frontmatter, then `md hash --save` succeeds (persisted read/write/read round trip) | L1 (CLI via `CliProcessFixture`) |
-| claudine | `inline-compose` on an indented-root document exits non-zero during preparation; `launch_recorder` records **zero** launches; the document is byte-identical | L1 (CLI via `CliProcessFixture`) |
+| claudine | `inline-compose` on an indented-root document exits non-zero during preparation; a cross-platform recording provider fixture records **zero** launches; the document is byte-identical | L1 (CLI via `CliProcessFixture`) |
+| darkmatter / DMLS | Shared cleanup and formatter paths normalize the root, preserve the YAML value, and are stable on a second pass; combine indentation with existing whitespace repairs and tab recovery | L1 |
+| claudine | Early refusal precedes a recording prompt-command stub; no prompt command runs and no guardrail file is created. Assert source path and typed cause. Use fixed timestamps in helper tests | L1 |
+| claudine | A column-0 baseline followed by an agent-indented candidate is refused at closure and restores the original bytes | L1 |
 | claudine | the existing inline closure tests still pass with a column-0 baseline (no behavior change on the happy path) | L1 |
+
+Use each package's existing hermetic CLI fixtures. Claudine's Unix-only
+`launch_recorder` is insufficient as the sole regression check: use its
+cross-platform provider-stub pattern for the launch marker. Keep audio silent,
+use temporary homes and directories, and never open or focus a terminal or
+browser. These are L1 checks; no live provider, L2/L3 run, new CI matrix, or
+performance gate is needed.
+
+## Open Questions
+
+None. Remaining choices are implementation details within the safety and
+scope constraints above.
 
 ## Documentation
 
