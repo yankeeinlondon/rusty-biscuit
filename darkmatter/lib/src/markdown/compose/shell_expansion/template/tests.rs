@@ -209,6 +209,29 @@ fn rule_types_keep_only_their_canonical_identity() {
     );
 }
 
+/// The widened structural relation reaches rule matching only for sound
+/// string-like subsets; the saved rule grammar and the broad-string rules are
+/// unchanged.
+#[test]
+fn rule_coverage_follows_the_structural_relation_for_string_like_holes() {
+    use crate::markdown::schemas::simplified::grammar::parse_type_expr;
+    let approval = |text: &str| {
+        StringLikeType::from_atom(&parse_type_expr("p", text).unwrap())
+            .map_or(ApprovalType::BroadString, ApprovalType::StringLike)
+    };
+    assert!(rule_covers(&approval("enum(a, b, c)"), &approval("enum(a, b)")));
+    assert!(rule_covers(&approval("enum(a, b, c)"), &approval("literal('a')")));
+    assert!(!rule_covers(&approval("enum(a, b)"), &approval("enum(a, b, c)")));
+    assert!(!rule_covers(&approval("enum(a, b)"), &approval("literal('z')")));
+    // Bounded: a one-member enum is not compared against a literal.
+    assert!(!rule_covers(&approval("literal('a')"), &approval("enum(a)")));
+    // A non-string declaration keeps the broad approval and needs a broad rule.
+    assert_eq!(approval("number"), ApprovalType::BroadString);
+    assert_eq!(approval("literal(4)"), ApprovalType::BroadString);
+    assert!(!rule_covers(&approval("enum('4')"), &approval("literal(4)")));
+    assert!(rule_covers(&ApprovalType::BroadString, &approval("literal(4)")));
+}
+
 #[test]
 fn session_reservations_are_keyed_by_mode_and_policy_root() {
     use crate::markdown::compose::shell_expansion::types::{ReserveOutcome, ShellExpansionRuntime};

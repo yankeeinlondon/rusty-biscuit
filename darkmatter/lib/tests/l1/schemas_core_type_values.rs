@@ -306,3 +306,31 @@ fn subtype_relation_is_reachable_through_the_public_schema_api() {
     assert!(is_subtype(&atom("alphanumeric(block-leading-dash)"), &atom("alphanumeric")));
     assert!(is_subtype(&atom("alphanumeric"), &atom("alphanumeric(block-leading-dash)")));
 }
+
+/// The shared structural relation accepts a narrowed type where its family,
+/// enum, or union admits it (`2026-10-16-type-narrowing` acceptance 5).
+#[test]
+fn narrowed_literals_and_unions_satisfy_their_parameter_types_structurally() {
+    use darkmatter::markdown::schemas::{PropertyDef, SimplifiedSchema, is_definition_subtype, is_subtype};
+    let atom = |text: &str| parse_type_expr("p", text).expect("parses");
+    let declared = |body: &str| -> PropertyDef {
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(body).expect("schema YAML");
+        match parse_yaml_schema(&yaml).expect("schema parses") {
+            SimplifiedSchema::Single(shape) => shape.properties["p"].clone(),
+            SimplifiedSchema::Union(_) => panic!("a single shape"),
+        }
+    };
+
+    assert!(is_subtype(&atom("literal('release')"), &atom("string")));
+    assert!(is_subtype(&atom("literal(4)"), &atom("number")));
+    assert!(is_subtype(&atom("literal(true)"), &atom("boolean")));
+    let literals = declared("p: [\"literal('a')\", \"literal('b')\"]\n");
+    assert!(is_definition_subtype(&literals, &PropertyDef::Single(atom("enum(a, b, c)"))));
+
+    // Controls: the relation stays structural and bounded.
+    assert!(!is_subtype(&atom("literal(4)"), &atom("enum('4')")));
+    assert!(!is_definition_subtype(&declared("p: [\"literal('a')\", \"literal('z')\"]\n"), &PropertyDef::Single(atom("enum(a, b, c)"))));
+    let scalars = declared("p: [string, number]\n");
+    assert!(is_definition_subtype(&scalars, &declared("p: [boolean, number, string]\n")));
+    assert!(!is_definition_subtype(&declared("p: [boolean, number, string]\n"), &scalars));
+}

@@ -2910,6 +2910,26 @@ pub(crate) fn is_absence_predicate(name: &str) -> bool {
     })
 }
 
+/// The canonical registry name the evaluator dispatches `name` to, matched
+/// exactly as `evaluate_function` matches it: lowercased, then by canonical
+/// name or alias. `None` for an unregistered name.
+pub(crate) fn canonical_function_name(name: &str) -> Option<&'static str> {
+    let name = name.to_ascii_lowercase();
+    joined_bindings()
+        .iter()
+        .find(|entry| entry.binding.canonical == name || entry.binding.aliases.contains(&name.as_str()))
+        .map(|entry| entry.binding.canonical)
+}
+
+/// Whether `canonical` is a registered binding that accepts `arity`
+/// arguments, by the same descriptors the evaluator's arity check reads.
+pub(crate) fn accepts_call_arity(canonical: &str, arity: usize) -> bool {
+    joined_bindings()
+        .iter()
+        .find(|entry| entry.binding.canonical == canonical)
+        .is_some_and(|entry| entry.descriptors.iter().any(|descriptor| accepts_arity(descriptor, arity)))
+}
+
 /// Whether the evaluator dispatches `name`, matched exactly as
 /// `evaluate_function` matches it: lowercased, then by canonical name or alias.
 pub(crate) fn is_dispatchable(name: &str) -> bool {

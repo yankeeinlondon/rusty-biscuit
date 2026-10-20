@@ -1,4 +1,4 @@
-//! The passive subtype relation among string-like SimplifiedSchema types.
+//! The passive structural subtype relation among SimplifiedSchema types.
 //!
 //! [`is_subtype`] answers "does every non-null value the underlying type A
 //! accepts also satisfy the underlying type B?" from typed, **resolved** atoms.
@@ -7,12 +7,15 @@
 //! defaults, and descriptions are ignored. The relation is bounded reasoning
 //! over the listed types: it never inspects user regexes, converts scalars,
 //! reads files, or resolves references, and it is no substitute for runtime
-//! value checks or shell quoting.
+//! value checks or shell quoting. Because it ignores presence, passing an
+//! optional atom to it is not a presence check; a caller that needs
+//! nullability compares it separately.
 
 use std::collections::BTreeSet;
 
 use super::alphanumeric::AlphanumericOptions;
-use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
+use super::query::flattened_alternatives;
+use super::types::{Constraint, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr};
 
 /// Whether every non-null value accepted by the underlying type of `a` is
 /// accepted by the underlying type of `b`.
@@ -23,6 +26,14 @@ use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 ///   allowed first characters are subsets of Y's, and X guarantees any
 ///   prohibition of `..` that Y makes.
 /// - Every always-text type is a subtype of `string`.
+/// - A `literal` is a subtype of its scalar family (`string`, `number`, or
+///   `boolean`), and a string `literal` of an `enum` that has it as a member.
+///   A numeric `literal(4)` is not a subtype of `enum('4')`, although the
+///   evaluator compares the two equal.
+/// - `enum(X)` ⊆ `enum(Y)` when X's members are a subset of Y's.
+/// - A non-array union is a subtype when every arm is; a non-array union is a
+///   supertype when one of its arms covers the source, so arm order never
+///   matters. `unknown` is never a subtype of a concrete type.
 /// - Every other pair, including an unresolved reference, is not.
 ///
 /// ## Examples
@@ -36,20 +47,72 @@ use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 /// assert!(is_subtype(&atom("alphanumeric(min(3))"), &rule));
 /// assert!(!is_subtype(&atom("string"), &rule));
 /// assert!(is_subtype(&atom("email"), &atom("string")));
+/// assert!(is_subtype(&atom("literal(4)"), &atom("number")));
+/// assert!(is_subtype(&atom("literal('a')"), &atom("enum(a, b, c)")));
 /// ```
 pub fn is_subtype(a: &PropertyAtom, b: &PropertyAtom) -> bool {
+    if a.is_array == b.is_array && identity(a) == identity(b) {
+        return true;
+    }
+    if let Some(arms) = scalar_union_arms(a) {
+        return arms.iter().all(|arm| is_subtype(arm, b));
+    }
+    if let Some(arms) = scalar_union_arms(b) {
+        return arms.iter().any(|arm| is_subtype(a, arm));
+    }
     if a.is_array || b.is_array {
-        return a.is_array && b.is_array && identity(a) == identity(b);
+        return false;
     }
     match (&a.ty, &b.ty) {
         (TypeExpr::Primitive(SimplifiedType::Alphanumeric), TypeExpr::Primitive(SimplifiedType::Alphanumeric)) => {
             alphanumeric_subset(options(a), options(b))
         }
-        (TypeExpr::Primitive(_), TypeExpr::Primitive(SimplifiedType::String)) => {
-            identity(a) == identity(b) || is_always_text(a)
+        (TypeExpr::Primitive(SimplifiedType::Enum), TypeExpr::Primitive(SimplifiedType::Enum)) => {
+            match (members(a), members(b)) {
+                (Some(source), Some(destination)) => source.is_subset(&destination),
+                _ => false,
+            }
         }
-        _ => identity(a) == identity(b),
+        (TypeExpr::Primitive(SimplifiedType::Literal), TypeExpr::Primitive(destination)) => {
+            literal_within(a.literal_value(), *destination, b)
+        }
+        (TypeExpr::Primitive(_), TypeExpr::Primitive(SimplifiedType::String)) => is_always_text(a),
+        _ => false,
     }
+}
+
+/// [`is_subtype`] over whole property definitions: every leaf alternative of
+/// `a` is covered by some leaf alternative of `b`. Presence is ignored, as it
+/// is by [`is_subtype`]; a `null` or `unknown` alternative of `a` is covered
+/// only by an identical one.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
+/// use darkmatter::markdown::schemas::{PropertyDef, is_definition_subtype};
+///
+/// let atom = |text| parse_type_expr("p", text).unwrap();
+/// let source = PropertyDef::Union(vec![atom("string"), atom("number")]);
+/// let destination = PropertyDef::Union(vec![atom("boolean"), atom("number"), atom("string")]);
+/// assert!(is_definition_subtype(&source, &destination));
+/// assert!(!is_definition_subtype(&destination, &source));
+/// ```
+pub fn is_definition_subtype(a: &PropertyDef, b: &PropertyDef) -> bool {
+    let leaves = |def| {
+        flattened_alternatives(def)
+            .into_iter()
+            .map(|alternative| {
+                let mut atom = alternative.atom.clone();
+                atom.is_array |= alternative.is_array;
+                atom
+            })
+            .collect::<Vec<_>>()
+    };
+    let destination = leaves(b);
+    leaves(a)
+        .iter()
+        .all(|source| destination.iter().any(|arm| is_subtype(source, arm)))
 }
 
 /// Whether `atom` is a single string-like type: not an array, and every value
@@ -69,6 +132,33 @@ pub fn is_subtype(a: &PropertyAtom, b: &PropertyAtom) -> bool {
 /// ```
 pub fn is_string_like(atom: &PropertyAtom) -> bool {
     !atom.is_array && is_always_text(atom)
+}
+
+/// The arms of a non-array union type; an array of a union compares by
+/// identity like every other array.
+fn scalar_union_arms(atom: &PropertyAtom) -> Option<&[PropertyAtom]> {
+    (!atom.is_array).then(|| atom.union_arms()).flatten()
+}
+
+fn members(atom: &PropertyAtom) -> Option<BTreeSet<&str>> {
+    atom.constraints.iter().find_map(|constraint| match constraint {
+        Constraint::Members(members) => Some(members.iter().map(String::as_str).collect()),
+        _ => None,
+    })
+}
+
+/// Whether a `literal` with `value` is accepted by the destination type: its
+/// own scalar family, or an `enum` with the same string member.
+fn literal_within(value: Option<&serde_json::Value>, destination: SimplifiedType, atom: &PropertyAtom) -> bool {
+    match (value, destination) {
+        (Some(serde_json::Value::String(_)), SimplifiedType::String)
+        | (Some(serde_json::Value::Number(_)), SimplifiedType::Number)
+        | (Some(serde_json::Value::Bool(_)), SimplifiedType::Boolean) => true,
+        (Some(serde_json::Value::String(text)), SimplifiedType::Enum) => {
+            members(atom).is_some_and(|members| members.contains(text.as_str()))
+        }
+        _ => false,
+    }
 }
 
 fn alphanumeric_subset(x: AlphanumericOptions, y: AlphanumericOptions) -> bool {
@@ -131,10 +221,7 @@ fn identity(atom: &PropertyAtom) -> Identity<'_> {
         TypeExpr::Primitive(ty) => Identity::Primitive {
             ty: *ty,
             options: atom.alphanumeric_options(),
-            members: atom.constraints.iter().find_map(|constraint| match constraint {
-                Constraint::Members(members) => Some(members.iter().map(String::as_str).collect()),
-                _ => None,
-            }),
+            members: members(atom),
             literal: atom.literal_value(),
         },
         TypeExpr::Imported { .. } => Identity::Unresolved,
@@ -286,6 +373,82 @@ mod tests {
         ] {
             assert_subtype(text, "string", false);
         }
+    }
+
+    #[test]
+    fn literals_are_subtypes_of_their_scalar_family_only() {
+        assert_subtype("literal('release')", "string", true);
+        assert_subtype("literal(4)", "number", true);
+        assert_subtype("literal(4.5)", "number", true);
+        assert_subtype("literal(true)", "boolean", true);
+        assert_subtype("literal(4)", "string", false);
+        assert_subtype("literal('4')", "number", false);
+        assert_subtype("literal(true)", "string", false);
+        assert_subtype("literal('true')", "boolean", false);
+        // No family promotion beyond the literal's own JSON kind.
+        assert_subtype("literal(4)", "numberlike", false);
+        assert_subtype("literal('x')", "email", false);
+        assert_subtype("literal('x')", "alphanumeric", false);
+    }
+
+    #[test]
+    fn string_literals_are_subtypes_of_enums_that_list_them() {
+        assert_subtype("literal('a')", "enum(a, b, c)", true);
+        assert_subtype("literal('z')", "enum(a, b, c)", false);
+        // The evaluator compares `4 == '4'` equal; the structure differs.
+        assert_subtype("literal(4)", "enum('4')", false);
+        assert_subtype("literal(true)", "enum('true')", false);
+    }
+
+    #[test]
+    fn enum_subsets_are_subtypes() {
+        assert_subtype("enum(a, b)", "enum(a, b, c)", true);
+        assert_subtype("enum(b, a)", "enum(c, a, b)", true);
+        assert_subtype("enum(a, d)", "enum(a, b, c)", false);
+        assert_subtype("enum(a, b, c)", "enum(a, b)", false);
+        assert_subtype("enum(a)[]", "enum(a, b)[]", false);
+    }
+
+    fn union(arms: &[&str]) -> PropertyAtom {
+        let mut atom = PropertyAtom::bare(SimplifiedType::Unknown);
+        atom.ty = TypeExpr::Union(arms.iter().map(|text| self::atom(text)).collect());
+        atom
+    }
+
+    #[test]
+    fn unions_compare_arm_by_arm_independent_of_order() {
+        let literals = union(&["literal('a')", "literal('b')"]);
+        assert!(is_subtype(&literals, &atom("enum(a, b, c)")));
+        assert!(!is_subtype(&union(&["literal('a')", "literal('z')"]), &atom("enum(a, b, c)")));
+
+        let source = union(&["string", "number"]);
+        assert!(is_subtype(&source, &union(&["string", "number", "boolean"])));
+        assert!(is_subtype(&source, &union(&["boolean", "number", "string"])));
+        assert!(is_subtype(&union(&["number", "string"]), &source));
+        assert!(!is_subtype(&union(&["string", "number", "boolean"]), &source));
+        assert!(is_subtype(&atom("email"), &union(&["number", "string"])));
+        assert!(!is_subtype(&atom("number"), &union(&["string", "boolean"])));
+    }
+
+    #[test]
+    fn unknown_is_never_proof_of_a_concrete_type() {
+        assert_subtype("unknown", "string", false);
+        assert_subtype("unknown", "number", false);
+        assert!(!is_subtype(&atom("unknown"), &union(&["string", "number", "boolean"])));
+        assert!(!is_subtype(&union(&["string", "unknown"]), &atom("string")));
+    }
+
+    #[test]
+    fn definitions_compare_every_leaf_alternative() {
+        let def = |arms: &[&str]| match arms {
+            [single] => PropertyDef::Single(atom(single)),
+            arms => PropertyDef::Union(arms.iter().map(|text| atom(text)).collect()),
+        };
+        assert!(is_definition_subtype(&def(&["literal('a')", "literal('b')"]), &def(&["enum(a, b, c)"])));
+        assert!(is_definition_subtype(&def(&["string", "number"]), &def(&["boolean", "number", "string"])));
+        assert!(!is_definition_subtype(&def(&["string", "null"]), &def(&["string"])));
+        assert!(is_definition_subtype(&def(&["string", "null"]), &def(&["null", "string"])));
+        assert!(!is_definition_subtype(&def(&["string[]"]), &def(&["string"])));
     }
 
     #[test]
