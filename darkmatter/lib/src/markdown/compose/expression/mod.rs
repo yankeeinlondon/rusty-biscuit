@@ -69,6 +69,7 @@ pub mod ast;
 pub mod binding;
 pub mod catalog;
 pub mod ctx;
+pub(crate) mod equality;
 pub(crate) mod fm_namespace;
 pub mod error;
 pub mod file_suggestions;
@@ -157,6 +158,16 @@ fn to_number_index(value: &Value) -> Option<f64> {
         Value::Number(n) => n.as_f64(),
         _ => None,
     }
+}
+
+/// The value a numeric literal evaluates to. The guard analysis models
+/// literal operands with this, so it must stay the evaluator's only literal
+/// conversion: an integral literal becomes a (saturating) `i64`.
+fn number_literal(n: f64) -> Option<Value> {
+    if n.fract() == 0.0 {
+        return Some(Value::Number(serde_json::Number::from(n as i64)));
+    }
+    serde_json::Number::from_f64(n).map(Value::Number)
 }
 
 fn json_number(value: f64) -> Result<Value, String> {
@@ -511,16 +522,8 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             Ok(binding.into_value().unwrap_or(Value::Null))
         }
         Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
-        Expr::NumberLiteral(n) => {
-            let num = if n.fract() == 0.0 {
-                serde_json::Number::from(*n as i64)
-            } else {
-                serde_json::Number::from_f64(*n).ok_or_else(|| {
-                    ExpressionError::Parse(format!("Invalid numeric literal: {n}"))
-                })?
-            };
-            Ok(Value::Number(num))
-        }
+        Expr::NumberLiteral(n) => number_literal(*n)
+            .ok_or_else(|| ExpressionError::Parse(format!("Invalid numeric literal: {n}"))),
         Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
         Expr::ArrayLiteral(items) => items
             .iter()
@@ -600,16 +603,9 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             let left = evaluate_expr(left, lookup, operand, observer)?;
             let right = evaluate_expr(right, lookup, operand, observer)?;
 
-            // Null-safe comparisons: when both sides are Null (undefined),
-            // equality and inequality both return false. Comparing two
-            // unknown values yields no meaningful result.
-            let both_null = left.is_null() && right.is_null();
-
             let outcome = match op {
-                ComparisonOp::Equal => !both_null && scalar_string(&left) == scalar_string(&right),
-                ComparisonOp::NotEqual => {
-                    !both_null && scalar_string(&left) != scalar_string(&right)
-                }
+                ComparisonOp::Equal => equality::values_equal(&left, &right),
+                ComparisonOp::NotEqual => !equality::values_equal(&left, &right),
                 ComparisonOp::GreaterThan => to_number_coerce(&left) > to_number_coerce(&right),
                 ComparisonOp::GreaterThanOrEqual => {
                     to_number_coerce(&left) >= to_number_coerce(&right)
@@ -1177,13 +1173,13 @@ mod tests {
             };
             assert_eq!(evaluate(&expr, &state).unwrap(), json!(true));
 
-            // Null-safe equality: null == null is false
+            // Two missing values are both null, and null equals null
             let expr = Expr::Comparison {
                 left: Box::new(Expr::Variable("missing_a".to_string())),
                 op: ComparisonOp::Equal,
                 right: Box::new(Expr::Variable("missing_b".to_string())),
             };
-            assert_eq!(evaluate(&expr, &state).unwrap(), json!(false));
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!(true));
         }
 
         #[test]

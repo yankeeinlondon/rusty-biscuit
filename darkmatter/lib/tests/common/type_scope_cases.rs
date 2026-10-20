@@ -40,8 +40,8 @@ guard_cases! {
     FmAlias,
     /// Predicates resolve through the registry, aliases and case included.
     PredicateAlias,
-    /// `x != null` proves `x`, and so does `x == null` (only `''` equals
-    /// `null`); the false side of `x != null` does not.
+    /// `x != null` proves `x`; `x == null` and `x != ''` do not, since
+    /// `null` equals only `null`.
     NotNull,
     /// `x == 'v'` proves `x`; `x != 'v'` does not.
     Equality,
@@ -105,9 +105,13 @@ pub const BLOCK_CASES: &[BlockCase] = &[
     row(GuardCase::PredicateAlias, &["!isNull(x)"], "x", true),
     row(GuardCase::PredicateAlias, &["is_null(x)"], "x", false),
     row(GuardCase::NotNull, &["x != null"], "x", true),
-    // Two nulls are never equal, so `x == null` holds only for `''`: present.
-    row(GuardCase::NotNull, &["x == null"], "x", true),
+    row(GuardCase::NotNull, &["!(x == null)"], "x", true),
+    // `x == null` holds only for `null`.
+    row(GuardCase::NotNull, &["x == null"], "x", false),
     row(GuardCase::NotNull, &["!(x != null)"], "x", false),
+    // `null != ''`, so `x != ''` admits a missing value; `x == ''` does not.
+    row(GuardCase::NotNull, &["x != ''"], "x", false),
+    row(GuardCase::NotNull, &["x == ''"], "x", true),
     row(GuardCase::Equality, &["x == 'v'"], "x", true),
     row(GuardCase::Equality, &["choice == 'a'"], "choice", true),
     row(GuardCase::Equality, &["x != 'v'"], "x", false),

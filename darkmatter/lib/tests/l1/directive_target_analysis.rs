@@ -218,8 +218,8 @@ fn block_guards_narrow_targets_through_the_shared_type_scope() {
         ("(x)", json!({"x": "value"}), true, &["x"][..]),
         ("x != null", json!({"x": "value"}), true, &["x"][..]),
         ("x != null", json!({"x": null}), false, &["x"][..]),
-        ("x != ''", json!({"x": "value"}), true, &["x"][..]),
-        ("x != ''", json!({"x": ""}), false, &["x"][..]),
+        ("x == ''", json!({"x": ""}), true, &["x"][..]),
+        ("!(x == null)", json!({"x": "value"}), true, &["x"][..]),
         ("a && b", json!({"a": true, "b": true}), true, &["a", "b"][..]),
         ("and(a, b)", json!({"a": true, "b": true}), true, &["a", "b"][..]),
         // Aliases and case resolve through the function registry.
@@ -234,6 +234,9 @@ fn block_guards_narrow_targets_through_the_shared_type_scope() {
         ("a || b", json!({"a": true, "b": false}), true, &[][..]),
         ("!x", json!({"x": false}), true, &[][..]),
         ("is_null(x)", json!({"x": null}), true, &[][..]),
+        // `null != ''` and `null == null`, so neither admits only present values.
+        ("x != ''", json!({"x": null}), true, &[][..]),
+        ("x == null", json!({"x": null}), true, &[][..]),
         ("length(x) > 0", json!({"x": [1]}), true, &[][..]),
     ];
 

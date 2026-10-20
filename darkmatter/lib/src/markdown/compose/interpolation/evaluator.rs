@@ -1012,17 +1012,21 @@ mod tests {
             }
         }
 
-        /// Equality comparison keeps `scalar_string`'s JSON-array form, so the
-        /// interpolation output change does not leak into `==` (spec criterion 8).
+        /// `==` compares the array value, not its rendered text: neither the
+        /// line-separated interpolation output nor the JSON text equals it.
         #[test]
         fn equality_comparison_unaffected_by_line_separated_output() {
             let state = create_test_state(json!({"items": ["a", "b"]}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"items == '["a","b"]' ? "yes" : "no""#).unwrap();
-
-            match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "yes"),
-                _ => panic!("Expected Value"),
+            for (source, expected) in [
+                (r#"items == ["a", "b"] ? "yes" : "no""#, "yes"),
+                (r#"items == '["a","b"]' ? "yes" : "no""#, "no"),
+                (r#"items == "a\nb" ? "yes" : "no""#, "no"),
+            ] {
+                match evaluator.eval(&parse(source).unwrap()) {
+                    EvalResult::Value(s) => assert_eq!(s, expected, "{source}"),
+                    _ => panic!("Expected Value for {source}"),
+                }
             }
         }
     }

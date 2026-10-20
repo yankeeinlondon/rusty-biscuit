@@ -74,6 +74,7 @@ mod disclosure_transclusion_integration;
 mod effects_integration;
 mod error_snapshots;
 mod expression_regression;
+mod expression_strict_equality;
 mod expression_type_scope;
 mod frontmatter_surface_projection;
 mod fs_capability;

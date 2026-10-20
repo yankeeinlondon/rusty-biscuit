@@ -91,7 +91,7 @@ pub const OPERATOR_DESCRIPTORS: &[OperatorDescriptor] = &[
     OperatorDescriptor {
         name: "Comparison",
         operators: "`==`, `!=`, `>`, `>=`, `<`, `<=`",
-        description: "Equality compares scalar string forms; ordering coerces to numbers.",
+        description: "Equality is strict on type and value; ordering coerces to numbers.",
         order: 5,
         example: Some(Example {
             invocation: "1 < 2",
@@ -503,18 +503,28 @@ impl Described for ComparisonOperatorDescriptor {
 pub const COMPARISON_OPERATOR_DESCRIPTORS: &[ComparisonOperatorDescriptor] = &[
     ComparisonOperatorDescriptor {
         syntax: "`==` and `!=`",
-        description: "compare scalar string representations",
+        description: "equal only with the same runtime type and value, recursively through arrays and objects; no conversion",
         order: 1,
         example: Some(Example {
-            invocation: "\"5\" == 5",
+            invocation: "5 == \"5\"",
+            result: "false",
+            verification: ExampleVerification::Executable,
+        }),
+    },
+    ComparisonOperatorDescriptor {
+        syntax: "explicit conversion",
+        description: "convert before an equality check, for example with `number(...)`",
+        order: 2,
+        example: Some(Example {
+            invocation: "5 == number(\"5\")",
             result: "true",
             verification: ExampleVerification::Executable,
         }),
     },
     ComparisonOperatorDescriptor {
         syntax: "`>`, `>=`, `<`, `<=`",
-        description: "coerce both sides to numbers",
-        order: 2,
+        description: "coerce both sides to numbers, so ordering can hold where `==` does not",
+        order: 3,
         example: Some(Example {
             invocation: "\"10\" > 2",
             result: "true",
@@ -523,20 +533,20 @@ pub const COMPARISON_OPERATOR_DESCRIPTORS: &[ComparisonOperatorDescriptor] = &[
     },
     ComparisonOperatorDescriptor {
         syntax: "both sides missing",
-        description: "`a == b` is false and `a != b` is also false",
-        order: 3,
+        description: "a missing value is `null`, which equals `null`: `a == b` is true and `a != b` is false",
+        order: 4,
         example: Some(Example {
             invocation: "missing_a == missing_b",
-            result: "false",
+            result: "true",
             verification: ExampleVerification::Executable,
         }),
     },
     ComparisonOperatorDescriptor {
-        syntax: "one side defined, one missing",
-        description: "`==` is false and `!=` is true",
-        order: 4,
+        syntax: "one side missing",
+        description: "`null` equals nothing else, not even the empty string: `==` is false and `!=` is true",
+        order: 5,
         example: Some(Example {
-            invocation: "\"x\" != missing",
+            invocation: "\"\" != missing",
             result: "true",
             verification: ExampleVerification::Executable,
         }),

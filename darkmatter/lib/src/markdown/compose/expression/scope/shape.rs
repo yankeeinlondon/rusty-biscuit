@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::GuardOrigin;
 use super::projection::DeclaredType;
-use crate::markdown::compose::expression::scalar_string;
+use crate::markdown::compose::expression::equality::values_equal;
 use crate::markdown::schemas::completion::alternative_accepts;
 use crate::markdown::schemas::{Constraint, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, flattened_alternatives};
 
@@ -321,34 +321,41 @@ impl Shape {
         }
     }
 
-    /// The values whose comparison text (`scalar_string`) may equal `text`,
-    /// keeping `null` only when `keep_null` and it was possible.
+    /// The true side of `x == value`: the values that may strictly equal
+    /// `value` (`values_equal`).
     ///
-    /// Matching literals stay; an unconstrained `string`, `enum`, or
-    /// `boolean` narrows to the matching literal; a `number` narrows only
-    /// when exactly one number formats as `text`. Constrained and other
-    /// string-like types keep their arm, and containers stay while their
-    /// JSON text could match. Unknown gains only presence, when `null` is
-    /// excluded.
-    pub(super) fn text_equal(&self, text: &str, keep_null: bool) -> Self {
+    /// Against `null`, only `null`. Otherwise `null` is gone, alternatives of
+    /// another runtime family are dropped, matching literals stay, and an
+    /// unconstrained `string`, `enum`, `boolean`, or `number` narrows to the
+    /// literal (a `number` only when that literal admits every storage of the
+    /// value). Constrained alternatives and containers keep their arm.
+    /// Unknown narrows the way an unconstrained alternative would.
+    pub(super) fn equal_to(&self, value: &Value) -> Self {
+        if value.is_null() {
+            return self.only_null();
+        }
         match self {
-            Self::Unknown { non_null } => Self::Unknown { non_null: *non_null || !keep_null },
-            Self::Arms { arms, nullable } => Self::Arms {
-                arms: arms.iter().filter_map(|arm| arm_text_equal(arm, text)).collect(),
-                nullable: *nullable && keep_null,
+            Self::Unknown { .. } => Self::Arms { arms: vec![pinned_atom(value)], nullable: false },
+            Self::Arms { arms, .. } => Self::Arms {
+                arms: arms.iter().filter_map(|arm| arm_equal(arm, value)).collect(),
+                nullable: false,
             },
         }
     }
 
-    /// The values whose comparison text may differ from `text`: literals
-    /// (and `enum` members, and the matching `boolean`) that must equal it
-    /// removed, keeping `null` only when `keep_null` and it was possible.
-    pub(super) fn text_differs(&self, text: &str, keep_null: bool) -> Self {
+    /// The true side of `x != value`: the values that may differ from it.
+    /// Against `null`, every non-null value; otherwise literals (and `enum`
+    /// members, and the matching `boolean`) that must equal it are removed,
+    /// and `null` stays possible.
+    pub(super) fn differs_from(&self, value: &Value) -> Self {
+        if value.is_null() {
+            return self.without_null();
+        }
         match self {
-            Self::Unknown { non_null } => Self::Unknown { non_null: *non_null || !keep_null },
+            Self::Unknown { .. } => self.clone(),
             Self::Arms { arms, nullable } => Self::Arms {
-                arms: arms.iter().filter_map(|arm| arm_text_differs(arm, text)).collect(),
-                nullable: *nullable && keep_null,
+                arms: arms.iter().filter_map(|arm| arm_differs(arm, value)).collect(),
+                nullable: *nullable,
             },
         }
     }
@@ -469,75 +476,97 @@ fn with_members(atom: &PropertyAtom, members: Vec<String>) -> PropertyAtom {
     atom
 }
 
-/// The single number whose comparison text is `text`, as `scalar_string`
-/// formats numbers: `Some(Some(n))` when exactly one does, `Some(None)` when
-/// several distinct numbers format identically, `None` when none does.
-///
-/// Every formatted number parses back as `f64`, so a `text` that does not,
-/// or that formats differently once parsed, is no number's text. Integral
-/// values print through `i64`, so beyond 2^53 distinct JSON numbers can
-/// print alike.
-fn number_with_text(text: &str) -> Option<Option<Value>> {
-    let parsed: f64 = text.parse().ok()?;
-    let value = serde_json::Number::from_f64(parsed).map(Value::Number)?;
-    if scalar_string(&value) != text {
-        return None;
+impl Family {
+    /// The family of a non-null value.
+    fn of(value: &Value) -> Option<Self> {
+        match value {
+            Value::String(_) => Some(Self::String),
+            Value::Number(_) => Some(Self::Number),
+            Value::Bool(_) => Some(Self::Boolean),
+            Value::Array(_) => Some(Self::Array),
+            Value::Object(_) => Some(Self::Object),
+            Value::Null => None,
+        }
     }
-    const EXACT_INTEGER_LIMIT: f64 = 9_007_199_254_740_992.0;
-    if parsed.fract() != 0.0 {
-        return Some(Some(value));
-    }
-    if parsed.abs() < EXACT_INTEGER_LIMIT {
-        return Some(Some(Value::from(parsed as i64)));
-    }
-    Some(None)
 }
 
-fn arm_text_equal(arm: &PropertyAtom, text: &str) -> Option<PropertyAtom> {
-    if let Some(value) = arm.literal_value() {
-        return (scalar_string(value) == text).then(|| arm.clone());
+/// The narrowest alternative holding every value strictly equal to the
+/// non-null `value`: its literal, or for a container (and a number no
+/// literal can pin) the bare family.
+fn pinned_atom(value: &Value) -> PropertyAtom {
+    match value {
+        Value::String(_) | Value::Bool(_) => literal_atom(value.clone()),
+        Value::Number(_) => pinned_number(value).unwrap_or_else(|| PropertyAtom::bare(SimplifiedType::Number)),
+        _ => Family::of(value).unwrap_or(Family::Object).bare_atom(),
     }
-    if arm.is_array {
-        return text.starts_with('[').then(|| arm.clone());
+}
+
+/// `literal(value)`, when schema validation of that literal admits every
+/// storage of the number that is strictly equal to it (`4` and `4.0`), so
+/// the narrowed type never rejects a live value the evaluator sends there.
+fn pinned_number(value: &Value) -> Option<PropertyAtom> {
+    let atom = literal_atom(value.clone());
+    equal_storages(value).iter().all(|storage| alternative_accepts(&atom, storage)).then_some(atom)
+}
+
+/// `value` together with its other `i64`/`u64`/`f64` storages that are
+/// strictly equal to it.
+fn equal_storages(value: &Value) -> Vec<Value> {
+    let Value::Number(number) = value else {
+        return vec![value.clone()];
+    };
+    let mut storages = vec![value.clone()];
+    let float = number.as_f64().filter(|float| float.fract() == 0.0);
+    let candidates = [
+        float.and_then(serde_json::Number::from_f64),
+        float.filter(|float| float.abs() < i64::MAX as f64).map(|float| serde_json::Number::from(float as i64)),
+        float.filter(|float| *float >= 0.0 && *float < u64::MAX as f64).map(|float| serde_json::Number::from(float as u64)),
+    ];
+    for candidate in candidates.into_iter().flatten().map(Value::Number) {
+        if values_equal(&candidate, value) && !storages.contains(&candidate) {
+            storages.push(candidate);
+        }
+    }
+    storages
+}
+
+fn arm_equal(arm: &PropertyAtom, value: &Value) -> Option<PropertyAtom> {
+    if let Some(literal) = arm.literal_value() {
+        return values_equal(literal, value).then(|| arm.clone());
+    }
+    if !families(arm).contains(&Family::of(value)?) {
+        return None;
     }
     let plain = !has_ordinary_constraints(arm);
-    match &arm.ty {
-        TypeExpr::InlineObject(_) | TypeExpr::Primitive(SimplifiedType::Object) => {
-            text.starts_with('{').then(|| arm.clone())
-        }
-        TypeExpr::Primitive(SimplifiedType::Enum) => {
-            let members = enum_members(arm)?;
-            members.iter().any(|member| member == text).then(|| {
-                if plain {
-                    literal_atom(Value::String(text.to_string()))
-                } else {
-                    with_members(arm, vec![text.to_string()])
-                }
-            })
-        }
-        TypeExpr::Primitive(SimplifiedType::String) if plain => Some(literal_atom(Value::String(text.to_string()))),
-        TypeExpr::Primitive(SimplifiedType::Number) => match number_with_text(text)? {
-            Some(value) if plain => Some(literal_atom(value)),
-            _ => Some(arm.clone()),
-        },
-        TypeExpr::Primitive(SimplifiedType::Boolean) => match text {
-            "true" | "false" if plain => Some(literal_atom(Value::Bool(text == "true"))),
-            "true" | "false" => Some(arm.clone()),
-            _ => None,
-        },
+    if let (TypeExpr::Primitive(SimplifiedType::Enum), Value::String(text)) = (&arm.ty, value) {
+        let members = enum_members(arm)?;
+        return members.iter().any(|member| member == text).then(|| {
+            if plain {
+                literal_atom(value.clone())
+            } else {
+                with_members(arm, vec![text.clone()])
+            }
+        });
+    }
+    if arm.is_array || !plain {
+        return Some(arm.clone());
+    }
+    match (&arm.ty, value) {
+        (TypeExpr::Primitive(SimplifiedType::String | SimplifiedType::Boolean), _) => Some(literal_atom(value.clone())),
+        (TypeExpr::Primitive(SimplifiedType::Number), _) => Some(pinned_number(value).unwrap_or_else(|| arm.clone())),
         _ => Some(arm.clone()),
     }
 }
 
-fn arm_text_differs(arm: &PropertyAtom, text: &str) -> Option<PropertyAtom> {
-    if let Some(value) = arm.literal_value() {
-        return (scalar_string(value) != text).then(|| arm.clone());
+fn arm_differs(arm: &PropertyAtom, value: &Value) -> Option<PropertyAtom> {
+    if let Some(literal) = arm.literal_value() {
+        return (!values_equal(literal, value)).then(|| arm.clone());
     }
     if arm.is_array || has_ordinary_constraints(arm) {
         return Some(arm.clone());
     }
-    match &arm.ty {
-        TypeExpr::Primitive(SimplifiedType::Enum) => {
+    match (&arm.ty, value) {
+        (TypeExpr::Primitive(SimplifiedType::Enum), Value::String(text)) => {
             let remaining: Vec<String> = enum_members(arm)?.iter().filter(|member| *member != text).cloned().collect();
             match remaining.as_slice() {
                 [] => None,
@@ -545,11 +574,7 @@ fn arm_text_differs(arm: &PropertyAtom, text: &str) -> Option<PropertyAtom> {
                 _ => Some(with_members(arm, remaining)),
             }
         }
-        TypeExpr::Primitive(SimplifiedType::Boolean) => match text {
-            "true" => Some(literal_atom(Value::Bool(false))),
-            "false" => Some(literal_atom(Value::Bool(true))),
-            _ => Some(arm.clone()),
-        },
+        (TypeExpr::Primitive(SimplifiedType::Boolean), Value::Bool(flag)) => Some(literal_atom(Value::Bool(!flag))),
         _ => Some(arm.clone()),
     }
 }

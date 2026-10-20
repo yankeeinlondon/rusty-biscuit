@@ -513,9 +513,9 @@ mod tests {
     }
 
     #[test]
-    fn null_equal_null_is_false() {
+    fn null_equal_null_is_true() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("missing_a == missing_b", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("missing_a == missing_b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]

@@ -174,7 +174,8 @@ fn evaluates_ambient_and_env_conditions() {
     );
     assert_eq!(
         evaluate_condition(&LoopCondition::While("env.PATH != \"\"".into()), &lookup).unwrap(),
-        std::env::var("PATH").is_ok_and(|value| !value.is_empty())
+        // An unset `PATH` reads as `null`, which strict `!=` separates from `""`.
+        std::env::var("PATH").ok().is_none_or(|value| !value.is_empty())
     );
 }
 

@@ -266,15 +266,25 @@ fn equality_narrows_to_literals_of_every_scalar_family() {
         ("name == 'release'", "name", "literal(release)", "string"),
         ("mode == 'release'", "mode", "literal(release)", "literal(debug)"),
         ("count == 4", "count", "literal(4)", "number"),
-        ("either == '4'", "either", "literal('4') | literal(4)", "string | number | null"),
+        // A number never equals text, so the numeric arm is gone.
+        ("either == '4'", "either", "literal('4')", "string | number | null"),
+        ("either == 4", "either", "literal(4)", "string | number | null"),
         ("flag == true", "flag", "literal(true)", "literal(false)"),
-        ("optional == ''", "optional", "literal('') | null", "string"),
-        ("optional != null", "optional", "string", "literal('') | null"),
-        ("optional == null", "optional", "literal('')", "string | null"),
+        ("flag != true", "flag", "literal(false)", "literal(true)"),
+        // `null` equals only `null`: `''` proves presence, `null` proves absence.
+        ("optional == ''", "optional", "literal('')", "string | null"),
+        ("optional != ''", "optional", "string | null", "literal('')"),
+        ("optional != null", "optional", "string", "null"),
+        ("optional == null", "optional", "null", "string"),
+        ("optional == 'a'", "optional", "literal(a)", "string | null"),
+        ("optional != 'a'", "optional", "string | null", "literal(a)"),
         ("pair == 'z'", "pair", "enum(a,b)", "enum(a,b)"),
         // Reversed operands use the same rules.
         ("'release' == mode", "mode", "literal(release)", "literal(debug)"),
         ("4 == count", "count", "literal(4)", "number"),
+        ("null == optional", "optional", "null", "string"),
+        ("'' != optional", "optional", "string | null", "literal('')"),
+        ("!(optional == null)", "optional", "string", "null"),
     ];
     for (guard, subject, true_side, false_side) in rows {
         assert_eq!(narrowed(&declared, guard, Polarity::True, subject), *true_side, "{guard} true");
@@ -288,22 +298,59 @@ fn equality_keeps_constraints_and_numeric_families_it_cannot_pin() {
     let declared = DeclaredTypes::new(Some(&schema));
     assert_eq!(narrowed(&declared, "mail == 'x'", Polarity::True, "mail"), "email");
     assert_eq!(narrowed(&declared, "count == 4", Polarity::True, "count"), "number(min(1))");
-    // Integral values print through `i64`, so beyond 2^53 two numbers can
-    // print alike and no single literal is claimed.
-    assert_eq!(narrowed(&declared, "big == 9007199254740993", Polarity::True, "big"), "number");
-    // No number prints as `4.0`, `+4`, or `-0`.
+    // A number never equals text.
     assert_eq!(narrowed(&declared, "big == '4.0'", Polarity::True, "big"), "number | null", "contradiction keeps the incoming type");
+    assert_eq!(narrowed(&declared, "big == '4'", Polarity::True, "big"), "number | null", "contradiction keeps the incoming type");
     assert_eq!(narrowed(&declared, "big == 4.5", Polarity::True, "big"), "literal(4.5)");
+    // `4.0` and `-0` are the integers the evaluator makes of them; the
+    // literal still admits the float storage of the same value.
+    assert_eq!(narrowed(&declared, "big == 4.0", Polarity::True, "big"), "literal(4)");
+    assert_eq!(narrowed(&declared, "big == -0", Polarity::True, "big"), "literal(0)");
+    assert_eq!(narrowed(&declared, "big == -4.5", Polarity::True, "big"), "literal(-4.5)");
+}
+
+/// The analysis compares the value the evaluator produces for a literal,
+/// not its spelling: integral literals become (saturating) `i64`.
+#[test]
+fn literal_numbers_narrow_to_the_value_the_evaluator_compares() {
+    let schema = schema("big: number
+");
+    let declared = DeclaredTypes::new(Some(&schema));
+    let lookup = Values(HashMap::from([("big".to_string(), json!(9_007_199_254_740_992_u64))]), None);
+    // The parser reads `…993` as the float 2^53, which the evaluator makes
+    // the integer 2^53: equal to a supplied 2^53.
+    assert_eq!(evaluate(&expr("big == 9007199254740993"), &lookup).unwrap(), json!(true));
+    assert_eq!(narrowed(&declared, "big == 9007199254740993", Polarity::True, "big"), "literal(9007199254740992)");
+    // Beyond `i64`, the evaluator's conversion saturates.
+    let lookup = Values(HashMap::from([("big".to_string(), json!(i64::MAX))]), None);
+    assert_eq!(evaluate(&expr("big == 99999999999999999999"), &lookup).unwrap(), json!(true));
+    assert_eq!(narrowed(&declared, "big == 99999999999999999999", Polarity::True, "big"), "literal(9223372036854775807)");
 }
 
 #[test]
-fn equality_against_unknown_or_a_container_proves_no_scalar_family() {
-    let schema = schema("items: \"string[]\"\n");
+fn equality_pins_an_unknown_value_and_a_container_to_its_family() {
+    let schema = schema("items: \"string[]\"\nchoice: [\"string[]\", object, string]\n");
     let declared = DeclaredTypes::new(Some(&schema));
-    assert_eq!(narrowed(&declared, "x == 'a'", Polarity::True, "x"), "unknown(present)");
-    assert_eq!(narrowed(&declared, "x == ''", Polarity::True, "x"), "unknown");
-    assert_eq!(narrowed(&declared, "items == '[]'", Polarity::True, "items"), "string[]");
-    assert_eq!(narrowed(&declared, "x == []", Polarity::True, "x"), "unknown");
+    // An undeclared value equal to a scalar literal is that literal.
+    assert_eq!(narrowed(&declared, "x == 'a'", Polarity::True, "x"), "literal(a)");
+    assert_eq!(narrowed(&declared, "x == ''", Polarity::True, "x"), "literal('')");
+    assert_eq!(narrowed(&declared, "x == 4", Polarity::True, "x"), "literal(4)");
+    assert_eq!(narrowed(&declared, "x == false", Polarity::True, "x"), "literal(false)");
+    assert_eq!(narrowed(&declared, "x == null", Polarity::True, "x"), "null");
+    assert_eq!(narrowed(&declared, "x != null", Polarity::True, "x"), "unknown(present)");
+    assert_eq!(narrowed(&declared, "x != 'a'", Polarity::True, "x"), "unknown");
+    assert_eq!(narrowed(&declared, "x == ''", Polarity::False, "x"), "unknown");
+    // A container never equals its JSON text.
+    assert_eq!(narrowed(&declared, "items == '[]'", Polarity::True, "items"), "string[] | null", "contradiction keeps the incoming type");
+    // Equal to a container literal: present, of that family.
+    assert_eq!(narrowed(&declared, "x == []", Polarity::True, "x"), "unknown[]");
+    assert_eq!(narrowed(&declared, "x == {}", Polarity::True, "x"), "object");
+    assert_eq!(narrowed(&declared, "items == ['a']", Polarity::True, "items"), "string[]");
+    assert_eq!(narrowed(&declared, "choice == []", Polarity::True, "choice"), "string[]");
+    assert_eq!(narrowed(&declared, "choice == {'k': x}", Polarity::True, "choice"), "object");
+    assert_eq!(narrowed(&declared, "[] == choice", Polarity::True, "choice"), "string[]");
+    assert_eq!(narrowed(&declared, "choice != []", Polarity::True, "choice"), "string[] | object | string | null");
+    assert_eq!(narrowed(&declared, "choice == []", Polarity::False, "choice"), "string[] | object | string | null");
 }
 
 #[test]
@@ -315,6 +362,17 @@ fn equality_between_two_subjects_narrows_against_a_finite_other_side() {
     assert_eq!(narrowed(&declared, "left == right", Polarity::False, "left"), "enum(a,b,c)");
     assert_eq!(narrowed(&declared, "free == left", Polarity::True, "free"), "literal(a) | literal(b) | literal(c)");
     assert_eq!(narrowed(&declared, "free == other", Polarity::True, "free"), "string | null");
+}
+
+/// A declaration that admits only `null` is a usable one-value set.
+#[test]
+fn equality_with_a_null_only_subject_narrows_the_other_side() {
+    let schema = schema("free: string\nnothing: \"null\"\n");
+    let declared = DeclaredTypes::new(Some(&schema));
+    assert_eq!(narrowed(&declared, "free == nothing", Polarity::True, "free"), "null");
+    assert_eq!(narrowed(&declared, "free == nothing", Polarity::False, "free"), "string");
+    assert_eq!(narrowed(&declared, "free != nothing", Polarity::True, "free"), "string");
+    assert_eq!(narrowed(&declared, "nothing != free", Polarity::False, "free"), "null");
 }
 
 // ── differential soundness against the evaluator ────────────────────────
@@ -353,6 +411,16 @@ fn samples() -> Vec<Value> {
         json!(["a"]),
         json!({}),
         json!({ "k": "v" }),
+        // Equal values in other storage, and values that differ only deeply.
+        json!(4.0),
+        json!(0.0),
+        json!(-0.0),
+        json!(9_007_199_254_740_992_u64),
+        json!(9_007_199_254_740_993_u64),
+        json!(["a", ["b"]]),
+        json!({ "k": null }),
+        json!({ "j": "v" }),
+        json!("null"),
     ]
 }
 
@@ -419,6 +487,23 @@ const GUARDS: &[&str] = &[
     "x != false",
     "x == 'true'",
     "x == '[]'",
+    "x == 4.0",
+    "x == 0",
+    "x == -0",
+    "x == 9007199254740992",
+    "x != 9007199254740992",
+    "x == 'null'",
+    "x == []",
+    "x != []",
+    "x == ['a']",
+    "x == {}",
+    "{'k': 'v'} == x",
+    "null != x",
+    "!(x == null)",
+    "y == null",
+    "y == 9007199254740992",
+    "y != 9007199254740992",
+    "x == y && y == null",
     "is_string(x)",
     "!isString(x)",
     "is_number(x)",
@@ -449,6 +534,8 @@ const DIFFERENTIAL_SCHEMAS: &[(&str, Option<&str>)] = &[
     ("literals", Some("x: \"literal('a')\"\ny: \"literal(4; required)\"\n")),
     ("containers", Some("x: \"string[]\"\ny: object\n")),
     ("container_unions", Some("x: [\"string[]\", string]\ny: [object, number]\n")),
+    ("null_other_side", Some("x: [string, number]\ny: \"null\"\n")),
+    ("large_integers", Some("x: number\ny: [\"literal(9007199254740992)\", string]\n")),
     ("undeclared", None),
 ];
 
@@ -507,20 +594,26 @@ differential!(
     literals,
     containers,
     container_unions,
+    null_other_side,
+    large_integers,
     undeclared,
 );
 
 #[test]
-fn two_nulls_are_neither_equal_nor_unequal() {
+fn two_nulls_are_equal() {
     let declared = DeclaredTypes::new(None);
     let lookup = Values(HashMap::new(), None);
-    assert_eq!(evaluate(&expr("x == y"), &lookup).unwrap(), json!(false));
+    assert_eq!(evaluate(&expr("x == y"), &lookup).unwrap(), json!(true));
     assert_eq!(evaluate(&expr("x != y"), &lookup).unwrap(), json!(false));
-    // So `x != y` holding proves neither side null-free, but its false side
-    // still admits both nulls.
+    // So the sides that two nulls reach admit them, and neither proves
+    // presence.
     let site = TypeScope::unguarded(&declared);
-    assert!(type_at(&site.assume(&expr("x != y"), Polarity::False), "x").admits(&Value::Null));
-    assert!(type_at(&site.assume(&expr("x == y"), Polarity::False), "x").admits(&Value::Null));
+    for (guard, polarity) in [("x == y", Polarity::True), ("x != y", Polarity::False)] {
+        let scope = site.assume(&expr(guard), polarity);
+        for subject in ["x", "y"] {
+            assert!(type_at(&scope, subject).admits(&Value::Null), "{guard} {polarity:?} {subject}");
+        }
+    }
 }
 
 // ── joins and invalidation ──────────────────────────────────────────────

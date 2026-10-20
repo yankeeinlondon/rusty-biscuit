@@ -11,6 +11,7 @@
 use super::guarded_shell_sites::{args_of, guarded_holes, missing, resolve, run, shape_of, shell_sites};
 use super::*;
 use crate::composition::preflight::settle_lifecycle_shell_modes;
+use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
 
 /// An enum whose `ALL` lists every variant by construction, each with the
 /// snake-case name its matrix tests start with.
@@ -323,11 +324,15 @@ fn assert_missing(frontmatter: &Value, expression: &str) {
     assert!(message.contains(&format!("`{expression}`")), "{frontmatter}: {message}");
 }
 
-/// Approved by its shape, `selecting` runs `command` once with `args`;
-/// `skipping` launches nothing.
-fn assert_runs_only_when_selected(frontmatter: &Value, command: &str, selecting: Value, args: &[&str], skipping: Value) {
+/// Approved by the shape pre-flight discovered for it, which its guard has
+/// narrowed, `selecting` runs `command` once with `args`; `skipping`
+/// launches nothing.
+fn assert_runs_only_when_selected(frontmatter: &Value, selecting: Value, args: &[&str], skipping: Value) {
     let config = resolve(frontmatter).expect("pre-flight accepts the guarded site");
-    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of(command), None);
+    let [site] = shell_sites(&config, LifecycleSignal::Start).try_into().expect("one site");
+    let mut discovered = ShellPreApprovals::new();
+    discovered.insert_template(TemplateShape::from_template(site.template()));
+    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &discovered, None);
 
     let selected = MockShell::new(0);
     let outcome = run(LifecycleSignal::Start, &config, selecting, &selected);
@@ -397,7 +402,6 @@ fn equality(site: ScopeSite) {
     if site != ScopeSite::LifecycleSetShell {
         assert_runs_only_when_selected(
             &frontmatter,
-            "tool {{ mode }}",
             json!({ "mode": "release" }),
             &["tool", "release"],
             json!({ "mode": "debug" }),

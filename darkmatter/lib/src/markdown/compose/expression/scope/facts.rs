@@ -11,7 +11,7 @@ use super::shape::{Family, Shape};
 use super::{GuardOrigin, Polarity, TypeScope};
 use crate::markdown::compose::expression::binding::NULL_ROOT;
 use crate::markdown::compose::expression::functions::{accepts_call_arity, canonical_function_name};
-use crate::markdown::compose::expression::{ComparisonOp, Expr, scalar_string};
+use crate::markdown::compose::expression::{ComparisonOp, Expr, json_number, number_literal};
 
 /// What a registered one-argument predicate proves about its original
 /// argument. Keyed by canonical registry name; aliases and case resolve
@@ -154,7 +154,8 @@ fn predicate_fact<'d>(
 /// A comparison operand the analysis can read without evaluating anything.
 enum Operand {
     Literal(Value),
-    Container,
+    /// An array or object literal, whose elements may be computed.
+    Container(Family),
 }
 
 /// The value the evaluator would produce for a literal operand.
@@ -163,23 +164,25 @@ fn literal_operand(expr: &Expr) -> Option<Operand> {
         Expr::Paren(inner) => literal_operand(inner),
         Expr::StringLiteral(text) => Some(Operand::Literal(Value::String(text.clone()))),
         Expr::BoolLiteral(value) => Some(Operand::Literal(Value::Bool(*value))),
-        Expr::NumberLiteral(number) => number_operand(*number),
+        Expr::NumberLiteral(number) => number_literal(*number).map(Operand::Literal),
+        // The evaluator negates the literal's value, not its spelling.
         Expr::UnaryMinus(inner) => match inner.as_ref() {
-            Expr::NumberLiteral(number) => number_operand(-number),
+            Expr::NumberLiteral(number) => {
+                let negated = -number_literal(*number)?.as_f64()?;
+                json_number(negated).ok().map(Operand::Literal)
+            }
             _ => None,
         },
         Expr::Variable(path) if path == NULL_ROOT => Some(Operand::Literal(Value::Null)),
-        Expr::ArrayLiteral(_) | Expr::ObjectLiteral(_) => Some(Operand::Container),
+        Expr::ArrayLiteral(_) => Some(Operand::Container(Family::Array)),
+        Expr::ObjectLiteral(_) => Some(Operand::Container(Family::Object)),
         _ => None,
     }
 }
 
-fn number_operand(number: f64) -> Option<Operand> {
-    serde_json::Number::from_f64(number).map(|number| Operand::Literal(Value::Number(number)))
-}
-
-/// `==` and `!=`, as the evaluator decides them: both sides compare by
-/// `scalar_string` text, and both are false when both sides are `null`.
+/// `==` and `!=`, as the evaluator decides them: strict typed equality
+/// (`values_equal`), under which `null` equals only `null` and the operators
+/// are exact complements.
 fn comparison<'d>(
     scope: &TypeScope<'d>,
     left: &Expr,
@@ -193,15 +196,17 @@ fn comparison<'d>(
         ComparisonOp::NotEqual => false,
         _ => return scope.clone(),
     };
+    // Whether the guard, as it holds on this side, says the operands are equal.
+    let equal = equal == (polarity == Polarity::True);
     let declared = scope.declared();
     match (declared.subject(left), declared.subject(right)) {
-        (Some(subject), None) => against_operand(scope, &subject, literal_operand(right), equal, polarity, origin),
-        (None, Some(subject)) => against_operand(scope, &subject, literal_operand(left), equal, polarity, origin),
+        (Some(subject), None) => against_operand(scope, &subject, literal_operand(right), equal, origin),
+        (None, Some(subject)) => against_operand(scope, &subject, literal_operand(left), equal, origin),
         (Some(left), Some(right)) => {
             let left_values = scope.type_of(&left).shape().finite_values();
             let right_values = scope.type_of(&right).shape().finite_values();
-            let scope = against_values(scope, &left, right_values, equal, polarity, origin);
-            against_values(&scope, &right, left_values, equal, polarity, origin)
+            let scope = against_values(scope, &left, right_values, equal, origin);
+            against_values(&scope, &right, left_values, equal, origin)
         }
         (None, None) => scope.clone(),
     }
@@ -212,69 +217,43 @@ fn against_operand<'d>(
     subject: &super::Subject,
     operand: Option<Operand>,
     equal: bool,
-    polarity: Polarity,
     origin: &GuardOrigin,
 ) -> TypeScope<'d> {
-    match operand {
-        Some(Operand::Literal(value)) => scope.refine(subject, origin, |shape| compare_with(shape, &value, equal, polarity)),
-        // `[] == '[]'` holds, so a container operand pins no scalar family.
-        Some(Operand::Container) | None => scope.clone(),
-    }
-}
-
-/// Narrows `shape` by `x == value` (`equal`) or `x != value` holding as
-/// `polarity` says.
-fn compare_with(shape: &Shape, value: &Value, equal: bool, polarity: Polarity) -> Shape {
-    let holds = polarity == Polarity::True;
-    if value.is_null() {
-        // `x == null` holds for a present value with empty text, and
-        // `x != null` for one with nonempty text; a null `x` fails both.
-        return match (equal, holds) {
-            (true, true) => shape.text_equal("", false),
-            (false, true) => shape.text_differs("", false),
-            (false, false) => shape.text_equal("", true),
-            (true, false) => shape.clone(),
-        };
-    }
-    // Against a present value the operators are exact complements; a null
-    // `x` compares as empty text.
-    let text = scalar_string(value);
-    if equal == holds {
-        shape.text_equal(&text, text.is_empty())
-    } else {
-        shape.text_differs(&text, !text.is_empty())
+    match (operand, equal) {
+        (Some(Operand::Literal(value)), true) => scope.refine(subject, origin, |shape| shape.equal_to(&value)),
+        (Some(Operand::Literal(value)), false) => scope.refine(subject, origin, |shape| shape.differs_from(&value)),
+        // Equal to a container is present and of its family; its elements
+        // may be computed, so the value itself is not pinned.
+        (Some(Operand::Container(family)), true) => scope.refine(subject, origin, |shape| shape.of_family(family)),
+        (Some(Operand::Container(_)), false) | (None, _) => scope.clone(),
     }
 }
 
 /// Narrows `subject` by comparison with another subject whose possible
-/// values are `values`, when that set is finite. The equal side keeps every
-/// alternative that may match one of them; the unequal side narrows only
-/// against a single present value.
+/// values are `values`, when that set is finite (`null` included). The equal
+/// side keeps every alternative that may strictly equal one of them; the
+/// unequal side narrows only against a single value.
 fn against_values<'d>(
     scope: &TypeScope<'d>,
     subject: &super::Subject,
     values: Option<Vec<Value>>,
     equal: bool,
-    polarity: Polarity,
     origin: &GuardOrigin,
 ) -> TypeScope<'d> {
     let Some(values) = values else {
         return scope.clone();
     };
-    if equal == (polarity == Polarity::True) {
-        // `x != y` is also false when both are null.
-        let both_null_route = !equal && values.contains(&Value::Null);
+    if equal {
         return scope.refine(subject, origin, |shape| {
-            let joined = values
+            values
                 .iter()
-                .map(|value| compare_with(shape, value, true, Polarity::True))
+                .map(|value| shape.equal_to(value))
                 .reduce(|joined, route| joined.join(&route))
-                .unwrap_or_else(|| shape.clone());
-            if both_null_route { joined.join(&shape.only_null()) } else { joined }
+                .unwrap_or_else(|| shape.clone())
         });
     }
     match values.as_slice() {
-        [value] if !value.is_null() => scope.refine(subject, origin, |shape| compare_with(shape, value, true, Polarity::False)),
+        [value] => scope.refine(subject, origin, |shape| shape.differs_from(value)),
         _ => scope.clone(),
     }
 }
