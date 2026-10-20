@@ -4,6 +4,23 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+    - claudine/cli/tests/l1/lifecycle_traces.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/fixtures/lifecycle_traces/
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/mod.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/engine.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/profiles.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/publisher.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/protocol_tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/replay.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - claudine-cli
+    - darkmatter
 ---
 
 # Plan: Darkmatter lifecycle ownership
@@ -79,7 +96,7 @@ bounded briefs stating that the entire session tree is non-interactive.
 
 ### Wave 1 — sequential prerequisite work
 
-- [ ] **Baseline inventory**
+- [x] **Baseline inventory**
   - Verify prerequisite behavior: flat grammar, namespaces, subject/container
     lifecycle, loops and flow control, task inputs/provider selection, schema
     action unions, and approved typed shell templates.
@@ -91,7 +108,7 @@ bounded briefs stating that the entire session tree is non-interactive.
 
 ### Wave 2 — parallel evidence and interface work
 
-- [ ] **Trace capture**
+- [x] **Trace capture**
   - From the gated baseline, use fake services to record events, action order,
     state snapshots, selected errors, and shell-lock changes for every Stage 1
     scenario: success; both blocked routes; catch failures in each catch event;
@@ -101,7 +118,7 @@ bounded briefs stating that the entire session tree is non-interactive.
   - Add immutable fixtures and L1 assertions through production paths, not only
     the historical model. Keep audio silent and provider work deterministic.
 
-- [ ] **Boundary prototype**
+- [x] **Boundary prototype**
   - Build an isolated deterministic non-agent host using proposed neutral
     descriptors and synchronous typed requests/replies. Register a
     before-composition notification, one renamed core event, and a complete
@@ -115,7 +132,7 @@ bounded briefs stating that the entire session tree is non-interactive.
 
 ### Wave 3 — sequential gate
 
-- [ ] **Prototype verdict**
+- [x] **Prototype verdict**
   - Replay every captured trace through the proposed request/reply boundary and
     compare all recorded facts. Confirm one shell-permission owner and ergonomic
     service adapters without moving the provider harness or coordinator.
