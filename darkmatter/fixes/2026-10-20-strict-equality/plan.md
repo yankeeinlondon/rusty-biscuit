@@ -4,6 +4,11 @@ created: 2026-10-20
 phase: 1
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Implementation Plan — Strict equality for `==` and `!=`
@@ -105,12 +110,12 @@ rather than silently deviating:
 
 ### Wave 1 — Baseline and inventory (concurrent)
 
-- [ ] **Baseline verification**
+- [x] **Baseline verification**
     - Run `just test` and `just lint` in `darkmatter/` and in `claudine/`;
       record the pre-change state so later failures are attributable.
     - Confirm the workspace resolves both package areas (`sniff repo
       package-areas` if there is any doubt about the claudine pairing).
-- [ ] **Audit inventory worksheet**
+- [x] **Audit inventory worksheet**
     - Enumerate every authored `==` / `!=` site in: root `prompts/` (including
       `feature.md`, `_prompt.md`, `_implement/*`, `_pr/*`, `fix.md`,
       `_interactive-prompting.md`, `_reviews/*`, `code-comment-quality.md`),
