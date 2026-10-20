@@ -84,12 +84,14 @@ bounded briefs stating that the entire session tree is non-interactive.
 - **Schema scope:** retain three typed nesting levels and existing deeper runtime
   validation. No recursive-schema work, new expression predicates, scheduler,
   provider hooks, or redesigned cancellation/container semantics belongs here.
-- **Input rulings:** the specification does not settle every malformed catalog
-  and trigger-envelope shape. The matrix below proposes strict catalog loading,
-  explicit-null rejection for trigger payloads, and non-string trigger-kind
-  rejection. Record these as author rulings before modifying those loaders. If
-  unresolved, the affected loader task remains gated; unrelated extraction can
-  proceed. Do not invent new supported file formats.
+- **Input rulings (decided by the author, 2026-10-20):** the specification does
+  not settle every malformed catalog and trigger-envelope shape, so the author
+  ruled: the global and host catalogs load strictly (a missing, `null`, wrongly
+  typed, or empty declaration, a duplicate key, or trailing garbage is a typed
+  error, never a fallback); an explicit `null` in any trigger field is an error,
+  never treated as absent; and a non-string trigger `kind` is an error, not a
+  non-trigger classification. The matrix below encodes these rulings; no
+  further ruling is needed. Do not invent new supported file formats.
 - **Execution:** no new speculative CI cells, interactive commands, audible
   playback, window focus, `cargo fmt`, commits, or lifecycle-directory moves.
   During implementation use package-area nextest recipes and the Test Toolkit.
@@ -145,6 +147,45 @@ and the gate verdict is reviewable. Acceptance criteria 1 and 7 originate here.
 
 ## Phase 2: Extract the neutral implementation
 
+### Entry gate — sequential, before Wave 4
+
+Phase 1 fixed its baseline before `2026-10-16-type-narrowing` was built. The
+author ruled that the fix lands first, so Phase 2 opens by moving the baseline
+onto the revision that closes it. These tasks change no production code.
+
+- [ ] **Prerequisite revision**
+  - Confirm `2026-10-16-type-narrowing` has `implemented: true` on its plan and
+    spec and a recorded final-phase close. If it does not, record that, set
+    `human_review: true`, and stop the phase without extraction work.
+  - Record the new starting revision and the fix's closing commits in the log
+    as this feature's prerequisite evidence.
+- [ ] **Baseline replay**
+  - At that revision, run `just test` in `claudine/` (it includes the 30
+    `lifecycle_traces` tests), the Darkmatter `lifecycle_boundary` replays and
+    protocol tests, and both `lifecycle_control_flow_spike` tests. Record the
+    new test counts in place of Phase 1's.
+  - Every trace must pass unedited. A trace that now differs was changed by the
+    prerequisite, not by this feature: confirm that cause, recapture that trace
+    and its replay, and log the before/after lines as a baseline change before
+    any extraction. Never recapture a trace after Wave 4 starts.
+- [ ] **Inventory refresh**
+  - Inventory the lifecycle code the fix added or changed: the scope-carrying
+    lifecycle preflight walk, typed lifecycle templates, sequence task `when`
+    scopes, guarded-hole (`HoleTiming::Guarded`) filling at a reached action,
+    and any lifecycle site kind in its conformance matrix. Assign each to an
+    owner using the spec's ownership table: the lifecycle walk's `TypeScope`
+    extension moves to Darkmatter, the sequence task `when` extension stays in
+    Claudine. Update the caller inventory and file list Waves 4–6 move.
+  - List every file path the fix's guard test and allowlists name, so moves in
+    this phase update those paths only.
+- [ ] **Guarded-shell trace**
+  - Add a trace scenario and its replay for a lifecycle `shell` with a
+    `{{ … }}` hole under a `when:` guard: once with the value present (the
+    command runs with it), and once with the value `set` to `null` before the
+    branch runs (the action fails with `MissingValue`, nothing runs, and the
+    routing that follows is recorded). Express the failure in the replay as a
+    host fact, not an engine rule keyed on names.
+
 ### Wave 4 — sequential foundational extraction
 
 - [ ] **Model extraction**
@@ -168,6 +209,10 @@ and the gate verdict is reviewable. Acceptance criteria 1 and 7 originate here.
     and repeated finalize. Isolate mutable state per concurrent subject.
   - Preserve every failure-stage row and finalize/re-entry exception from baseline
     traces, including source-finalize suppression on accepted proxy handoff.
+  - Carry the guarded-hole check with the executor: a reached shell still fills
+    guarded holes through Darkmatter's shared template API and fails with
+    `MissingValue` before launch. Do not add a second guard walk or fact source;
+    the preflight walk itself moves in Phase 3.
 
 - [ ] **Service adapters**
   - Move neutral effect/emitter interfaces and the full neutral error envelope;
@@ -186,10 +231,14 @@ and the gate verdict is reviewable. Acceptance criteria 1 and 7 originate here.
   - Move tests with assertions intact; repoint both historical spike test imports
     without moving `spike/model.rs` or `spike/scenarios.rs`.
   - Add dependency guards covering Darkmatter lib, CLI, and DMLS manifests/imports.
+  - Keep `2026-10-16-type-narrowing`'s guard test, allowlists, and conformance
+    matrix green with assertions unedited; a moved file changes only its path
+    there, and each allowlist entry keeps its reason.
 
 **Checkpoint:** run both areas' L1 suites and focused trace replay. Every existing
-Claudine assertion and Stage 1 trace passes unchanged; no moved module imports a
-Claudine type. Covers criteria 2, 3, 10, and 19.
+Claudine assertion and Stage 1 trace (as re-baselined by the entry gate) passes
+unchanged, as do the type-narrowing conformance matrix and guard test; no moved
+module imports a Claudine type. Covers criteria 2, 3, 10, and 19.
 
 ## Phase 3: Install registry and unified preflight
 
@@ -271,7 +320,7 @@ Freeze shared registry and catalog-consumption interfaces before the next wave.
     document-schema discovery, including rediscovery via another path.
   - Feed runtime, schema CLI, and DMLS from resolved declarations; per-view availability
     remains separate from shape, including unavailable err and independent fm.ctx.
-  - Implement catalog matrix outcomes after Phase 1 rulings and parity tests.
+  - Implement catalog matrix outcomes, per the input rulings, after parity tests.
 
 - [ ] **Trigger migration**
   - Own `darkmatter/lib/src/markdown/schemas/triggers/`, trigger-facing CLI options,
@@ -376,10 +425,10 @@ Each column is a separate load-bearing field. `E` means a typed, field-located
 load failure surfaced by public catalog lookup or trigger scan/validation, never
 an empty/successful result. `N/A` means the shape cannot apply to that scalar;
 for a collection substituted there, assert E. Null and absence have separate
-outcomes even when both are rejected. Proposed outcomes needing the Phase 1
-ruling are explicit below.
+outcomes even when both are rejected. The outcomes below follow the author's
+input rulings and are final.
 
-Global catalog (proposed strict declaration contract):
+Global catalog (strict declaration contract):
 
 | Shape | kind | $schema | fm | ctx | current | env | err | timing |
 |---|---|---|---|---|---|---|---|---|
@@ -408,7 +457,7 @@ and these separate required declaration columns:
 | Duplicate key | E | E | E |
 | Invalid/trailing YAML | E | E | E |
 
-Trigger envelope and condition fields (proposed strict explicit-null handling;
+Trigger envelope and condition fields (strict explicit-null handling;
 absence of kind retains ordinary non-trigger classification):
 
 | Shape | kind | match | $schema payload | group | all | none | min-match | min-match.count | min-match.of | $path | property condition |

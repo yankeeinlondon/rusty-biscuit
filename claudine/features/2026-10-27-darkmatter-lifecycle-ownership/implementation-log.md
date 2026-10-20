@@ -20,42 +20,17 @@ skills_files_updated_during_phase_1: []
 packages:
     - claudine-cli
     - darkmatter
-human_review: true
-human_review_items:
-    - |-
-        **A dependency this feature names has not been built yet: `2026-10-16-type-narrowing`.**
-
-        The spec relies on it for two things. In Phase 3, the shell-approval check must read whether a value is guaranteed present inside a `when:` branch (the `TypeScope` type). Acceptance criterion 23 also needs its test matrix to pass. Today that spec is still a draft: nothing is implemented, and no `TypeScope` type exists in the code. Phase 2 (moving the engine into Darkmatter) does not need it. Phase 3 does, so the decision is cheapest now, before more work builds on the current plan.
-
-        - **Option A: build `2026-10-16-type-narrowing` before Phase 3.** Pro: the spec is delivered as written, including criterion 23. Con: adds a separate fix to the critical path and delays Phase 3.
-        - **Option B: keep going, and in Phase 3 keep today's approval behavior** (no narrowing-aware approval), marking criterion 23 and the narrowing paragraph of section 4 as deferred to the narrowing fix. Pro: no delay; nothing that works today changes. Con: the feature ends with one criterion open, and a follow-up must revisit the shell audit.
-        - **Option C: fold the narrowing work into this feature.** Pro: one delivery. Con: makes an already large feature larger and mixes two independent concerns.
-
-        **Recommendation: Option B.** The extraction's main promise is "no Claudine behavior change", and narrowing-aware approval is new behavior. Deferring it keeps this feature a pure move plus the `md` host, and the narrowing fix can then land against the single engine Darkmatter will own.
-    - |-
-        **Phase 4 needs your ruling on how strictly two configuration files are read.** These are the new global schema catalog and the schema-trigger files.
-
-        The plan proposes, and asks you to confirm before those readers are changed:
-
-        1. The global catalog is read strictly. A missing, `null`, wrongly typed, or empty entry for any global (`fm`, `ctx`, `current`, `env`, `err`, `timing`, and Claudine's `seq`, `loop`, `group`) is an error, as are duplicate keys and trailing garbage.
-        2. In trigger files, an explicit `null` for any trigger field is an error, never treated as "absent".
-        3. A non-string trigger `kind` (for example `kind: 5`) is an error rather than "this is not a trigger".
-
-        This is not needed for Phase 2 or 3. Phase 4 cannot finish those readers without it, so answering early avoids a stall later.
-
-        - **Option A: accept all three as proposed.** Pro: invalid configuration is always reported where it is written, never silently ignored. Con: a hand-edited file with a stray `null` that loads today could start failing; the repository's own files will be migrated in the same change.
-        - **Option B: accept 1 and 3, but keep `null` meaning "absent" in triggers.** Pro: more forgiving for trigger authors. Con: `null` and absence become indistinguishable, which the repository's input-robustness rules discourage.
-        - **Option C: make the catalog lenient (fall back to defaults).** Con: the catalog is the single source of every global's shape, so a silent fallback hides real breakage in the editor, the CLI, and runtime alike.
-
-        **Recommendation: Option A.** It matches the repository's input-robustness rules, and the repository has no external users whose files would break.
+human_review: false
 message_to_agent: |-
     Phase 1 is done and the Stage 1 gate PASSED (all 30 production traces replay exactly through the prototype). Read the implementation log's Phase 1 sections before Phase 2. Key facts:
 
-    - Traces: `claudine/cli/tests/l1/lifecycle_traces.rs` + `claudine/cli/tests/fixtures/lifecycle_traces/*.trace` are the immutable behavioral baseline (unix-only). Never edit a `.trace` to make Phase 2/3 pass; acceptance criterion 2 requires them unchanged.
+    - FIRST, before Wave 4: complete the plan's Phase 2 "Entry gate" tasks. Phase 1 recorded its baseline at `f3381eb5c`, before `2026-10-16-type-narrowing` was built. The author chose to build that fix first (Option A of the former review item), and it lands between Phase 1 and Phase 2. It changes Claudine's lifecycle preflight walk, `lifecycle/shell_template.rs`, `sequence/preflight/mod.rs`, and how a reached lifecycle shell fills a guarded hole, which is code this phase moves. So the baseline revision, the test counts, and the caller inventory below are stale until the entry gate refreshes them. Read the type-narrowing implementation log's final message and its Phase 4 and Phase 5 sections first.
+    - Narrowing artifacts are prerequisites, not part of this feature: its conformance matrix, its guard test (bare `is_null()` presence checks; reasoned `TypeScope::unguarded` allowlist), and its tests must pass with their assertions unedited. When this phase moves a file one of them names, update the path and nothing else.
+    - Traces: `claudine/cli/tests/l1/lifecycle_traces.rs` + `claudine/cli/tests/fixtures/lifecycle_traces/*.trace` are the immutable behavioral baseline (unix-only). Never edit a `.trace` to make Phase 2/3 pass; acceptance criterion 2 requires them unchanged. The single exception is the entry gate's recapture of a trace the prerequisite fix changed, logged before Wave 4 starts.
     - The prototype (`darkmatter/lib/tests/l1/lifecycle_boundary/`) is TEST-ONLY. The spec forbids two production engines, so do not promote it to a second engine beside Claudine's. Phase 2 should move Claudine's real executor/catch/guard into `darkmatter::lifecycle` and use the prototype's API shapes (log section "Boundary prototype" and "Prototype verdict") as the target boundary. Once the real engine exists, retire or rewire `replay.rs` to drive it, keeping the 30 replays green.
     - Production departs from spec section 8 in eight places (D1–D8 in the log). The code is authoritative; preserve these. In particular, D5 (resume in `start` without a session aborts with no failure/finalize) and D7 (proxy target that fails to parse ends the run with no events) needed a distinct "aborted" reply, separate from "refused".
     - Untraced, so add a trace before relying on it: `retry` in `initialize` or from preflight-reached `blocked` (production hard-errors without finalize; the prototype runs refusal cleanup), `retry` from `start`, and a cancelled root run (exit 130).
-    - `2026-10-16-type-narrowing` is not implemented (no `TypeScope`); see `human_review_items`.
+    - No author rulings are outstanding. The author decided the Phase 4 catalog/trigger input rulings on 2026-10-20 (strict catalogs, explicit `null` rejected in trigger fields, non-string trigger `kind` rejected); the plan's "Input rulings" rule and matrix record them.
 ---
 
 # Implementation Log for 2026-10-27-darkmatter-lifecycle-ownership (6 phases)
@@ -183,7 +158,8 @@ The Input Robustness Matrix does not apply to Phase 1: no catalog or trigger loa
 
 ## Phase 2
 
-- **Starting revision:** `563326f84` on `feat/pipeline` (2026-10-20), Phase 1 committed.
+- **Starting revision:** `563326f84` on `feat/pipeline` (2026-10-20), Phase 1 committed. **Superseded:** Phase 2 was paused here, before any extraction code, so `2026-10-16-type-narrowing` could be built first (the author's ruling on the former Phase 1 review item, 2026-10-20). Phase 2 resumes from the revision that closes that fix; the plan's Phase 2 entry gate records it and refreshes the Phase 1 baseline.
+- **Criterion 23 is no longer blocked:** owner P3 preflight integration (the audit reads `TypeScope`), with evidence from P5 invocation coverage (a guarded lifecycle shell under `md compose` behaves as under Claudine) and the narrowing conformance matrix passing unedited after every phase.
 
 ### Extraction design (decided before Wave 4)
 
