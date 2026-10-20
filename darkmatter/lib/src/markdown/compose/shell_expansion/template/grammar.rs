@@ -6,7 +6,7 @@ use super::{
     ArgPart, CommandTemplate, Placeholder, RedirectOp, TemplateArg, TemplateGrammarError, TemplateSegment,
     project_hole,
 };
-use crate::markdown::compose::expression::ExpressionFinder;
+use crate::markdown::compose::expression::{DeclaredTypes, ExpressionFinder, TypeScope};
 use crate::markdown::compose::shell_expansion::types::ChainOperator;
 use std::ops::Range;
 
@@ -16,8 +16,8 @@ use std::ops::Range;
 /// any quote, whitespace, or operator is interpreted, so a span's own spaces,
 /// quotes, and `||` never split or chain the command. A placeholder stays
 /// inside the argument that contains it, quoted or not. Placeholders are typed
-/// as if the document had no schema; call
-/// [`CommandTemplate::project_types`] with the owner's schema.
+/// as if the document had no schema and no guard; call
+/// [`CommandTemplate::project_types`] with the site's type scope.
 ///
 /// ## Examples
 ///
@@ -173,7 +173,7 @@ impl Parser<'_> {
         let placeholder = Placeholder {
             expression: expression.clone(),
             span: span.clone(),
-            typing: project_hole(expression, None, &[]),
+            typing: project_hole(expression, &TypeScope::unguarded(&DeclaredTypes::new(None))),
             timing: super::HoleTiming::ApprovalTime,
         };
         self.pos = span.end;

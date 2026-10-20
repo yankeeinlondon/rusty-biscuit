@@ -1071,6 +1071,8 @@ fn sequence_lifecycle_template(
                     hole.timing = match hole.timing {
                         HoleTiming::Deferred { .. } => HoleTiming::ApprovalTime,
                         HoleTiming::ApprovalTime => HoleTiming::Deferred { roots: Vec::new() },
+                        // Read only when its guarded action is reached.
+                        HoleTiming::Guarded { .. } => hole.timing.clone(),
                     };
                 }
             }

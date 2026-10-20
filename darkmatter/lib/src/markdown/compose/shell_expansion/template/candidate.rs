@@ -7,10 +7,10 @@
 //! documents with different schemas and so have different template types.
 
 use super::{
-    ApprovalKey, ArgPart, CommandTemplate, HoleTiming, OfferedChoices, ShellPreApprovals,
-    TemplateApprovalView, TemplateGrammarError, TemplateShape,
+    ApprovalKey, CommandTemplate, HoleTiming, OfferedChoices, ShellPreApprovals, TemplateApprovalView,
+    TemplateGrammarError, TemplateShape,
 };
-use crate::markdown::compose::expression::{Expr, ExpressionFinder, fm_namespace, parse};
+use crate::markdown::compose::expression::{Expr, ExpressionFinder, GuardOrigin, TypeScope, fm_namespace, parse};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandOrigin, ShellExpansionError};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
@@ -255,10 +255,10 @@ impl ShellCandidate {
     }
 }
 
-/// What discovery knows about the document that owns a command site.
+/// What discovery knows about the document that owns a command site. The
+/// site's types (the owner's schema and host roots, narrowed by its enclosing
+/// guards) are the [`TypeScope`] each [`build`](Self::build) call requires.
 pub(crate) struct CandidateScope<'a> {
-    pub schema: Option<&'a crate::markdown::schemas::SimplifiedSchema>,
-    pub host_globals: Vec<String>,
     pub deferred: &'a DeferredShellRoots,
     /// Frontmatter keys whose value reads a late root, directly or through
     /// another such key.
@@ -275,38 +275,49 @@ impl CandidateScope<'_> {
         self.deferred.late_roots_of(expression, self.derived)
     }
 
-    /// Builds the candidate for one authored command.
+    /// Builds the candidate for one authored command at a site whose types
+    /// are `types`.
     ///
     /// `evaluate` reads an approval-time placeholder against the document's
     /// discovery state; it returns `None` when the expression cannot be read
     /// there, which leaves the verdict to the compose pass.
     ///
+    /// A placeholder whose value is `null` here waits for its command only
+    /// when a guard in `types` proves that very expression present at this
+    /// site: it becomes [`HoleTiming::Guarded`] and the command template
+    /// required. A declaration never excuses a `null`, and a guard on one
+    /// expression never excuses another. A late placeholder the guards prove
+    /// present is [`HoleTiming::Guarded`] too, so no unconditional barrier
+    /// reads it.
+    ///
     /// ## Errors
     ///
     /// - [`ShellExpansionError::MissingValue`] for an approval-time
-    ///   placeholder whose value is `null`.
-    /// - [`ShellExpansionError::TemplateGrammar`] when a late placeholder, or
-    ///   [`DeferredShellRoots::placeholders_template_required`], requires
-    ///   template mode and the authored command is not a valid template.
+    ///   placeholder whose value is `null` and that no guard proves present.
+    /// - [`ShellExpansionError::TemplateGrammar`] when a late or guarded
+    ///   placeholder, or [`DeferredShellRoots::placeholders_template_required`],
+    ///   requires template mode and the authored command is not a valid
+    ///   template.
     pub(crate) fn build(
         &self,
         authored: &str,
         template: Result<CommandTemplate, TemplateGrammarError>,
         origin: ShellCommandOrigin,
+        types: &TypeScope<'_>,
         evaluate: &dyn Fn(&Expr) -> Option<Value>,
     ) -> Result<ShellCandidate, ShellExpansionError> {
-        let host_globals: Vec<&str> = self.host_globals.iter().map(String::as_str).collect();
-        let template = template.map(|mut template| {
-            template.project_types(self.schema, &host_globals);
-            for segment in &mut template.segments {
-                for arg in &mut segment.args {
-                    for part in &mut arg.parts {
-                        if let ArgPart::Hole(placeholder) = part
-                            && let Some(roots) = self.deferred_roots(&placeholder.expression)
-                        {
-                            placeholder.timing = HoleTiming::Deferred { roots };
-                        }
-                    }
+        let guard_of = |expression: &str| -> Option<GuardOrigin> {
+            let expr = parse(expression).ok()?;
+            types.type_of_expr(&expr)?.guard_presence().cloned()
+        };
+        let mut template = template.map(|mut template| {
+            template.project_types(types);
+            for placeholder in template.placeholders_mut() {
+                if let Some(roots) = self.deferred_roots(&placeholder.expression) {
+                    placeholder.timing = match guard_of(&placeholder.expression) {
+                        Some(guard) => HoleTiming::Guarded { guard, roots },
+                        None => HoleTiming::Deferred { roots },
+                    };
                 }
             }
             template
@@ -317,12 +328,7 @@ impl CandidateScope<'_> {
         let holes: Vec<(String, bool)> = match &template {
             Ok(template) => template
                 .placeholders()
-                .map(|placeholder| {
-                    (
-                        placeholder.expression.clone(),
-                        matches!(placeholder.timing, HoleTiming::Deferred { .. }),
-                    )
-                })
+                .map(|placeholder| (placeholder.expression.clone(), placeholder.timing.is_late()))
                 .collect(),
             Err(_) => ExpressionFinder::scan_plain(authored)
                 .expressions
@@ -334,7 +340,8 @@ impl CandidateScope<'_> {
                 .collect(),
         };
 
-        let any_late = holes.iter().any(|(_, late)| *late);
+        let mut any_late = holes.iter().any(|(_, late)| *late);
+        let mut guarded: Vec<(&str, GuardOrigin)> = Vec::new();
         for (expression, late) in &holes {
             if *late {
                 continue;
@@ -343,12 +350,28 @@ impl CandidateScope<'_> {
                 continue;
             };
             if matches!(evaluate(&expr), Some(Value::Null)) {
-                return Err(ShellExpansionError::MissingValue {
-                    ctx: Box::new(self.ctx.clone()),
-                    command: authored.to_string(),
-                    expression: expression.clone(),
-                    origin,
-                });
+                let Some(guard) = guard_of(expression) else {
+                    return Err(ShellExpansionError::MissingValue {
+                        ctx: Box::new(self.ctx.clone()),
+                        command: authored.to_string(),
+                        expression: expression.clone(),
+                        origin,
+                    });
+                };
+                guarded.push((expression, guard));
+                any_late = true;
+            }
+        }
+        // Discovery keeps the authored expression; nothing it resolved for a
+        // guarded hole stands in for the value read when the command runs.
+        if let Ok(template) = &mut template {
+            for placeholder in template.placeholders_mut() {
+                if let Some((_, guard)) = guarded.iter().find(|(expression, _)| *expression == placeholder.expression) {
+                    placeholder.timing = HoleTiming::Guarded {
+                        guard: guard.clone(),
+                        roots: Vec::new(),
+                    };
+                }
             }
         }
 

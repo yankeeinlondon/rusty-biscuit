@@ -515,8 +515,6 @@ fn collect_recursive(
     // inserts data, never a directive, so the orders agree.
     let site_ctx = DiscoverySiteContext::new(&prepared, &discovery, &child_state, remote_fetch);
     let scope = CandidateScope {
-        schema: None,
-        host_globals: host_global_roots(options),
         deferred: options.deferred_shell_roots(),
         derived: &deferred_keys,
         source_file: source_file.clone(),
@@ -1131,8 +1129,6 @@ fn scan_one_frontmatter(
     let authored_ctx = markdown.full_source_context_for_errors();
     let mut site_ctx: Option<DiscoverySiteContext> = None;
     let scope = CandidateScope {
-        schema: None,
-        host_globals: host_global_roots(options),
         deferred: options.deferred_shell_roots(),
         derived: deferred_keys,
         source_file: source_file.to_path_buf(),
@@ -1357,15 +1353,11 @@ impl DiscoverySiteContext {
             .as_ref()
             .map(|template| template.placeholders().next().is_some())
             .unwrap_or(false);
-        let typed = CandidateScope {
-            schema: if has_holes { self.schema() } else { None },
-            host_globals: scope.host_globals.clone(),
-            deferred: scope.deferred,
-            derived: scope.derived,
-            source_file: scope.source_file.clone(),
-            owner: scope.owner.clone(),
-            ctx: scope.ctx,
-        };
+        let host_globals = host_global_roots(&self.options);
+        let host_roots: Vec<&str> = host_globals.iter().map(String::as_str).collect();
+        let declared = crate::markdown::compose::expression::DeclaredTypes::new(if has_holes { self.schema() } else { None })
+            .with_host_globals(&host_roots);
+        let types = crate::markdown::compose::expression::TypeScope::unguarded(&declared);
         let lookup = crate::markdown::compose::context::effective_state::ResolvingLookup::new(
             &self.state,
             self.resolution.clone(),
@@ -1380,8 +1372,8 @@ impl DiscoverySiteContext {
             }
             crate::markdown::compose::expression::evaluate(expr, &lookup).ok()
         };
-        let candidate = typed
-            .build(authored, template, origin.clone(), &evaluate)
+        let candidate = scope
+            .build(authored, template, origin.clone(), &types, &evaluate)
             .map_err(|error| crate::markdown::types::MarkdownError::ShellExpansion(Box::new(error)))?;
         if self.options.validate_deferred_shell_values && let Ok(template) = &candidate.template {
             use crate::markdown::compose::shell_expansion::template::{LookupEvaluator, resolve_late_values};

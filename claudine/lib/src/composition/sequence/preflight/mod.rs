@@ -68,6 +68,7 @@ use darkmatter::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, DeferredShellRoots, HoleError, HoleEvaluator, HoleTiming,
     LateValues, ModeRequirement, ShellCandidate, derived_deferred_keys, parse_authored,
 };
+use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
 use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 use std::collections::HashSet;
 
@@ -1579,7 +1580,8 @@ impl<'a> Loader<'a> {
         let roots = sequence_deferred_roots();
         let schema = self.owner_schema(origin);
         let parsed = parsed.map(|mut template| {
-            template.project_types(schema.as_ref(), &SEQUENCE_HOST_GLOBALS);
+            let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(&SEQUENCE_HOST_GLOBALS);
+            template.project_types(&TypeScope::unguarded(&declared));
             mark_late_holes(&mut template, &roots, &self.step_derived);
             template
         });

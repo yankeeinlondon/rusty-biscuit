@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::compose::ShellCommandOrigin;
+use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
 use darkmatter::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, ModeRequirement, ShellCandidate, ShellPreApprovals, SiteValues,
     TemplateShape, parse_authored,
@@ -188,7 +189,8 @@ pub fn typed_template(
 ) -> Option<CommandTemplate> {
     let mut template = parse_authored(raw).ok()?;
     template.placeholders().next()?;
-    template.project_types(schema, &LIFECYCLE_HOST_GLOBALS);
+    let declared = DeclaredTypes::new(schema).with_host_globals(&LIFECYCLE_HOST_GLOBALS);
+    template.project_types(&TypeScope::unguarded(&declared));
     Some(template)
 }
 

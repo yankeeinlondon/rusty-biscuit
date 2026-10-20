@@ -488,17 +488,21 @@ impl<'a> SiteScope<'a> {
     ) -> Result<Option<TemplateSite<'e>>, ShellExpansionError> {
         let derived = std::collections::HashSet::new();
         let scope = template::candidate::CandidateScope {
-            schema: self.schema.as_ref(),
-            host_globals: self.host_globals.clone(),
             deferred: self.deferred,
             derived: &derived,
             source_file: self.source_file.clone(),
             owner: self.owner.clone(),
             ctx: &ctx,
         };
+        let host_roots: Vec<&str> = self.host_globals.iter().map(String::as_str).collect();
+        let declared =
+            crate::markdown::compose::expression::DeclaredTypes::new(self.schema.as_ref()).with_host_globals(&host_roots);
+        // The site's types must be the ones discovery typed it with, so its
+        // shape matches what was approved.
+        let types = crate::markdown::compose::expression::TypeScope::unguarded(&declared);
         // Presence is checked when each hole is filled, so discovery's
         // approval-time evaluation is not repeated here.
-        let candidate = scope.build(authored, template, origin, &|_| None)?;
+        let candidate = scope.build(authored, template, origin, &types, &|_| None)?;
         Ok(TemplateSite::new(candidate, evaluator, ctx, frame))
     }
 }

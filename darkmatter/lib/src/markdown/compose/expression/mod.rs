@@ -79,6 +79,7 @@ pub(crate) mod path_projection;
 pub mod parser;
 pub mod prepared;
 pub mod resolve_ctx;
+pub mod scope;
 pub mod semantics;
 
 pub use absence::{StaticVariableRead, static_variable_reads};
@@ -106,6 +107,10 @@ pub(crate) use path_projection::{
     make_portable_relative_in_context,
 };
 pub use resolve_ctx::ResolutionContext;
+pub use scope::{
+    BindingId, DeclaredType, DeclaredTypes, GuardOrigin, Member, Polarity, PresenceEvidence, ScopedType, Shape,
+    Subject, TypeScope, WriteSet,
+};
 pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
