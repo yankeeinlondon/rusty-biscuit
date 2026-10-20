@@ -88,6 +88,7 @@ mod inline_envelope_prototype;
 mod interpolation_literal_pipeline;
 mod layout_matrix;
 mod layout_snapshots;
+mod lifecycle_boundary;
 mod lifecycle_control_flow_spike;
 mod link_interpolation_integration;
 mod literal_token;
