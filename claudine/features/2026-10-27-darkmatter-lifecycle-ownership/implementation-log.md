@@ -180,3 +180,14 @@ Also observed: catch-loop (raising gate guard after `finalize`) runs no catch ev
 
 The Input Robustness Matrix does not apply to Phase 1: no catalog or trigger loader was changed. Its proposed outcomes still need the author rulings the plan requires before Phase 4 (see `human_review_items`).
 
+
+## Phase 2
+
+- **Starting revision:** `563326f84` on `feat/pipeline` (2026-10-20), Phase 1 committed.
+
+### Extraction design (decided before Wave 4)
+
+- **Placement:** a new `darkmatter::lifecycle` module in `darkmatter/lib/src/lifecycle/`. No new crate: Darkmatter already depends on every crate the moved code uses (`biscuit-terminal`, `biscuit-file`, `indexmap`, `serde_json`, `thiserror`, `tracing`).
+- **Errors:** the parser and model raise `darkmatter::lifecycle::LifecycleError`, which holds the lifecycle authoring variants moved out of Claudine's `CompositionError` (same fields, same `Display` text). Claudine keeps its same-named `CompositionError` variants for now, because its diagnostic code catalog, block renderer, and every existing test assertion are keyed on them, and maps each `LifecycleError` variant onto its twin with one exhaustive `From` impl. A Claudine test checks that the two `Display` texts agree for every variant. This keeps the error *type* in two places while the parser exists once; Phase 3 (the "delete superseded" task) can fold the twins together.
+- **Existing tests stay where their assertions are typed.** Claudine's lifecycle tests assert on `CompositionError` variants through `claudine::composition::parse_lifecycle_config` and friends. They stay in Claudine, unchanged, and now exercise the moved parser through the bridge, which is the strongest evidence for acceptance criterion 2. Moving them would have meant renaming the error type inside each assertion. Tests that live inside a moved file and assert only on moved types move with it. Darkmatter gets new tests against its own public API.
+- **Re-exports:** Claudine re-exports every moved item at its old path (`claudine::composition::{LifecycleSignal, LifecycleConfig, …}`), so callers and tests keep compiling. The re-exports delegate to the one implementation; there is no copy.
