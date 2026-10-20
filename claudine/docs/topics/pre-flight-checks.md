@@ -114,6 +114,15 @@ Each command is checked against shell policy (blacklist, whitelist, approval cac
 
 A shell command never runs with a missing value. A placeholder whose expression evaluates to `null` (an absent property reads as `null`) fails pre-flight before anything runs, on every surface: `::shell`, `::shell-block`, frontmatter `$( … )`, a lifecycle `shell` action, and a lifecycle `set` value written as `$( … )`.
 
+The one exception is a placeholder that a guard enclosing its command proves present: a lifecycle item's `when:` (for its `then:` and the actions beside the `when:`; the negation for its `else:`), or a sequence task's `when:` (for its `shell:` command). Such a command is approved only by its shape and reads the value when its guard has selected it; if the value is `null` then, that action fails with `MissingValue` and none of it launches. A `when: msg` excuses only `msg`, never another placeholder, and a lifecycle `set` of `msg` earlier in the same branch ends the excuse. See Darkmatter's [Guarded values](../../../darkmatter/docs/inline/preflight-checks.md#guarded-values).
+
+```yaml
+success:
+  - when: "ctx.dirty_files && commit_message"
+    then:
+      - shell: git commit -m "{{commit_message}}"   # approved by its shape; skipped when the guard is false
+```
+
 ```md
 ---
 target: null
@@ -391,7 +400,7 @@ flowchart TD
     N --> O[validate, check filled chain<br/>and direct targets, then dispatch]
 ```
 
-**Missing values.** Every value a command reads that exists at pre-flight — the sequence's frontmatter, caller values (`key=value`, `--set`), step values, `ctx.*`, `env.*` — is checked in every task, later ones included: a `null` fails pre-flight before step 1, naming the command and the value. A late value is checked when its task is reached, before any of that task's commands run: a `null`, an array or object, or a value its type refuses fails the task with `SequenceShellLateValue`, which never shows the value. Effects of earlier steps stand. A group checks every member before any member command runs.
+**Missing values.** Every value a command reads that exists at pre-flight — the sequence's frontmatter, caller values (`key=value`, `--set`), step values, `ctx.*`, `env.*` — is checked in every task, later ones included: a `null` fails pre-flight before step 1, naming the command and the value, unless the task's `when:` proves that placeholder present. A late value is checked when its task is reached, before any of that task's commands run: a `null`, an array or object, or a value its type refuses fails the task with `SequenceShellLateValue`, which never shows the value. Effects of earlier steps stand. A group checks every member before any member command runs. A value the task's `when:` proves present is checked instead by its command once the guard has selected the task, so a member whose guard is false is skipped without failing that check. A prompt task's `with:` value written as one `{{ … }}` that its `when:` proves present, but that is missing at pre-flight, is late for the document.
 
 Concurrent groups validate member commands at group entry and retain checked
 late inputs for execution. Nested sequences and group lifecycle events are

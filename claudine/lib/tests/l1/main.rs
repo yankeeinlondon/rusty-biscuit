@@ -32,4 +32,5 @@ mod single_loop_engine;
 mod test_layout;
 mod tts_phase1_contract;
 mod tts_phase5_contract;
+mod type_scope_ownership_guard;
 mod typed_stream_protocols;

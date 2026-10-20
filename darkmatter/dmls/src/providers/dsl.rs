@@ -22,7 +22,8 @@ use darkmatter::markdown::compose::target_chain::TargetSelection;
 use darkmatter::markdown::compose::directive_targets::{
     TargetNullability, analyze_directive_targets,
 };
-use darkmatter::markdown::compose::expression::ExpressionFinder;
+use darkmatter::markdown::compose::expression::{DeclaredTypes, ExpressionFinder, TypeScope};
+use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{
     FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellValue, describe_suffix,
     parse_frontmatter_shell_suffixes, parse_frontmatter_shell_value_spanned,
@@ -284,7 +285,8 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 }
 
 /// Hover describing a directive's semantics and (for a file target) its
-/// resolved target; for `::shell`, the parsed command and policy verdict.
+/// resolved target; for `::shell`, the parsed command and policy verdict, and
+/// the local type of a `{{ }}` hole under the cursor that a guard narrows.
 fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let directive = directives::directive_at(ctx.text, offset)?;
     let info = directives::info_for(directive.kind)?;
@@ -310,6 +312,9 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         && let Some(command) = &directive.target
     {
         lines.push(shell_verdict_markdown(&command.value, ctx));
+        if let Some(line) = shell_hole_type_line(ctx, offset) {
+            lines.push(format!("\n{line}"));
+        }
     }
 
     Some(markup_hover(ctx, directive.span.clone(), lines.join("\n")))
@@ -318,18 +323,61 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 /// Hover on a `{{ … }}` expression: its parsed form plus, in precedence order,
 /// the catalog block for the function call under the cursor (D5), the shared
 /// `ctx.*` catalog block with the compose-time note (D2), a frontmatter static
-/// value, or a bare function-name description.
+/// value, or a bare function-name description; then the identifier's local
+/// type when an enclosing guard narrows it.
 fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let body_base = body_base(ctx.text);
     let interpolation = expressions::interpolation_at(ctx.text, body_base, offset)?;
     let expr_offset = offset.saturating_sub(interpolation.inner.start);
-    let value = interpolation_hover_markdown(
-        &interpolation.text,
-        expr_offset,
-        |name| frontmatter_scalar(ctx, name),
-        |name| schema_property_hover(ctx, name),
-    );
+    let value = with_site_scope(ctx, Some(interpolation.inner.start), |site| {
+        expressions::hover_markdown(
+            &interpolation.text,
+            expr_offset,
+            site,
+            |name| frontmatter_scalar(ctx, name),
+            |name| schema_property_hover(ctx, name),
+        )
+    });
     Some(markup_hover(ctx, interpolation.outer.clone(), value))
+}
+
+/// Runs `analyze` with the type scope of a site in this document: the
+/// declared layer of its authored schema (`EffectiveSchema.simplified`) and
+/// static frontmatter, narrowed, for a body `offset`, by every `::block when`
+/// enclosing it ([`BodyGuards`]). These are the inputs composition and
+/// `analyze_directive_targets` build the same site's scope from. A
+/// frontmatter site (`None`) is unguarded: a lifecycle or task `when` is not
+/// applied to the actions it selects (see `docs/hover.md`).
+pub(crate) fn with_site_scope<R>(
+    ctx: &DocumentContext,
+    offset: Option<usize>,
+    analyze: impl FnOnce(&TypeScope<'_>) -> R,
+) -> R {
+    let empty_frontmatter = serde_json::Value::Object(serde_json::Map::new());
+    let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
+    let schema = bundle.and_then(|bundle| bundle.effective.simplified.as_ref());
+    let static_frontmatter = bundle
+        .map(|bundle| &bundle.frontmatter_json)
+        .unwrap_or(&empty_frontmatter);
+    let declared = DeclaredTypes::new(schema).with_static_frontmatter(static_frontmatter);
+    let unguarded = TypeScope::unguarded(&declared);
+    let site = match offset {
+        Some(offset) => BodyGuards::scan(ctx.text).scope_at(unguarded, offset),
+        None => unguarded,
+    };
+    analyze(&site)
+}
+
+/// The local-type line for a `{{ … }}` hole under `offset` inside a shell
+/// command, so a `::shell` or `::shell-block` hover shows what the expression
+/// hover would.
+fn shell_hole_type_line(ctx: &DocumentContext, offset: usize) -> Option<String> {
+    let interpolation = expressions::interpolation_at(ctx.text, body_base(ctx.text), offset)?;
+    let expr = expressions::parse(&interpolation.text).ok()?;
+    let node = expressions::expression_at(&expr, offset.saturating_sub(interpolation.inner.start))?;
+    with_site_scope(ctx, Some(interpolation.inner.start), |site| {
+        expressions::local_type_line(&expr, node, site)
+    })
 }
 
 /// Hover on a `{{{ … }}}` interpolation literal: identifies the span and shows
@@ -371,16 +419,23 @@ fn literal_hover_markdown(content: &str) -> String {
     )
 }
 
-/// The Markdown body of an interpolation hover — the shared
-/// [`expressions::hover_markdown`] authority so a body `{{ }}` interpolation and
-/// an Expression-typed frontmatter value render byte-identical hovers.
+/// The Markdown body of an unguarded, untyped interpolation hover through the
+/// shared [`expressions::hover_markdown`] authority, for the formatting tests.
+#[cfg(test)]
 fn interpolation_hover_markdown(
     expression: &str,
     expr_offset: usize,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
-    expressions::hover_markdown(expression, expr_offset, frontmatter_scalar, schema_property)
+    let declared = DeclaredTypes::new(None);
+    expressions::hover_markdown(
+        expression,
+        expr_offset,
+        &TypeScope::unguarded(&declared),
+        frontmatter_scalar,
+        schema_property,
+    )
 }
 
 /// The effective-schema hover details for a bare interpolation identifier that
@@ -416,8 +471,9 @@ fn frontmatter_shell_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover
     Some(markup_hover(ctx, value_span, markdown))
 }
 
-/// Hover on a `::shell-block` body command line: the parsed command and policy
-/// verdict. The opening `::shell-block` line falls outside every body span, so
+/// Hover on a `::shell-block` body command line: the parsed command, policy
+/// verdict, and the local type of a narrowed `{{ }}` hole under the cursor.
+/// The opening `::shell-block` line falls outside every body span, so
 /// the catalog hover on the keyword still wins there.
 fn shell_block_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let (command, span) = shell_block_commands(ctx.text)
@@ -425,6 +481,9 @@ fn shell_block_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         .find(|(_, span)| span.start <= offset && offset <= span.end)?;
     let mut markdown = format!("**Shell command**\n\n`{command}`");
     markdown.push_str(&shell_verdict_markdown(&command, ctx));
+    if let Some(line) = shell_hole_type_line(ctx, offset) {
+        markdown.push_str(&format!("\n\n{line}"));
+    }
     Some(markup_hover(ctx, span, markdown))
 }
 

@@ -72,7 +72,7 @@ impl RuntimeFixture {
         let scope = SiteScope {
             origin: &task.origin_path.clone(), label: &task.label.clone(),
             property: task.diagnostic.task_property.clone(), state: &state,
-            placement: Placement { position: task.position, in_group },
+            placement: Placement { position: task.position, in_group }, guard: None,
         };
         loader.collect_lifecycle_shell(task, &scope)?;
         if let PreflightAction::Group(group) = &mut task.action {

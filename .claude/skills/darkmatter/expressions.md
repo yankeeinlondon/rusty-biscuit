@@ -93,10 +93,13 @@ declaration) may excuse a discovery-time null, and `ScopedType::admits`
 checks a live value against the refinement. `template::project_hole(expr,
 &TypeScope)` reads the declaration from the scope's `DeclaredTypes` and, when
 a guard refined the subject, approves the narrowed type and records it as
-`HoleType::refinement`. `AbsenceScope`'s
-branch rule and `directive_targets::narrowed_expression_paths` are still live
-and are being migrated onto it (`2026-10-16-type-narrowing`); never add
-another guard walker.
+`HoleType::refinement`. Its consumers: shell candidates, body `::block`
+guards (`page_blocks::BodyGuards`, the one body-region helper; DMLS reuses
+it), transclusion targets (`directive_targets::classify_target_nullability`
+and `analyze_directive_targets`' `narrowed_paths` read the scope), and
+`AbsenceScope`'s branch facts. `expression::branch_scope(expr, span, site)`
+gives the scope at one node inside an expression (ternary/`&&`/`||` sides,
+same routing as `walk_static`); DMLS hover uses it. Never add another guard walker.
 
 Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
 model in `expression/binding.rs`, never through a lookup override. A root

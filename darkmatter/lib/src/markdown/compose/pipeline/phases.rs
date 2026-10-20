@@ -85,6 +85,7 @@ impl Markdown {
                     .filter(|authored| authored.text().contains("::shell-block"))
                     .map(|authored| shell_blocks::BlockTemplates {
                         authored,
+                        guards: crate::markdown::compose::page_blocks::BodyGuards::scan_body(authored.text(), line_offset),
                         scope: shell_expansion::site::SiteScope::new(
                             options,
                             schemas.effective_for(self).and_then(|effective| effective.simplified),

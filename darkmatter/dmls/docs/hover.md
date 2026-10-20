@@ -163,6 +163,64 @@ Cursor precedence: the function name wins on its own name identifier; an offset 
 
 A bare identifier inside `{{ … }}` is a **frontmatter variable** (the D2 rule above). When the document sets the key, hover shows its static value. When the key is *declared by the effective schema but unset in the document* — a caller-supplied parameter injected at compose time — hover falls back to the schema block: type, constraints, and `->` description, rendered by `frontmatter::schema_hover_details` (the schema body without the leading `` `key` `` heading, so the name is not duplicated under the `**Expression**` header). A set frontmatter value always wins over the schema block.
 
+## Formatting rule: narrowed local type
+
+When a guard narrows an identifier's type where the cursor is, the expression
+hover ends with one more line giving the type there and the guards that
+narrowed it. With `target: [string, number, "null"]` in the schema:
+
+```md
+::block when="is_string(target)"
+Checking out {{ target }}.
+::end-block
+```
+
+hovering `target` inside the block adds:
+
+> Type here: `string` (narrowed by `::block when="is_string(target)" (line 5)`)
+
+The type comes from Darkmatter's type scope, the same one composition uses for
+shell template holes and transclusion targets, so the editor and `md compose`
+always agree on it. DMLS does not decide any guard fact itself. A hover that no
+guard narrows shows no extra line.
+
+```mermaid
+flowchart LR
+    D[schema + static frontmatter] --> S[unguarded scope]
+    B["enclosing ::block when guards"] -->|true side| S2[scope at the interpolation]
+    S --> S2
+    E["ternary / && / || around the cursor"] -->|each side| S3[scope at the identifier]
+    S2 --> S3
+    S3 --> H[Type here line]
+```
+
+Guards that apply:
+
+- **Body `::block when="…"`**, every block that encloses the interpolation,
+  outermost first. This covers prose interpolations, `::shell` holes, and
+  `::shell-block` holes. On a `::shell` line or a `::shell-block` command the
+  shell hover keeps precedence and appends the same line when the cursor is on
+  a `{{ … }}` hole.
+- **Inside the expression**: the branch of a ternary gets its side of the
+  condition (`is_string(target) ? target : 'none'` shows `string` on the first
+  `target`, `number | null` on the last), and a later `&&` / `and` operand gets
+  the earlier operands' true side, a later `||` / `or` operand their false side.
+  This also applies to an `expression`-typed frontmatter value.
+
+Both branches are analyzed, each with its own side's type, because the editor
+cannot know which one runs; this says nothing about which branch compose
+reads. Guards are never evaluated: `file_exists(x)` makes `x` a present string
+inside its block without checking any file or URL.
+
+Not applied (current limits):
+
+- A lifecycle `when` (with its `then` / `else` actions) and a sequence task
+  `when` in frontmatter do not narrow the actions they select. DMLS analyzes
+  each frontmatter expression on its own and has no model of the host's
+  action structure, so a value under `then:` hovers with its declared type.
+- Host globals (`err`, `timing`, `group`) and nested union members are not
+  projected: a guard on `x.kind` narrows only `x.kind`, never `x`.
+
 ## Formatting rule: interpolation literal hover
 
 A cursor anywhere inside an interpolation literal (`{{{ … }}}`) renders an `**Interpolation literal**` block showing the composed output — the inner content wrapped in `{{ … }}` as inline code (a fenced block when multiline, with backtick fences sized to survive content containing backticks) — followed by the note that the content is rendered as literal `{{ … }}` text and is not interpolated. The body is assembled by the pure `literal_hover_markdown` function in `src/providers/dsl.rs`. The hover range is the literal's complete outer `{{{ … }}}` span.
@@ -176,7 +234,7 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 | substrate (Markdown) | a link                                               | graph-sourced target preview (an unopened target is read once, then cached)                               |
 | wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview                                                                         |
 | frontmatter          | a frontmatter key or its value                       | schema type/required/enum/default/description; or a `ctx.*` generated-key annotation                      |
-| DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
+| DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note, plus a guard-narrowed local type; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
 
 Because the chain stops at the first non-empty hover, a schema-defined frontmatter key whose value contains `{{ }}` is explained by the **frontmatter** provider (the schema description), while an *undefined* key's `{{ … }}` value falls through to the **DSL** provider's interpolation hover.
 

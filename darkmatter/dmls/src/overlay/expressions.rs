@@ -15,10 +15,11 @@ use darkmatter::markdown::compose::expression::{
     BinaryOp, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
     ParseError,
     ParseMode, SpannedExpr, SpannedExprKind, expression_function_descriptors,
-    BindingView, ReservedRootDescriptor, RootMembers, identifier_prefix_start,
-    is_whole_value_span, lint_expression, parse_condition_spanned, parse_spanned,
-    reserved_root_descriptors, static_variable_reads, validate_expression,
+    BindingView, ReservedRootDescriptor, RootMembers, ScopedType, Shape, TypeScope, branch_scope,
+    identifier_prefix_start, is_whole_value_span, lint_expression, parse_condition_spanned,
+    parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
 };
+use darkmatter::markdown::schemas::simplified::serialize_property_atom;
 use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
 use serde::{Deserialize, Serialize};
@@ -846,7 +847,9 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
 
 /// The Markdown body of a **value-dialect** expression hover — the body `{{ }}`
 /// interpolation hover. `expr_offset` is the cursor's byte offset into
-/// `expression`. Pure so the D2/D5 classification is unit-testable.
+/// `expression`; `site` is the type scope enclosing the whole expression (its
+/// body `::block` guards, or unguarded). Pure so the D2/D5 classification is
+/// unit-testable.
 ///
 /// The single authority for value-dialect expression hover markdown. See
 /// [`hover_markdown_from`] for the shared classification rule, and
@@ -855,6 +858,7 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
 pub fn hover_markdown(
     expression: &str,
     expr_offset: usize,
+    site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
@@ -862,6 +866,7 @@ pub fn hover_markdown(
         parse(expression),
         expression,
         expr_offset,
+        site,
         frontmatter_scalar,
         schema_property,
     )
@@ -875,6 +880,7 @@ pub fn hover_markdown(
 pub fn hover_markdown_condition(
     expression: &str,
     expr_offset: usize,
+    site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
@@ -882,6 +888,7 @@ pub fn hover_markdown_condition(
         parse_condition(expression),
         expression,
         expr_offset,
+        site,
         frontmatter_scalar,
         schema_property,
     )
@@ -897,12 +904,15 @@ pub fn hover_markdown_condition(
 /// the generic hover without borrowing a similarly named bare key's value. A bare
 /// identifier with no static frontmatter value falls back to `schema_property` —
 /// the effective schema's type/constraints/description for a declared-but-unset
-/// property — before the generic function-name description. Nothing here
-/// evaluates the expression or reads `ctx.*`.
+/// property — before the generic function-name description. When a guard
+/// refines the identifier's type at the cursor ([`local_type`]), a final line
+/// gives that local type. Nothing here evaluates the expression or reads
+/// `ctx.*`.
 fn hover_markdown_from(
     parsed: Result<SpannedExpr, ParseError>,
     expression: &str,
     expr_offset: usize,
+    site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
@@ -962,7 +972,63 @@ fn hover_markdown_from(
     } else if let Some(descriptor) = function_descriptor(&name) {
         value.push_str(&format!("\n\nFunction: {}", descriptor.description));
     }
+    if let Some(line) = local_type_line(&expr, sub_expr, site) {
+        value.push_str(&format!("\n\n{line}"));
+    }
     value
+}
+
+/// The type of `node` (a node of `expr`) at `site` extended by the branch
+/// facts of `expr` that enclose it, when an enclosing guard refined its
+/// declaration or proves it present. `None` for an unrefined type and for a
+/// node that reads no stable subject (a function result, a computed index).
+///
+/// Every fact comes from Darkmatter's [`TypeScope::assume`] through
+/// [`branch_scope`]; DMLS decides none itself. Static: both branches of a
+/// ternary get their own side's type, whichever would run.
+pub fn local_type(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<ScopedType> {
+    let scope = branch_scope(expr, &node.span, site.clone());
+    let ty = scope.type_of_expr(&node.erase())?;
+    (ty.is_refined() || ty.guard_presence().is_some()).then_some(ty)
+}
+
+/// The hover line giving [`local_type`] and the guards that narrowed it, or
+/// `None` when no guard refined `node` there. Shared by the expression hover
+/// and the shell-command hovers, whose `{{ }}` holes are typed the same way.
+pub fn local_type_line(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<String> {
+    let local = local_type(expr, node, site)?;
+    let mut guards: Vec<String> = Vec::new();
+    for origin in local.refinements().iter().chain(local.guard_presence()) {
+        let label = format!("`{}`", origin.label());
+        if !guards.contains(&label) {
+            guards.push(label);
+        }
+    }
+    Some(format!("Type here: `{}` (narrowed by {})", type_text(&local), guards.join(", ")))
+}
+
+/// A scoped type as type text: its non-null alternatives in the schema
+/// grammar, then `null` when it is still admitted.
+pub fn type_text(ty: &ScopedType) -> String {
+    match ty.shape() {
+        Shape::Unknown { non_null: true } => "unknown (not null)".to_string(),
+        Shape::Unknown { non_null: false } => "unknown".to_string(),
+        Shape::Arms { arms, nullable } => {
+            let mut parts: Vec<String> = arms
+                .iter()
+                .map(|arm| {
+                    let mut arm = arm.clone();
+                    arm.description = None;
+                    serialize_property_atom(&arm)
+                })
+                .collect();
+            if *nullable {
+                // The JSON spelling, so DMLS keeps no root names of its own.
+                parts.push(serde_json::Value::Null.to_string());
+            }
+            parts.join(" | ")
+        }
+    }
 }
 
 /// Whether a bare root `name` is an undeclared document property: one the
@@ -1064,8 +1130,11 @@ pub enum UndeclaredPropertyFinding {
 /// (the YAML quote style around a frontmatter value).
 ///
 /// Absence handling follows the library's static walk
-/// ([`static_variable_reads`]), so the editor suppresses what the runtime
-/// suppresses; it flags both branches because it cannot know which runs.
+/// ([`static_variable_reads`]): intentional absence handling plus the shared
+/// branch facts, so the second `x` of `x && x` or `x ? x : 'none'` is silent
+/// while a false ternary branch and a sibling path are not. It checks both
+/// branches, each under its own side's facts, because it cannot know which
+/// runs; the runtime warns only for the branch it reads.
 pub fn undeclared_property_findings(
     expr: &SpannedExpr,
     source: &str,
@@ -1265,6 +1334,14 @@ mod frontmatter_inventory_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use darkmatter::markdown::compose::expression::DeclaredTypes;
+
+    /// The declared layer of a document with no schema or frontmatter.
+    static UNTYPED: DeclaredTypes<'static> = DeclaredTypes::new(None);
+
+    fn untyped() -> TypeScope<'static> {
+        TypeScope::unguarded(&UNTYPED)
+    }
 
     /// Findings for a value-dialect `source` where `keys` are the document's
     /// frontmatter keys.
@@ -1367,6 +1444,7 @@ mod tests {
         let declared = hover_markdown(
             "current_env",
             3,
+            &untyped(),
             |name| (name == "current_env").then(|| "userland".to_string()),
             |_| None,
         );
@@ -1374,7 +1452,7 @@ mod tests {
         assert!(!declared.contains("reserved"), "{declared}");
 
         let from_schema =
-            hover_markdown("current_env", 3, |_| None, |name| (name == "current_env").then(|| "SCHEMA-BLOCK".to_string()));
+            hover_markdown("current_env", 3, &untyped(), |_| None, |name| (name == "current_env").then(|| "SCHEMA-BLOCK".to_string()));
         assert!(from_schema.contains("SCHEMA-BLOCK"), "{from_schema}");
     }
 
@@ -1840,7 +1918,7 @@ mod tests {
                     && candidate.detail.as_deref().is_some_and(|detail| detail.contains(typed))),
                 "completion for {name} must carry `{typed}`"
             );
-            let hover = hover_markdown(expression, 1, |_| None, |_| None);
+            let hover = hover_markdown(expression, 1, &untyped(), |_| None, |_| None);
             assert!(hover.contains(typed), "{hover}");
             assert!(!hover.contains("not implemented"), "hover must not evaluate: {hover}");
         }
@@ -1950,15 +2028,15 @@ mod tests {
         let no_schema = |_: &str| None;
         // Body (value dialect) hover renders `||` as fallback — the behavior this
         // change must preserve.
-        let body = hover_markdown("a || b", 0, no_fm, no_schema);
+        let body = hover_markdown("a || b", 0, &untyped(), no_fm, no_schema);
         assert!(body.contains("`a || b`"), "{body}");
         // Frontmatter (condition dialect) hover lowers `||` to a logical `or(...)`.
-        let cond = hover_markdown_condition("a || b", 0, no_fm, no_schema);
+        let cond = hover_markdown_condition("a || b", 0, &untyped(), no_fm, no_schema);
         assert!(cond.contains("`or(a, b)`"), "{cond}");
         // A function-call name inside a condition expression still enriches.
         let source = "is_empty(title) || is_string(title)";
         let fn_offset = source.find("is_empty").unwrap() + 2;
-        let enriched = hover_markdown_condition(source, fn_offset, no_fm, no_schema);
+        let enriched = hover_markdown_condition(source, fn_offset, &untyped(), no_fm, no_schema);
         let is_empty = function_descriptor("is_empty").expect("`is_empty` is a known function");
         assert!(enriched.contains(&format_function_block(is_empty)), "{enriched}");
     }
@@ -2025,8 +2103,8 @@ mod tests {
             let expression = "spec-name || foo";
             for offset in 0..="spec-name".len() {
                 for markdown in [
-                    hover_markdown(expression, offset, kebab_scalar, |_| None),
-                    hover_markdown_condition(expression, offset, kebab_scalar, |_| None),
+                    hover_markdown(expression, offset, &untyped(), kebab_scalar, |_| None),
+                    hover_markdown_condition(expression, offset, &untyped(), kebab_scalar, |_| None),
                 ] {
                     assert!(
                         markdown.contains("from frontmatter `spec-name`"),
@@ -2039,9 +2117,9 @@ mod tests {
         #[test]
         fn hover_keeps_double_dash_operands_separate() {
             let expression = "foo--bar";
-            let on_foo = hover_markdown(expression, 1, kebab_scalar, |_| None);
+            let on_foo = hover_markdown(expression, 1, &untyped(), kebab_scalar, |_| None);
             assert!(on_foo.contains("from frontmatter `foo`"), "{on_foo}");
-            let on_bar = hover_markdown(expression, expression.len() - 1, kebab_scalar, |_| None);
+            let on_bar = hover_markdown(expression, expression.len() - 1, &untyped(), kebab_scalar, |_| None);
             assert!(on_bar.contains("from frontmatter `bar`"), "{on_bar}");
         }
 

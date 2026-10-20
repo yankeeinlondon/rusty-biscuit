@@ -68,7 +68,8 @@ use darkmatter::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, DeferredShellRoots, HoleError, HoleEvaluator, HoleTiming,
     LateValues, ModeRequirement, ShellCandidate, derived_deferred_keys, parse_authored,
 };
-use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
+use darkmatter::markdown::compose::expression::{DeclaredTypes, GuardOrigin, Polarity, TypeScope};
+use super::super::lifecycle::shell_template::{placeholder_guard, retime_guarded};
 use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 use std::collections::HashSet;
 
@@ -602,6 +603,10 @@ struct Loader<'a> {
     /// Keys an inline container event of the graph may write, collected as
     /// the walk reads them; [`Self::finish`] adds every retained stack's.
     written_keys: HashSet<String>,
+    /// The `when:` of a `task:` reference, with its authored location, for
+    /// the task its file declares: the reference's guard decides whether that
+    /// task runs, above one the file declares. Taken by the next task loaded.
+    guard_override: Option<(String, String)>,
 }
 
 /// Where in the sequence a task being loaded sits.
@@ -634,6 +639,7 @@ impl<'a> Loader<'a> {
             source_schema: None,
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
+            guard_override: None,
         }
     }
 
@@ -659,6 +665,7 @@ impl<'a> Loader<'a> {
             source_schema: None,
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
+            guard_override: None,
         }
     }
 
@@ -804,6 +811,11 @@ impl<'a> Loader<'a> {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        let (when, when_property) = match self.guard_override.take() {
+            Some(reference) => reference,
+            None => (option_string(options, "when").unwrap_or_default(), property_child(property, "when")),
+        };
+        let guard = TaskGuard::parse(&when, when_property.clone());
 
         let mut preflight_approvals = Vec::new();
         let mut shell_sites = Vec::new();
@@ -813,7 +825,7 @@ impl<'a> Loader<'a> {
                 let reference = expect_reference(value, "prompt", label)?;
                 let document = self.load_prompt(&reference, origin)?;
                 let with = option_map(options, "with");
-                let prepared = self.record_prompt_reference(&document, &with, origin, state, placement);
+                let prepared = self.record_prompt_reference(&document, &with, origin, state, placement, guard.as_ref());
                 provider = Some(self.predict_provider(&document, &with, &prepared, origin, property)?);
                 PreflightAction::Prompt {
                     path: document,
@@ -827,6 +839,7 @@ impl<'a> Loader<'a> {
                     property: property_child(property, field.key()),
                     state,
                     placement,
+                    guard: guard.as_ref(),
                 };
                 let (commands, approvals, sites) = self.resolve_shell_commands(value, &site)?;
                 preflight_approvals = approvals;
@@ -859,6 +872,7 @@ impl<'a> Loader<'a> {
             }
             ExecutableField::Task => {
                 let reference = expect_reference(value, "task", label)?;
+                self.guard_override = (!when.is_empty()).then(|| (when.clone(), when_property.clone()));
                 let mut task = self.load_external_task(
                     &reference,
                     origin,
@@ -921,6 +935,7 @@ impl<'a> Loader<'a> {
             property: property.to_string(),
             state,
             placement,
+            guard: None,
         };
         self.collect_lifecycle_shell(&mut task, &site)?;
         Ok(task)
@@ -1476,6 +1491,9 @@ impl<'a> Loader<'a> {
             let stage_scope = SiteScope {
                 label: &stage_label,
                 property: property_child(&scope.property, stage.key()),
+                // A task's guard narrows only what the sequence evaluates for
+                // it; its stacks are typed unguarded.
+                guard: None,
                 ..*scope
             };
             for (index, (kind, raw)) in shape::collect_stack_shell_sites(&stack).into_iter().enumerate() {
@@ -1511,7 +1529,11 @@ impl<'a> Loader<'a> {
     /// otherwise — a later task, or a late value (`outputs`, `loop`, `group`,
     /// or a step value derived from one) — it is approved only by its typed
     /// shape. Either way every approval-time value is resolved here, and a
-    /// missing one (`null`) fails preflight before any step runs.
+    /// missing one (`null`) fails preflight before any step runs, unless the
+    /// task's `when:` guard ([`SiteScope::guard`]) proves that placeholder
+    /// present: then the command is approved only by its shape and reads the
+    /// value once the guard selects the task. A late value the guard proves
+    /// present is read then too, not at the step barrier.
     ///
     /// A first-task command's resolved bytes are what it runs: a target-identity
     /// root (`ctx.agent`, `ctx.model`, `env.AGENT`, `env.MODEL`) is rejected
@@ -1577,23 +1599,30 @@ impl<'a> Loader<'a> {
 
         // Type each placeholder against the authoring document's schema and
         // mark the ones that read a late value.
+        // A `shell:` command is typed on the true side of its task's guard:
+        // the guard selected the task before the command runs.
         let roots = sequence_deferred_roots();
         let schema = self.owner_schema(origin);
+        let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(&SEQUENCE_HOST_GLOBALS);
+        let types = site_types(&declared, scope.guard);
         let parsed = parsed.map(|mut template| {
-            let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(&SEQUENCE_HOST_GLOBALS);
-            template.project_types(&TypeScope::unguarded(&declared));
+            template.project_types(&types);
             mark_late_holes(&mut template, &roots, &self.step_derived);
+            // A late value the guard proves present is read by the command
+            // once the guard selects the task, never by the step barrier.
+            for placeholder in template.placeholders_mut() {
+                if let HoleTiming::Deferred { roots } = &placeholder.timing
+                    && let Some(guard) = placeholder_guard(&placeholder.expression, &types)
+                {
+                    placeholder.timing = HoleTiming::Guarded { guard, roots: roots.clone() };
+                }
+            }
             template
         });
         let holes: Vec<(String, bool)> = match &parsed {
             Ok(template) => template
                 .placeholders()
-                .map(|hole| {
-                    (
-                        hole.expression.clone(),
-                        matches!(hole.timing, HoleTiming::Deferred { .. }),
-                    )
-                })
+                .map(|hole| (hole.expression.clone(), hole.timing.is_late()))
                 .collect(),
             Err(_) => darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(raw)
                 .expressions
@@ -1607,21 +1636,9 @@ impl<'a> Loader<'a> {
         let any_late = holes.iter().any(|(_, late)| *late);
         let template_required = any_late || scope.placement.position == TaskPosition::Later;
         let template_result = parsed.clone();
-        let parsed = match parsed {
+        let mut parsed = match parsed {
             Ok(template) => Some(template),
-            Err(reason) if template_required => {
-                return Err(self.site_failure(
-                    raw,
-                    scope,
-                    ShellExpansionError::TemplateGrammar {
-                        ctx: Box::new(self.authored_context(origin, &authored)),
-                        command: authored.clone(),
-                        reason,
-                        origin: site_origin(&scope.property),
-                    },
-                    "it must run as a template, but it is not a valid template".to_string(),
-                ));
-            }
+            Err(reason) if template_required => return Err(self.grammar_failure(raw, &authored, scope, reason)),
             Err(_) => None,
         };
 
@@ -1635,21 +1652,35 @@ impl<'a> Loader<'a> {
             .map(|(expression, _)| expression.as_str())
             .collect();
         let resolved = self.resolve_approval_time(raw, !any_late, &approval_time, scope)?;
-        if let Some(expression) = resolved.missing {
-            return Err(self.site_failure(
-                raw,
-                scope,
-                ShellExpansionError::MissingValue {
-                    ctx: Box::new(self.authored_context(origin, &authored)),
-                    command: authored.clone(),
-                    expression: expression.to_string(),
-                    origin: site_origin(&scope.property),
-                },
-                format!(
-                    "it reads `{expression}`, which is missing; a shell command never runs with a \
-                     missing value"
-                ),
-            ));
+        // A missing value fails preflight unless the task's guard proves that
+        // very placeholder present; then the command reads it when it runs.
+        let mut guarded = Vec::new();
+        for expression in &resolved.missing {
+            let Some(guard) = placeholder_guard(expression, &types) else {
+                return Err(self.site_failure(
+                    raw,
+                    scope,
+                    ShellExpansionError::MissingValue {
+                        ctx: Box::new(self.authored_context(origin, &authored)),
+                        command: authored.clone(),
+                        expression: expression.to_string(),
+                        origin: site_origin(&scope.property),
+                    },
+                    format!(
+                        "it reads `{expression}`, which is missing; a shell command never runs with a \
+                         missing value"
+                    ),
+                ));
+            };
+            guarded.push((expression.to_string(), guard));
+        }
+        let template_required = template_required || !guarded.is_empty();
+        match (&mut parsed, &template_result) {
+            (Some(template), _) => retime_guarded(template, &guarded),
+            (None, Err(reason)) if template_required => {
+                return Err(self.grammar_failure(raw, &authored, scope, reason.clone()));
+            }
+            (None, _) => {}
         }
 
         if !template_required {
@@ -1791,10 +1822,12 @@ impl<'a> Loader<'a> {
             unreachable!("an array subtree composes to an array");
         };
         let reads = composed.split_off(usize::from(with_bytes));
-        let missing = holes
-            .iter()
-            .zip(&reads)
-            .find_map(|(hole, read)| read.is_null().then_some(*hole));
+        let mut missing: Vec<&'h str> = Vec::new();
+        for (hole, read) in holes.iter().zip(&reads) {
+            if read.is_null() && !missing.contains(hole) {
+                missing.push(hole);
+            }
+        }
         let bytes = composed.pop().map(|resolved| match resolved {
             Value::String(text) => text,
             other => other.to_string(),
@@ -1872,6 +1905,28 @@ impl<'a> Loader<'a> {
         Ok((resolved.to_string(), Some(value)))
     }
 
+    /// The failure of a site that must run as its template but whose
+    /// command `authored` is not a valid one.
+    fn grammar_failure(
+        &self,
+        raw: &str,
+        authored: &str,
+        scope: &SiteScope<'_>,
+        reason: darkmatter::markdown::compose::shell_expansion::template::TemplateGrammarError,
+    ) -> CompositionError {
+        self.site_failure(
+            raw,
+            scope,
+            ShellExpansionError::TemplateGrammar {
+                ctx: Box::new(self.authored_context(scope.origin, authored)),
+                command: authored.to_string(),
+                reason,
+                origin: site_origin(&scope.property),
+            },
+            "it must run as a template, but it is not a valid template".to_string(),
+        )
+    }
+
     /// A typed site failure carrying Darkmatter's shell error as its cause.
     fn site_failure(
         &self,
@@ -1929,6 +1984,12 @@ impl<'a> Loader<'a> {
     /// entry is evaluated now, against the step's early-binding values, so
     /// the document's commands see it as they will at the task's turn.
     ///
+    /// `guard` is the task's `when:`, read with the step's bindings before any
+    /// `with` value binds. A whole `{{ … }}` value it proves present but that
+    /// is `null` now is late too, so the document reads it when the guard has
+    /// selected the task, and its own barrier checks it then. The guard never
+    /// narrows the document itself.
+    ///
     /// An entry whose evaluation fails is late for shell discovery, because
     /// `with` otherwise binds only at the task's turn, but [`PreparedWith`]
     /// keeps its cause so provider prediction can fail a selection input that
@@ -1940,7 +2001,11 @@ impl<'a> Loader<'a> {
         origin: &Path,
         state: &EffectiveState,
         placement: Placement,
+        guard: Option<&TaskGuard>,
     ) -> PreparedWith {
+        let schema = guard.and_then(|_| self.owner_schema(origin));
+        let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(&SEQUENCE_HOST_GLOBALS);
+        let types = site_types(&declared, guard);
         let mut deferred: Vec<String> =
             derived_deferred_keys(with.iter(), &sequence_deferred_roots(), &self.step_derived)
                 .into_iter()
@@ -1965,6 +2030,10 @@ impl<'a> Loader<'a> {
                 &self.context,
                 &file_resolution_context,
             ) {
+                // A whole value the task's guard proves present, but missing
+                // now, binds at the task's turn: the document treats it as late
+                // rather than as a `null` it would refuse.
+                Ok(Ok(Value::Null)) if guard_proves_whole_value(value, &types) => deferred.push(key.clone()),
                 Ok(Ok(resolved)) => {
                     evaluated.insert(key.clone(), resolved);
                 }
@@ -2203,6 +2272,41 @@ struct SiteScope<'s> {
     property: String,
     state: &'s EffectiveState,
     placement: Placement,
+    /// The task's `when:` guard, for a site the sequence evaluates for the
+    /// task (its `shell:` command); `None` for its `setup:`/`teardown:` stacks
+    /// and for a container's events.
+    guard: Option<&'s TaskGuard>,
+}
+
+/// A task's `when:` guard, parsed passively, as the values the sequence
+/// evaluates for that task are checked under it.
+struct TaskGuard {
+    when: darkmatter::markdown::compose::expression::Expr,
+    /// The guard's authored location, `tasks[2].when`.
+    origin: GuardOrigin,
+}
+
+impl TaskGuard {
+    /// The guard authored as `when` at `property`, or `None` when there is
+    /// none or it does not parse: a malformed guard fails when the task
+    /// evaluates it, as before, and proves nothing here.
+    fn parse(when: &str, property: String) -> Option<Self> {
+        if when.is_empty() {
+            return None;
+        }
+        let when = darkmatter::markdown::compose::expression::parse_condition(when).ok()?;
+        Some(Self { when, origin: GuardOrigin::new(property) })
+    }
+}
+
+/// The type scope of a site whose declared layer is `declared`: unguarded, or
+/// narrowed by `guard`.
+fn site_types<'d>(declared: &'d DeclaredTypes<'d>, guard: Option<&TaskGuard>) -> TypeScope<'d> {
+    let site = TypeScope::unguarded(declared);
+    match guard {
+        Some(guard) => site.assume_at(&guard.when, Polarity::True, guard.origin.clone()),
+        None => site,
+    }
 }
 
 /// One prepared site and what its task records about it.
@@ -2219,9 +2323,20 @@ struct PreparedSite {
 /// The approval-time reads of one site.
 struct ApprovalTimeValues<'h> {
     bytes: Option<String>,
-    /// The first approval-time placeholder that read `null`.
-    missing: Option<&'h str>,
+    /// Every approval-time placeholder that read `null`, in authored order.
+    missing: Vec<&'h str>,
     approval: Option<reapproval::ApprovalRecordOwned>,
+}
+
+/// Whether `value` is one whole-value `{{ … }}` span whose expression a guard
+/// in `types` proves present.
+fn guard_proves_whole_value(value: &Value, types: &TypeScope<'_>) -> bool {
+    let Value::String(text) = value else { return false };
+    if !darkmatter::markdown::compose::expression::is_whole_value_span(text) {
+        return false;
+    }
+    let found = darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(text);
+    found.expressions.first().is_some_and(|location| placeholder_guard(&location.expression, types).is_some())
 }
 
 /// Mark each placeholder of `template` that reads a late root, directly or

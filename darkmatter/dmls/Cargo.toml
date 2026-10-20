@@ -118,6 +118,8 @@ source-inputs = [
   "darkmatter/cli/tests/common/source_scan.rs",
   "darkmatter/lib/tests/common/clean_parity/mod.rs",
   "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+  "darkmatter/lib/tests/common/type_scope_cases.rs",
+  "darkmatter/lib/tests/common/type_scope_guard.rs",
   "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
   "darkmatter/lib/tests/position_fixtures/mod.rs",
   "darkmatter/lib/tests/union_fixtures/mod.rs",

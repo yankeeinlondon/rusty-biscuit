@@ -162,11 +162,21 @@ absence:
 | `{{ x \|\| "d" }}` | no — primary of a fallback |
 | `{{ a \|\| x }}` | yes, when the right-hand side is evaluated |
 | `{{ x ? a : b }}` | no — ternary condition |
-| `{{ x ? x : b }}` | no — the branch is guarded by `x` |
+| `{{ x ? x : b }}` | no — the true branch is reached only when `x` is present |
+| `{{ x ? b : x }}` | yes, when the false branch is evaluated — it learns nothing about `x` |
+| `{{ x != null ? x : b }}`, `{{ is_string(x) ? x : b }}` | the condition's `x` yes; the true branch's `x` no |
+| `{{ x && x.name }}` | the first `x` yes (an `&&` operand is not an absence check); `x.name` no — it is read only once `x` held, and a guard on `x` covers the paths below it |
+| `{{ x.a ? x.b : c }}` | yes — a guard on `x.a` says nothing about its sibling `x.b` |
 | `{{ a ? x : b }}` | yes, when the `x` branch is evaluated |
 | `{{ is_null(x) }}`, `{{ is_empty(x) }}` | no — direct argument of an absence predicate or one of its aliases |
 | `{{ is_empty(lower(x)) }}` | yes — the predicate no longer guards the lookup directly |
 | `::block when="x"` | yes — a misspelled gate would silently hide content |
+
+A branch is silent for exactly what its side of the condition proves present,
+by the same guard rules that narrow shell placeholders (see
+[Guarded values](./preflight-checks.md#guarded-values)): a ternary branch gets
+its own side only, the right side of `&&` gets the left side's true facts, and
+the right side of `||` its false facts.
 
 Composition reports only what it evaluates, so an unchosen ternary branch or a
 short-circuited fallback is never reported. The same rule applies to frontmatter

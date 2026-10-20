@@ -82,7 +82,7 @@ pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;
 
-pub use absence::{StaticVariableRead, static_variable_reads};
+pub use absence::{StaticVariableRead, branch_scope, static_variable_reads};
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
@@ -563,28 +563,37 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             let base = evaluate_expr(base, lookup, scope, observer)?;
             Ok(evaluate_member(&base, name))
         }
-        Expr::Fallback { primary, fallback } => {
-            let primary = evaluate_expr(primary, lookup, scope.absence_check(), observer)?;
+        Expr::Fallback { primary: primary_expr, fallback } => {
+            let primary = evaluate_expr(primary_expr, lookup, scope.absence_check(), observer)?;
             if is_truthy(&primary) {
                 Ok(primary)
+            } else if O::OBSERVES {
+                // Keeps `scope`'s handling: in a chain `a || b || "d"` that is
+                // itself a primary, `b` is handled too. The fallback is read
+                // only when the primary failed, so it gets the false side.
+                let facts = scope.facts().assume(primary_expr, scope::Polarity::False);
+                evaluate_expr(fallback, lookup, scope.with_facts(&facts), observer)
             } else {
-                // Keeps `scope`: in a chain `a || b || "d"` that is itself a
-                // primary, `b` is handled too.
                 evaluate_expr(fallback, lookup, scope, observer)
             }
         }
         Expr::Ternary {
-            condition,
+            condition: condition_expr,
             then_branch,
             else_branch,
         } => {
-            let guard = scope.condition_guard(condition);
-            let branch_scope = scope.branch(guard.as_ref());
-            let condition = evaluate_expr(condition, lookup, scope.absence_check(), observer)?;
-            if is_truthy(&condition) {
-                evaluate_expr(then_branch, lookup, branch_scope, observer)
+            let condition = evaluate_expr(condition_expr, lookup, scope.absence_check(), observer)?;
+            let (branch, polarity) = if is_truthy(&condition) {
+                (then_branch, scope::Polarity::True)
             } else {
-                evaluate_expr(else_branch, lookup, branch_scope, observer)
+                (else_branch, scope::Polarity::False)
+            };
+            if O::OBSERVES {
+                // The chosen branch reads under its own side's facts only.
+                let facts = scope.facts().assume(condition_expr, polarity);
+                evaluate_expr(branch, lookup, scope.with_facts(&facts), observer)
+            } else {
+                evaluate_expr(branch, lookup, scope, observer)
             }
         }
         Expr::Comparison { left, op, right } => {
@@ -807,10 +816,15 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
                 }
                 None => return Err(unknown_function_error("and")),
             }
+            // Each operand reads under the earlier operands' true facts.
+            let mut facts = argument.facts();
             for arg in args {
-                let value = evaluate_expr(arg, lookup, argument, observer)?;
+                let value = evaluate_expr(arg, lookup, argument.with_facts(&facts), observer)?;
                 if !is_truthy(&value) {
                     return Ok(Value::Bool(false));
+                }
+                if O::OBSERVES {
+                    facts = facts.assume(arg, scope::Polarity::True);
                 }
             }
             Ok(Value::Bool(true))
@@ -823,10 +837,15 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
                 }
                 None => return Err(unknown_function_error("or")),
             }
+            // Each operand reads under the earlier operands' false facts.
+            let mut facts = argument.facts();
             for arg in args {
-                let value = evaluate_expr(arg, lookup, argument, observer)?;
+                let value = evaluate_expr(arg, lookup, argument.with_facts(&facts), observer)?;
                 if is_truthy(&value) {
                     return Ok(Value::Bool(true));
+                }
+                if O::OBSERVES {
+                    facts = facts.assume(arg, scope::Polarity::False);
                 }
             }
             Ok(Value::Bool(false))

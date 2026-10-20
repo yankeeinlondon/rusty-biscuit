@@ -525,11 +525,23 @@ fn collect_recursive(
         markdown.content(),
         markdown.frontmatter_line_count(),
     );
+    // Discovery is condition-blind, so every site is collected; each is
+    // typed on the true side of the `::block when=` guards around it, as the
+    // compose pass types it once those guards have selected it.
+    let body_guards = crate::markdown::compose::page_blocks::BodyGuards::scan_body(markdown.content(), markdown.frontmatter_line_count());
+    let authored_offset = markdown.frontmatter_line_count();
     let mut body_sites = Vec::with_capacity(authored_directives.len());
     let mut body_awaiting = Vec::with_capacity(authored_directives.len());
     for (authored, line) in &authored_directives {
         let template = crate::markdown::compose::shell_expansion::parser::authored_template(authored);
-        body_sites.push(site_ctx.build(&scope, authored, template, ShellCommandOrigin::Body { line: *line })?);
+        let guards = body_guards.enclosing_line(line - authored_offset);
+        body_sites.push(site_ctx.build(
+            &scope,
+            authored,
+            template,
+            ShellCommandOrigin::Body { line: *line },
+            &guards,
+        )?);
         body_awaiting.push(site_ctx.awaits_execution(authored));
     }
     let body_linked = body_sites.len() == directive_lines.len();
@@ -606,7 +618,6 @@ fn collect_recursive(
     // failure and let the compose pass produce the real, styled error.
     let pairs = block_pairs::scan_block_pairs_in(prepared.content(), Some(&body_data))
         .unwrap_or_default();
-    let authored_offset = markdown.frontmatter_line_count();
     // The authored commands of each block, in document order, beside the
     // site discovery built for each.
     let mut authored_blocks: Vec<Vec<(ShellCandidate, String, usize, bool)>> = Vec::new();
@@ -629,6 +640,7 @@ fn collect_recursive(
                     start_line: pair.start_line + authored_offset,
                     command_line: command.start_line + authored_offset,
                 },
+                &body_guards.enclosing_line(command.start_line),
             )?;
             let awaiting = site_ctx.awaits_execution(&command.raw_command);
             block.push((site, command.raw_command, command.start_line, awaiting));
@@ -1159,7 +1171,9 @@ fn scan_one_frontmatter(
                     Some(site_ctx) => site_ctx,
                     None => site_ctx.insert(DiscoverySiteContext::for_frontmatter(&fm_clone, options)?),
                 };
-                Some(site_ctx.build(&scope, &authored, template, origin.clone())?)
+                // A standalone `$( … )` value is unguarded: a body block that
+                // later reads the key grants it nothing.
+                Some(site_ctx.build(&scope, &authored, template, origin.clone(), &[])?)
             }
             None => None,
         };
@@ -1348,6 +1362,7 @@ impl DiscoverySiteContext {
             crate::markdown::compose::shell_expansion::template::TemplateGrammarError,
         >,
         origin: ShellCommandOrigin,
+        guards: &[&crate::markdown::compose::page_blocks::BodyGuard],
     ) -> MarkdownResult<ShellCandidate> {
         let has_holes = template
             .as_ref()
@@ -1357,7 +1372,12 @@ impl DiscoverySiteContext {
         let host_roots: Vec<&str> = host_globals.iter().map(String::as_str).collect();
         let declared = crate::markdown::compose::expression::DeclaredTypes::new(if has_holes { self.schema() } else { None })
             .with_host_globals(&host_roots);
-        let types = crate::markdown::compose::expression::TypeScope::unguarded(&declared);
+        // `SiteScope::site` narrows the compose pass's site by the same
+        // guards, so the approved shape is the shape that runs.
+        let types = crate::markdown::compose::page_blocks::guards::within(
+            guards,
+            crate::markdown::compose::expression::TypeScope::unguarded(&declared),
+        );
         let lookup = crate::markdown::compose::context::effective_state::ResolvingLookup::new(
             &self.state,
             self.resolution.clone(),

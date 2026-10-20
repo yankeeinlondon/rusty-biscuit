@@ -1,24 +1,23 @@
 //! Typed evaluation and rewriting for interpolated transclusion targets.
 
-use std::collections::BTreeSet;
-
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::body_origin::{DataRanges, TextEdit};
-use crate::markdown::compose::context::context_variable_descriptors;
 use crate::markdown::compose::directives_api::{
-    BlockKind, BlockScanError, DirectiveKind, scan_darkmatter_blocks,
-    scan_darkmatter_directives, scan_darkmatter_directives_in,
+    BlockScanError, DirectiveKind, scan_darkmatter_blocks, scan_darkmatter_directives,
+    scan_darkmatter_directives_in,
 };
 use crate::markdown::compose::expression::{
-    ComparisonOp, EvaluationLookup, Expr, parse, parse_condition, scalar_string,
+    BindingId, DeclaredType, DeclaredTypes, EvaluationLookup, Expr, Member, Subject, TypeScope, parse,
+    scalar_string,
 };
+use crate::markdown::compose::page_blocks::BodyGuards;
 use crate::markdown::compose::expression::absence;
 use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::interpolation::rewrite::interpolate_value;
 use crate::markdown::compose::interpolation::{
     Evaluator, ExpressionFailurePolicy, LocatedInterpolationError,
 };
-use crate::markdown::schemas::{EffectiveSchema, SchemaOriginKind, SimplifiedSchema};
+use crate::markdown::schemas::EffectiveSchema;
 use crate::markdown::span::SourceSpan;
 
 /// A normalized property path used by passive target and guard analysis.
@@ -59,14 +58,17 @@ pub struct DirectiveTargetAnalysis {
     pub expression: Expr,
     /// Normalized property root when the expression is a supported path.
     pub root: Option<ExpressionPath>,
-    /// Schema- and frontmatter-derived nullability.
+    /// Schema-, descriptor-, and frontmatter-derived nullability, before any
+    /// guard.
     pub nullability: TargetNullability,
-    /// Paths narrowed by every enclosing page block.
+    /// The paths the enclosing page-block guards prove present at the target,
+    /// sorted.
     pub narrowed_paths: Vec<ExpressionPath>,
 }
 
 impl DirectiveTargetAnalysis {
-    /// Whether an enclosing page-block condition narrows this target's root.
+    /// Whether the enclosing page-block guards prove this target's root
+    /// present.
     pub fn is_narrowed(&self) -> bool {
         self.root
             .as_ref()
@@ -76,79 +78,43 @@ impl DirectiveTargetAnalysis {
 
 /// Classifies a parsed target expression from already-assembled static state.
 ///
-/// The classifier is intentionally conservative: document properties must be
-/// top-level SimplifiedSchema declarations owned by the document or a
-/// referenced schema file. Unsupported authority returns [`TargetNullability::Unknown`].
+/// The target's type is read from an unguarded [`TypeScope`] over the
+/// document's authored schema projection (`EffectiveSchema.simplified`) and
+/// `static_frontmatter`: a top-level schema property, a cataloged `ctx`
+/// member (by its descriptor), or a concrete static scalar. Anything else,
+/// including a nested path and a property no authored schema declares, is
+/// [`TargetNullability::Unknown`].
 pub fn classify_target_nullability(
     expression: &Expr,
     effective_schema: Option<&EffectiveSchema>,
     static_frontmatter: &serde_json::Value,
 ) -> TargetNullability {
+    let declared = DeclaredTypes::new(effective_schema.and_then(|effective| effective.simplified.as_ref()))
+        .with_static_frontmatter(static_frontmatter);
+    target_nullability(&TypeScope::unguarded(&declared), expression)
+}
+
+/// The nullability of target `expression` at a site whose types are `scope`.
+fn target_nullability(scope: &TypeScope<'_>, expression: &Expr) -> TargetNullability {
     let Some(root) = expression_path(expression) else {
         return TargetNullability::Unknown;
     };
-
-    if let Some(name) = root.as_str().strip_prefix("ctx.") {
-        if name.contains('.') {
-            return TargetNullability::Unknown;
-        }
-        let Some(descriptor) = context_variable_descriptors()
-            .iter()
-            .find(|descriptor| descriptor.name == name)
-        else {
-            return TargetNullability::Unknown;
-        };
-        return if descriptor.required
-            || descriptor.default.as_ref().is_some_and(|value| !value.is_null())
-        {
-            TargetNullability::NonNullable
-        } else {
-            TargetNullability::Nullable { root }
-        };
-    }
-
-    if root.as_str().contains('.') {
-        return TargetNullability::Unknown;
-    }
-    if static_frontmatter
-        .as_object()
-        .and_then(|frontmatter| frontmatter.get(root.as_str()))
-        .is_some_and(is_concrete_scalar)
-    {
-        return TargetNullability::NonNullable;
-    }
-
-    let Some(effective_schema) = effective_schema else {
+    let Some(target) = scope.type_of_expr(expression) else {
         return TargetNullability::Unknown;
     };
-    let Some(SimplifiedSchema::Single(shape)) = effective_schema.simplified.as_ref() else {
-        return TargetNullability::Unknown;
-    };
-    let Some(origin) = effective_schema.origins.get(root.as_str()) else {
-        return TargetNullability::Unknown;
-    };
-    if !matches!(origin.kind, SchemaOriginKind::Document | SchemaOriginKind::ReferencedFile) {
-        return TargetNullability::Unknown;
+    match target.declared() {
+        _ if target.proves_present() => TargetNullability::NonNullable,
+        DeclaredType::Property(_) | DeclaredType::Context { .. } => TargetNullability::Nullable { root },
+        _ => TargetNullability::Unknown,
     }
-    let Some(property) = shape.properties.get(root.as_str()) else {
-        return TargetNullability::Unknown;
-    };
-
-    if property.is_required() {
-        TargetNullability::NonNullable
-    } else {
-        TargetNullability::Nullable { root }
-    }
-}
-
-/// Returns property paths proven present when a parsed condition is true.
-pub fn narrowed_expression_paths(condition: &Expr) -> Vec<ExpressionPath> {
-    let mut paths = BTreeSet::new();
-    collect_narrowed_paths(condition, &mut paths);
-    paths.into_iter().collect()
 }
 
 /// Passively analyzes whole-value targets and all enclosing page-block guards.
+///
+/// Each target's site is typed on the true side of every `::block when=`
+/// guard around it ([`BodyGuards`]), the facts composition can rely on once
+/// those blocks were selected; [`DirectiveTargetAnalysis::narrowed_paths`]
+/// lists the paths those guards prove present there.
 ///
 /// This function parses only in-memory source and supplied schema/frontmatter
 /// state. It does not evaluate expressions, resolve paths, fetch URLs, execute
@@ -159,24 +125,12 @@ pub fn analyze_directive_targets(
     static_frontmatter: &serde_json::Value,
 ) -> Result<Vec<DirectiveTargetAnalysis>, BlockScanError> {
     let directives = scan_darkmatter_directives(source);
-    let blocks = scan_darkmatter_blocks(source)?;
-    let page_guards: Vec<_> = blocks
-        .iter()
-        .filter(|block| block.kind == BlockKind::Page)
-        .filter_map(|block| {
-            let opener = directives.iter().find(|directive| {
-                directive.kind == DirectiveKind::Block && directive.line == block.start_line
-            })?;
-            let condition = opener
-                .options
-                .iter()
-                .find(|option| option.key.value == "when")?
-                .value
-                .as_ref()?;
-            let parsed = parse_condition(&condition.value).ok()?;
-            Some((block.body_span.clone(), narrowed_expression_paths(&parsed)))
-        })
-        .collect();
+    // Unpaired block markers are this analysis's error; `BodyGuards` would
+    // only drop their facts.
+    scan_darkmatter_blocks(source)?;
+    let guards = BodyGuards::scan(source);
+    let declared = DeclaredTypes::new(effective_schema.and_then(|effective| effective.simplified.as_ref()))
+        .with_static_frontmatter(static_frontmatter);
 
     let mut analyses = Vec::new();
     for directive in directives {
@@ -195,17 +149,12 @@ pub fn analyze_directive_targets(
             continue;
         };
         let root = expression_path(&expression);
-        let nullability = classify_target_nullability(
-            &expression,
-            effective_schema,
-            static_frontmatter,
-        );
-        let mut narrowed = BTreeSet::new();
-        for (body_span, paths) in &page_guards {
-            if body_span.start <= target.span.start && target.span.end <= body_span.end {
-                narrowed.extend(paths.iter().cloned());
-            }
-        }
+        let nullability = target_nullability(&TypeScope::unguarded(&declared), &expression);
+        let site = guards.scope_at(TypeScope::unguarded(&declared), target.span.start);
+        let mut narrowed: Vec<ExpressionPath> =
+            site.guarded_subjects().iter().filter_map(subject_path).collect();
+        narrowed.sort();
+        narrowed.dedup();
         analyses.push(DirectiveTargetAnalysis {
             kind: directive.kind,
             target_span: target.span.clone(),
@@ -214,19 +163,28 @@ pub fn analyze_directive_targets(
             expression,
             root,
             nullability,
-            narrowed_paths: narrowed.into_iter().collect(),
+            narrowed_paths: narrowed,
         });
     }
     Ok(analyses)
 }
 
-fn is_concrete_scalar(value: &serde_json::Value) -> bool {
-    matches!(
-        value,
-        serde_json::Value::Bool(_)
-            | serde_json::Value::Number(_)
-            | serde_json::Value::String(_)
-    )
+/// The dotted path of `subject`, as [`expression_path`] names a target root:
+/// a document property without its `fm.` prefix, a namespace member with its
+/// root. A subject with an index step has no dotted path.
+fn subject_path(subject: &Subject) -> Option<ExpressionPath> {
+    let mut path = match subject.binding() {
+        BindingId::Document(key) => key.clone(),
+        BindingId::Namespace(root) | BindingId::Global(root) => root.clone(),
+    };
+    for member in subject.path() {
+        let Member::Field(name) = member else {
+            return None;
+        };
+        path.push('.');
+        path.push_str(name);
+    }
+    Some(ExpressionPath(path))
 }
 
 fn expression_path(expression: &Expr) -> Option<ExpressionPath> {
@@ -247,55 +205,6 @@ fn expression_path(expression: &Expr) -> Option<ExpressionPath> {
         return None;
     }
     Some(ExpressionPath(path.to_string()))
-}
-
-fn collect_narrowed_paths(expression: &Expr, paths: &mut BTreeSet<ExpressionPath>) {
-    match expression {
-        Expr::Paren(inner) => collect_narrowed_paths(inner, paths),
-        Expr::Variable(_) => {
-            if let Some(path) = expression_path(expression) {
-                paths.insert(path);
-            }
-        }
-        Expr::UnaryNot(inner) => {
-            if let Expr::UnaryNot(candidate) = inner.as_ref()
-                && let Some(path) = expression_path(candidate)
-            {
-                paths.insert(path);
-            }
-        }
-        Expr::Comparison {
-            left,
-            op: ComparisonOp::NotEqual,
-            right,
-        } if is_absence_comparison_value(right) => {
-            if let Some(path) = expression_path(left) {
-                paths.insert(path);
-            }
-        }
-        Expr::FunctionCall { name, args } if name.eq_ignore_ascii_case("file_exists") => {
-            if let [candidate] = args.as_slice()
-                && let Some(path) = expression_path(candidate)
-            {
-                paths.insert(path);
-            }
-        }
-        Expr::FunctionCall { name, args } if name.eq_ignore_ascii_case("and") => {
-            for arg in args {
-                collect_narrowed_paths(arg, paths);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn is_absence_comparison_value(expression: &Expr) -> bool {
-    match expression {
-        Expr::Paren(inner) => is_absence_comparison_value(inner),
-        Expr::Variable(name) => name == "null",
-        Expr::StringLiteral(value) => value.is_empty(),
-        _ => false,
-    }
 }
 
 /// Why a successfully evaluated directive target has no target value.

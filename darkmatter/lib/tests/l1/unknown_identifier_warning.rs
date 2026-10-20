@@ -180,8 +180,12 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         ("{{ set || x }}", "yes", &[]),
         ("{{ x ? \"a\" : \"b\" }}", "b", &[]),
         ("{{ x ? x : \"b\" }}", "b", &[]),
-        // A guarded root is silent even in the branch evaluation reaches.
-        ("{{ x ? \"a\" : x }}", "", &[]),
+        // The false branch learns nothing about its condition's root, so a
+        // read of `x` there warns; only the true branch is proven.
+        ("{{ x ? \"a\" : x }}", "", &["x"]),
+        // A branch reached because its condition proved `x` present reads it
+        // silently, whatever the condition's form.
+        ("{{ set != null ? set : x }}", "yes", &[]),
         // A different root in a guarded ternary's branch still warns.
         ("{{ x ? \"a\" : y }}", "", &["y"]),
         ("{{ set ? x : \"b\" }}", "", &["x"]),
@@ -217,6 +221,37 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         ));
         assert_eq!(content, format!("[{rendered}]"), "render of {expression}");
         assert_eq!(warned_roots(&report), *warned, "warnings for {expression}: {:?}", report.warnings);
+    }
+}
+
+/// DMLS's static twin reads every branch, each under the branch facts the
+/// shared type scope gives it: `&&` proves its left operand for its right,
+/// a false ternary branch inherits none of the true side's facts, and a fact
+/// about one member proves nothing about a sibling.
+#[test]
+fn static_reads_use_the_shared_branch_facts() {
+    use darkmatter::markdown::compose::expression::{parse_spanned, static_variable_reads};
+
+    let rows: &[(&str, &[&str])] = &[
+        ("x && x.name", &["x"]),
+        ("is_string(x) && lower(x)", &["x"]),
+        ("x && y ? y : z", &["x", "y", "z"]),
+        ("x ? x : \"none\"", &[]),
+        ("x ? \"some\" : x", &["x"]),
+        ("is_string(x) ? \"some\" : x", &["x", "x"]),
+        ("x.a ? x.a : \"none\"", &[]),
+        ("x.a ? x.b : \"none\"", &["x"]),
+        ("x.a || x.b", &["x"]),
+    ];
+    for (source, expected) in rows {
+        let expr = parse_spanned(source).unwrap();
+        let reads = static_variable_reads(&expr);
+        let unhandled: Vec<&str> = reads
+            .iter()
+            .filter(|read| !read.handles_absence)
+            .map(|read| read.root())
+            .collect();
+        assert_eq!(unhandled, *expected, "{source}");
     }
 }
 

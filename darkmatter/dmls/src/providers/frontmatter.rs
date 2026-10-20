@@ -1094,16 +1094,20 @@ fn expression_value_at<'a>(
 /// [`expressions::hover_markdown_condition`] authority (condition dialect, so
 /// `&&`/`||` values hover like any other expression). Fires only when the cursor
 /// is inside the value (a cursor on the key falls through to the schema hover,
-/// which describes the `expression` type itself).
+/// which describes the `expression` type itself). The value's own ternary and
+/// `&&`/`||` facts narrow it; no enclosing lifecycle or task `when` does.
 fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
     let value = expression_value_at(ctx, ast, offset)?;
     let expr_offset = value.decoded_offset(offset)?;
-    let markdown = expressions::hover_markdown_condition(
-        value.expression(),
-        expr_offset,
-        |name| frontmatter_scalar(ctx, name),
-        |name| schema_property_details(ctx, name),
-    );
+    let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
+        expressions::hover_markdown_condition(
+            value.expression(),
+            expr_offset,
+            site,
+            |name| frontmatter_scalar(ctx, name),
+            |name| schema_property_details(ctx, name),
+        )
+    });
     markup_hover(ctx, value.expression_span(), markdown)
 }
 
@@ -2951,9 +2955,11 @@ mod tests {
                 panic!("markdown hover");
             };
             // Byte-identical to the shared interpolation hover for the same text.
+            let declared = darkmatter::markdown::compose::expression::DeclaredTypes::new(None);
             let expected = expressions::hover_markdown(
                 "ctx.today",
                 2,
+                &darkmatter::markdown::compose::expression::TypeScope::unguarded(&declared),
                 |_| None,
                 |_| None,
             );

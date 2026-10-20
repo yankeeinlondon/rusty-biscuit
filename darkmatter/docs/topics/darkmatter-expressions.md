@@ -175,7 +175,13 @@ or `""` skips the directive with a compose warning. The guard above is applied
 before body interpolation, so it removes the directive and suppresses that
 warning. DMLS warns on statically nullable unguarded targets without executing
 the expression; unsupported expression or schema shapes remain unknown rather
-than being guessed nullable or safe.
+than being guessed nullable or safe. Any enclosing `when` that proves the
+target's property present on its true side counts as its guard (`log`,
+`log != null`, `log != ''`, `is_string(log)`, `!is_null(log)`,
+`file_exists(log)` and their aliases, or a conjunction holding one), by the
+same rules that excuse a missing shell placeholder (see
+[Guarded values](../inline/preflight-checks.md#guarded-values)); `!log`,
+`log || other`, and a guard on a member such as `log.path` do not.
 
 ## Operator Precedence
 

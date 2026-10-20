@@ -78,6 +78,15 @@ impl Subject {
         &self.path
     }
 
+    /// This subject and each of its ancestors, longest first: `x.a.b`,
+    /// `x.a`, `x`.
+    pub fn ancestors_and_self(&self) -> impl Iterator<Item = Subject> + '_ {
+        (0..=self.path.len()).rev().map(|length| Subject {
+            binding: self.binding.clone(),
+            path: self.path[..length].to_vec(),
+        })
+    }
+
     /// Whether a write to one of these subjects can change the other: the
     /// same binding, and one path a prefix of the other. An index step
     /// matches any member, since `x[-1]`, `x[2]`, and `x['2']` can name one
@@ -140,7 +149,7 @@ impl<'s> DeclaredTypes<'s> {
     /// The declared layer of an owner whose projection is `schema`
     /// (`EffectiveSchema.simplified`), with no static frontmatter and no
     /// host roots.
-    pub fn new(schema: Option<&'s SimplifiedSchema>) -> Self {
+    pub const fn new(schema: Option<&'s SimplifiedSchema>) -> Self {
         Self {
             schema,
             frontmatter: None,
@@ -196,7 +205,8 @@ impl<'s> DeclaredTypes<'s> {
         }
     }
 
-    fn variable_subject(&self, path: &str) -> Option<Subject> {
+    /// The subject of the variable read `path`; see [`Self::subject`].
+    pub(crate) fn variable_subject(&self, path: &str) -> Option<Subject> {
         if path == NULL_ROOT {
             return None;
         }

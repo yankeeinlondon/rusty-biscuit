@@ -198,6 +198,33 @@ impl<'d> TypeScope<'d> {
         self.declared.subject(expr).map(|subject| self.type_of(&subject))
     }
 
+    /// Every subject a guard proves present at this site, in no particular
+    /// order. A subject a later write touched is not listed.
+    pub fn guarded_subjects(&self) -> Vec<Subject> {
+        let mut subjects: Vec<Subject> = Vec::new();
+        let mut link = self.head.as_deref();
+        while let Some(current) = link {
+            if let Step::Fact { subject, .. } = &current.step
+                && !subjects.contains(subject)
+            {
+                subjects.push(subject.clone());
+            }
+            link = current.parent.as_deref();
+        }
+        subjects.retain(|subject| self.type_of(subject).guard_presence().is_some());
+        subjects
+    }
+
+    /// Whether a guard proves `subject` or one of its ancestors present, so
+    /// its root binding exists: `x` proven present covers a read of `x.name`.
+    /// A fact about `x.a` covers neither `x` nor its sibling `x.b`.
+    pub fn guards_path_or_ancestor(&self, subject: &Subject) -> bool {
+        self.head.is_some()
+            && subject
+                .ancestors_and_self()
+                .any(|path| self.type_of(&path).guard_presence().is_some())
+    }
+
     /// This scope after a mutation that may write `writes`. Check the
     /// mutation's own right-hand side under `self` first.
     pub fn invalidate(&self, writes: &WriteSet) -> Self {

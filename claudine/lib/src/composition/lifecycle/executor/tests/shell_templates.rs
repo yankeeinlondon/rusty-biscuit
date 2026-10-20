@@ -1,7 +1,8 @@
 //! Lifecycle `shell` actions and `set` values approved by their typed shape.
 
 use super::*;
-use crate::composition::lifecycle::shell_template::typed_template;
+use crate::composition::lifecycle::shell_template::{lifecycle_declared_types, typed_template};
+use darkmatter::markdown::compose::expression::TypeScope;
 use crate::composition::preflight::{resolve_lifecycle_shell_commands, settle_lifecycle_shell_modes};
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
 
@@ -29,9 +30,15 @@ fn prepared(frontmatter: &Value, approvals: Option<&ShellPreApprovals>) -> Lifec
     config
 }
 
+/// `command` typed with no enclosing guard and no schema.
+fn unguarded(command: &str) -> darkmatter::markdown::compose::shell_expansion::template::CommandTemplate {
+    let declared = lifecycle_declared_types(None);
+    typed_template(command, &TypeScope::unguarded(&declared)).expect("a template")
+}
+
 fn shape_of(command: &str) -> ShellPreApprovals {
     let mut approvals = ShellPreApprovals::new();
-    approvals.insert_template(TemplateShape::from_template(&typed_template(command, None).unwrap()));
+    approvals.insert_template(TemplateShape::from_template(&unguarded(command)));
     approvals
 }
 
@@ -135,7 +142,7 @@ fn the_disabled_runner_refuses_every_structured_path() {
     let config = prepared(&frontmatter, Some(&shape_of("tool {{ x }}")));
     let state = map(json!({ "x": "v" }));
     let chain = darkmatter::markdown::compose::shell_expansion::template::fill_template(
-        &typed_template("tool {{ x }}", None).unwrap(),
+        &unguarded("tool {{ x }}"),
         &|_: &str| Ok(json!("v")),
         None,
     )
@@ -172,7 +179,7 @@ fn a_host_approved_site_fills_its_late_values_without_reading_them_again() {
     use darkmatter::markdown::compose::shell_expansion::template::{ArgPart, HoleTiming, resolve_late_values};
     let frontmatter = json!({ "start": [{ "shell": "placeholder" }] });
     let mut config = parse_lifecycle_config(&frontmatter, Path::new(SOURCE)).unwrap();
-    let mut template = typed_template("tool {{ produced }} {{ x }}", None).unwrap();
+    let mut template = unguarded("tool {{ produced }} {{ x }}");
     if let ArgPart::Hole(hole) = &mut template.segments[0].args[0].parts[0] {
         hole.timing = HoleTiming::Deferred { roots: vec!["produced".to_string()] };
     }

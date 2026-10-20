@@ -210,8 +210,9 @@ pub struct PreparedShellSite {
     /// The command as authored, `{{ … }}` spans included. For a `set` value
     /// this is the command inside `$( … )`.
     pub authored: String,
-    /// The authored command typed against the owning document's schema, with
-    /// each hole's timing. `None` when it has no placeholder or, for a
+    /// The authored command typed against the owning document's schema, as
+    /// the task's `when:` guard narrows it for a `shell:` command, with each
+    /// hole's timing. `None` when it has no placeholder or, for a
     /// resolved-byte site, when it is not a valid template.
     pub template: Option<CommandTemplate>,
     pub mode: SiteMode,
@@ -226,7 +227,10 @@ pub struct PreparedShellSite {
 }
 
 impl PreparedShellSite {
-    /// Whether a placeholder reads a value an earlier step produces.
+    /// Whether a placeholder reads a value an earlier step produces, so the
+    /// step barrier reads it. A late placeholder the task's `when:` guard
+    /// proves present ([`HoleTiming::Guarded`]) is read only by its command
+    /// once the guard selects the task, so it does not count.
     pub fn reads_late_value(&self) -> bool {
         self.template.as_ref().is_some_and(|template| {
             template

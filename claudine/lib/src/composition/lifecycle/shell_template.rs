@@ -3,9 +3,9 @@
 //! A lifecycle `shell` command, or a whole-value `$( … )` in a `set`, whose
 //! authored text holds a placeholder is resolved at pre-flight to bytes and is
 //! also kept as its authored template, each placeholder typed against the
-//! owning document's schema ([`LifecycleShellTemplate`]). Approval decides
-//! which of the two runs, and records it on the site
-//! ([`LifecycleShellTemplate::settle`]):
+//! owning document's schema as the guards enclosing the site narrow it
+//! ([`LifecycleShellTemplate`]). Approval decides which of the two runs, and
+//! records it on the site ([`LifecycleShellTemplate::settle`]):
 //!
 //! - its bytes are approved (an `exact` rule, a cached resolved-byte decision,
 //!   a `prefix` rule, or the exact/prefix/once prompt choices): the action
@@ -13,8 +13,13 @@
 //! - otherwise its shape is approved (a `template` rule, a cached shape
 //!   decision, or the "command shape" choice): the action runs its template.
 //!   Each placeholder is read when the action executes, checked against its
-//!   declared type, and passed as exactly one argument to a program started
-//!   directly, never through a shell.
+//!   declared type and any guard refinement, and passed as exactly one
+//!   argument to a program started directly, never through a shell.
+//!
+//! A site whose placeholder is missing at pre-flight, but which an enclosing
+//! guard proves present, has no bytes: that placeholder is
+//! [`HoleTiming::Guarded`] and the site runs only as its template, failing
+//! with a missing value if the selected action still reads `null`.
 //!
 //! Sequence hosts withdraw resolved-byte eligibility from later tasks and late
 //! reads, and attach the step barrier's validated values with `with_late_values`.
@@ -31,9 +36,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::compose::ShellCommandOrigin;
-use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
+use darkmatter::markdown::compose::expression::{DeclaredTypes, GuardOrigin, TypeScope};
 use darkmatter::markdown::compose::shell_expansion::template::{
-    CommandSite, CommandTemplate, ModeRequirement, ShellCandidate, ShellPreApprovals, SiteValues,
+    CommandSite, CommandTemplate, HoleTiming, ModeRequirement, ShellCandidate, ShellPreApprovals, SiteValues,
     TemplateShape, parse_authored,
 };
 
@@ -181,17 +186,48 @@ impl LifecycleShellTemplate {
     }
 }
 
-/// The authored command `raw` as a template typed against `schema`, when it
-/// is a valid template with at least one placeholder.
-pub fn typed_template(
-    raw: &str,
+/// The declared layer a lifecycle shell site of a document whose schema is
+/// `schema` is typed against: the schema, with [`LIFECYCLE_HOST_GLOBALS`] as
+/// host roots.
+pub fn lifecycle_declared_types(
     schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
-) -> Option<CommandTemplate> {
+) -> DeclaredTypes<'_> {
+    DeclaredTypes::new(schema).with_host_globals(&LIFECYCLE_HOST_GLOBALS)
+}
+
+/// The authored command `raw` as a template typed in `scope`, the type scope
+/// at its site, when it is a valid template with at least one placeholder.
+///
+/// A placeholder a guard enclosing the site narrows carries that refinement,
+/// so the site's approval shape follows the guard, and its value is checked
+/// against the refinement when the command is filled.
+pub fn typed_template(raw: &str, scope: &TypeScope<'_>) -> Option<CommandTemplate> {
     let mut template = parse_authored(raw).ok()?;
     template.placeholders().next()?;
-    let declared = DeclaredTypes::new(schema).with_host_globals(&LIFECYCLE_HOST_GLOBALS);
-    template.project_types(&TypeScope::unguarded(&declared));
+    template.project_types(scope);
     Some(template)
+}
+
+/// The guard in `scope` that proves the placeholder `expression` itself
+/// present, if one does. A declaration is not a guard, and a guard on one
+/// expression proves nothing about another.
+pub fn placeholder_guard(expression: &str, scope: &TypeScope<'_>) -> Option<GuardOrigin> {
+    let expr = darkmatter::markdown::compose::expression::parse(expression).ok()?;
+    scope.type_of_expr(&expr)?.guard_presence().cloned()
+}
+
+/// Mark each placeholder of `template` whose expression `guarded` names as
+/// [`HoleTiming::Guarded`] by that guard: it is read and checked only when its
+/// guarded action is reached, never at approval or by a barrier.
+pub fn retime_guarded(template: &mut CommandTemplate, guarded: &[(String, GuardOrigin)]) {
+    for placeholder in template.placeholders_mut() {
+        if let Some((_, guard)) = guarded.iter().find(|(expression, _)| *expression == placeholder.expression) {
+            placeholder.timing = HoleTiming::Guarded {
+                guard: guard.clone(),
+                roots: Vec::new(),
+            };
+        }
+    }
 }
 
 /// Whether any lifecycle `shell` command or whole-value `set` `$( … )`
@@ -229,9 +265,14 @@ pub fn reads_as_command(bytes: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn unguarded(raw: &str) -> Option<CommandTemplate> {
+        let declared = lifecycle_declared_types(None);
+        typed_template(raw, &TypeScope::unguarded(&declared))
+    }
+
     fn site(resolved: Option<&str>) -> LifecycleShellTemplate {
         LifecycleShellTemplate::new(
-            typed_template("tool {{ x }}", None).expect("a template"),
+            unguarded("tool {{ x }}").expect("a template"),
             resolved.map(|bytes| vec![bytes.to_string()]),
         )
     }
@@ -280,6 +321,6 @@ mod tests {
         assert!(reads_as_command("tool 'a b'"));
         assert!(!reads_as_command("tool a; rm -rf ~"));
         assert!(!reads_as_command("tool a | cat"));
-        assert!(typed_template("tool plain", None).is_none());
+        assert!(unguarded("tool plain").is_none());
     }
 }

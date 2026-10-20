@@ -303,7 +303,7 @@ In template mode, before anything runs:
    rule. The original value must pass the placeholder's declared type,
    constraints included (`min`, `pattern`, …); nothing is converted first, so
    a number never passes `alphanumeric`. A placeholder typed under a guard
-   (see [Guarded values](#guarded-values-planned)) must also pass the type
+   (see [Guarded values](#guarded-values)) must also pass the type
    the guard narrowed it to. A refused value fails with
    `TemplateValueRejected`, which names the placeholder and its declared type
    and never shows the value.
@@ -465,38 +465,63 @@ Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightRe
 
 **Late values.** A host whose commands read values the run produces later (Claudine's sequence outputs, for example) declares those roots with `ComposeOptions::with_deferred_shell_roots`. Discovery does not evaluate a placeholder that reads one, directly or through a frontmatter value derived from one, and marks it `HoleTiming::Deferred`. Its command has no resolved bytes, so it can be approved only as a template (`ModeRequirement::TemplateRequired`); one whose authored text is not a valid template fails pre-flight with `TemplateGrammar`. Declaring a root late does not make it readable: availability stays with the host's globals. The command's other placeholders are still checked for missing values. A late root names a host global: `fm.<root>` reads the document's own property of that name and is an approval-time value.
 
-#### Guarded values (planned)
-
-> **Planned:** the template layer below is built, but no command site passes
-> its enclosing guards to it yet, so today every site is typed and checked as
-> unguarded.
+#### Guarded values
 
 A guard that encloses a command proves things about the values it reads. In
+a document body, a command inside `::block when="…"` runs only when the
+condition held, because composition removes a false block before any command
+runs:
 
-```yaml
-success:
-    - when: "ctx.dirty_files && commit_message"
-      then:
-          - shell: git commit -m "{{ commit_message }}"
+```md
+::block when="release_tag"
+::shell git tag {{ release_tag }}
+::end-block
 ```
 
-`commit_message` is present whenever the command runs, even when it is
-missing while commands are approved. Such a placeholder waits for its command
+`release_tag` is present whenever `git tag` runs, even when it is missing
+while commands are approved. Such a placeholder waits for its command
 (`HoleTiming::Guarded`): the command can be approved only as a template, and
-the value is read and checked when the guard actually selects it, before any
-segment of the chain starts. If it is `null` then, the command fails with
-`MissingValue`; if the guard is false, nothing is read and nothing fails. Only
-a guard excuses a missing value, and only for the expression it proves: a
-schema declaring the property required does not, and `when: x` does not
-excuse a missing `y` in `tool {{ x }} {{ y }}`. A command that must wait this
-way and is not a valid template fails with `TemplateGrammar`.
+the value is read and checked when the block is actually selected, before any
+segment of the chain starts. If the guard is false, the block is removed and
+nothing is read or run. The same applies to every command of a
+`::shell-block` inside the block. Nested blocks combine: a command inside
+`::block when="a"` and then `::block when="b"` has both guards.
+
+Only a guard excuses a missing value, and only for what it proves on its true
+side:
+
+| Around `::shell tool {{ x }}` | Missing `x` at approval |
+| --- | --- |
+| no block | `MissingValue` |
+| `::block when="x"`, `when="x != null"`, `when="file_exists(x)"`, `when="is_string(x)"`, `when="a && x"` | waits for the command |
+| `::block when="!x"`, `when="is_null(x)"`, `when="x \|\| y"`, `when="x.a"` | `MissingValue` |
+
+A schema declaring the property required does not excuse a missing value, and
+`when="x"` does not excuse a missing `y` in `tool {{ x }} {{ y }}` or a read
+of `x` outside the block. A frontmatter `$( … )` value is never guarded, even
+when a block that reads its key is the only use of it. A command that must
+wait this way and is not a valid template fails with `TemplateGrammar`.
+
+A host that runs commands under its own conditions types each command under
+those guards through the same type scope, so the rules above apply there too:
+a placeholder its guard proves present waits for its command, and a `null`
+read once the guard has selected the action fails that action with
+`MissingValue`. Claudine does this for a lifecycle item's `when:` (its `then:`
+and the actions written beside the `when:` get the true side, its `else:` the
+false side, nested items combining) and for a sequence task's `when:`, which
+covers that task's `shell:` command and `with:` values but not the document a
+`prompt:` task composes. A lifecycle `set` ends what a guard proved about each
+key it writes for the actions after it, including after the item that
+contains it.
 
 A guard also narrows the type a placeholder approves as. Under
-`when: "mode != 'release'"` with `mode: enum(release, debug, test)`, the
+`::block when="mode != 'release'"` with `mode: enum(release, debug, test)`, the
 placeholder in `deploy {{ mode }}` approves as `{{ enum(debug,test) }}`, and a
 saved rule for the whole enum still covers it. A narrowing to a non-string
 type keeps the broad `{{ string }}` approval and is shown as
-`string (validated as number)`. When the command runs, the value must pass
+`string (validated as number)`. Discovery and the compose pass type a body
+command under the same enclosing blocks, so the narrowed shape approved before
+composition is the shape that runs. When the command runs, the value must pass
 both its declaration and the narrowed type; a value that changed type after
 the guard (for example through a `set`) fails with `TemplateValueRejected`.
 A host's late-value barrier never reads a guarded placeholder, and checks a

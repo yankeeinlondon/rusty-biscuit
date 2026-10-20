@@ -247,7 +247,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
-| `dm.expression.undeclared_property` | **Warning** (advisory), matching `md compose`. An identifier, in any operand position and ranged at itself, whose root is an undeclared document property: no frontmatter key, schema-declared property, or function names it, and Darkmatter's binding model does not classify it as a reserved namespace (`fm`, `ctx`, `env`, `current`) or the `null` literal. `doc` and `current_env` are ordinary property names. A bare runtime-context name such as `repo` is a document property, never `ctx.repo`. The message says the property is valid, of unknown type, and `null` unless supplied at runtime. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition and its guarded root (`x ? x : "none"`), and a direct `is_null`/`is_empty` argument. Unlike compose, both ternary branches are checked. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
+| `dm.expression.undeclared_property` | **Warning** (advisory), matching `md compose`. An identifier, in any operand position and ranged at itself, whose root is an undeclared document property: no frontmatter key, schema-declared property, or function names it, and Darkmatter's binding model does not classify it as a reserved namespace (`fm`, `ctx`, `env`, `current`) or the `null` literal. `doc` and `current_env` are ordinary property names. A bare runtime-context name such as `repo` is a document property, never `ctx.repo`. The message says the property is valid, of unknown type, and `null` unless supplied at runtime. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition, a direct `is_null`/`is_empty` argument, and a read an enclosing branch proves present — the true branch of its ternary condition (`x ? x : "none"`) or a later `&&` operand (`x && x.name`). The false branch does not inherit the condition's proof (`x ? "some" : x` still warns), and a proof of `x.a` covers neither `x` nor `x.b`. The branch facts are Darkmatter's own, shared with compose. Unlike compose, both ternary branches are checked, each with its own side's facts. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
 | `dm.expression.unknown_function` | **Error**, matching `md compose`, which fails on the call. A call to a function outside Darkmatter's closed catalog, ranged on the function name and reported in every branch. Unlike the advisory, it is reported on a document without frontmatter too. |
 | `dm.fence.unknown_language` | A fenced-code language token no grammar recognizes (with a nearest-match suggestion). |
 | `dm.security.disallowed_command` | A `::shell` / `::shell-block` / `$()` command the shell policy disallows. |
@@ -310,10 +310,25 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   the diagnostic falls back to the definition's whole value. It is never given
   an empty or guessed range.
 - `dm.transclusion.nullable_target` ranges the complete `{{ ... }}` target
-  expression. DMLS suppresses it when an enclosing supported guard proves the
-  same property present, including `file_exists(x)`, truthy `x`, `!!x`,
-  successful `x != null` / `x != ''`, parentheses, and conjunctions. Unknown,
-  mixed, and statically non-null targets do not receive the warning.
+  expression. DMLS suppresses it when an enclosing `::block when` proves the
+  same property present, using the same guard rules as compose: truthy `x`,
+  `!!x`, `x != null`, `x != ''`, `file_exists(x)`, `is_string(x)` and the
+  other type predicates, `!is_null(x)`, `!is_empty(x)`, equality with a
+  non-empty literal (`x == 'main.md'`), parentheses, and conjunctions.
+  Predicates match through the function registry, so aliases and case
+  (`fileExists`, `isString`, `!isNull`) count too. A guard is never evaluated:
+  `file_exists(x)` proves `x` is a present string inside the block without
+  checking any file. A guard that does not exclude null on its true side, such as `is_null(x)` or `x || y`, proves nothing.
+  Unknown, mixed, and statically non-null targets do not receive the warning.
+  For example, only the first target here is reported:
+
+  ```md
+  ::file {{ optional }}
+
+  ::block when="isString(chapter)"
+  ::file {{ chapter }}
+  ::end-block
+  ```
 - `dm.transclusion.broken_path` applies only to concrete local targets of
   `::file`, `::code`, and `::toc-linking`, resolved through the document's
   context like every other reference. A `::toc-linking` fallback chain is

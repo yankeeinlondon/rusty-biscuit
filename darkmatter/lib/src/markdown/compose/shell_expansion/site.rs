@@ -472,6 +472,10 @@ impl<'a> SiteScope<'a> {
     /// it has no placeholder or is not a valid template (it then runs only as
     /// resolved bytes).
     ///
+    /// `guards` are the body `::block` guards enclosing the site, outermost
+    /// first (none for a frontmatter value). They must be the guards
+    /// discovery typed the site under, so its shape matches its approval.
+    ///
     /// ## Errors
     ///
     /// [`ShellExpansionError::TemplateGrammar`] for a command that reads a
@@ -485,6 +489,7 @@ impl<'a> SiteScope<'a> {
         ctx: SourceContext,
         evaluator: &'e dyn HoleEvaluator,
         frame: SiteFrame,
+        guards: &[&crate::markdown::compose::page_blocks::BodyGuard],
     ) -> Result<Option<TemplateSite<'e>>, ShellExpansionError> {
         let derived = std::collections::HashSet::new();
         let scope = template::candidate::CandidateScope {
@@ -499,7 +504,10 @@ impl<'a> SiteScope<'a> {
             crate::markdown::compose::expression::DeclaredTypes::new(self.schema.as_ref()).with_host_globals(&host_roots);
         // The site's types must be the ones discovery typed it with, so its
         // shape matches what was approved.
-        let types = crate::markdown::compose::expression::TypeScope::unguarded(&declared);
+        let types = crate::markdown::compose::page_blocks::guards::within(
+            guards,
+            crate::markdown::compose::expression::TypeScope::unguarded(&declared),
+        );
         // Presence is checked when each hole is filled, so discovery's
         // approval-time evaluation is not repeated here.
         let candidate = scope.build(authored, template, origin, &types, &|_| None)?;

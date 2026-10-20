@@ -144,6 +144,12 @@ Inside an interpolation, the DSL provider offers four candidate families:
 Matching is **prefix-based and case-sensitive**. `{{ ctx.pa }}` offers matching
 `ctx.*` variables; it does not offer the removed `*_list` aliases.
 
+These candidates are names, not values: interpolation completion does not
+offer a property's enum members, literals, or object members. An enclosing
+guard such as `::block when="mode != 'release'"` therefore leaves the
+candidate list unchanged; hover shows the narrowed type instead
+([Hover](./hover.md#formatting-rule-narrowed-local-type)).
+
 ### `ctx.*` candidate discovery
 
 A `ctx.*` variable is offered whenever its fully qualified name is a

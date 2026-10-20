@@ -422,6 +422,12 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.
+- Hover shows the local narrowed type ("Type here") at body sites and
+  inside expressions: `providers/dsl.rs::with_site_scope` builds
+  `BodyGuards::scope_at` over `DeclaredTypes`, and `overlay/expressions.rs`
+  `hover_markdown*` take a `site: &TypeScope` and refine it with
+  `branch_scope`. Lifecycle/task `when` guards do not narrow frontmatter
+  actions in DMLS (no host action model); see `dmls/docs/hover.md`.
 - Matching trigger payloads feed completion and hover as well as
   diagnostics. The editor's property shape is
   `EffectiveSchema::property_shape` (base → extensions → matching trigger

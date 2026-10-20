@@ -86,6 +86,10 @@ mod handle_repo_config;
 mod handoff_owners;
 mod home_lookup_round_trip;
 mod hooks_cli;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod implement_plan_commit_message;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
 #[cfg(unix)]
@@ -134,6 +138,10 @@ mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod guarded_shell_values;
 // Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
 // binaries, which only `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]

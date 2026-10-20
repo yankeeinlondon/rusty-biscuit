@@ -27,7 +27,7 @@
 //! - [`ExpressionFunctionAction`] — read-only Darkmatter expression
 //!   functions invoked for their result.
 
-use darkmatter::markdown::compose::expression::Expr;
+use darkmatter::markdown::compose::expression::{Expr, GuardOrigin, Polarity, TypeScope, WriteSet};
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 use darkmatter::markdown::compose::{ResolvedShellValue, check_frontmatter_shell_value};
 use indexmap::IndexMap;
@@ -97,6 +97,68 @@ pub fn for_each_action_mut(nodes: &mut [LifecycleNode], visit: &mut impl FnMut(&
                 for_each_action_mut(&mut conditional.otherwise, visit);
             }
         }
+    }
+}
+
+/// Visit every action in `nodes`, in authored order and through both branches
+/// of every conditional, with the type scope that holds where it sits;
+/// returns the scope that continues after the list.
+///
+/// A conditional's `then` body sees `scope` assumed on the true side of its
+/// `when`, its `else` body the false side, each labelled with the guard's
+/// authored path (`success[4].when`). After the conditional, the scope is the
+/// [`TypeScope::join`] of the two bodies' ends, so a write in either branch
+/// invalidates what came before. An action is visited under the scope that
+/// reaches it, and only then do its writes ([`action_writes`]) invalidate
+/// facts for the actions after it, so a `set` value is checked before its own
+/// write.
+///
+/// Like [`for_each_action`], the walk is structural: no guard, predicate, or
+/// mutation is evaluated.
+///
+/// ## Errors
+///
+/// The first error `visit` returns; the walk stops there.
+pub fn walk_scoped<'d, E>(
+    nodes: &mut [LifecycleNode],
+    scope: TypeScope<'d>,
+    visit: &mut dyn FnMut(&mut LifecycleAction, &TypeScope<'d>) -> Result<(), E>,
+) -> Result<TypeScope<'d>, E> {
+    let mut scope = scope;
+    for node in nodes {
+        match node {
+            LifecycleNode::Action(action) => {
+                visit(action, &scope)?;
+                for writes in action_writes(action) {
+                    scope = scope.invalidate(&writes);
+                }
+            }
+            LifecycleNode::Conditional(conditional) => {
+                let origin = GuardOrigin::new(conditional.path.field("when").to_string());
+                let then_scope = scope.assume_at(&conditional.when, Polarity::True, origin.clone());
+                let else_scope = scope.assume_at(&conditional.when, Polarity::False, origin);
+                let then_end = walk_scoped(&mut conditional.then, then_scope, visit)?;
+                let else_end = walk_scoped(&mut conditional.otherwise, else_scope, visit)?;
+                scope = TypeScope::join(&then_end, &else_end);
+            }
+        }
+    }
+    Ok(scope)
+}
+
+/// The document properties an action may write.
+///
+/// A `set` writes each destination it names. A Darkmatter side effect may
+/// rewrite this document's frontmatter under any key, so it writes every
+/// document property. Every other action writes none.
+pub fn action_writes(action: &LifecycleAction) -> Vec<WriteSet> {
+    match &action.kind {
+        LifecycleActionKind::RuntimeSet(set) => set.iter().map(|(key, _)| WriteSet::destination(key)).collect(),
+        LifecycleActionKind::SideEffect(_) => vec![WriteSet::AllDocument],
+        LifecycleActionKind::ExpressionFunction(function) if is_known_side_effect(&function.function) => {
+            vec![WriteSet::AllDocument]
+        }
+        _ => Vec::new(),
     }
 }
 
@@ -722,11 +784,14 @@ pub struct ShellAction {
     /// `true` once pre-flight (C3) has stamped `command` and `on_error` with
     /// their resolved bytes. A command approved as those bytes runs them as
     /// they stand: anything the resolution inserted is data and is never
-    /// interpolated again at event time.
+    /// interpolated again at event time. A command whose guarded value was
+    /// missing at pre-flight keeps its authored text instead; its `template`
+    /// has no bytes, so it runs only as that template.
     pub pre_resolved: bool,
-    /// The authored `command` as a typed template, recorded by pre-flight
-    /// when it holds a placeholder. Its approval decides whether the action
-    /// runs the stamped bytes or the template.
+    /// The authored `command` as a template typed in the scope of its
+    /// enclosing guards, recorded by pre-flight when it holds a placeholder.
+    /// Its approval decides whether the action runs the stamped bytes or the
+    /// template.
     pub template: Option<super::shell_template::LifecycleShellTemplate>,
 }
 

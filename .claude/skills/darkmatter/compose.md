@@ -562,11 +562,17 @@ message). The moving parts:
 
 - **One classifier.** `expression::absence::AbsenceScope` is threaded through
   `evaluate_expr`, so observation follows evaluation. An unchosen branch or a
-  short-circuited operand is never read, so it never warns. Handled: a
-  fallback primary (and every operand of a primary `a || b || "d"` chain), a
-  ternary condition, the condition's own root in its branches when the
-  condition is a bare variable, and a direct argument of an absence predicate.
-  "Direct" is strict: `x == 1 ? …`, `!x`, `is_empty(lower(x))` all warn.
+  short-circuited operand is never read, so it never warns. Handled
+  (intentional-absence policy, never a presence proof): a fallback primary
+  (and every operand of a primary `a || b || "d"` chain), a ternary
+  condition, and a direct argument of an absence predicate. Also handled: a
+  read the shared branch facts prove present — the scope carries a
+  `TypeScope` (`TypeScope::assume`, computed only when observing): a ternary
+  branch gets its own side of the condition, an `and`/`&&` operand the earlier
+  operands' true side, an `or`/`||` operand their false side;
+  `TypeScope::guards_path_or_ancestor` covers the proven path and below, never
+  a sibling. "Direct" is strict: `x == 1 ? …`, `!x`, `is_empty(lower(x))` all
+  warn, and `x ? "a" : x` warns for the false branch.
   `when=` and `$()` ternary conditions are gates, not absence checks: a bare
   unknown `when="x"` warns.
 - **Absence predicates** are the `predicates::ABSENCE_PREDICATES` binding group
@@ -1045,9 +1051,14 @@ frontmatter key (`derived_deferred_keys`, inherited by children), and raises
 `ShellExpansionError::MissingValue` for an approval-time hole that evaluates
 to `null` unless `ScopedType::guard_presence` proves that expression at the
 site: then the hole is `HoleTiming::Guarded { guard, roots }` (also for a late
-hole a guard proves) and the site `TemplateRequired`. Every caller passes
-`TypeScope::unguarded` today; the runtime `SiteScope::site` must use the same
-scope as discovery or the shape will not match its approval. A deferred site is `ModeRequirement::TemplateRequired`, contributes
+hole a guard proves) and the site `TemplateRequired`. Body sites are typed
+on the true side of their enclosing `::block when=` guards,
+`page_blocks::BodyGuards::scan(authored body)` + `enclosing_line`/`enclosing`
+(by authored body line or byte offset) + `guards::within`: discovery
+(`DiscoverySiteContext::build`) and the compose pass (`SiteScope::site`, from
+`inline/shell_expansion.rs` and `BlockTemplates::guards`) must pass the same
+guards or the shape will not match its approval. Frontmatter `$( … )` sites
+pass `&[]` (never guarded). A deferred site is `ModeRequirement::TemplateRequired`, contributes
 no entry, and is `TemplateGrammar` if its text is not a template. A host that
 places commands late (Claudine's later sequence tasks) adds
 `DeferredShellRoots::with_placeholders_template_required()`: every site with a

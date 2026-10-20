@@ -457,6 +457,16 @@ the first spawn. Shared redirection targets identify original destinations:
 stderr's own capture channel. Native `native_task_` and `native_lifecycle_`
 CLI regressions prove routing and downstream output on every OS. See [Pre-flight Checks](topics/pre-flight-checks.md).
 
+Static presence decisions read Darkmatter's shared `TypeScope`.
+`lib/tests/l1/type_scope_ownership_guard.rs` fails when a
+`TypeScope::unguarded`, `DeclaredTypes::new`, `assume_at`, or presence lookup
+appears outside its reasoned allowlist entry, or when an entry is stale. It also
+fails when preflight refuses a `MissingValue` without asking `placeholder_guard`.
+A new host site adds an entry with its reason. Runtime `is_null` checks are not
+restricted. The guard/site conformance matrix is
+`composition/lifecycle/executor/tests/scope_site_conformance.rs` plus its
+sequence sibling in `sequence/preflight/tests.rs`.
+
 Late roots are `seq`, `loop`, and `group`; sequence and container terminal
 event shells participate in the same closed graph audit. Both group schedulers
 validate all members before member start, retaining `LateValues`, prompt
