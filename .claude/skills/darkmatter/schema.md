@@ -393,13 +393,17 @@ needs `@this`.
   pending deferral mirror `expression`. Exported-schema consumers must
   enforce the format. Excluding `shell` from an action union is authoring
   validation only; Claudine's runtime `initialize` shell ban stays.
-- `is_subtype(a, b)` (`simplified/subtype.rs`) is passive over resolved
-  atoms: identical identity (type, canonical options, enum member set,
-  literal value, structural inline objects/unions) is a subtype;
-  `alphanumeric` compares character sets and the `..` ban; always-text types
-  are subtypes of `string`; everything else, including unresolved references,
-  `unknown`, `null`, and arrays against `string`, is not. Constraints are
-  ignored.
+- `is_subtype(a, b)` (`simplified/subtype.rs`) is the one structural
+  relation, passive over resolved atoms: identical identity (type, canonical
+  options, enum member set, literal value, structural inline objects/unions)
+  is a subtype; `alphanumeric` compares character sets and the `..` ban;
+  always-text types are subtypes of `string`; a `literal` is a subtype of its
+  own family and a string literal of an `enum` listing it (`literal(4)` is
+  not one of `enum('4')`); `enum` subsets; a non-array union arm by arm on
+  either side, order-free. Everything else, including unresolved references,
+  `unknown`, `null`, and arrays against other arrays, is not. Constraints and
+  presence are ignored, so an optional atom is never a presence check.
+  `is_definition_subtype` lifts it to whole `PropertyDef`s.
 
 ## Suggestions and DMLS
 

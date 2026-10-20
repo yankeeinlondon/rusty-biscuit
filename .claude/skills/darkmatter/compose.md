@@ -1035,13 +1035,19 @@ frontmatter `$( … )`) and reports one `ShellCandidate` per site in
 and `offered()` retain program-hole restrictions for byte-only host commands.
 A site is matched
 to its resolved bytes by document order (`resolved`); a count mismatch leaves
-it unlinked rather than guessed. `CandidateScope::build` types holes from the
-owner's schema (assembled lazily, only for a site with holes), marks a hole
+it unlinked rather than guessed. `CandidateScope::build` requires the site's
+`TypeScope` (its `DeclaredTypes` carry the owner's schema, assembled lazily
+only for a site with holes, and the host roots), types holes through
+`project_types(&TypeScope)`, marks a hole
 `HoleTiming::Deferred` when it reads a root from
 `ComposeOptions::with_deferred_shell_roots` directly or through a derived
 frontmatter key (`derived_deferred_keys`, inherited by children), and raises
 `ShellExpansionError::MissingValue` for an approval-time hole that evaluates
-to `null`. A deferred site is `ModeRequirement::TemplateRequired`, contributes
+to `null` unless `ScopedType::guard_presence` proves that expression at the
+site: then the hole is `HoleTiming::Guarded { guard, roots }` (also for a late
+hole a guard proves) and the site `TemplateRequired`. Every caller passes
+`TypeScope::unguarded` today; the runtime `SiteScope::site` must use the same
+scope as discovery or the shape will not match its approval. A deferred site is `ModeRequirement::TemplateRequired`, contributes
 no entry, and is `TemplateGrammar` if its text is not a template. A host that
 places commands late (Claudine's later sequence tasks) adds
 `DeferredShellRoots::with_placeholders_template_required()`: every site with a
@@ -1094,11 +1100,15 @@ path included) so chain `template` blacklists reach bytes.
 **Shared API for hosts (`template/fill.rs`, `template/target.rs`).**
 `HoleEvaluator` (closures and `LookupEvaluator<L: EvaluationLookup>`),
 `fill_template(&CommandTemplate, &dyn HoleEvaluator, Option<&SiteValues>) ->
-Result<FilledChain, HoleError>` (evaluate once → null/container/NUL refusal →
-`HoleValidator::accepts` on the original value → `scalar_string` → concatenate;
+Result<FilledChain, HoleError>` (evaluate once per distinct expression →
+null/container/NUL refusal → `HoleValidator::accepts` on the original value →
+`HoleType::refinement` (the guard-narrowed type, `RejectReason::GuardRefinement`)
+→ `scalar_string` → concatenate;
 `HoleError::into_shell_error` maps to `MissingValue`/`TemplateValueRejected`/
 `ExpressionEvaluation`), `resolve_late_values(sites, eval) -> LateValues`
-(only `HoleTiming::Deferred` holes, keyed by host site id + hole index),
+(only `HoleTiming::Deferred` holes, keyed by host site id + hole index; never
+`Guarded`; it checks the declaration and records the refinement verdict for
+`fill_template` to enforce),
 `resolve_direct_target(program, path, cwd)` (Windows `.exe`/`.com` only; Unix
 ELF/Mach-O/fat or `#!`). `TemplateValueRejected` and `TemplateTarget` are
 `shell_input_violation()`s like `MissingValue`. The native argv recorder for

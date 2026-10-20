@@ -77,6 +77,27 @@ and an unknown function as the `ERROR` `dm.expression.unknown_function` through
 `expression::validate_expression` (see
 [dmls.md](dmls.md#undeclared-properties-and-unknown-functions)).
 
+**Type scope** (`expression/scope/`). `TypeScope` is the one source of
+static presence and type at a site: `DeclaredTypes` (built once per owner
+from `EffectiveSchema.simplified`, static frontmatter, and host roots or a
+`BindingView`) refined by guards. `TypeScope::assume(&Expr, Polarity)` is the
+only fact producer. It handles `!`, parentheses, `and`/`or`/`||` (lowered to
+`FunctionCall`/`Fallback`, matched through the registry), ternaries,
+`==`/`!=` by `scalar_string` text with the both-null rule, and the predicate
+facts in `scope/facts.rs::PREDICATE_FACTS`, which a unit test keeps
+registry-backed. `invalidate(&WriteSet)` (`WriteSet::destination` for a
+`set` path) and `TypeScope::join` keep facts from leaking past writes or
+regions. There is no `Default`; an unguarded site calls
+`TypeScope::unguarded`. Only `ScopedType::guard_presence` (not a
+declaration) may excuse a discovery-time null, and `ScopedType::admits`
+checks a live value against the refinement. `template::project_hole(expr,
+&TypeScope)` reads the declaration from the scope's `DeclaredTypes` and, when
+a guard refined the subject, approves the narrowed type and records it as
+`HoleType::refinement`. `AbsenceScope`'s
+branch rule and `directive_targets::narrowed_expression_paths` are still live
+and are being migrated onto it (`2026-10-16-type-narrowing`); never add
+another guard walker.
+
 Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
 model in `expression/binding.rs`, never through a lookup override. A root
 resolves as reserved namespace → registered global (available, possibly

@@ -2544,6 +2544,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 Detection is passive: it derives the supplied context to each document and never discovers a repository. A reference that does not resolve is a `string`, and so is every value when that derivation is invalid, so pass a context that admits the document: the request's for a document inside its tree, otherwise the one prepared for that document (in another repository, in none, or opened through another spelling of its path). `md schema detect` passes each argument's document context.
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
 - `is_subtype(&PropertyAtom, &PropertyAtom)` — whether every non-null value one resolved type accepts is accepted by another; see [Subtype Relation](#subtype-relation-is_subtype).
+- `is_definition_subtype(&PropertyDef, &PropertyDef)` — the same relation over whole property definitions: every leaf alternative of the first is covered by an alternative of the second.
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
@@ -2576,6 +2577,9 @@ let rule = atom("alphanumeric(allow-slashes)");
 assert!(is_subtype(&atom("alphanumeric(min(3))"), &rule)); // constraints are ignored
 assert!(!is_subtype(&atom("string"), &rule));
 assert!(is_subtype(&atom("email"), &atom("string")));
+assert!(is_subtype(&atom("literal(4)"), &atom("number")));
+assert!(is_subtype(&atom("literal('a')"), &atom("enum(a, b, c)")));
+assert!(!is_subtype(&atom("literal(4)"), &atom("enum('4')"))); // structure, not `==`
 ```
 
 Only the type and its canonical options count. Ordinary constraints (`min`,
@@ -2587,9 +2591,24 @@ outside the relation.
 | any type | the same type with the same canonical options (including an identical array, inline object, or union) | yes |
 | `alphanumeric(X)` | `alphanumeric(Y)` | yes when X's allowed characters and allowed first characters are subsets of Y's, and X guarantees any ban on `..` that Y makes |
 | an always-text type: `string`, `date`, `datetime`, `time`, `file`, `enum(…)`, `url`, `email`, `yaml`, `json`, `expression`, `alphanumeric(…)`, `shell`, or a string `literal(…)` | `string` | yes |
+| a `literal(…)` | its own scalar family: `string`, `number`, or `boolean` | yes |
+| a string `literal(v)` | an `enum(…)` that has `v` as a member | yes |
+| a number or boolean `literal(…)` | any `enum(…)` | no, even when `==` would compare them equal |
+| `enum(X)` | `enum(Y)` | yes when X's members are a subset of Y's |
+| a union (not an array of one) | any type | yes when every arm is a subtype of it |
+| any type | a union (not an array of one) | yes when one arm covers it, whatever the arm order |
 | `string`, `email`, or any other non-`alphanumeric` type | `alphanumeric(…)` | no |
 | `unknown`, `null`, `number`, `boolean`, an array, … | `string` | no |
 | any other pair, including an unresolved reference | | no |
+
+So `string | number` is a subtype of `boolean | number | string`, and
+`unknown` is never a subtype of a concrete type. Arrays compare only by
+identity: `alphanumeric[]` is not a subtype of `string[]`.
+
+A saved shell rule typed `enum(a, b, c)` therefore covers a placeholder
+declared `enum(a, b)` or `literal('a')`. The rule grammar is unchanged:
+rule placeholders are still string-like types, and every other placeholder
+still needs a broad `{{ string }}` rule.
 
 The `alphanumeric` row compares what the options permit, not the keywords
 written. X guarantees no `..` when it blocks double periods or does not allow

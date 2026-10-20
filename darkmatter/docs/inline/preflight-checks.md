@@ -295,12 +295,16 @@ argument `a b/build`.
 
 In template mode, before anything runs:
 
-1. **Every placeholder is evaluated once** against the document's current
-   state and checked. `null` is a missing value (`MissingValue`). An array or
+1. **Every placeholder expression is evaluated once** against the document's
+   current state and checked; when the same expression fills several
+   arguments, that one checked value fills each of them. `null` is a missing
+   value (`MissingValue`). An array or
    object, or a string holding a NUL byte, is refused, even under a `string`
    rule. The original value must pass the placeholder's declared type,
    constraints included (`min`, `pattern`, …); nothing is converted first, so
-   a number never passes `alphanumeric`. A refused value fails with
+   a number never passes `alphanumeric`. A placeholder typed under a guard
+   (see [Guarded values](#guarded-values-planned)) must also pass the type
+   the guard narrowed it to. A refused value fails with
    `TemplateValueRejected`, which names the placeholder and its declared type
    and never shows the value.
 2. **The value becomes text** (a string as is, a number or boolean as written)
@@ -460,6 +464,44 @@ Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightRe
 **Each command site is reported.** Besides the deduped resolved-byte entries, the report's `candidates` holds one `ShellCandidate` per command site, never merged by bytes: its authored template, typed against the schema of the document that owns it (a transcluded child uses its own), whether it may run as resolved bytes, and the bytes discovery resolved for it.
 
 **Late values.** A host whose commands read values the run produces later (Claudine's sequence outputs, for example) declares those roots with `ComposeOptions::with_deferred_shell_roots`. Discovery does not evaluate a placeholder that reads one, directly or through a frontmatter value derived from one, and marks it `HoleTiming::Deferred`. Its command has no resolved bytes, so it can be approved only as a template (`ModeRequirement::TemplateRequired`); one whose authored text is not a valid template fails pre-flight with `TemplateGrammar`. Declaring a root late does not make it readable: availability stays with the host's globals. The command's other placeholders are still checked for missing values. A late root names a host global: `fm.<root>` reads the document's own property of that name and is an approval-time value.
+
+#### Guarded values (planned)
+
+> **Planned:** the template layer below is built, but no command site passes
+> its enclosing guards to it yet, so today every site is typed and checked as
+> unguarded.
+
+A guard that encloses a command proves things about the values it reads. In
+
+```yaml
+success:
+    - when: "ctx.dirty_files && commit_message"
+      then:
+          - shell: git commit -m "{{ commit_message }}"
+```
+
+`commit_message` is present whenever the command runs, even when it is
+missing while commands are approved. Such a placeholder waits for its command
+(`HoleTiming::Guarded`): the command can be approved only as a template, and
+the value is read and checked when the guard actually selects it, before any
+segment of the chain starts. If it is `null` then, the command fails with
+`MissingValue`; if the guard is false, nothing is read and nothing fails. Only
+a guard excuses a missing value, and only for the expression it proves: a
+schema declaring the property required does not, and `when: x` does not
+excuse a missing `y` in `tool {{ x }} {{ y }}`. A command that must wait this
+way and is not a valid template fails with `TemplateGrammar`.
+
+A guard also narrows the type a placeholder approves as. Under
+`when: "mode != 'release'"` with `mode: enum(release, debug, test)`, the
+placeholder in `deploy {{ mode }}` approves as `{{ enum(debug,test) }}`, and a
+saved rule for the whole enum still covers it. A narrowing to a non-string
+type keeps the broad `{{ string }}` approval and is shown as
+`string (validated as number)`. When the command runs, the value must pass
+both its declaration and the narrowed type; a value that changed type after
+the guard (for example through a `set`) fails with `TemplateValueRejected`.
+A host's late-value barrier never reads a guarded placeholder, and checks a
+late value only against its declaration, leaving the narrowed type to the
+command that is reached.
 
 A host that places commands where their values may change before they run (a sequence task after the first) also calls `DeferredShellRoots::with_placeholders_template_required()`. Every command with a placeholder is then `TemplateRequired`, even when all its values are known: it contributes no resolved bytes, is never offered "this exact command", and an `exact` rule for its current bytes does not cover it. Its approval-time placeholders are still evaluated and checked for missing values, and a command with a placeholder that is not a valid template fails with `TemplateGrammar`. A command with no placeholder is unaffected.
 
