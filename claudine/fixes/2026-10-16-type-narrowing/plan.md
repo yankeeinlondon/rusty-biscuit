@@ -135,6 +135,104 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/tests/l1/shell_template_guards.rs
+    - darkmatter/lib/tests/l1/shell_template_execution.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - claudine/lib/src/composition/lifecycle/shell_template.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/tests/l1/shell_template_body_guards.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+    - claudine/cli/tests/l1/guarded_shell_values.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/main.rs
+    - darkmatter/lib/tests/common/type_scope_cases.rs
+    - darkmatter/lib/tests/common/type_scope_guard.rs
+    - darkmatter/lib/tests/l1/scope_site_conformance.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/expressions.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - .claude/skills/darkmatter/compose.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/SKILL.md
+    - darkmatter/docs/topics/expression-engine.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+completed_phase: 6
+implemented: true
 ---
 
 # Shared type scope implementation plan
@@ -464,7 +562,7 @@ of sibling cases for the affected guard/site boundary.
 
 ### Wave 7 — Documentation tracks (parallel)
 
-- [ ] **Document Darkmatter behavior**
+- [x] **Document Darkmatter behavior**
   - Update expression and shell-approval topic pages plus applicable DMLS docs
     and Darkmatter skills. Describe both guard sides, equality caveats,
     declaration/refinement/fallback separation, live checks, and passive
@@ -472,7 +570,7 @@ of sibling cases for the affected guard/site boundary.
     Mermaid flow; label future argument-binding/projection behavior planned.
   - Keep README changes limited to public overview drift. Do not add spec paths
     or feature/fix names to current docs.
-- [ ] **Document Claudine behavior**
+- [x] **Document Claudine behavior**
   - Update composition/preflight, lifecycle, and sequence topic pages and
     Claudine skills with conditional validation, task-guard bindings, mutation
     invalidation, and re-entry lifetimes. Explain why an unselected branch skips
@@ -484,7 +582,7 @@ of sibling cases for the affected guard/site boundary.
 
 ### Wave 8 — Final verification (serial)
 
-- [ ] **Run affected checks**
+- [x] **Run affected checks**
   - Run the canonical `just test` in `darkmatter/` and `claudine/` after all
     branches integrate; these recipes cover the relevant library, CLI, and DMLS
     L1 targets. Run each area's `just lint` separately afterward. Do not run
@@ -500,7 +598,7 @@ of sibling cases for the affected guard/site boundary.
     static-analysis fix. Load the `os` skill before platform-specific changes
     or environment-specific failure handling; do not claim unrun environments
     were locally verified.
-- [ ] **Audit delivery evidence**
+- [x] **Audit delivery evidence**
   - Review the diff for residual private fact producers, unreviewed unguarded
     construction, broad root deferrals, cached discovery empties, branch leaks,
     unconditional conditional-hole barriers, and unsupported behavior claims.

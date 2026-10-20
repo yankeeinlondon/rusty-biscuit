@@ -6,9 +6,9 @@ clarified: true
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-20
-review_iterations: 0
-implemented: false
-completed: false
+review_iterations: 1
+implemented: true
+completed: true
 $schema:
     status: |-
         enum(
@@ -39,6 +39,7 @@ related:
     - 2026-10-27-darkmatter-lifecycle-ownership
     - 2026-10-28-schema-enhancements
     - 2026-10-31-type-aware-evaluation
+implemented_by: "claude/opus"
 ---
 
 # One type scope: guard narrowing applied everywhere
@@ -486,6 +487,15 @@ specification. Record any departure from this draft in the implementation log.
 ## Open Questions
 
 ### What may `file_exists` prove after argument conversion is introduced?
+
+**Resolved by the author (2026-10-20): none of the options below.**
+`file_exists` is an inspecting predicate, `file_exists(value: any): boolean`.
+It never converts its argument. Null, a number, a boolean, an array, or an
+object returns `false`; a `string` or `file` returns whether that path exists.
+Only text can return `true`, so the true side proves a present `string | file`
+(a present string at runtime) and the false side proves nothing. This is the
+fact this fix already registers. `2026-10-28-schema-enhancements` records the
+binding change as its decision 82.
 
 Today Darkmatter's
 [`file_exists_fn`](../../../darkmatter/lib/src/markdown/compose/expression/functions/mod.rs)

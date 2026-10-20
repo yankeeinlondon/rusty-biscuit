@@ -13,13 +13,6 @@ packages:
     - dmls
     - claudine-cli
 human_review: false
-message_to_agent: |-
-    Phase 5 added the conformance matrix, the ownership guards and the invocation proofs. Read "## Phase 5" in this log, especially "Findings recorded, not fixed" and the acceptance-to-evidence map, which is the current AC 1-14 state for Phase 6's audit.
-    - Matrix: `darkmatter/lib/tests/l1/scope_site_conformance.rs` (document sites, with the shared case table in `lib/tests/common/type_scope_cases.rs`), Claudine `composition/lifecycle/executor/tests/scope_site_conformance.rs`, and the sequence sibling in `sequence/preflight/tests.rs`. Planned cells are marked planned; when a projection lands, `planned_projections_stay_unclaimed_at_body_shell` fails until its cells are updated.
-    - Ownership guards: `type_scope_ownership_guard.rs` in darkmatter lib, dmls and claudine lib. A new `TypeScope::unguarded`, `DeclaredTypes::new`, `assume_at` or presence-lookup site needs an allowlist entry with a reason; a stale entry fails.
-    - Production fix: `BodyGuards::scan_body(body, frontmatter_lines)` makes body guard labels name the marker's file line. Phase 6 docs that quote a guard label should use file lines.
-    - Phase 6 docs: `yolo: true` approves no shell command. The AC 1 test needs whitelist rules, including `template git commit -m {{ string }}`.
-    - For the author (not Phase 6 work): finding 1 is an exact-approval key that drops a quoted empty argument (`git commit -m ""`). It comes from the shell-template-approval resolution, not this fix.
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
     - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
@@ -142,6 +135,104 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/tests/l1/shell_template_guards.rs
+    - darkmatter/lib/tests/l1/shell_template_execution.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - claudine/lib/src/composition/lifecycle/shell_template.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/tests/l1/shell_template_body_guards.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs
+    - claudine/cli/tests/l1/guarded_shell_values.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/main.rs
+    - darkmatter/lib/tests/common/type_scope_cases.rs
+    - darkmatter/lib/tests/common/type_scope_guard.rs
+    - darkmatter/lib/tests/l1/scope_site_conformance.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/tests/l1/implement_plan_commit_message.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/expressions.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - .claude/skills/darkmatter/compose.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/SKILL.md
+    - darkmatter/docs/topics/expression-engine.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-16-type-narrowing (6 phases)
@@ -1469,3 +1560,254 @@ this phase did not touch them:
 
 - `claudine/features/2026-10-27-darkmatter-lifecycle-ownership/{plan,implementation-log}.md`
 - `darkmatter/features/2026-10-20-map-and-filter/spec.md`
+
+## Phase 6
+
+Phase 6 is documentation and final verification. No source file changed. The
+orchestrator wrote both documentation tracks itself, because each one needed
+the guard rules read from `scope/facts.rs` and `lifecycle/actions.rs` rather
+than restated from the spec. It then ran every gate once, sequentially.
+
+### Documentation (Wave 7)
+
+**Darkmatter**
+
+- `darkmatter/docs/topics/darkmatter-expressions.md`:
+  - New section, `## What a Guard Proves`, placed after `## Truthiness`. It
+    lists the guarded regions, gives a guarded and an unguarded example, and
+    has a table of the three separate layers: declaration, guard refinement,
+    and the shell-only `{{ string }}` approval fallback.
+  - A guard-form table, true side and false side, read from
+    `PREDICATE_FACTS` and `facts.rs`. Then the stable-subject rules,
+    contradiction handling, fact lifetime (`set` invalidation, aliases,
+    joins, no carry-over across events, passes, retries, resumes or
+    proxies), the passive-analysis guarantee with the live re-check, and a
+    **Planned** list.
+  - **Drift fixed** in `### Equality and Inequality`. The page said that when
+    one side is missing, `==` is false and `!=` is true. The evaluator
+    (`expression/mod.rs`, `scalar_string(null) == ""`) compares a missing
+    side as empty text, so `missing == ''` is true. The code is taken as
+    correct and the bullets are rewritten: `x == null` holds only for a
+    present empty-text `x`, and `[] == '[]'` is true.
+- `darkmatter/docs/topics/expression-engine.md`: the "Type Aware Parsing"
+  sentence ended mid-word ("narrowed" because). It is now completed and links
+  to the new section.
+- `darkmatter/docs/inline/preflight-checks.md` `#### Guarded values`: a
+  Mermaid flow from placeholder through scope, approval and the run-time guard
+  to each outcome (removed, `MissingValue`, `TemplateValueRejected`, filled
+  and run), plus a link to the guard-form section.
+- `darkmatter/dmls/docs/hover.md`: "Not applied (current limits)" is now
+  "Not applied yet (**planned**)", so the lifecycle and task-body narrowing,
+  host globals and nested unions are labeled planned.
+- `.claude/skills/darkmatter/expressions.md`: names the ownership guard, the
+  matrix and the case table, states the equality caveat, and links the user
+  docs.
+- Darkmatter README: no change. It describes no guard behavior, so nothing
+  had drifted.
+
+**Claudine**
+
+- `claudine/docs/topics/flow-control/lifecycle.md`:
+  - The "Both branches are validated" shell-approval bullet now says that a
+    guard-proven missing placeholder is approved by its shape, not its
+    bytes. The old text, "approved bytes are the executed bytes", was
+    incomplete since Phase 4.
+  - New `### What a guard proves to the actions it selects`, with the
+    `commit_message` example: approval by shape, the false branch reads
+    nothing, the true branch passes one argument, a null after a `set`
+    gives `MissingValue` that `no_error` cannot suppress, and only proven
+    values are excused.
+  - The `file_exists` fact is stated as today's strict-handler fact (a
+    present string), never a filesystem guarantee.
+  - "What ends a guard's proof": a `set` of a key, `fm`/bare aliases,
+    ancestors and descendants, inner-branch writes after the join, a
+    non-constant destination or any Darkmatter side effect (checked against
+    `actions.rs::action_writes`: `set_frontmatter` is a side effect and ends
+    every document fact), and no carry-over across re-entry.
+- `claudine/docs/topics/flow-control/sequences.md` `### Task guards`: a "What
+  a guard proves to its task" part covering:
+  - the `shell:` and `with:` coverage;
+  - that the task's own `with:` cannot prove its own guard;
+  - that the guard does not narrow a `prompt:` document's body, so a guarded
+    whole-value `with:` becomes a late value of that document;
+  - why a false guarded branch skips the late-value barrier while an
+    ordinary unguarded late value keeps it (`SequenceShellLateValue`);
+  - the per-turn lifetime.
+- `claudine/docs/topics/pre-flight-checks.md` (Missing Values exception):
+  states the re-entry lifetime and the `file_exists` limitation, and links
+  the two new sections.
+- `.claude/skills/claudine/SKILL.md` (Structured shell authorization): a fact
+  is pre-flight evidence only and never crosses re-entry, plus user-doc links.
+- No spec path or feature/fix name was added to any current doc. A grep over
+  `darkmatter/docs`, `claudine/docs`, DMLS docs and skills finds only
+  `rollout-strategy.md`'s unrelated `2026-10-16-core-schema-types` roadmap
+  row.
+
+### Delivery audit (Wave 8)
+
+- Retired classifiers (`narrowed_expression_paths`,
+  `collect_narrowed_paths`, `RootGuard`, `condition_guard`): there are none
+  in `darkmatter/lib/src`, `dmls/src`, `claudine/lib/src` or
+  `claudine/cli/src`. The three `type_scope_ownership_guard` tests enforce
+  this, and they passed in the full suites below.
+- Unreviewed `TypeScope::unguarded` construction, broad root deferral, and
+  the `placeholder_guard` requirement before `MissingValue` are all enforced
+  by the same guards. They passed.
+- Unsupported behavior claims: each doc claim was checked against code
+  (`facts.rs`, `actions.rs`, `mod.rs::scalar_string`) or a named test
+  (`guarded_shell_values::{a_task_guard_proves_its_shell_value_present,
+  a_false_task_guard_does_not_fail_the_late_value_barrier}`). Future
+  behavior is marked **planned**.
+- Docs and comments against behavior: one drift was found and resolved (the
+  equality edge case above), plus the incomplete expression-engine sentence
+  and the lifecycle "approved bytes" bullet.
+
+### Acceptance criteria 1–14 (final)
+
+The map in Phase 5's "Acceptance-to-evidence map (current state)" stands
+unchanged. No test was added, renamed or removed in Phase 6. Every test it
+names passed in this phase's full `just test` runs, darkmatter and claudine
+(results below). Planned, not claimed:
+
+- nested-union and discriminant projection;
+- typed host values for `seq`, `loop` and `group`;
+- conversion-aware `file_exists` (the spec's Open Question, still for the
+  author);
+- function-argument checks against the scope;
+- DMLS narrowing of lifecycle and task bodies.
+
+The spec lists function-result narrowing as out of scope, and the docs state
+that it proves nothing.
+
+### Requirement-to-test mapping for this phase
+
+Phase 6 changes no behavior, so it adds no tests. Input Robustness Matrix:
+not applicable, since no loader or validator changed. The docs-reading tests
+that the scope calculator selected (`claudine-cli`, `darkmatter`, `dmls`) ran
+inside the two area suites.
+
+### Gates
+
+All gates ran sequentially, with no subagent running:
+
+- Scope calculator, after all doc edits:
+  `packages: [claudine-cli, darkmatter, dmls]`, `change_class: package`. No
+  gate was skipped.
+- `just test` (darkmatter): **10767 passed**, 10 skipped, exit 0.
+- `just lint` (darkmatter): exit 0.
+- `just test` (claudine): **10590 passed** (15 slow), 9 skipped, exit 0.
+- `just lint` (claudine): exit 0.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- `just check-tier-coverage claudine`: 0 stranded.
+- Dependents: no source changed, so no dependent package was retested.
+- `shipped_schema_corpus` (reads this log's and the plan's frontmatter), rerun after the frontmatter edits: 8 passed.
+- There were no failures, load-sensitive or pre-existing.
+- **Cross-OS check: not run.** Phase 6 changed only Markdown, so there is no
+  OS-specific risk. CI's per-environment cells cover the earlier phases'
+  code.
+
+### Remaining author items (not blocking)
+
+- The `file_exists` conversion Open Question in the spec. It matters only
+  when argument conversion lands.
+- Phase 5 finding 1: the exact-approval key drops a quoted empty argument.
+  This belongs to the shell-template-approval resolution.
+
+Implementation complete, ready for review.
+
+### Unrelated working-tree changes
+
+- `darkmatter/docs/images/darkmatter.excalidraw.svg` went from an empty file
+  in git to a full Excalidraw drawing during this session, at 13:02. No
+  Phase 6 step writes images, so this phase left it untouched and did not
+  list it in this phase's frontmatter.
+
+### O2 repair (2026-10-20)
+
+**Reproduced.** Recording-program L1 tests, run against the unfixed tree,
+showed the empty argument lost from both the key and the argv. The shared
+resolved-byte tokenizer (`shell_expansion::tokenize`) dropped every quoted
+empty word, so `git commit -m "{{ commit_message }}"` with `""` became
+`["commit", "-m"]`: pre-flight showed `git commit -m`, `exact git commit -m`
+approved it, and the program got two arguments. This held for a lifecycle
+`shell`, a body `::shell`, a frontmatter `$( … )`, and sequence tasks (first
+task with a hole, later task with an authored `''`). Template mode kept the
+empty argument. Two sibling defects of the same class were found:
+`normalize_command` wrote an empty argument as nothing, so a user blacklist
+`exact … ""` rule could never match a template fill with an empty argument,
+and Claudine's harness displayed commands as a bare `join(" ")`.
+
+**Changed.**
+- `tokenize`: a word that opened a quote is emitted even when empty; `''2>`
+  is the word `2`, not a stderr redirection. Unquoted empty values still add
+  no word (documented resolved-byte splitting is unchanged).
+- `normalize_command`: an empty argument is written `""`, which tokenizes
+  back to one empty word.
+- Claudine `validate_and_approve_command_parts`: the displayed command is the
+  normalized key, not the bare join.
+- Docs: Darkmatter `preflight-checks.md` (Running a command as a template)
+  and Claudine `pre-flight-checks.md` (Phase 2).
+
+**Tests.** Darkmatter: `tokenize_keeps_quoted_empty_words`,
+`normalize_quotes_an_empty_argument_and_round_trips`; CLI
+`compose_shell_template::{an_exact_rule_keeps_a_quoted_empty_argument,
+an_exact_rule_without_the_quoted_empty_argument_approves_nothing,
+an_unquoted_empty_value_contributes_no_resolved_word,
+an_exact_blacklist_rule_blocks_a_template_fill_with_an_empty_argument,
+a_frontmatter_command_keeps_a_quoted_empty_argument}`. Claudine CLI:
+`lifecycle_shell_templates::{a_lifecycle_exact_key_keeps_a_quoted_empty_argument,
+a_lifecycle_exact_key_without_the_empty_argument_approves_nothing}`,
+`sequence_shell_templates::sequence_task_exact_keys_keep_quoted_empty_arguments`.
+
+**Decisions.**
+- The key spells an empty argument `""`, matching how `normalize_command`
+  already double-quotes other arguments, and how the template rule writer
+  spells an empty literal. `''` was rejected because no other key uses single
+  quotes.
+- The fix is in the tokenizer, not in each site. Every resolved-byte site
+  reaches the tokenizer, so a per-site fix would have left the others broken.
+- A saved `exact git commit -m` no longer approves the quoted form. It
+  approved different bytes. A saved key changes meaning only if it already
+  spelled a quoted empty word: before, `exact tool ""` was unreachable; now it
+  matches. No saved key without an empty argument changes.
+- Unquoted empty values keep shell semantics (no word), as the docs already
+  said for resolved bytes.
+- Two more findings of the same class were found during the sweep. Both are
+  repaired below.
+
+**Follow-up repairs (same day).**
+
+1. *`md compose` approval hint.* The non-interactive "add one of these" hint
+   printed `exact <authored text>`, `{{ }}` holes included, which can never
+   match, plus `prefix <first word>`, which is wrong for a chain.
+   `ShellExpansionError::ApprovalRequired` now carries `suggested_rules`
+   (`template::SuggestedRules`). Every place that raises the error builds it
+   from the same choices its approval prompt offers: resolved-byte directives
+   (`prepare_resolved`), template-only sites (`approve_template_only`), and
+   Darkmatter pre-flight (`decide_site`, `decide_entry`). Those choices are
+   the exact keys of the resolved bytes, the template shape, and the program
+   prefixes. The CLI renders those lines. It now also backslash-escapes `\`
+   for Prose, so a key's `\\` escape prints as written. Before, Prose
+   consumed it. Tests: `compose_shell_template::every_suggested_rule_approves_the_command`
+   copies each suggested line into a fresh whitelist and proves it approves
+   the command, for a quoted-empty site, a template-only site, and a
+   quote/backslash/underscore site. `approval::suggested_rules_tests::a_chain_groups_its_lines_and_unoffered_choices_are_omitted`
+   covers chains. Docs: `darkmatter/docs/inline/shell-expansion.md` (Approval).
+   That page's example was already stale: it omitted the `prefix` line.
+   - Decision: a new field on the error, not a re-derivation in the CLI. The
+     CLI cannot see the site, its offered choices, or its shape. Alternatives:
+     a separate error variant (rejected: more churn for every matcher), or
+     dropping the exact line when the command has a placeholder (rejected: a
+     valid exact key would be hidden).
+   - Decision: alternatives are lists of lines. A chain's exact or prefix
+     alternative needs one line per segment, so a multi-line list gets
+     `# all of:` / `# or all of:` comment headers, which the loader skips. A
+     list that is all single lines prints as before.
+   - Decision: the Prose `StatusBlock` hint ("add the command to your
+     whitelist") is unchanged. It suggests no rule text.
+2. *Claudine `permissions::query::tokenize_command_words`.* It dropped `""`
+   and `''` the same way. It now keeps a word that opened a quote even when
+   empty. Test: `permissions::query::tests::command_query_keeps_quoted_empty_arguments`.
+   - Decision: a local fix, not reuse of Darkmatter's tokenizer. That
+     tokenizer refuses pipes, `;`, `$(`, and redirections, while a provider
+     permission request can be any shell text and must still classify.
