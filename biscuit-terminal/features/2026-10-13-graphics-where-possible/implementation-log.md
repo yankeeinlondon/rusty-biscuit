@@ -101,41 +101,35 @@ packages:
     - "biscuit-icon"
 human_review: false
 message_to_agent: |-
-    Phase 3 (route model) is done; context for phase 4 (probe):
+    Phase 5 (tmux transport) is done; context for phase 6 (placeholders):
 
-    - The route lives in `biscuit-terminal/lib/src/discovery/detection/route.rs`.
-      `resolve_graphics_route(&RouteInputs)` is pure; extend `RouteInputs` with
-      the probe's results (Kitty query reply, structured DA1, wrapped/native
-      split) rather than reading anything inside the resolver. Every
-      "unknown" branch is the probe slot: `resolve_detected`'s final
-      `Unknown` (incl. SSH without hints), `resolve_zellij`'s
-      `zellij_kitty_enabled` (already wired: `Some(true)` -> Kitty/Verified,
-      `Some(false)` -> NoSupport/Verified; nothing fills it yet), and
-      `resolve_windows_terminal` (DA1 `4` is the second Sixel signal).
-    - `Terminal::graphics_route` is authoritative (the old `image_support`
-      field is gone; `Terminal::image_support()` projects it). Never re-resolve
-      per image; TUI escape hatch (ruling 8) should let a caller supply a
-      route via `Terminal::builder().graphics_route(..)` or turn probing off.
-    - The L1 matrix is `biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs`
-      (79 tests, `route_rows!` table); add probe rows there.
-    - Reason kinds: `Supported`, `NoSupport`, `Unknown`, `UserDisabled`,
-      `BlockedTransport`, `InvalidInput`, `NotATerminal`. `fix` is set only
-      when the blocker was observed; `bt` prints it as a hint
-      (`biscuit-terminal/cli/src/hints.rs`). The hidden-tmux hint
-      (`BISCUIT_GRAPHICS_TRANSPORT=tmux`) was deliberately not added yet.
-    - tmux resolves to `Unknown` "planned" for every case (ruling 3), forced
-      formats included; phase 5 replaces `tmux_planned`.
-    - `TerminalImage::render_with_route` returns `ImageOutput::{Pixels,
-      Fallback}`; a Sixel route falls back in `protocol.rs::encoder_for`
-      until phase 7. `render()` now returns alt text on fallback (not "").
-      Test pixel dispatch via `encoder_for` (rendering pixels queries the
-      live cursor).
-    - Windows Terminal version: `versions.rs` (Toolhelp32 walk + file
-      version, `windows-sys` 0.61, cfg(windows)); `zellij --version` runs
-      under a 500 ms deadline via `run_with_deadline`. Both are cached per
-      process.
-    - `just cross-check … -E '(…)'` breaks on parentheses; use positional
-      nextest filters.
+    - A visible tmux now resolves from `RouteInputs::tmux` (`TmuxFacts {
+      version, passthrough, clients }`, `detection/tmux.rs`, read in
+      `from_process` only when `TMUX` is set, using `TMUX_PANE`).
+      `route.rs::resolve_visible_tmux` applies the 3.3 floor, the
+      `allow-passthrough off` block, then `passthrough_route` with the
+      clients' common format (`outer_terminal` / `client_terminal`). Every
+      tmux route is `GraphicsPlacement::Ordinary` today. Phase 6 upgrades
+      Kitty/Ghostty clients to `Placeholders`: `client_terminal` returns the
+      display name ("kitty", "Ghostty", "WezTerm", ...), so placeholders can
+      be keyed on that; WezTerm and unidentified clients stay ordinary.
+    - The wrapped probe runs for a visible tmux ONLY when `allow-passthrough`
+      could not be read; with passthrough on and no recognized client the
+      route is Kitty with confidence `Unknown` (deliberate: probing every
+      tmux session would add a 500 ms wait when tmux does not forward the
+      reply).
+    - Emission: `protocol::for_transport` wraps every APC/OSC/DCS per sequence
+      (`terminal_image/tmux.rs::wrap_graphics_for_tmux`; CSI untouched, an
+      existing envelope never re-wrapped) and enforces the 1 MiB budget
+      (`TMUX_MESSAGE_BUDGET`) before rows are reserved. Kitty through tmux
+      uses `render_kitty_with_id` (`i=` from `probe::next_kitty_id`, renamed
+      from `next_probe_id`; `q=2`; explicit `c=`/`r=`). Placeholder uploads
+      need `U=1` plus the placeholder grid printed UNwrapped as ordinary text.
+    - Tests: route rows in `tests/l1/graphics_tmux_matrix.rs` (its macro fixes
+      placement to `Ordinary`; phase 6 must loosen it); live tmux evidence in
+      `tests/level2/level2_graphics_tmux.rs` (private harness server,
+      `pipe-pane` raw capture, `discovery_probe` gained
+      `PROBE_GRAPHICS_IMAGE=<path>` to render an image for the route).
 source_files_during_phase_2:
     - "Cargo.lock"
     - "biscuit-terminal/lib/src/components/image_options.rs"
@@ -239,6 +233,74 @@ skills_files_updated_during_phase_3:
     - ".claude/skills/biscuit-terminal/terminal-struct.md"
     - ".claude/skills/os/SKILL.md"
     - ".claude/skills/os/windows-console.md"
+source_files_during_phase_4:
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/Cargo.toml"
+    - "biscuit-terminal/lib/src/discovery/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/raw_mode.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/unix.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/windows.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/color.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/query.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/support.rs"
+    - "biscuit-terminal/lib/src/terminal.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/tests/common/pty.rs"
+    - "biscuit-terminal/lib/tests/l1/main.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_probe_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs"
+    - "biscuit-terminal/lib/tests/level2/main.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs"
+    - "biscuit-terminal/cli/src/output.rs"
+docs_updated_during_phase_4:
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/research/graphics/multiplexing.md"
+    - "biscuit-terminal/lib/README.md"
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - ".claude/skills/biscuit-terminal/SKILL.md"
+    - ".claude/skills/biscuit-terminal/cli.md"
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-terminal/terminal-struct.md"
+    - ".claude/skills/os/windows-console.md"
+source_files_during_phase_5:
+    - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tmux.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/tests/l1/main.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/level2/main.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+docs_updated_during_phase_5:
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
 ---
 
 # Implementation Log for 2026-10-13-graphics-where-possible (9 phases)
@@ -792,3 +854,272 @@ super::*` in `render_in_cell_tests` under `--features image` (present at
 HEAD); `biscuit-terminal --all-features` fails to compile the `serde`
 feature's `horizontal_rule` test module (`HorizontalRule` not in scope; the
 `serde` feature is not in CI's feature list). No test was load-sensitive.
+
+## Phase 4
+
+### What was built
+
+- **Query engine, cross-platform** (`discovery/tty_query/{mod,unix,windows}.rs`,
+  replacing `tty_query.rs`): one shared loop (deadline, silence budget,
+  `MAX_RESPONSE_BYTES`, caller-chosen DA1 sentinel) over a `QueryPort`
+  (`/dev/tty` + raw mode + `select` on Unix; `CONIN$`/`CONOUT$` with console
+  modes saved and restored on native Windows). `exchange()` returns a
+  structured result (all bytes through the DA1 reply, plus where DA1
+  starts); `round_trip()` keeps its old contract (cursor, CSI 14 t,
+  standalone OSC) including the unanswered-request memo. New options:
+  `record_silence` (off for the wrapped exchange) and `skip_if_input_pending`
+  (`TtyQueryError::InputPending`). `typeahead_ranges` (pure) marks typed
+  input among replies; the Windows port writes those keys back with
+  `WriteConsoleInputW`, Unix discards them as before.
+  `TERMINAL_QUERY_MUTEX` is no longer `cfg(unix)`.
+- **Pure probe module** (`discovery/detection/probe.rs`): `kitty_query(id)`
+  (one RGB pixel, `a=q,t=d,f=24,s=1,v=1`, payload `AAAA`), `next_probe_id`
+  (fresh, nonzero, per-process offset), `parse_kitty_reply` (complete reply
+  with `i=<id>` only; `OK` → Accepted; other message → Rejected; disagreeing
+  duplicates → Conflicting; else NoReply), `Da1Reply` (class + attributes;
+  Sixel = attribute `4`, never the class or a digit), `ProbeReply`,
+  `ProbeResult`/`ProbeSkip`, `GraphicsProbe { direct, tunneled }`,
+  `ProbePlan`, and `wrap_for_tmux` (ESC doubled exactly once).
+- **Resolver** (`route.rs`): `decide(inputs) -> (route, ProbePlan)`, so the
+  decision to probe and the reading of the result share one source.
+  `resolve_graphics_route` and the new public `probe_plan` are its two
+  views. `RouteInputs` gained `is_ci`, `probe_mode: ProbeMode`, and
+  `probe: GraphicsProbe`; `zellij_kitty_enabled` was removed (the probe
+  fills `probe.direct`). New: `BISCUIT_TERMINAL_PROBE=auto|off` (shares
+  `parse_choice`; invalid → `InvalidInput`), `ProbeMode::{Auto, Off}`,
+  `RouteInputs::probed()`, `GraphicsRoute::needs_measured_cells`.
+  Probe outcomes: Kitty OK → Kitty `Verified` (beats Sixel); DA1 `4` →
+  Sixel `Verified`; rejection or DA1 alone → NoSupport `Verified`; silence,
+  conflict, busy-input skip, unavailable → Unknown.
+- **Zellij**: the interim "Kitty-family host" rule is replaced by the pane
+  query; DA1 `4` gives Sixel even below 0.45; Zellij pixel routes set
+  `needs_measured_cells`, and `encoder_for` falls back with a distinct
+  reason when no measured cell size exists (`unmeasured_cells_reason`).
+- **Windows Terminal**: either signal (version ≥ 1.22, or DA1 `4`) gives
+  Sixel. **Legacy Windows console** (ruling 6 definition) now resolves to
+  NoSupport and is never probed.
+- **Hidden tmux**: `TERM=tmux-*|screen-*` (or exactly `tmux`/`screen`) with
+  neither `TMUX` nor `STY` → direct + wrapped exchanges; wrapped OK → Tmux
+  transport, ordinary, `Verified` (iTerm2 format with forwarded
+  `LC_TERMINAL=iTerm2`); plain OK → direct (same iTerm2 preference);
+  neither → Unknown with fix `set BISCUIT_GRAPHICS_TRANSPORT=tmux …`.
+  **Declared tmux** (`BISCUIT_GRAPHICS_TRANSPORT=tmux`, no `TMUX`):
+  identified outer terminal → `Forced` ("unverified"), else wrapped probe
+  → `Verified`, else Unknown with a `BISCUIT_GRAPHICS` fix. A forced format
+  with a declared tmux → Tmux transport, `Forced`. Visible tmux stays
+  `tmux_planned`.
+- **Startup exchange** (`discovery/startup_exchange.rs`): the once-per-
+  process OSC 10/11 exchange now also carries the Kitty query when the route
+  wants a direct probe; whichever caller comes first sends both. The direct
+  and wrapped results are cached separately; a busy-input skip is not
+  cached (the colors are then sent alone, as before). `osc_queries` reads
+  its colors from it (`LIVE_FG_BG` removed); `color_query_wanted()` is the
+  single color gate and now also honors `BISCUIT_TERMINAL_PROBE` and never
+  queries a native Windows SSH server session. Windows Terminal is on the
+  color list on native Windows only.
+- **TUI escape hatch** (ruling 8, final names): `Terminal::builder()
+  .probe(ProbeMode::Off)` (no live query at construction; colors from
+  `heuristic_color`/`color_mode_for_background`), `.graphics_route(..)`
+  (supplied route is never re-resolved and sends no graphics probe), and
+  `BISCUIT_TERMINAL_PROBE=off`. No `Terminal::new_with`; the existing
+  builder already carried `.graphics_route`, so a second constructor would
+  duplicate it.
+- **Interim**: any Tmux-transport pixel route falls back in `encoder_for`
+  until phase 5's wrapping.
+- **`discovery_probe`**: `PROBE=graphics` mode (route fields, colors,
+  `PROBE_GRAPHICS_CONSTRUCTIONS`, `PROBE_GRAPHICS_PROBE=off`,
+  `PROBE_READ_TYPEAHEAD_MS`, `PROBE_AWAIT_TYPEAHEAD_MS`).
+
+### Departures and decisions
+
+- **Bug found by the PTY tests and fixed**: `detect_terminal` read the
+  colors before resolving the route, so with input waiting the color
+  exchange consumed the typed keys and a second exchange then sent the
+  Kitty query. The route is now resolved first (the colors ride in its
+  exchange). Regression test: `level1_graphics_probe::waiting_input_still_queries_colors`
+  (failed before, passes after).
+- **Windows typeahead re-injection shipped** (the L2 test
+  `keys_typed_during_the_exchange_reach_the_program_afterwards` passed on
+  three runs on `build-win-native`). Limit: re-injected keys are appended,
+  so a key typed between the last read and the write-back lands first.
+- **Windows L2 uses `xpty`**, not the shared expectrl helper: under the
+  expectrl console the probe's queries never reached the test and conhost
+  answered DA1 itself. Recorded in the `os` skill.
+- **Zellij L2 only ever skipped**: `zellij` is not installed here (spike
+  S1). The present-path test is written but has never run.
+- **Mode 2026**: the library emits no synchronized-output block of its own
+  around construction; "never probe inside mode 2026 or a TUI loop" is a
+  documented caller rule (construct first), not a runtime check.
+- **Under a hidden tmux, a Sixel answer in the plain DA1 is ignored**: tmux
+  answers that DA1 itself; tmux-native Sixel is phase 7's.
+- **Gaps noted, not changed**: cursor position and CSI 14 t remain
+  `cfg(unix)` (the Windows port could serve them later).
+
+### Requirement-to-test mapping
+
+| Behavior | Test (tier, rung) |
+| --- | --- |
+| Kitty reply parser: complete OK, extra keys, fragments (every cut), wrong ID, ID prefix, ENOTSUPPORTED rejection, typeahead around it, after DA1 (out of order), among color replies, duplicate agree/conflict, other ID first, empty | `l1 graphics_probe_matrix::kitty_*` (15, L1, F1 public API) |
+| DA1 structural parse: attribute 4, none, digit in another number, class 4, no attributes, fragments/foreign CSI, after typeahead; Kitty and DA1 kept separately | `graphics_probe_matrix::da1_*`, `probe_reply_keeps_kitty_and_da1_separately` |
+| Probe outcomes for an unknown endpoint/SSH (Kitty, Sixel, Kitty beats Sixel, rejection, DA1-only, silence, conflict, busy skip, unavailable; CI/probe-off/env-off reasons; known terminal ignores a result) | `graphics_probe_matrix::unknown_*`, `ssh_*`, `known_*`, `ci_*`, `probe_*` |
+| `BISCUIT_TERMINAL_PROBE` validator wiring (auto control, off keeps known terminals, `OFF` invalid) | `graphics_probe_matrix::probe_env_*` |
+| Windows Terminal either-signal rule | `graphics_probe_matrix::windows_terminal_*` (5) |
+| Zellij pane query, version independence, measured-cells flag | `graphics_probe_matrix::zellij_*` (6); updated `graphics_route_matrix::zellij_*` |
+| Hidden tmux (wrapped OK, iTerm2 forward, plain OK incl. iTerm2, unconfirmed hint, hint beats identity, `screen-*`, bare `tmux`, `screenx`, `STY`, direct override) and declared tmux (5 rows) | `graphics_probe_matrix::hidden_*`, `declared_*`, `gnu_screen_*`, `direct_transport_*` |
+| Never-queried list (known compatible/iTerm2/incompatible, WT ≥ 1.22, declared tmux to identified terminal, pipe, CI, CI+hidden tmux, disabled, forced, invalid override/transport/probe env, probe env off, ProbeMode::Off, Windows SSH, Windows SSH + tmux TERM, legacy console, visible tmux) and positive plans | `graphics_probe_matrix::plan_*` (27) |
+| Live exchange: colors + Kitty + one DA1 in one write; graphics-only; Sixel; NoSupport; rejection; busy input skips graphics but keeps colors and typeahead; probe off writes nothing (builder and env); known terminals/Terminal.app not probed; once per process; hidden tmux verified and unconfirmed-with-hint; wrapped bytes doubled once | `l1 level1_graphics_probe::*` (14, L1 PTY, F2) |
+| Tmux-transport and unmeasured-cells fallbacks in `TerminalImage` | `terminal_image::tests::route_dispatch::a_tmux_route_falls_back_…`, `…a_route_needing_measured_cells_…` |
+| Engine helpers (`da1_end`, `typeahead_ranges`), probe bytes, fresh IDs, wrapping | `tty_query::tests::*`, `detection::probe::tests::*` |
+| Real WezTerm answers the Kitty query (no reply junk on the pane) | `level2 level2_graphics_probe_wezterm::level2_wezterm_answers_the_kitty_graphics_query` (L2) |
+| Zellij ≥ 0.45 | `level2_zellij_probe_is_verified_or_reasoned` (L2; skips here) |
+| Windows backend: measured colors, DA1 `4` → Sixel Verified, typeahead returned | `level2 level2_windows_console_query::*` (3, L2 on build-win-native) + 7 Windows-only port unit tests |
+
+Input robustness: `BISCUIT_TERMINAL_PROBE` uses the shared `parse_choice`
+validator (its shapes were walked in phase 3); this phase adds a control row
+and one invalid shape (`OFF`). The color gate reads the variable as
+`var_os(..).is_none_or(== "auto")`, so any invalid value turns live color
+queries off, never on. Code-smell grep over the new files: no
+`#[serde(default)]`, `unwrap_or_default()`, or `filter_map(.. as_str())`
+on a load-bearing parse.
+
+### Gates
+
+| Scope | Command | Result |
+| --- | --- | --- |
+| biscuit-terminal | `just lint` | clean |
+| biscuit-terminal | `just test` | 3686 passed, 55 skipped |
+| biscuit-terminal | `just test-l2` | lib 4 passed; cli first run 4 failed of 113 (WezTerm "other wezterm clients held the mux for 15s"/capture timeouts) |
+| biscuit-terminal-cli | rerun `--test level2 level2_prose_styling` alone, then the whole cli `level2` binary | 58/58, then 313/313 passed: load-sensitive, not a regression |
+| biscuit-terminal | `just check-tier-coverage biscuit-terminal` | nothing stranded |
+| Windows | `just cross-check biscuit-terminal --os windows` | 3300 passed, 61 skipped |
+| Windows | `just cross-check biscuit-terminal --os windows --features terminal-tests level2_windows_console_query tty_query` | 16/16 |
+| biscuit-visualized | `just test` | 310 passed |
+| biscuit-icon(+cli) | `--all-features` | 241 passed |
+| darkmatter | image/mermaid/diagram/graph/force/hr/render_tree/color/terminal filter (no tier markers) | 844 passed |
+| darkmatter-cli | `test-fixtures`, image/mermaid/diagram/graph/render | 78 passed |
+| worktree-cli | list/graph/image | 216 passed |
+| sniff-cli | graph/deps/dot/image | 23 passed |
+| biscuit-tui | all | 601 passed |
+| workspace | clippy `-D warnings` on darkmatter, worktree-cli, biscuit-icon, biscuit-visualized | clean |
+
+Gate-skip check: `git status --porcelain --untracked-files=all | awk
+'{print $NF}' | xargs python3 scripts/ci/affected_scope.py` → `change_class:
+package`, `packages: [biscuit-terminal, biscuit-terminal-cli, test-toolkit,
+darkmatter, sniff, tree-hugger-cli]`, so the gates were run.
+
+## Phase 5
+
+### Wave 1: tmux facts, wrapper, budget
+
+- **tmux facts reader** — new `lib/src/discovery/detection/tmux.rs`
+  (`TmuxFacts { version, passthrough, clients }`, `Passthrough`,
+  `TmuxClient`, pure `parse_passthrough` / `parse_clients`, and
+  `read_facts(pane)`). Read in `RouteInputs::from_process` only when `TMUX` is
+  set; `TMUX_PANE` joined `ROUTE_ENV_VARS`. Commands go through the existing
+  `versions::run_with_deadline` (no shell, 500 ms each): `tmux -V`,
+  `tmux show-options -Apv -t $TMUX_PANE allow-passthrough`,
+  `tmux list-clients -t $TMUX_PANE -F '#{client_termname}\t#{client_termtype}'`.
+  Anything unreadable is `Unknown` / `None`, never "off". Without `TMUX_PANE`
+  only the version is read (an untargeted query could describe another pane).
+- Host check (tmux 3.8, private `-L` servers): `show-options -Apv` prints
+  `off` / `on` / `all`; an invalid option or missing socket exits 1 (→
+  unknown). `list-clients -t <pane>` lists only the clients of the pane's
+  session (verified with two sessions and two `script`-attached clients).
+- **Clients disagreeing (interpretation recorded):** the route uses the
+  format every client of the pane's session renders, preferring Kitty
+  (Kitty/Ghostty: Kitty; WezTerm/Konsole: Kitty and iTerm2; iTerm2: iTerm2).
+  An unrecognized client counts as Kitty-only, matching the plan's rule that
+  an unidentified outer terminal gets Kitty ordinary. No common format →
+  `NoSupport` naming the terminals.
+- **`show-environment` not used:** the plan lists it as an identity source,
+  but a session's environment only carries variables in `update-environment`
+  (by default not `TERM_PROGRAM` / `LC_TERMINAL`), so it describes the
+  server's past rather than the current client; `client_termtype` (the outer
+  terminal's XTVERSION answer, which iTerm2, kitty, WezTerm, Ghostty send)
+  covers the identification. Recorded as a departure from the plan.
+- **Wrapper** — new `lib/src/components/terminal_image/tmux.rs`:
+  `wrap_graphics_for_tmux` wraps each APC / OSC / DCS in its own envelope
+  (reusing `probe::wrap_for_tmux`), leaves CSI (cursor save/move/restore,
+  mode 2026) and text alone, copies an existing `ESC P tmux;` envelope as-is,
+  and copies unterminated sequences unchanged. It reports the largest
+  envelope.
+- **iTerm2 budget** — `TMUX_MESSAGE_BUDGET = 1 << 20`, counted over the whole
+  wrapped message. Applied generically in `protocol::for_transport` to every
+  envelope (Kitty chunks are ~4 KiB so only iTerm2 can reach it).
+
+### Wave 2: route integration and emission
+
+- `route.rs`: `tmux_planned` removed. `resolve_visible_tmux` handles a
+  visible tmux for both detection and `BISCUIT_GRAPHICS` forcing: version
+  unreadable → `Unknown` (no fix); < 3.3 → `BlockedTransport` + "upgrade tmux
+  to 3.3.0 or later"; `allow-passthrough off` → `BlockedTransport` + "set -g
+  allow-passthrough on"; forced format → that format through tmux (`Forced`);
+  on → clients' format (`Known`), or Kitty with confidence `Unknown` when no
+  client is recognized; unreadable → wrapped probe (`ProbePlan { tunneled }`),
+  where any answer proves passthrough (`Verified`) and silence stays
+  `Unknown` without a fix.
+- **Design decision:** the wrapped probe runs for a visible tmux only when
+  `allow-passthrough` cannot be read. Probing every passthrough-on tmux with
+  an unrecognized client would cost up to the 500 ms local silence budget per
+  process whenever tmux does not forward the wrapped DA1 reply, and the plan
+  already names "unidentified ⇒ Kitty ordinary through passthrough".
+- Emission: `encoder_for` no longer falls back for `Tmux` routes.
+  `render_to_terminal` now returns `ImageOutput` and calls `for_transport`
+  before the cursor rows are computed or written, so an oversized message
+  falls back before any row is reserved; `render_inline` maps it to
+  `UnsupportedTerminal`. Kitty through tmux uses the new
+  `render_kitty_with_id` (`q=2,i=<id>,…,c=,r=`): rows are explicit because
+  the outer terminal is not `term.app`. The three Kitty chunk loops now share
+  `kitty_chunks` (byte-identical output for the existing paths).
+- `probe::next_probe_id` renamed `next_kitty_id`: one process-wide counter
+  for probe IDs and upload IDs keeps them distinct.
+- `discovery_probe graphics` gained `PROBE_GRAPHICS_IMAGE=<path>` (prints
+  `graphics_image[i]=pixels|fallback:<text>|error:<msg>`).
+
+### Requirement → test mapping
+
+| Requirement | Test(s) |
+| --- | --- |
+| ESC doubling, per-chunk envelopes, nested terminators | `terminal_image::tmux::tests::each_kitty_chunk_gets_its_own_envelope`, `an_osc_ends_at_bel_or_st_whichever_comes_first` |
+| never wrap twice; mode 2026 / CSI never wrapped | `an_existing_envelope_is_never_wrapped_twice`, `cursor_movement_and_synchronized_output_are_not_wrapped` |
+| empty / large sequences | `empty_plain_and_unterminated_input_pass_through`, `a_large_sequence_is_one_envelope_with_its_size_reported`, `the_wrapped_length_counts_doubling_and_the_envelope` |
+| 1 MiB budget at limit-1 / limit / limit+1; direct unaffected | `route_dispatch::the_tmux_message_budget_holds_at_its_boundary`, `the_budget_only_applies_through_tmux` |
+| oversize falls back before rows (real PNG, public `render_with_route`) | `route_dispatch::an_oversized_tmux_iterm2_image_falls_back_before_reserving_rows` |
+| wrapped quiet Kitty with fresh nonzero IDs, explicit rows; iTerm2 one envelope | `route_dispatch::a_tmux_kitty_route_wraps_each_chunk_with_an_id_and_explicit_rows`, `a_tmux_iterm2_route_wraps_the_file_message_once`, `a_direct_kitty_route_is_not_wrapped` |
+| facts parsers | `detection::tmux::tests::passthrough_values`, `client_lines` |
+| version floor (3.2 / 3.3 / unreadable), passthrough on/off/unknown, client identity and disagreement, forced formats, transport overrides, probe plan | `l1 graphics_tmux_matrix::*` (39 tests) |
+| live tmux: passthrough on (wrapped Kitty chunks in raw output, nothing on the grid) and off (fallback + fix, no graphics bytes) | `level2 level2_graphics_tmux::level2_tmux_passthrough_on_wraps_kitty_chunks`, `level2_tmux_passthrough_off_falls_back_and_names_the_setting` |
+
+- The interim rows `tmux_detected_is_planned`, `tmux_forced_kitty_is_planned`,
+  `tmux_declared_transport_with_tmux_visible_is_planned` (route matrix) and
+  `a_tmux_route_falls_back_until_passthrough_wrapping_exists` (unit) were
+  replaced by the rows above.
+- L2 tests ran in 0.18 s; a mutation (expected fallback text changed) made the
+  `off` test fail with the live pane output (`tmux 3.8.0 has
+  allow-passthrough off for this pane`), so they genuinely exercise tmux.
+- Input robustness: the tmux facts are command output, not a config format;
+  the passthrough parser maps every unexpected value (empty, error text,
+  `ON`) to `Unknown`, covered in `passthrough_values`.
+
+### Gates
+
+- `just lint` (biscuit-terminal area): clean. Also
+  `cargo clippy -p biscuit-terminal --features terminal-tests,image --tests --examples -- -D warnings`: clean.
+- `just test`: 3736 passed, 0 failed (one invocation, lib + CLI).
+- `just test-l2`: biscuit-terminal 6 run / 6 passed, biscuit-terminal-cli 251
+  passed.
+- `just check-tier-coverage biscuit-terminal`: 0 stranded.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): packages
+  `biscuit-terminal, biscuit-terminal-cli, test-toolkit, darkmatter, sniff,
+  tree-hugger-cli`, change_class `package` (the working tree still holds
+  phase 4's uncommitted changes), so the gates were run.
+- Dependents (serial, filtered to symbols touched): darkmatter
+  `test(/route|graphics|image/)` 115 passed; worktree-cli
+  `test(/graphics|route|image|git_graph/)` 85 passed; biscuit-visualized
+  (`terminal`) `test(/route|graphics|image|kitty|iterm/)` 17 passed.
+- Cross-OS check skipped: the only new process interaction (`tmux`
+  subprocesses) runs solely when `TMUX` is set, the wrapper and route rows
+  are pure, and the new L2 file is `cfg(unix)`. Linux CI runs the L2 tmux
+  tests (ubuntu tmux 3.4 ≥ 3.3).
+- No pre-existing or load-sensitive failures observed.

@@ -203,6 +203,74 @@ skills_files_updated_during_phase_3:
     - ".claude/skills/biscuit-terminal/terminal-struct.md"
     - ".claude/skills/os/SKILL.md"
     - ".claude/skills/os/windows-console.md"
+source_files_during_phase_4:
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/Cargo.toml"
+    - "biscuit-terminal/lib/src/discovery/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/raw_mode.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/unix.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/windows.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/color.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/query.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/support.rs"
+    - "biscuit-terminal/lib/src/terminal.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/tests/common/pty.rs"
+    - "biscuit-terminal/lib/tests/l1/main.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_probe_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs"
+    - "biscuit-terminal/lib/tests/level2/main.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs"
+    - "biscuit-terminal/cli/src/output.rs"
+docs_updated_during_phase_4:
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/research/graphics/multiplexing.md"
+    - "biscuit-terminal/lib/README.md"
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - ".claude/skills/biscuit-terminal/SKILL.md"
+    - ".claude/skills/biscuit-terminal/cli.md"
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-terminal/terminal-struct.md"
+    - ".claude/skills/os/windows-console.md"
+source_files_during_phase_5:
+    - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tmux.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/tests/l1/main.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/level2/main.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+docs_updated_during_phase_5:
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
 ---
 
 # Plan: Graphics Where Possible
@@ -663,7 +731,7 @@ Windows gets a query backend (§2). *Depends on phase 3. Uses spike S1.*
 
 ### Wave 1 (parallel, disjoint files)
 
-- [ ] **Structured query engine** (`discovery/tty_query.rs`, `osc_queries/`)
+- [x] **Structured query engine** (`discovery/tty_query.rs`, `osc_queries/`)
     - Extend (don't fork) the engine: structured per-request results and a
       structured DA1 result; a caller-chosen transport for **both** the request
       and the DA1 sentinel. Preserve existing color/cursor behavior; extending
@@ -671,7 +739,7 @@ Windows gets a query backend (§2). *Depends on phase 3. Uses spike S1.*
     - Write through the controlling terminal, never captured stdout. Keep
       locking, raw-mode restore, bounded reads, deadlines, silence budgets.
       Never probe in a synchronized-output block (mode 2026) or from a TUI loop.
-- [ ] **Reply parsers (pure)**
+- [x] **Reply parsers (pure)**
     - Kitty: valid one-pixel `a=q` (direct data, fresh nonzero ID, dimensions and
       pixel format matching payload); accept only a complete `OK` for that ID;
       distinguish rejection from silence.
@@ -680,7 +748,7 @@ Windows gets a query backend (§2). *Depends on phase 3. Uses spike S1.*
     - L1: fragmented, out-of-order, interleaved-with-typeahead, duplicate-ID,
       wrong-ID, error-reply (`ENOTSUPPORTED`) fixtures; native-vs-tunneled DA1
       kept as separate results.
-- [ ] **Native Windows backend** (`cfg(windows)`, `query.rs` Windows arm today a stub)
+- [x] **Native Windows backend** (`cfg(windows)`, `query.rs` Windows arm today a stub)
     - Same contract: request + DA1, deadline and silence budget, console modes
       restored. Serves colors and graphics (so Windows gets measured
       fg/bg, selecting diagram theme and Sixel background) and the WT DA1 `4`
@@ -694,7 +762,7 @@ Windows gets a query backend (§2). *Depends on phase 3. Uses spike S1.*
 
 ### Wave 2 (sequential; prerequisite: Wave 1)
 
-- [ ] **Wire into `Terminal::new()`**
+- [x] **Wire into `Terminal::new()`**
     - The Kitty query joins the existing once-per-process OSC 10/11 exchange;
       the DA1 that already ends it answers Sixel. No new probing moment.
     - Probe runs only when environment cannot decide (unknown SSH endpoint;
@@ -707,9 +775,9 @@ Windows gets a query backend (§2). *Depends on phase 3. Uses spike S1.*
     - Replace Zellij's interim rule with the pane query (confidence `Verified`);
       query success does not imply cell-size knowledge; missing geometry or
       placement failure ⇒ distinct reason + fallback.
-- [ ] **TUI escape hatch** per ruling 8; first construction probes, so docs say
+- [x] **TUI escape hatch** per ruling 8; first construction probes, so docs say
       "construct before any input loop starts".
-- [ ] **Hidden tmux across SSH**
+- [x] **Hidden tmux across SSH**
     - `TERM=tmux-*|screen-*` and no `TMUX` ⇒ also send a *wrapped* Kitty query
       (wrap exactly once, with its own wrapped DA1 ordering sentinel). Correlated
       `OK` ⇒ tmux transport (ordinary placement; forwarded
@@ -721,17 +789,17 @@ Windows gets a query backend (§2). *Depends on phase 3. Uses spike S1.*
 
 ### Wave 3 (validation checkpoint)
 
-- [ ] L1: parser matrix above; "never queried" list (known incompatible,
+- [x] L1: parser matrix above; "never queried" list (known incompatible,
       CI, pipe, disabled, Windows SSH); busy-input skip; cache keying.
-- [ ] L1 (PTY): per `biscuit-terminal` skill notes — answer the DA1 sentinel
+- [x] L1 (PTY): per `biscuit-terminal` skill notes — answer the DA1 sentinel
       (`ProbeAnswer::every(DA1_QUERY, DA1_REPLY)`) and rebuild `discovery_probe`
       before narrowed runs.
-- [ ] L2: WezTerm; Windows ConPTY (`xpty`) on `$BUILD_WIN`; Zellij if >= 0.45
+- [x] L2: WezTerm; Windows ConPTY (`xpty`) on `$BUILD_WIN`; Zellij if >= 0.45
       installed (else harness skip).
-- [ ] Update `docs/discovery/terminal-queries.md` for the intentional graphics
+- [x] Update `docs/discovery/terminal-queries.md` for the intentional graphics
       probe exception, input ownership, and platform limits; update
       `graphics-routes.md`.
-- [ ] `just cross-check biscuit-terminal --os windows`.
+- [x] `just cross-check biscuit-terminal --os windows`.
 
 ---
 
@@ -742,7 +810,7 @@ identification (§3). *Depends on phases 3, 4. Uses spike S2.*
 
 ### Wave 1 (parallel, disjoint files)
 
-- [ ] **tmux facts reader**
+- [x] **tmux facts reader**
     - `TMUX` detection; `tmux -V` (floor 3.3; older/unreadable ⇒ fallback with
       version in the reason); `allow-passthrough` via
       `tmux show-options -Apv -t "$TMUX_PANE" allow-passthrough`.
@@ -753,17 +821,17 @@ identification (§3). *Depends on phases 3, 4. Uses spike S2.*
       (`#{client_termname}`, `#{client_termtype}`, `show-environment`); never an
       arbitrary client or the server's startup env. Disagreeing clients ⇒ a
       format all can handle, or fallback.
-- [ ] **Wrapper** (pure): `ESC P tmux; <seq with every ESC doubled> ESC \`, per
+- [x] **Wrapper** (pure): `ESC P tmux; <seq with every ESC doubled> ESC \`, per
       Kitty chunk; never wrap twice; mode 2026 never wrapped. L1: ESC doubling,
       nested terminators, empty/large sequences.
-- [ ] **iTerm2 size budget** (pure): base64 expansion + metadata + ESC doubling +
+- [x] **iTerm2 size budget** (pure): base64 expansion + metadata + ESC doubling +
       tmux envelope against a fixed 1 MiB budget; oversize ⇒ fallback with a
       size-limit reason **before** reserving rows. Never split `File=` into
       multiple OSCs. L1 at boundary (limit-1, limit, limit+1).
 
 ### Wave 2 (sequential; prerequisite: Wave 1)
 
-- [ ] **Route integration**
+- [x] **Route integration**
     - Replace phase 3's interim tmux `None`: Kitty/Ghostty outside ⇒ Kitty
       (placement upgrade arrives in phase 6; until then ordinary placement);
       WezTerm/unidentified ⇒ Kitty ordinary through passthrough; iTerm2 outside
@@ -773,16 +841,16 @@ identification (§3). *Depends on phases 3, 4. Uses spike S2.*
     - Reply transport for the probe under tmux uses phase 4's wrapped round trip.
     - Document WezTerm-outside limits (drift on resize/copy mode, may persist
       over other windows).
-- [ ] **TerminalImage tmux emission**: wrapped, chunked, quiet-mode Kitty with
+- [x] **TerminalImage tmux emission**: wrapped, chunked, quiet-mode Kitty with
       nonzero IDs; no extra pixel format on partial failure.
 
 ### Wave 3 (validation checkpoint)
 
-- [ ] L1: wrapping, budget boundaries, version floor, passthrough
+- [x] L1: wrapping, budget boundaries, version floor, passthrough
       on/off/unknown, client-disagreement, route-table rows for tmux.
-- [ ] L2 through `biscuit-test-harness` tmux backend: passthrough on and off
+- [x] L2 through `biscuit-test-harness` tmux backend: passthrough on and off
       (capture assertions per `rust-testing`); no window focus.
-- [ ] Docs: `graphics-routes.md` tmux section incl. known limits (fresh client
+- [x] Docs: `graphics-routes.md` tmux section incl. known limits (fresh client
       renders blank placeholders — documented, not fixed).
 
 ---
