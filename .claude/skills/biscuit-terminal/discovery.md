@@ -68,14 +68,19 @@ default and is never queried, so it falls through to `AppleInterfaceStyle`.
 ### Image Support
 
 ```rust
-use biscuit_terminal::discovery::detection::image_support;
+use biscuit_terminal::discovery::detection::{graphics_route, GraphicsFormat};
 
-match image_support() {
-    ImageSupport::Kitty => println!("Kitty graphics protocol"),
-    ImageSupport::ITerm => println!("iTerm2 inline images"),
-    ImageSupport::None => println!("No image support"),
+let route = graphics_route(); // or Terminal::new().graphics_route
+match route.format {
+    GraphicsFormat::Kitty | GraphicsFormat::Iterm2 | GraphicsFormat::Sixel => {}
+    GraphicsFormat::None => println!("no graphics: {}", route.reason),
 }
 ```
+
+Resolution is env-only today (`BISCUIT_GRAPHICS`, `BISCUIT_GRAPHICS_TRANSPORT`,
+Windows SSH, Zellij, tmux, known terminals); see
+`biscuit-terminal/docs/discovery/graphics-routes.md`. `image_support()` is a
+projection kept for existing callers.
 
 ### OSC8 Hyperlinks
 

@@ -59,6 +59,12 @@ color queries (Kitty, WezTerm, iTerm2, Alacritty, Ghostty, Foot, Contour) and
 otherwise fall back to `COLORFGBG` and per-terminal defaults. Native Windows
 sends no live queries; the functions return `None` immediately.
 
+Graphics detection sends no queries: the
+[graphics route](./graphics-routes.md) is decided from the environment alone.
+A graphics probe is **planned**; it joins the color exchange above (a Kitty
+query in the same write, with Sixel read from the DA1 reply that already ends
+it) rather than adding a round trip.
+
 ## Timing knobs
 
 | Situation | Wait for the first reply byte | Whole exchange |

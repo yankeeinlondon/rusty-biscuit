@@ -3,8 +3,8 @@
 Part of the `os` skill; [SKILL.md](SKILL.md) is the index.
 
 Load before writing a Windows Level 2 test, driving a console or
-pseudoconsole, using WezTerm on `build-win`, or capturing a native command's
-output from PowerShell. Path spelling is in [windows-paths.md](windows-paths.md);
+pseudoconsole, using WezTerm on `build-win`, capturing a native command's
+output from PowerShell, or writing escape sequences from a Windows SSH session. Path spelling is in [windows-paths.md](windows-paths.md);
 processes and the environment in [windows.md](windows.md).
 
 ## WezTerm on `build-win`
@@ -102,3 +102,30 @@ marker, so the L1 filter selects it.
   ceiling, and kill and reap the child so the cell reports `FAIL`, not `LEAK`.
 - A run that dies in `git fetch` with `ssh: connect to host github.com port
   22` is a build-host network fault, not a test result; exclude it.
+
+## Escape sequences through the Windows OpenSSH server
+
+Measured 2026-10-20 on `build-win-native`: the bytes a Windows process wrote
+inside an `ssh -tt` session were captured at the client.
+
+- **The session's console is the system `C:\WINDOWS\system32\conhost.exe`,**
+  and it filters by sequence type, not by content:
+
+  | Sent by the Windows process | Arrived at the client |
+  | --- | --- |
+  | APC (Kitty graphics) | **Removed** |
+  | DCS (Sixel, and anything wrapped for tmux passthrough) | **Removed** |
+  | OSC (iTerm2 `OSC 1337;File=`, BEL or ST terminated) | Intact, even at 2 MB, byte count exact |
+  | OSC 8 hyperlink | Passes; conhost adds an `id=` parameter |
+
+- **WezTerm's multiplexer works on the same host** because WezTerm ships its
+  own `conpty.dll` and `OpenConsole.exe` (`C:\Program Files\WezTerm\`) and
+  never uses the system console host. A WezTerm-mux result is not evidence for
+  a plain SSH session.
+- **Consequence in code:** `biscuit-terminal`'s graphics route never selects
+  Kitty or Sixel when `SSH_CONNECTION` is set on native Windows (a forced
+  `BISCUIT_GRAPHICS=kitty`/`sixel` is reported as a blocked transport); it
+  selects the iTerm2 format only when the client terminal renders it. See
+  `biscuit-terminal/docs/discovery/graphics-routes.md`.
+- A test that asserts on OSC 8 output read back through this path must accept
+  the added `id=`.

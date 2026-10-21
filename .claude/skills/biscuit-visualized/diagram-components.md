@@ -14,6 +14,29 @@ never depends on this crate, so never add a re-export of these types there.
 | `GitGraph` | `components/git_graph.rs` | `components::MermaidDiagram` | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule, merges, the no-substitution rule, and fits the terminal by trimming commits and lanes (see below) |
 | `TerminalDiagramRenderer` | `components/render_hook.rs` | `components::MermaidDiagram` | The `biscuit_terminal::render_tree::DiagramRenderer` hook that draws Mermaid fences in a render tree |
 
+## Display size and PNG hand-off
+
+`MermaidDiagram` and `GraphExpression` (and `GitGraph`, through
+`MermaidDiagram`) rasterize once at the final display size, via
+`components/display.rs`: `display_pixels(columns, cell)` gives width =
+resolved columns × cell width and `row_height` = cell height (measured, else
+`CellSize::FALLBACK` 8x16; never zero), and `display_image(path, columns)`
+wraps the cached PNG in `EncodedPng` for
+`TerminalImage::from_encoded_png(..).with_width(ImageWidth::Characters(columns))`.
+Kitty and iTerm2 get the rasterizer's exact bytes, and the reserved rows
+match the padded height. The displayed columns are the ones the component
+resolved (margins included); never re-resolve a percent width against the
+full terminal width. Size is measured on every render, so a resize gets a new
+raster (cache keys differ by geometry).
+
+Background: `with_background(Background)` on both; `with_transparent_background(bool)`
+remains (`false` = `Background::Theme`). Terminal defaults are
+`Transparent` (Kitty/iTerm2 composite over the terminal); `inverted(..)` uses
+the opaque theme background. `MermaidRenderer::render_to_cached_png_at_width`
+(crate-private) takes `(target_width, row_height)`;
+`GraphExpression::render_to_cached_png_at_width(target_width)` is unchanged
+(no row padding).
+
 Two `MermaidDiagram` types exist on purpose: `mermaid::MermaidDiagram` makes
 SVG/PNG artifacts and knows nothing about terminals;
 `components::MermaidDiagram` is the terminal component built on it. Import the
@@ -23,7 +46,9 @@ component from `components`.
 
 Install `TerminalDiagramRenderer` with
 `TerminalRenderOptions::with_diagram_renderer(Rc::new(TerminalDiagramRenderer))`.
-It renders exactly `MermaidDiagram::new(source).try_render(terminal)` and never
+It renders exactly `MermaidDiagram::new(source).try_render(terminal)`, with the
+terminal's `fixed_width` set to `DiagramRenderRequest::available_width` (the
+fence's columns: a list item's or quote's inner width), and never
 builds a render tree, so it cannot re-promote its own fence. When and how
 biscuit-terminal consults it (and the strictness rules on failure) is in the
 `biscuit-terminal` skill's `diagrams.md`. Darkmatter installs it in

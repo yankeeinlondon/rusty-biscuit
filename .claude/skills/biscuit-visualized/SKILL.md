@@ -131,10 +131,10 @@ let graph = GraphDiagram::from_expression("a -> b")?
 
 ### RenderRequest
 
-`RenderRequest` is a plain struct; use struct literal syntax (no fluent builder beyond `with_target_width`):
+`RenderRequest` is a plain struct; use struct literal syntax with `..RenderRequest::default()`, or the builders `with_target_width`, `with_row_height`, and `with_background`:
 
 ```rust
-use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
+use biscuit_visualized::artifact::{Background, OutputFormat, RenderRequest};
 
 // SVG export
 let req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
@@ -146,17 +146,20 @@ let req = RenderRequest::default().with_target_width(1600);
 let req = RenderRequest {
     format: OutputFormat::Png,
     scale: 2,
-    target_width: None,
-    transparent_background: true,
+    background: Background::Transparent,  // Theme (default) | Transparent | Solid { r, g, b }
+    ..RenderRequest::default()
 };
+
+// Terminal display size: exact width, height padded to whole 18 px cell rows
+let req = RenderRequest::default().with_target_width(540).with_row_height(18);
 ```
 
-`target_width: Some(px)` takes precedence over `scale`. See [Rasterization](./rasterization.md) for the trade-off.
+`target_width: Some(px)` takes precedence over `scale`. `row_height` pads PNG height (ignored for SVG); the padding is transparent unless the background is `Solid`. See [Rasterization](./rasterization.md) for the trade-off.
 
 ### Cache Behavior
 
 - Location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/`
-- Key: xxHash of `version + kind + source + options + backend_id + format`
+- Key: xxHash of `v2 + kind + source + options + backend_id + format`; options include scale, target width, row height, background, and the PNG encoder settings (see [Artifacts & Caching](./artifacts-caching.md))
 - `RenderedArtifact.cache_hit` indicates whether the result was cached
 - No automatic cleanup — relies on OS temp directory lifecycle
 

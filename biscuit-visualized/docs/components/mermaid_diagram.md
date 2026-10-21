@@ -45,6 +45,7 @@ let diagram = MermaidDiagram::new("pie\n    \"A\" : 40\n    \"B\" : 60")
 | `.with_title(str)` | Add a diagram title |
 | `.with_config(MermaidConfig)` | Customize rendering config |
 | `.with_width(ImageWidth)` | Display width; the default is `ImageWidth::Scale(1.0)` |
+| `.with_background(Background)` | What paints behind the diagram; the default is `Background::Transparent` |
 | `.resolve_dimensions(term_width, cell)` | The columns the image will occupy, measuring the diagram for `Scale` |
 | `.try_render(&Terminal)` | Fallible render returning `MermaidRenderResult` |
 | `.render(&Terminal)` | Infallible render (falls back to code block) |
@@ -52,6 +53,8 @@ let diagram = MermaidDiagram::new("pie\n    \"A\" : 40\n    \"B\" : 60")
 ### Sizing
 
 The default width is `ImageWidth::Scale(1.0)`: the diagram's 16-unit body text is one terminal line tall, so nodes and text are the same size in every diagram whatever its content. The natural width comes from `mermaid-rs-renderer`'s `measure_svg_dimensions` (the root `viewBox` width), measured with the same theme as the render. The result is clamped to the available columns, so only a terminal too narrow for the diagram shrinks it. `Percent`, `Characters`, and `Fill` still work as before.
+
+The diagram is rasterized once, at its final display size: the PNG is as many pixels wide as the resolved columns (margins included) times the measured cell width, and its height is padded with blank rows below the drawing up to a whole number of cell rows. When the terminal reports no cell size, the 8x16 fallback is used. Those PNG bytes reach Kitty and iTerm2 unchanged (see [`EncodedPng`](../../../biscuit-terminal/docs/components/terminal_image.md#already-encoded-png-input)), so the terminal shows the raster 1:1 in exactly the rows it reserves, with no stretching or re-encoding. The size is measured on every render, so after a terminal or font resize the next render produces a new raster.
 
 ### Error Handling
 
@@ -62,13 +65,24 @@ Returns `MermaidRenderError` for visualization errors, unsupported terminals, an
 ### Theme and Rendering Options
 
 ```rust
+use biscuit_visualized::artifact::Background;
 use biscuit_visualized::components::mermaid::{MermaidDiagram, MermaidTheme};
 
 let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
     .with_theme(MermaidTheme::Dark)         // dark, default, forest, neutral
     .with_scale(3)                          // Higher resolution (default: 2)
-    .with_transparent_background(true);     // Blend with terminal background
+    .with_background(Background::Solid { r: 0x1e, g: 0x1e, b: 0x2e });
 ```
+
+The background decides what paints the area behind the diagram, and also the blank rows below it:
+
+| Background | Result |
+|------------|--------|
+| `Background::Transparent` (default) | Nothing is painted; Kitty and iTerm2 composite the diagram over the terminal's own background |
+| `Background::Theme` | The theme's background color |
+| `Background::Solid { r, g, b }` | One opaque color in place of the theme's |
+
+`with_transparent_background(bool)` remains as a shorthand: `true` is `Transparent`, `false` is `Theme`. `inverted(..)` switches to the inverse theme with its opaque `Theme` background.
 
 ### Quadrant Chart Configuration
 
@@ -200,7 +214,9 @@ let fence = RenderNode::code(Some("mermaid".into()), None, "flowchart LR\n    A 
 let rendered = render_terminal_node(&fence, &options)?;
 ```
 
-The hook renders exactly what `MermaidDiagram::try_render` would. When it
+The hook renders exactly what `MermaidDiagram::try_render` would, sized to
+the columns available at the fence's position (a list item's or block quote's
+inner width, not the whole terminal). When it
 cannot (no image support, invalid source), the render's strictness decides:
 `Strict` rejects the render, `Warn` records a lossy diagnostic and shows the
 fence as code, and `Lossy` shows it as code silently. Darkmatter installs the

@@ -397,6 +397,11 @@ bt --completions zsh > ~/.zfunc/_bt
   "text_color": { "r": 205, "g": 214, "b": 244, "hex": "#cdd6f4" },
   "supports_italic": true,
   "image_support": "Kitty",
+  "graphics_route": {
+    "format": "Kitty", "transport": "Direct", "placement": "Ordinary",
+    "confidence": "Known",
+    "reason": { "kind": "Supported", "message": "WezTerm (TERM_PROGRAM=WezTerm) is known to render the Kitty graphics protocol", "fix": null }
+  },
   "underline_support": {
     "straight": true,
     "double": true,
@@ -425,8 +430,11 @@ bt --completions zsh > ~/.zfunc/_bt
 ### Terminal Debugging
 
 ```bash
-# Check why images aren't working
-bt --json | jq '{app, image_support, is_tty}'
+# Check why images aren't working (the route carries the reason)
+bt --json | jq '{app, image_support, is_tty, reason: .graphics_route.reason}'
+# Piped stdout always reports NotATerminal; run `bt` without --json in the
+# terminal to see the route there. `bt` prints a one-line stderr hint when a
+# route's reason has a fix (stderr must be a terminal; once per reason).
 
 # Verify color support
 bt --json | jq '{color_depth, color_mode}'

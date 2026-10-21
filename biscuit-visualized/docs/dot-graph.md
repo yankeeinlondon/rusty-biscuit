@@ -185,10 +185,10 @@ If you need any of these, the only path today is forking `layout-rs` or post-pro
 After `layout-rs` produces raw SVG, `GraphDiagram::render()` runs three passes before optional rasterization:
 
 1. **Padding trim** (`trim_svg_padding`) — Recomputes a tight `viewBox` from element coordinates (ellipses, paths) so the canvas doesn't have ~60 px of empty `layout-rs` padding on each side.
-2. **Background fill** (`apply_graph_background`) — Inserts a `<rect width="100%" height="100%" fill="...">` matching the theme's `surface_color`, unless `RenderRequest::transparent_background` is set.
+2. **Background fill** (`apply_graph_background`) — Inserts a `<rect width="100%" height="100%" fill="...">` chosen by `RenderRequest::background`: the theme's `surface_color` for `Background::Theme` (the default; white when no `GraphColorTheme` is set), the given color for `Background::Solid { r, g, b }`, and no rectangle at all for `Background::Transparent`.
 3. **Text style patch** (`apply_text_style`) — Replaces `font-family: Times, serif;` (hard-coded by `layout-rs`) with the theme's font family, and adds `fill="..."` to every `<text>` to override `layout-rs`'s baked-in text colour.
 
-These passes only run when a `GraphColorTheme` is configured; the bare default renders with `layout-rs`'s built-in styling.
+The text style patch only runs when a `GraphColorTheme` is configured; without one, text keeps `layout-rs`'s built-in styling.
 
 ## Resolution tuning for terminal display
 
@@ -198,21 +198,40 @@ The DOT pipeline ultimately produces a PNG that's shown inline in a terminal. Th
 |---|---|---|
 | "Render at this many pixels wide" | `RenderRequest::with_target_width(px)` | The display target in pixels |
 | "Render at N× the SVG's native size" | `RenderRequest { scale: N, .. }` | A HiDPI multiplier (1, 2, 3…) |
+| "Fill whole rows N pixels tall" | `RenderRequest::with_row_height(px)` | The terminal's cell height in pixels |
 
-For terminal display, the first form is what you want.
+For terminal display, the first form is what you want, together with a row height.
+
+`row_height` pads the PNG's height up to the next whole multiple of that many pixels. The padding sits below the drawing and is transparent, or painted with the `Solid` color when the request asks for one. A terminal reserves whole cell rows for an image; a PNG whose height already fills those rows is shown 1:1 instead of being stretched to fit. `row_height` is ignored for SVG output.
+
+```rust,no_run
+use biscuit_visualized::artifact::{Background, RenderRequest};
+# use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax};
+# let graph = GraphDiagram::parse("a -> b", GraphInputSyntax::Auto)?;
+
+// 60 columns of 9x18-pixel cells: 540 px wide, height a multiple of 18 px.
+let request = RenderRequest::default()
+    .with_target_width(60 * 9)
+    .with_row_height(18)
+    .with_background(Background::Transparent);
+let artifact = graph.render(&request)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 ### How `GraphExpression` uses it
 
-`GraphExpression::render_to_image` computes the target before calling the rasterizer:
+`GraphExpression::render_to_image` computes the display size before calling the rasterizer:
 
 ```rust
 let dims = TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
-let cell_pixel_width = term.cell_size().map(|cs| cs.width.max(1)).unwrap_or(8);
-let target_width_px = dims.image_width * cell_pixel_width;
-let (png_path, _) = self.render_to_cached_png_at_width(target_width_px)?;
+let (target_width_px, row_height_px) = display_pixels(dims.image_width, term.cell_size());
+let (png_path, cache_hit) = self.render_png(target_width_px, Some(row_height_px))?;
+let term_image = display_image(&png_path, dims.image_width)?;
 ```
 
-`resvg` then renders the SVG once at exactly `target_width_px` pixels. Text glyphs are rasterised fresh at the display resolution — no oversampling, no downstream downscaling.
+`display_pixels` turns the resolved columns into pixels with the measured cell size, or the 8x16 fallback when the terminal reports none (neither dimension is ever zero). `resvg` then renders the SVG once at exactly `target_width_px` pixels, with its height padded to whole `row_height_px` rows. Text glyphs are rasterized fresh at the display resolution — no oversampling, no downstream downscaling.
+
+`display_image` hands the cached PNG to `biscuit-terminal` as an `EncodedPng`, displayed `ImageWidth::Characters(columns)` wide. Kitty and iTerm2 receive the rasterizer's bytes unchanged, and the rows the terminal reserves match the padded height exactly. The size is measured on every render, so a resized terminal or font gets a new raster; the cache keys differ by geometry.
 
 ### Why this matters in practice
 

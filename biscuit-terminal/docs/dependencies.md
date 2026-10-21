@@ -64,12 +64,6 @@
 
     _Tags: image, graphics_
 
-- [viuer](https://github.com/atanunq/viuer) _v0.11_
-
-    _Terminal image viewer supporting Kitty and iTerm2 graphics protocols._
-
-    _Tags: terminal, images, graphics_
-
 ### Logging & Tracing
 
 - [tracing](https://github.com/tokio-rs/tracing) _v0.1_

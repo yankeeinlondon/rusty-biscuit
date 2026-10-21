@@ -9,6 +9,10 @@ SVG-to-PNG conversion using `resvg`. Two complementary entry points:
 
 Both preserve aspect ratio and run through the same `resvg` + `tiny_skia` pipeline; they just differ in how the output dimensions are computed.
 
+## PNG encoding
+
+Every PNG (public functions and `RenderRequest` renders alike) is encoded by the private `encode_png` with the `png` crate (0.17, the version tiny-skia already uses) at zlib's default compression level with adaptive filtering, after converting tiny-skia's premultiplied alpha to straight alpha. tiny-skia's own `encode_png` uses fast compression with the Sub filter, whose output can exceed the raw pixel size; these bytes now reach Kitty and iTerm2 unchanged, so size matters. The settings are part of every PNG artifact's cache key (`PNG_ENCODING` in `artifact.rs`), so changing them never serves bytes encoded the old way.
+
 ## Width-based API (preferred for display)
 
 ```rust
@@ -76,13 +80,20 @@ let req = RenderRequest {
     format: OutputFormat::Png,
     scale: 2,
     target_width: None,           // None → scale path
-    transparent_background: false,
+    ..RenderRequest::default()
 };
+
+// Terminal display: exact width, height padded to whole 18 px rows
+let req = RenderRequest::default()
+    .with_target_width(540)
+    .with_row_height(18);
 ```
 
 When `target_width` is `Some`, the rasterizer renders at that exact pixel width and `scale` is ignored. When `target_width` is `None`, the rasterizer falls back to `scale × svg_native`.
 
-The cache key incorporates both fields, so width-based and scale-based renders of the same SVG produce distinct cache entries.
+`row_height` pads the canvas height up to the next multiple of that many pixels; the drawing sits at the top and the padding below it is transparent, or filled with the color of `Background::Solid`. A terminal reserves whole cell rows for an image, so a padded PNG fills them 1:1 instead of being stretched. It is ignored for SVG and has no public-function equivalent: it is reachable only through `RenderRequest` (the crate-private `rasterize_svg_for_request` is the renderers' single SVG-to-PNG path).
+
+The cache key incorporates `scale`, `target_width`, `row_height`, `background`, and the PNG encoding, so renders differing in any of them produce distinct cache entries.
 
 ## Query available fonts
 
@@ -128,5 +139,5 @@ Common causes:
 | File | Contents |
 |------|----------|
 | `biscuit-visualized/src/raster/mod.rs` | Font database initialization, `available_font_families()`, public re-exports |
-| `biscuit-visualized/src/raster/png.rs` | `rasterize_svg_to_png()` (width-based), `rasterize_svg_to_png_bytes()` (scale-based), `rasterize_svg()` file wrapper, `RasterError` |
-| `biscuit-visualized/src/artifact.rs` | `RenderRequest` with both `scale: u32` and `target_width: Option<u32>` fields, plus `with_target_width()` builder |
+| `biscuit-visualized/src/raster/png.rs` | `rasterize_svg_to_png()` (width-based), `rasterize_svg_to_png_bytes()` (scale-based), `rasterize_svg()` file wrapper, `rasterize_svg_for_request()` (crate-private), `encode_png()`, `RasterError` |
+| `biscuit-visualized/src/artifact.rs` | `RenderRequest` (`scale`, `target_width`, `row_height`, `background`; `with_target_width`/`with_row_height`/`with_background` builders), `Background`, `PNG_ENCODING` |

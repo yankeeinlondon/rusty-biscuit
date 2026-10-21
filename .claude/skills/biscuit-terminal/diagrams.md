@@ -27,7 +27,13 @@ DiagramRenderRequest, DiagramRenderError}`) on
 - cloned child options keep the hook (`Rc`), so nested fences reach it
 
 `biscuit_visualized::components::TerminalDiagramRenderer` is the real hook;
-darkmatter installs it. `bt` has no render-tree path that promotes Mermaid, so
+darkmatter installs it. It sizes the diagram to `available_width` (the
+fence's columns: a list item's or quote's inner width), not the full terminal
+width. The diagram components rasterize at that display size (width =
+columns × cell width, height padded to whole cell rows) and hand the PNG to
+`TerminalImage::from_encoded_png` unchanged (see
+[Image Rendering](./image-rendering.md#already-encoded-png-encodedpng)), so
+this crate never decodes or re-encodes a diagram for Kitty or iTerm2. `bt` has no render-tree path that promotes Mermaid, so
 it installs none. The library's own tests use fakes
 (`lib/tests/l1/render_tree_diagram_hook.rs`).
 

@@ -51,7 +51,7 @@ For a `gitGraph`, rendering also restores the second parent of labeled merges an
 ## Graph Example
 
 ```rust,no_run
-use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
+use biscuit_visualized::artifact::{Background, OutputFormat, RenderRequest};
 use biscuit_visualized::graph::{GraphDiagram, GraphInputSyntax, GraphOrientation};
 
 let graph = GraphDiagram::parse("a -> b -> c", GraphInputSyntax::Auto)?
@@ -60,13 +60,15 @@ let graph = GraphDiagram::parse("a -> b -> c", GraphInputSyntax::Auto)?
 
 let artifact = graph.render(&RenderRequest {
     format: OutputFormat::Svg,
-    scale: 1,
-    transparent_background: true,
+    background: Background::Transparent,
+    ..RenderRequest::default()
 })?;
 
 println!("{}", artifact.path.display());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+`Background` is `Theme` by default; `Transparent` leaves the area behind the diagram unpainted and `Solid { r, g, b }` fills it with one color. For PNG output, `RenderRequest::with_target_width(px)` renders at an exact pixel width and `with_row_height(px)` pads the height to whole rows of that many pixels, which is how the terminal components fill the cells they reserve. See [DOT graph rendering](docs/dot-graph.md) for the details.
 
 Graph diagrams also support explicit theming before rendering:
 

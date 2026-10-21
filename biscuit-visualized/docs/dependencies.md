@@ -49,6 +49,12 @@ flowchart LR
 
     _Rasterizes SVG to PNG._
 
+- [png](https://github.com/image-rs/image-png) _v0.17_ (feature: `image`)
+
+    _Encodes rasterized PNGs at zlib's default level with adaptive filtering,
+    which is smaller than tiny-skia's fast `encode_png`. Kept on the major
+    version resvg's tiny-skia already uses, so it adds no second copy._
+
 - [mermaid-rs-renderer](https://crates.io/crates/mermaid-rs-renderer) _v0.3.1_ (feature: `image`)
 
     _Pure-Rust Mermaid parser, layout engine, and SVG renderer, with
@@ -75,3 +81,5 @@ flowchart LR
 - `biscuit-test-harness` (`manifest_dir!()`), `insta` (layout-matrix
   snapshots), and `image` (decoding rendered PNGs) serve the `l1` integration
   tests of the diagram components.
+- `base64` decodes the Kitty and iTerm2 protocol payloads in the `l1` tests,
+  to check that the PNG bytes reach the terminal unchanged.

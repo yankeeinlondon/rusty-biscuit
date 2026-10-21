@@ -35,7 +35,7 @@ pub struct Terminal {
 
     // Feature support
     pub supports_italic: bool,
-    pub image_support: ImageSupport,      // None, Kitty, ITerm
+    pub graphics_route: GraphicsRoute,    // authoritative; image_support() projects it
     pub underline_support: UnderlineSupport,
     pub osc_link_support: bool,
     pub color_depth: ColorDepth,          // None, Minimal, Basic, Enhanced, TrueColor
@@ -122,10 +122,16 @@ pub enum TerminalApp {
 ```rust
 pub enum ImageSupport {
     None,
-    Kitty,  // Kitty Graphics Protocol (highest quality)
-    ITerm,  // iTerm2 inline images (legacy)
+    Kitty,  // Kitty graphics protocol
+    ITerm,  // iTerm2 OSC 1337 format
+    Sixel,  // DEC Sixel
 }
 ```
+
+`ImageSupport` is a projection of `Terminal::graphics_route`
+(`term.image_support()`); set a route with the builder's `.graphics_route(..)`,
+or `.image_support(..)` for a caller-supplied direct route. Assigning in
+tests: `term.graphics_route = ImageSupport::None.into();`.
 
 ### ColorDepth
 

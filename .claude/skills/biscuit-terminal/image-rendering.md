@@ -42,6 +42,41 @@ let width = parse_width_spec("75%")?;
 let img = TerminalImage::new(Path::new("photo.jpg"))?.with_width(width);
 ```
 
+## Already-encoded PNG (`EncodedPng`)
+
+For PNG bytes the program produced itself (e.g. `biscuit-visualized`'s diagram
+components, which rasterize at the display size), skip the file round-trip:
+
+```rust
+use biscuit_terminal::components::terminal_image::{EncodedPng, ImageWidth, TerminalImage};
+
+let png = EncodedPng::new(png_bytes)?; // validates; no decode
+let img = TerminalImage::from_encoded_png(png).with_width(ImageWidth::Characters(60));
+```
+
+- `EncodedPng::new(Vec<u8>)` checks, before any decode or row reservation:
+  ≤ 10 MiB (`DEFAULT_MAX_FILE_SIZE`, else `FileTooLarge`), a readable PNG
+  header (else `ImageLoadError`), and dimensions within the `image` crate's
+  default 512 MiB decode allocation limit (else `ImageLoadError` with a limits
+  error). Accessors: `bytes()`, `width()`, `height()` (from the header).
+- Kitty and iTerm2 standalone paths, the inline (`TwoColumn`) path, and
+  `render_as_kitty` send the bytes **unchanged**. They are decoded only by
+  `load_image()` or an actual resize (`render_as_iterm2` when the target pixel
+  width, columns × cell width, differs from the PNG width). Internally the
+  protocol paths go through `ImagePixels` (`Encoded` borrows the bytes,
+  `Decoded` encodes a loaded file).
+- No file: iTerm2 `name=` is `image.png`, alt text `[Image: image]`, unless
+  `with_alt_text` is set.
+- Not for caller-supplied files; those keep using `new` / `from_spec`.
+
+## PNG encoding
+
+`encode_as_png` (and every internal encode: decoded files, resizes) uses
+`PngEncoder::new_with_quality(CompressionType::Default, FilterType::Adaptive)`
+(`encoded_png::encode_png`), not `write_to`, whose fast settings can exceed
+the raw pixel size. Measured once on macOS: the 400x400 iTerm2 app icon went
+from 53,114 to 43,044 bytes.
+
 ## Policy Controls with TerminalImageOptions
 
 `TerminalImageOptions` is a policy helper (`base_path`, `max_file_size`, `allow_remote`, `width`) that your application can enforce before rendering.
@@ -130,15 +165,28 @@ let iterm_escape = img.render_iterm2(&png_data, "40", "filename.png");
 - File/path/encoding/runtime errors (`FileNotFound`, `InvalidPath`, `ImageLoadError`, etc.)
 - Policy-style variants (`PathTraversalBlocked`, `FileTooLarge`, `RemoteUrlBlocked`)
 
-The policy-style variants are primarily tied to helper checks; they are not all emitted by the default `new()/render_to_terminal()` path.
+The policy-style variants are primarily tied to helper checks; they are not all emitted by the default `new()`/`render_with_route()` path.
 
-## Fallback Behavior Clarification
+## Graphics Route and Fallback
 
-- `render_to_terminal()` returns `Ok(String::new())` when `ImageSupport::None`
-- `fallback_render()` currently delegates to `render_to_terminal()` and therefore also yields empty output in that case
-- If you want textual fallback, print `generate_alt_text()` from your application
+- The encoder follows `Terminal::graphics_route` (a `GraphicsRoute`: format,
+  transport, placement, confidence, structured `RouteReason`), resolved once
+  per `Terminal`; never re-resolve per image. Developer guide:
+  `biscuit-terminal/docs/discovery/graphics-routes.md`.
+- `render_with_route(&term)` returns `ImageOutput::Pixels(seq)` or
+  `ImageOutput::Fallback { text, reason }` (alt text with controls stripped).
+  Load/decode errors stay `Err` either way; `render()` maps errors to `""`.
+- A Kitty route to `TerminalApp::ITerm2` uses the iTerm2 format unless the
+  route is `Forced` (iTerm2 ignores `q=2` and places nothing for width-only `c=`).
+- A Sixel route falls back (encoder not built yet); a route with no pixels
+  falls back with the route's reason. The library never prints hints; `bt`
+  does (stderr, terminal only, once per reason, only with a `fix`).
+- Tests: assert pixel dispatch through `protocol::encoder_for` (rendering
+  pixels queries the live cursor), and build routes with
+  `resolve_graphics_route(&RouteInputs::new(true).with_var(..))`, never by
+  mutating the process env.
 
 ## Related
 
-- [Terminal Struct](./terminal-struct.md) - `ImageSupport` detection
-- [Discovery Functions](./discovery.md) - `image_support()` and terminal detection
+- [Terminal Struct](./terminal-struct.md) - `graphics_route` and its `ImageSupport` projection
+- [Discovery Functions](./discovery.md) - `graphics_route()` / `resolve_graphics_route()`
