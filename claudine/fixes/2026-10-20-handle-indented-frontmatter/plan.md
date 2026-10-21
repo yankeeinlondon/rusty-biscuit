@@ -9,7 +9,37 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+  - biscuit-file
+  - darkmatter
+  - claudine
+source_files_during_phase_2:
+  - biscuit-file/lib/src/yaml/analyze/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/root_indentation.rs
+  - darkmatter/lib/src/markdown/hash/write.rs
+  - darkmatter/lib/tests/l1/inline_document_text.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/closure.rs
+  - claudine/lib/src/composition/closure/tests.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/render/schema.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+  - darkmatter/cli/tests/l1/clean_frontmatter.rs
+  - darkmatter/dmls/tests/l1/formatting_transaction.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/timeline.md
 ---
 
 # Indented Frontmatter Implementation Plan
@@ -66,14 +96,14 @@ At review, inspect changed parsing paths for load-bearing `#[serde(default)]`, a
 
 Both tasks depend on Wave 1 and may run concurrently in separate file sets. Each task includes its own focused tests and relevant API-comment updates.
 
-- [ ] **Repair Root Indentation**
+- [x] **Repair Root Indentation**
   - Own biscuit-file's YAML analyzer implementation and tests. Add `YamlDiagnosticCode::RootIndentation` with `yaml.root-indentation` serialization, string conversion, `ALL` inventory entry/count, and round-trip coverage.
   - Generate S1 candidates through `s1_candidates`, using the parsed root shape and lexical context to enforce the eligibility rules. Keep the implementation within the existing analyzer rather than creating a second cleanup dispatcher.
   - Emit nonoverlapping leading-prefix removals with correct byte spans. Preserve terminators in these edits; account separately for comments, blank lines outside scalars, and whitespace-only scalar content at/below/above the scalar content indent.
   - Extend/register `tests/root_indentation.rs` beside `tab_indentation.rs`. Cover common indentation, column-0 controls, exclusions, LF/CRLF, less-indented comments, key/order/comment fidelity, all scalar-safety cases, and combined whitespace edits. Assert public applied text, audit acceptance, and parsed-value equality; unsafe candidates must be absent.
   - Preserve the existing proof/fallback behavior even if individually applied prefix edits are insufficient to dedent a multi-line scalar safely.
 
-- [ ] **Guard Text Editors**
+- [x] **Guard Text Editors**
   - Own Darkmatter's `markdown/hash/write.rs` gate and its editor tests. Preserve the original leading spaces while skipping blank/comment lines to identify the first root key; do not classify nested content as a root key.
   - After respecting existing YAML/root-shape errors, reject indented block mappings with `MarkdownError::FrontmatterTextEdit` and the spec's exact reason, including the measured space count and `md clean --save <file>` guidance.
   - Validate before key lookup/insertion, including otherwise-no-op requests. Test `apply_hash_save_text`, `restore_properties_text` with indentation in either current or snapshot input, and `locate_frontmatter_leaves`; verify unchanged inputs and typed causes.
@@ -87,14 +117,14 @@ Both tasks depend on Wave 1 and may run concurrently in separate file sets. Each
 
 Both tasks depend on Wave 2. Keep ownership separate: cleanup/DMLS files belong to the first task; Claudine preparation/closure/error files belong to the second.
 
-- [ ] **Verify Cleanup Consumers**
+- [x] **Verify Cleanup Consumers**
   - Extend Darkmatter's `lib/tests/l1/clean_frontmatter_repair.rs` and CLI `tests/l1/clean_frontmatter.rs`. Prove `repair_frontmatter`/`clean_document` consumes the analyzer repair through its existing path, without a new dispatch branch.
   - Verify common indentation combined with whitespace repairs, tab recovery followed by the existing rescan, parsed-value preservation, and stability on a second cleanup. Distinguish the new prefix edits' terminator fidelity from other existing line-ending/body cleanup rules.
   - Through `CliProcessFixture`, first assert `md hash --save` refuses the indented reproduction with the indentation reason and unchanged file bytes. Then persist `md clean --save`, reread the file, run `md hash --save`, and reread/assert the valid column-0 stamp and preserved data.
   - Extend `dmls/tests/l1/formatting_transaction.rs` using the current buffer and provider formatting API: apply the offered edits, verify equivalent frontmatter and column-0 keys, and verify the second formatting request offers no further root repair. Include tab-recovery interaction through the shared transaction.
   - If integration exposes an analyzer defect, hand it back to its owner; do not bypass the proof in a consumer.
 
-- [ ] **Preflight Inline Baselines**
+- [x] **Preflight Inline Baselines**
   - Add a small closure helper that calls `restore_properties_text(original, original, CLOSURE_OWNED_PROPERTIES)`, constructs Markdown from the returned text, and calls `stamp_baseline` with `inline_hash_options()`, a caller-supplied timestamp, and `Change::Known`. Discard the result; do not call reconciliation or persist anything.
   - Introduce `CompositionError::InlineBaselineUnstampable { path, source }` with a typed `MarkdownError` cause. Integrate the source chain, semantic diagnostic identity/detail, terminal block rendering, and all exhaustive matches. The rendered error must explain preparation refusal, name the source path, and retain the editor's actionable reason.
   - Call the helper on `source.original_text` near entry to `prepare_inline_on`, after side-effect-free early grammar checks and before prompt commands, guardrail creation, and other side-effect-capable preparation. Exercise ordinary preparation and preview modes; confirm retry/proxy preparations using this helper cannot skip the check.

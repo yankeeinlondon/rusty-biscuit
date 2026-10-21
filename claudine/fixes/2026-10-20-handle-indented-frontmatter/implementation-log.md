@@ -7,14 +7,45 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+  - biscuit-file
+  - darkmatter
+  - claudine
 human_review: false
+source_files_during_phase_2:
+  - biscuit-file/lib/src/yaml/analyze/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/root_indentation.rs
+  - darkmatter/lib/src/markdown/hash/write.rs
+  - darkmatter/lib/tests/l1/inline_document_text.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/closure.rs
+  - claudine/lib/src/composition/closure/tests.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/render/schema.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+  - darkmatter/cli/tests/l1/clean_frontmatter.rs
+  - darkmatter/dmls/tests/l1/formatting_transaction.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/timeline.md
 message_to_agent: |-
-  Phase 1 was an audit only; read the "## Phase 1" section of this log before starting. Key traps for Phase 2:
-  - biscuit-file `Draft` carries one repair and `prove_drafts` re-tests drafts singly on combined failure, so per-line dedent drafts would all be dropped. Carry several prefix repairs on one diagnostic, or prove the dedent as a unit as `tab_indentation_recovery` does.
-  - Skip whitespace-only `Blank` lines outside block scalars (the trailing-whitespace edit spans them from line start) and the trailing blank-line run; dedent `BlockContent` whitespace-only lines. `scan.rs` has no directive kind (`%YAML` is `Content`) and `Line.indent` counts tabs too.
-  - Darkmatter `apply_hash_save_text` returns `Ok(None)` at write.rs:320-322 BEFORE `validate_block_mapping` (:340); the spec requires the indentation check before any no-op, so move validation ahead when a block exists. Comment-only frontmatter acceptance is untested; add a control.
-  - Adding a `YamlDiagnosticCode` touches four places, including the position-sensitive pinned spelling list in src/yaml/analyze/tests/diagnostic.rs.
+  Phase 3 is done; read "## Phase 3" in this log. Notes for Phase 4:
+  - The inline refusal is `CompositionError::InlineBaselineUnstampable { path, source: Box<MarkdownError> }`, code `composition.failed`, raised in `prepare_inline_on` right after the removed-grammar scans, before compose (frontmatter `$(…)`) and the guardrail write. The rendered block header is "inline baseline not editable"; the body names the file and says the prompt was not composed and the file was not changed, then shows the editor reason. The terminal renderer styles the reason's code span, so stderr shows `md clean --save <file>` without backticks and may wrap; the darkmatter CLI test strips whitespace and backticks before matching, so do the same in Claudine CLI assertions.
+  - In-process coverage already exists for the refusal (prepare_inline, loop seed, sequence probe; sentinel `$(mkdir ran)` not run; no `.claudine/inline-compose.md`) and for the agent-indented-candidate rollback (`closure::tests::a_rehearsed_baseline_still_refuses_and_rolls_back_an_agent_indented_candidate`, which fails with `InlineArtifactEditFailed(FrontmatterTextEdit)`). Phase 4 still owes the CLI-level acceptance (zero provider launches via `install_marker_provider` in `wrap_compose_validation.rs`, which is gated `test-fixtures`; then `md clean --save` and a successful run with a column-0 hash).
+  - A command in a prepare test needs `pre_approved_commands`, or the outcome depends on the host's shell whitelist. The shell policy refuses output redirection, which is why the sentinel uses `mkdir`.
+  - Behavior consequence to document: a malformed stored `hash` is now refused at launch (`InlineBaselineUnstampable` wrapping `MalformedStoredHash`), not after the agent ran.
+  - Docs are still owed (unchanged from Phase 2's list), plus `claudine/docs/topics/composition.md`. The claudine skill's `timeline.md` already has a 2026-10-20 entry; update it if Phase 4 changes behavior.
 ---
 
 # Implementation Log for 2026-10-20-handle-indented-frontmatter (4 phases)
@@ -241,3 +272,248 @@ established. No spike was run.
 - `just lint` (claudine area): passed.
 - No source changed, so no dependent-package tests or cross-OS check apply.
 - The Claudine skill needs no update: no behavior changed in this phase.
+
+## Phase 2
+
+Both Wave 2 tasks were implemented directly (no subagents), biscuit-file first,
+then Darkmatter, in separate file sets.
+
+### Repair Root Indentation (biscuit-file)
+
+- `YamlDiagnosticCode::RootIndentation` (`yaml.root-indentation`) added to the
+  enum, `ALL` (now 25, placed after `TabIndentation`), `as_str`, and the pinned
+  spelling list in `src/yaml/analyze/tests/diagnostic.rs`. The `FromStr`/serde
+  round-trip tests loop over `ALL` and cover it.
+- `Draft` now carries `repairs: Vec<YamlRepair>` and is proven as a unit;
+  `prove_drafts` and `tab_indentation_recovery` share a new `proves_equal`
+  helper. The combined/individual/survivor proof sequence is unchanged, so the
+  per-line trap from Phase 1 is avoided without weakening the proof.
+- `root_indentation_candidate` runs inside `s1_candidates` (after trailing
+  whitespace). Eligibility: parsed value is a nonempty mapping; no document
+  markers; the first `Content` line is a non-dash mapping entry whose key does
+  not start with `? ! & * % [ {`. Common indent is the minimum leading
+  ASCII-space count over nonblank `Content`/`BlockContent` lines. Edits:
+  `Content` lines lose the common indent, `Comment` lines only when they have
+  that many spaces, `BlockContent` lines (including whitespace-only) lose up to
+  it, `Blank` lines are left to `yaml.trailing-whitespace`.
+- **Departure, recorded here:** `Content` lines that start inside a flow
+  collection or a quoted scalar keep their indentation. The flow-whitespace
+  candidate removes leading runs before `]`/`}`/`,`, so dedenting those lines
+  would overlap it, and an overlap drops every survivor on the combined
+  re-proof (it would have cost unrelated line-ending repairs). Folding makes
+  their indentation insignificant, and the second pass offers nothing because
+  the root keys are at column 0. The spec does not require dedenting them; it
+  requires parse equivalence, which holds.
+- Diagnostic span: first edit start to last edit end; message
+  `root mapping is indented by N spaces`.
+
+### Guard Text Editors (Darkmatter `markdown/hash/write.rs`)
+
+- `validate_block_mapping` keeps its flow-root, scalar/sequence, and parse
+  errors, and for a parsed mapping refuses a first non-blank, non-comment line
+  with leading spaces, with the spec's exact reason (singular "1 space").
+  Helpers: `first_content_line`, `root_indent`, `indented_root_error`.
+- `apply_hash_save_text` no-op (`new_stored == None`): previously returned
+  before any validation, and the existing test
+  `textual_no_change_does_not_parse_unsupported_source` pins that a no-op never
+  parses unsupported sources. To satisfy both that and the spec's
+  "even if the operation would otherwise be a no-op", the no-op branch runs
+  only `refuse_indented_root`, which parses only when the first key line is
+  indented, and only for a block that extracts cleanly (a no-op never reported
+  near-miss fences). The write path still runs the full gate before key lookup.
+- `restore_properties_text` and `locate_frontmatter_leaves` already reach the
+  gate through `parse_text_frontmatter` / their own call; no code change.
+- Comment-only frontmatter was already accepted (serde gives `Null`, and the
+  map deserializer accepts it); the new control confirms it, no fix needed.
+- API docs on `apply_hash_save_text`, `restore_properties_text`, and
+  `locate_frontmatter_leaves` now state the column-0 constraint.
+
+### Requirement-to-test mapping (Phase 2 rows 1–10 of the Phase 1 checklist)
+
+| # | Requirement | Test |
+| - | --- | --- |
+| 1 | Reproduction dedented, value kept | `root_indentation::test_reproduction_prompt_block_moves_to_column_zero`, `test_common_indent_is_removed_preserving_order_nesting_and_comments` |
+| 2 | Column-0 and excluded roots get no repair | `test_column_zero_mapping_gets_no_root_repair`, `test_excluded_root_forms_get_no_root_repair` (empty, whitespace, comment-only, sequence, scalar, flow mapping/sequence, `?` complex key, `!!map` tag, `&` anchor, `---`, `%YAML`, `...`) |
+| 3 | Comments | `test_less_indented_comments_are_kept`, row 1 tests |
+| 4 | Whitespace-only lines | `test_whitespace_only_scalar_lines_at_below_and_above_content_indent`, `test_blank_lines_outside_block_scalars_are_left_to_trailing_whitespace` |
+| 5 | LF/CRLF and combined edits | `test_crlf_terminators_survive_prefix_edits_and_combine_with_line_endings`, `test_combines_with_trailing_whitespace_and_final_newline_repairs`, `test_missing_final_newline_combines_with_dedent` |
+| 6 | Scalar safety | `test_literal_and_folded_scalars_keep_their_values`, `test_explicit_indentation_indicator_keeps_value`, `test_scalar_lines_beginning_with_hash_are_content_not_comments`, `test_multiline_quoted_and_plain_scalars_keep_their_values`, `test_nested_multiline_flow_value_keeps_its_value` |
+| 7 | Invalid documents; tab recovery then rescan | `test_invalid_documents_keep_their_outcomes_without_a_root_repair`, `test_tab_indented_root_is_recovered_first_then_dedented_on_rescan` (cleanup-level rescan is Phase 3's) |
+| 8 | Code inventory | `diagnostic::test_code_spellings_pinned` (+ existing `ALL` loops) |
+| 9 | Editor refusal before any no-op, text untouched | `write::tests::hash_save_refuses_the_indented_reproduction_with_the_indentation_reason`, `hash_save_refuses_an_indented_root_even_when_no_write_is_needed`, `restore_refuses_indentation_in_either_input`, `leaf_location_refuses_an_indented_root_with_the_same_cause`, `l1::inline_document_text::restore_refuses_an_indented_root_through_the_public_api` |
+| 10 | Editor controls | `comments_and_nested_values_do_not_count_as_the_root_key`, `empty_and_comment_only_frontmatter_stay_editable`, `indented_unsupported_roots_keep_their_existing_reasons`, column-0 controls inside row 9 tests |
+
+Every root-indentation test asserts audit-clean application, byte preservation
+outside applied spans (`assert_untouched_bytes_preserved`), parsed-value
+equality, and that a second analysis offers no root repair. Boundary: these are
+in-process L1 tests at each crate's public API (`analyze_yaml` /
+`YamlAnalysis::apply`; `apply_hash_save_text`, `restore_properties_text`,
+`locate_frontmatter_leaves`). The CLI round trip (`md clean --save` then
+`md hash --save`) and DMLS are Phase 3.
+
+Robustness smell grep over the changed parsing paths: no `#[serde(default)]`,
+`unwrap_or_default()`, or `filter_map(..as_str())` added. One intentional
+`if let Ok(Some(..)) = extract_frontmatter_block(..)` in the no-op branch, with
+a comment: the no-op path never reported fence errors, and the write path
+still propagates them.
+
+### Gates
+
+- biscuit-file: `just test` 1161 passed; `just lint` clean.
+- darkmatter (includes DMLS): `just test` 10490 passed, 10 skipped; `just lint` clean.
+- content-policy (only other analyzer consumer, filters on `TabIndentation`):
+  `cargo nextest run -p content-policy -E 'test(/tab/)'` 9 passed.
+- claudine: `just test` 10448 passed (12 slow), 9 skipped; `just lint` clean
+  (only the pre-existing `__eh_frame` linker warning).
+- Scope calculator: `packages: ['biscuit-file', 'darkmatter', 'test-toolkit']`,
+  `change_class: package`, so the gates were run. `test-toolkit` is a reverse
+  dependency of biscuit-file and does not use the analyzer or editor; not run
+  separately.
+- No failures, skips introduced, or load-sensitive reruns.
+- Cross-OS check not run: the changes are byte-level string logic with no
+  path, process, or `cfg` code; CRLF is covered by tests.
+- No docs or skills changed in this phase; Phase 4 owns them (see
+  `message_to_agent`). The claudine skill needs no update: Claudine code did
+  not change.
+
+## Phase 3
+
+The two Wave 3 tasks ran as parallel subagents in disjoint file sets
+(Darkmatter cleanup/CLI/DMLS tests; Claudine closure/prepare/error), each
+verifying only its own slice. The area gates were run once afterwards.
+
+### Verify Cleanup Consumers (Darkmatter, test-only)
+
+No product code changed and no defect was found: `repair_frontmatter`,
+`clean_document`, `md clean`, and DMLS formatting all receive the analyzer's
+`yaml.root-indentation` repair through the existing shared path.
+
+- `darkmatter/lib/tests/l1/clean_frontmatter_repair.rs`
+  - `indented_root_reproduction_is_dedented_by_one_root_indentation_finding`:
+    exact output, a single finding carrying many space-only edits, all of them
+    applied, and an equal parsed value.
+  - `clean_document_applies_the_root_repair_and_keeps_the_parsed_value`
+  - `indented_root_combines_with_trailing_whitespace_and_final_blank_lines`
+  - `crlf_indented_root_keeps_prefix_edits_off_terminators`: every
+    root-indentation edit removes only spaces. The frontmatter's switch to LF
+    comes from a separate `yaml.line-ending` finding, and the fences and body
+    keep CRLF under the existing cleanup rules. This keeps prefix-edit
+    terminator fidelity apart from the other line-ending rules.
+  - `tab_indented_root_is_recovered_then_dedented_by_the_rescan`:
+    `yaml.tab-indentation` first, then one `yaml.root-indentation` from the
+    rescan.
+  - Stability: a second pass through `repair_frontmatter` and
+    `clean_document` reports no `RootIndentation`, applies nothing, and
+    returns `Unchanged`. The check uses the reported codes, not text equality.
+- `darkmatter/cli/tests/l1/clean_frontmatter.rs`
+  - `test_indented_root_is_refused_by_hash_save_until_clean_save_dedents_it`
+    (five spawns through `CliProcessFixture`):
+    1. `md hash --save` fails with the exact indentation reason, and the bytes
+       are unchanged.
+    2. `md clean --save` runs; the reread has column-0 keys and the same
+       parsed data.
+    3. `md hash --save` succeeds; the reread has a column-0 `hash:` stamp and
+       the frontmatter, minus the stamps, equals the original.
+    4. `md hash --diff` exits 0.
+
+    The reason is compared after stripping whitespace and backticks, because
+    the terminal renderer styles the code span and wraps lines.
+- `darkmatter/dmls/tests/l1/formatting_transaction.rs`
+  - `an_indented_root_is_dedented_once_and_keeps_its_value`: the edit matches
+    `clean_document`. After `didChange`, a second formatting request returns
+    `[]`.
+  - `a_tab_indented_root_is_recovered_and_dedented_in_one_transaction`
+- Scoped runs: darkmatter `clean_frontmatter_repair::` 15 passed;
+  darkmatter-cli `clean_frontmatter::test_indented_root` passed (one rerun,
+  after a test-assertion fix for the rendered code span); dmls
+  `formatting_transaction::` 16 passed; `just lint` (darkmatter) clean.
+  `clean_frontmatter.rs` was already over the 500-line guideline (739 → 852;
+  report-only).
+
+### Preflight Inline Baselines (Claudine)
+
+- `closure::rehearse_inline_baseline(original, now) -> Result<(), MarkdownError>`
+  restores `CLOSURE_OWNED_PROPERTIES` from the baseline into itself, then
+  stamps it with `inline_hash_options()` and `Change::Known`. It discards the
+  result and writes nothing.
+- `prepare_inline_on` calls it on `source.original_text` (a plain `String`)
+  with `Utc::now()`, right after `reject_removed_sequence_reads_in_source`.
+  That is before `inline_prompt_text`, `compose_selecting` (frontmatter
+  `$(…)`), and `load_or_create_guardrails`.
+- New `CompositionError::InlineBaselineUnstampable { path, source: Box<MarkdownError> }`:
+  - Display names the path and includes the cause.
+  - `status_block` renders it in the schema family, not in the typed-Darkmatter
+    arm, because a `FrontmatterTextEdit` cause has no path or excerpt and the
+    block must name the document. A comment at that arm records why.
+  - `code()` is `composition.failed` (Author/Correctable, detail
+    `source_path`). No dedicated code was added, because the cause already
+    names the fix. So no catalog or corpus entry was needed.
+  - `detail()` projects `source_path`; `role()` is the default `Semantic`.
+  - `frontmatter_block_spec` highlights `hash` only for a
+    `MalformedStoredHash` cause.
+  - The existing batch-detail test list now includes the new variant.
+- Every inline entry reaches `prepare_inline_on`: `prepare_inline`/`_selecting`,
+  `prepare_inline_with_schema` and its drop-optionals retry,
+  `prepare_loop_seed`, `prepare_sequence_probe`, the service
+  `prepare_document`, `--dry-run`, the staged reread, retry/resume/proxy
+  through harness_orch, and sequence JIT. The only production
+  `InlineClosurePlan` is built in `prepare.rs`. Direct compose/sequence use
+  `prepare_direct_on` and are unaffected.
+- **Behavior consequences, recorded here:**
+  - A document whose stored `hash` is malformed is now refused at launch with
+    `InlineBaselineUnstampable(MalformedStoredHash)` instead of after the agent
+    runs with `InlineHashMalformed`. This follows from rehearsing the real
+    stamp, which is what the spec requires.
+  - An unstampable baseline is reported before a missing-`prompt` error.
+  - No existing test depended on either order.
+- Tests:
+
+  | Requirement | Test |
+  | --- | --- |
+  | Helper refuses an indented baseline with a typed cause; input unchanged; fixed timestamp | `composition::closure::tests::rehearsal_refuses_an_indented_baseline_with_the_editors_reason` |
+  | Helper accepts column 0, with managed properties present and absent | `rehearsal_accepts_a_column_zero_baseline_with_every_managed_property`, `rehearsal_accepts_a_column_zero_baseline_with_only_a_prompt` |
+  | Valid baseline, then an agent-indented candidate: closure refuses (`InlineArtifactEditFailed(FrontmatterTextEdit)`), nothing is written, rollback restores exact bytes | `a_rehearsed_baseline_still_refuses_and_rolls_back_an_agent_indented_candidate` |
+  | Preparation refuses before composing (exact path, matched cause, bytes unchanged, `$(mkdir ran)` sentinel did not run, no `.claudine/inline-compose.md`) through `prepare_inline`, `prepare_loop_seed(Inline)`, and `prepare_sequence_probe(Inline)` | `composition::prepare::tests::inline_preparation_refuses_an_indented_baseline_before_composing` |
+  | Control: column 0 composes, the sentinel runs, the guardrail file is created | `inline_preparation_of_a_column_zero_baseline_composes_and_writes_guardrails` |
+  | Rendering names the path and keeps the editor reason; code/detail/role; typed source chain (`Box<MarkdownError>`) | `composition::error::tests::inline_baseline_unstampable_renders_the_path_and_the_editor_reason`, `…_owns_composition_failed_with_its_path`, `…_retains_the_typed_markdown_cause` |
+
+  A mutation check (the preflight call stubbed out) made the refusal test
+  fail. The sentinel is `$(mkdir ran)` because it works the same under `sh`
+  and `cmd`, and the shell policy refuses redirection. Commands are pre-approved
+  so the result never depends on the host's shell whitelist.
+- The CLI-level acceptance (`inline-compose` with zero provider launches,
+  `md clean --save` then a successful run) is Phase 4's per the plan.
+
+### Robustness smell check
+
+No `#[serde(default)]`, `unwrap_or_default()`, `filter_map(..as_str())`, or
+`.ok()` was added on a parse path. The editor and analyzer loaders are
+unchanged in this phase; their document-shape matrix was covered in Phase 2.
+
+### Gates
+
+- claudine `just test`: 10457 passed (31 slow), 9 skipped, 0 failed (296.7 s).
+- claudine `just lint`: passed.
+- `just check-tier-coverage claudine` (repo root): 0 stranded.
+- Darkmatter: only test files changed in this phase. The scoped runs above
+  plus `just lint` cover them, and the full darkmatter suite runs in Phase 4's
+  Wave 5. No Darkmatter product code changed, so no dependents are affected.
+- Claudine dependents: the change is internal to inline preparation
+  (`pub(crate)` helper and a new error variant). Its in-repo consumer crates
+  (`claudine-cli`, `claudine-contract`, `claudine-gen`) are part of the claudine
+  area suite above. No reverse dependency outside the area does inline
+  preparation, so none was run separately.
+- No failures, load-sensitive reruns, or skipped tests introduced.
+- Skill: `.claude/skills/claudine/timeline.md` gained a 2026-10-20 entry for
+  the preparation invariant. User docs are Phase 4's.
+- Cross-OS: `just cross-check claudine --os windows inline_preparation rehears a_rehearsed inline_baseline_unstampable`
+  ran the 9 new Claudine tests on native Windows, and all passed. The
+  `$(mkdir ran)` sentinel works under `cmd`. A first attempt that passed a
+  `-E '…'` filter failed in the remote shell's quoting (parentheses), before
+  any test ran. The cross-check published no observation because the remote
+  tree is not a committed head. The Darkmatter tests are string or
+  `CliProcessFixture` based and were not run cross-OS.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: ['biscuit-file', 'claudine', 'darkmatter', 'darkmatter-cli', 'dmls', 'test-toolkit']`,
+  `change_class: package`. The working tree still holds the uncommitted Phase 2
+  changes. The packages list is non-empty, so the gates were run.
