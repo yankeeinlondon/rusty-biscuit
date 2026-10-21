@@ -105,8 +105,8 @@ to async-signal-safe operations:
 - A repeat press that lands while a **terminal lifecycle event** (`success`,
   `blocked`, `failure`, `finalize`) is running — and no wait loop owns the
   ladder — does not force-exit at once. The lib marks those events with
-  `claudine::interrupt::TerminalLifecycleScope` (entered in
-  `LifecycleRunGuard::run_event_stack`); the press arms a 500 ms deadline
+  `claudine::interrupt::TerminalLifecycleScope` (entered whenever
+  `LifecycleRunGuard::run_event_stack` runs one of them); the press arms a 500 ms deadline
   (`TERMINAL_LIFECYCLE_EXIT_GRACE`), and a run that finishes inside it exits
   normally. On Unix the signal handler cannot wait, so it writes one byte to a
   process-lifetime self-pipe and a relay thread sleeps out the grace before
@@ -301,7 +301,7 @@ The remaining universal backstop is **second-press force-exit** (above), used wh
 ### Lifecycle short-circuit details
 
 The lifecycle short-circuit lives in
-[`LifecycleRunGuard::emit_signal`](../../lib/src/composition/lifecycle/mod.rs),
+[`LifecycleRunGuard::emit_signal`](../../../darkmatter/lib/src/lifecycle/run_guard.rs),
 the guard's drop safety net for a run that started but never emitted a
 terminal event. It has no execution context, so it emits only the signal
 stack's root-level, unguarded, literal communication (text with no `{{ … }}`

@@ -48,6 +48,7 @@ definitions away from their references or replace them with placeholders.
 | Remote reads and the transport cache | [remote-cache.md](remote-cache.md) |
 | `md` file arguments and CLI conventions | [cli.md](cli.md) |
 | Expression grammar, inserted text, warnings | [expressions.md](expressions.md) |
+| Lifecycle grammar, executor, run accounting, request/reply `Run` | [lifecycle.md](lifecycle.md) |
 | Test fixtures, source guards, parity matrix | [testing.md](testing.md) |
 | Public modules and extracted library surfaces | [library-surfaces.md](library-surfaces.md) |
 | DMLS architecture, protocol behavior, and rollout history | [dmls.md](dmls.md) |

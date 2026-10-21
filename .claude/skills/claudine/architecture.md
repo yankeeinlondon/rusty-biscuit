@@ -625,21 +625,41 @@ index. `validate.rs::walk_stack` is the one recursive walker (both branches)
 for nested-span, `err`-availability, retired-loop-read, and shell-collection
 checks, and DMLS's `nested_span.rs` mirrors its path spelling.
 
-- **Lift-ready slice.** `parse`, `action_shape`, `actions`, `validate`,
-  `signatures`, and `source_map` name no Claudine runtime type
-  (`lib/tests/l1/lifecycle_lift_ready_guard.rs`); the caller injects the effect
-  catalog through `LifecycleParseOptions`. The public `parse_lifecycle_config`
-  lives in `lifecycle/mod.rs` and supplies `audio.rs::is_known_effect`.
+- **Moved slice.** `parse`, `action_shape`, `actions`, `validate`,
+  `signatures`, `source_map`, and `shell_template` live in
+  `darkmatter/lib/src/lifecycle/` and name no Claudine runtime type
+  (`lib/tests/l1/lifecycle_lift_ready_guard.rs` reads them there); the caller
+  injects the effect catalog through `LifecycleParseOptions`. Claudine's
+  public `parse_lifecycle_config` wrapper lives in `lifecycle/mod.rs`, supplies
+  `audio.rs::is_known_effect` and `UnknownVerbPolicy::Reject`, and maps
+  `LifecycleError` to `CompositionError`.
 - **Removed grammar.** `stack`, the `action` aggregator or discriminator map,
   the speech-ordering flag, communication `message`/`sound`/`route` parameters, and
   `_loop_*` reads are `CompositionError::RemovedGrammar { path, removed,
   replacement }`, checked before any other shape error; loop-root
   `action`/`actions` stay iteration controls.
-- **Execution.** `executor.rs::execute_nodes` runs nodes serially, evaluates a
+- **Execution.** Darkmatter's `lifecycle/executor.rs::execute_nodes` runs
+  nodes serially (Claudine's `lifecycle/executor.rs` is the `LifecycleHost`
+  adapter: bindings, `set` commits, loop `break`, `prep`, shell policy,
+  failure classification), evaluates a
   reached guard once, runs only the selected body, and the first directive
   ends the whole event. Audio is published in list position (no
-  `audio_phases`). `LifecycleRunGuard::emit_signal` (the drop safety net) emits
-  only root, unguarded, literal communication.
+  `audio_phases`). Darkmatter's `run_guard.rs::LifecycleRunGuard::emit_signal`
+  (the drop safety net) emits only root, unguarded, literal communication.
+- **Run guard and runtime.** `LifecycleRunGuard` (the one terminal slot,
+  `finalize` once, the shell lock until `start`, proxy and iteration resets),
+  the catch protocol, `decide_lifecycle_transition`, `ContainerRunner`, and
+  control admission (`control.rs`) are Darkmatter's
+  (`darkmatter::lifecycle::{run_guard, runtime, control}`). Claudine's
+  `LifecycleRunGuard<'a>` is an alias over `ClaudineRunHost` (the runtime
+  context, emitter, one `ClaudineLifecycleEffects` per run, `ClaudineDiagnostics`,
+  `TerminalLifecycleScope`, and `classify_run_failure`), constructed with
+  `LifecycleRunGuardExt::new`; `LifecycleCatchProtocolExt::new` classifies with
+  `ClaudineDiagnostics`. `StackExecutionContext` is the guard's
+  `GuardedEventStack`. `resolve_proxy_target` and `IterationSummarySignals`
+  stay in Claudine. The guard keeps its accounting in
+  `run_guard::RunAccounting`, which Darkmatter's request/reply
+  `lifecycle::run::Run` shares; no Claudine driver uses `Run` yet.
 - **Shell modes.** A `shell` command or `set` `$( … )` with a placeholder
   carries a `shell_template::LifecycleShellTemplate` (stamped by
   `preflight::resolve_lifecycle_shell_commands`); the lifecycle audit settles
@@ -649,7 +669,7 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   container stack elsewhere builds one with
   `LifecycleShellTemplate::approved`.
 - **`with` overlays.** `proxy` and `retry` share `WithOverlay` and
-  `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
+  Darkmatter's `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
   (`LifecycleWithUnsupported` elsewhere). A retry overlay travels as
   `StackControl::Retry.overlay` into `HarnessPromptState.pending_retry_overlay`
   and applies to one transition (see [cli-commands.md](cli-commands.md)).
@@ -695,7 +715,8 @@ Claudine enforces this at two boundaries:
     ending the frontmatter is stored as compose reads it (trimmed).
   - `persisted_data` applies the same gate to the lifecycle
     `set_`/`merge_`/`append_`/`prepend_frontmatter` writes
-    (`lifecycle/executor.rs::dispatch_side_effect`, also the sequence
+    (Darkmatter's `executor.rs::dispatch_side_effect` through
+    `LifecycleHost::persisted_data`, also the sequence
     `side_effect:` path); the in-memory mirror stays raw.
   - Readers use `stored_text` / `opens_stored_token`: schema validation and
     status (`schema/mod.rs`, `classify.rs`; `pre_validate_layered_for_mode`
@@ -913,7 +934,8 @@ re-prepares the resolved target canonically. A direct provider wrapper
 `surface_or_adopt_terminal_proxy` refuses an otherwise unowned handoff with a
 typed diagnostic rather than adopting it under the invocation's own bundle.
 
-`LifecycleCatchProtocol` in `lib/src/composition/lifecycle/runtime.rs` is the
+`LifecycleCatchProtocol` (Darkmatter's `lifecycle/runtime.rs`, re-exported at
+`claudine::composition::lifecycle::runtime`) is the
 single provider-neutral owner of setup catch routing, terminal-slot
 redesignation, finalize eligibility, active-error threading, and evaluation
 error precedence. Every initialize/start/blocked catch and every

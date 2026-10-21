@@ -70,14 +70,19 @@ bundle expands in a fixed canonical order at parse time. Every retired spelling
 `CompositionError::RemovedGrammar` with a replacement hint. The directive
 verbs live in one list (`signatures.rs::LIFECYCLE_CONTROL_VERBS`); `prep` is
 the one directive that returns (`LifecycleControlAction::returns`), so it is
-exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser
-slice (`lifecycle/{parse,action_shape,actions,validate,signatures,source_map}.rs`)
-is lift-ready: `lib/tests/l1/lifecycle_lift_ready_guard.rs` fails if it names a
-Claudine runtime type, so the caller injects the effect catalog
+exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser,
+executor, run accounting, catch protocol, and control admission live in
+`darkmatter::lifecycle` (see the `darkmatter` skill's `lifecycle.md`); Claudine
+re-exports them at their old paths and adapts them: `effects.rs`
+(`ClaudineLifecycleEffects`: TTS and messaging configuration), `executor.rs`
+(`StackExecutionContext` is the `LifecycleHost`), `ClaudineRunHost` for the run
+guard, the `*Ext` traits for the old constructors, and `CompositionError`
+twins of `LifecycleError`. `lib/tests/l1/lifecycle_lift_ready_guard.rs` still
+reads the moved slice, so the caller injects the effect catalog
 (`LifecycleParseOptions`). Loop values are the host-declared `loop` global
 (`loop.count`, …), supplied to Darkmatter main compose through
 `ComposeOptions::with_host_globals`; `fm.loop` is the loop configuration.
-`retry.with` shares `proxy.with`'s evaluation (`executor.rs::resolve_with_overlay`)
+`retry.with` shares `proxy.with`'s evaluation (Darkmatter `executor.rs::resolve_with_overlay`)
 and travels as `StackControl::Retry.overlay` into
 `HarnessPromptState.pending_retry_overlay`; `prompt.rs::active_overlay` layers
 it over the retained proxy overlay (retry wins a shared key). The retried
@@ -120,7 +125,7 @@ break in declaration order; a failure or retry `discard()`s it. The code is
 the exit status only for the root loop (`RootRun::broken_exit_code`;
 `prep.rs` when `step_scope` is `None`). `PromptRunOutcome.withheld` keeps an
 unlaunched document out of `seq.outputs`. `prep` is a returning action
-(`executor.rs::run_prep`) through the thread-installed
+(Darkmatter `executor.rs::run_prep`, via `LifecycleHost::prep`) through the thread-installed
 `lifecycle::prep::PrepRunner` (`install`, `inherit` for group workers, call
 chain `enter_call`, one cycle domain with proxies); the CLI runner
 (`commands/prep_target.rs`, installed by compose/inline-compose/sequence)
