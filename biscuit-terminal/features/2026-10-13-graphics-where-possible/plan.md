@@ -330,6 +330,205 @@ skills_files_updated_during_phase_7:
     - ".claude/skills/biscuit-terminal/discovery.md"
     - ".claude/skills/biscuit-terminal/image-rendering.md"
     - ".claude/skills/biscuit-visualized/diagram-components.md"
+source_files_during_phase_8:
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/src/render_tree/render.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/cli/src/commands/image.rs"
+    - "biscuit-terminal/cli/tests/l1/graphics_route.rs"
+    - "biscuit-terminal/cli/tests/level2/level2_image.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-icon/lib/src/icon.rs"
+docs_updated_during_phase_8:
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/components/two_column.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/README.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-terminal/cli/README.md"
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-terminal/cli.md"
+source_files_during_phase_9:
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/unix.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "darkmatter/lib/src/markdown/output/terminal.rs"
+    - "darkmatter/lib/src/mermaid/mod.rs"
+    - "biscuit-icon/lib/src/icon.rs"
+docs_updated_during_phase_9:
+    - "biscuit-terminal/README.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-terminal/cli/README.md"
+docs_created_during_phase_9:
+    - "biscuit-terminal/features/2026-10-13-graphics-where-possible/verification.md"
+skills_files_updated_during_phase_9: []
+source_code:
+    - "biscuit-terminal/lib/Cargo.toml"
+    - "biscuit-terminal/lib/src/components/mod.rs"
+    - "biscuit-terminal/lib/src/prelude.rs"
+    - "biscuit-terminal/lib/src/render_tree/mod.rs"
+    - "biscuit-terminal/lib/src/render_tree/options.rs"
+    - "biscuit-terminal/lib/src/render_tree/render.rs"
+    - "biscuit-terminal/lib/tests/l1/main.rs"
+    - "biscuit-terminal/lib/tests/l1/layout_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/render_tree_code_context.rs"
+    - "biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs"
+    - "biscuit-terminal/lib/tests/layout_matrix_support/mod.rs"
+    - "biscuit-terminal/cli/Cargo.toml"
+    - "biscuit-terminal/cli/src/main.rs"
+    - "biscuit-terminal/cli/src/commands/graph.rs"
+    - "biscuit-terminal/cli/src/commands/mermaid.rs"
+    - "biscuit-terminal/cli/src/commands/quadrant.rs"
+    - "biscuit-visualized/src/Cargo.toml"
+    - "biscuit-visualized/src/src/lib.rs"
+    - "biscuit-visualized/src/src/components/mod.rs"
+    - "biscuit-visualized/src/src/components/render_hook.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-visualized/src/src/components/git_graph.rs"
+    - "biscuit-visualized/src/src/components/git_graph/tests.rs"
+    - "biscuit-visualized/src/src/graph/expression.rs"
+    - "biscuit-visualized/src/src/tests/mod.rs"
+    - "biscuit-visualized/src/tests/l1/main.rs"
+    - "biscuit-visualized/src/tests/l1/mermaid_parity.rs"
+    - "biscuit-visualized/src/tests/l1/graph_expression_parity.rs"
+    - "biscuit-visualized/src/tests/l1/layout_matrix.rs"
+    - "biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs"
+    - "biscuit-visualized/src/tests/l1/snapshots/"
+    - "darkmatter/lib/Cargo.toml"
+    - "darkmatter/lib/src/markdown/render_tree/entrypoints.rs"
+    - "darkmatter/lib/src/markdown/render_tree/code_renderer.rs"
+    - "darkmatter/lib/src/mermaid/render_terminal.rs"
+    - "darkmatter/lib/benches/render_pipeline_steps.rs"
+    - "darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs"
+    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/images.rs"
+    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs"
+    - "darkmatter/lib/tests/level3-terminal/level3_image_painting.rs"
+    - "sniff/cli/Cargo.toml"
+    - "sniff/cli/src/output/filesystem/deps.rs"
+    - "worktree/cli/Cargo.toml"
+    - "worktree/cli/src/commands/git_graph.rs"
+    - "worktree/cli/src/commands/git_graph/tests.rs"
+    - "worktree/cli/src/commands/list_table.rs"
+    - "biscuit-icon/cli/tests/cli.rs"
+    - "biscuit-tui/lib/Cargo.toml"
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/src/components/image_options.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/iterm.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-visualized/src/src/artifact.rs"
+    - "biscuit-visualized/src/src/cache/file_cache.rs"
+    - "biscuit-visualized/src/src/raster/png.rs"
+    - "biscuit-visualized/src/src/graph/render.rs"
+    - "biscuit-visualized/src/src/mermaid/render.rs"
+    - "biscuit-visualized/src/src/components/display.rs"
+    - "biscuit-visualized/src/src/tests/artifact_tests.rs"
+    - "biscuit-visualized/src/src/tests/cache_tests.rs"
+    - "biscuit-visualized/src/src/tests/graph_tests.rs"
+    - "biscuit-visualized/src/src/tests/mermaid_tests.rs"
+    - "biscuit-visualized/src/src/tests/raster_tests.rs"
+    - "biscuit-visualized/src/tests/l1/display_size.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route/tests.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/versions.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/image.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
+    - "biscuit-terminal/lib/src/terminal.rs"
+    - "biscuit-terminal/lib/src/components/horizontal_rule/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/examples/terminal_info.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/parity_helpers.rs"
+    - "biscuit-terminal/lib/tests/l1/integration.rs"
+    - "biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs"
+    - "biscuit-terminal/cli/src/hints.rs"
+    - "biscuit-terminal/cli/src/output.rs"
+    - "biscuit-terminal/cli/src/commands/image.rs"
+    - "biscuit-terminal/cli/tests/l1/main.rs"
+    - "biscuit-terminal/cli/tests/l1/graphics_route.rs"
+    - "darkmatter/lib/src/markdown/output/terminal.rs"
+    - "biscuit-icon/lib/src/icon.rs"
+    - "biscuit-icon/cli/src/commands.rs"
+    - "worktree/cli/src/commands/list.rs"
+    - "biscuit-terminal/lib/src/discovery/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/raw_mode.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/unix.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/windows.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/color.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/query.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/support.rs"
+    - "biscuit-terminal/lib/tests/common/pty.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_probe_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs"
+    - "biscuit-terminal/lib/tests/level2/main.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tmux.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/placeholder.rs"
+    - "biscuit-terminal/lib/src/components/two_column.rs"
+    - "biscuit-terminal/lib/src/utils/block_constraint.rs"
+    - "biscuit-terminal/lib/tests/l1/two_column_parity.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block/tests.rs"
+    - "biscuit-terminal/cli/tests/level2/level2_image.rs"
+    - "darkmatter/lib/src/mermaid/mod.rs"
+documentation:
+    - "biscuit-terminal/README.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-terminal/docs/components/index.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/dependencies.md"
+    - "biscuit-visualized/README.md"
+    - "biscuit-visualized/docs/dot-graph.md"
+    - "biscuit-visualized/docs/mermaid-gitgraph.md"
+    - "biscuit-visualized/docs/components/mermaid_diagram.md"
+    - "biscuit-visualized/docs/components/graph_expression.md"
+    - "biscuit-visualized/docs/components/git_graph.md"
+    - "biscuit-visualized/docs/data-visualization/visualizing-graph-expressions.md"
+    - "biscuit-icon/docs/dependencies.md"
+    - "biscuit-icon/lib/README.md"
+    - "darkmatter/docs/dependencies.md"
+    - "darkmatter/docs/rendering/mermaid.md"
+    - "darkmatter/lib/README.md"
+    - "darkmatter/lib/src/mermaid/README.md"
+    - "docs/dependencies.md"
+    - "sniff/docs/dependencies.md"
+    - "worktree/docs/git-graph.md"
+    - "worktree/docs/performance-testing.md"
+    - "biscuit-visualized/docs/dependencies.md"
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/research/graphics/multiplexing.md"
+    - "biscuit-terminal/docs/components/two_column.md"
+    - "biscuit-terminal/cli/README.md"
+    - "biscuit-terminal/features/2026-10-13-graphics-where-possible/verification.md"
+completed_phase: 9
+implemented: true
 ---
 
 # Plan: Graphics Where Possible
@@ -390,7 +589,7 @@ Every item is observable without a human at a terminal:
       placeholder grid encoding pass L1; tmux L2 passes with passthrough on/off.
 - [x] Sixel output is deterministic for fixed fixtures and leaves terminal mode
       state unchanged.
-- [ ] Plain images with no pixel route render half-blocks (truecolor + Unicode),
+- [x] Plain images with no pixel route render half-blocks (truecolor + Unicode),
       else alt text; pipes get plain text.
 - [ ] `just test`, `just test-l2`, `just lint` pass for `biscuit-terminal`,
       `biscuit-visualized`, and every migrated consumer; Windows backend and
@@ -998,23 +1197,23 @@ text (§6). *Depends on phase 3.*
 
 ### Wave 1
 
-- [ ] **Half-block renderer**: `▀` with truecolor fg/bg; degrade to alt text
+- [x] **Half-block renderer**: `▀` with truecolor fg/bg; degrade to alt text
       (explicit alt text wins over file name) when truecolor or Unicode is
       missing. Sanitize alt text/file names as literal text (no control
       injection; L1 with embedded ESC/OSC/CR). Non-tty stdout ⇒ plain text
       description, never color blocks.
-- [ ] **Policy**: honors `BISCUIT_GRAPHICS=none`, `GraphicsMode` ceilings
+- [x] **Policy**: honors `BISCUIT_GRAPHICS=none`, `GraphicsMode` ceilings
       (`Off`/`Vector` forbid raster-derived half-blocks), image access policy,
       and render-tree placeholder style; does not bypass explicit policies.
-- [ ] **Wiring**: `TerminalImage` and `bt image`, inline and standalone; decode
+- [x] **Wiring**: `TerminalImage` and `bt image`, inline and standalone; decode
       only here (limits enforced); route reason unchanged so hints still apply.
 
 ### Checkpoint
 
-- [ ] L1: truecolor/256/no-Unicode/pipe matrix; sanitization; policy precedence.
-- [ ] L2 (Apple Terminal or any available harness backend; skip cleanly):
+- [x] L1: truecolor/256/no-Unicode/pipe matrix; sanitization; policy precedence.
+- [x] L2 (Apple Terminal or any available harness backend; skip cleanly):
       half-block output captured with no escape garbage.
-- [ ] Docs: `terminal_image.md` half-block section; remove **planned** markers.
+- [x] Docs: `terminal_image.md` half-block section; remove **planned** markers.
 
 ---
 
@@ -1022,22 +1221,22 @@ text (§6). *Depends on phase 3.*
 
 **Goal:** write `verification.md` from the spec's checklist. *Depends on 1-8.*
 
-- [ ] **Write `verification.md`** in this folder: one section per row of the
+- [x] **Write `verification.md`** in this folder: one section per row of the
       spec's "Human verification checklist" (iTerm2, Windows SSH server,
       Windows Terminal, mintty, Ghostty/Kitty/WezTerm under tmux, SSH from
       local tmux, Zellij 0.45+, Terminal.app). Each with the exact command,
       what to look for, and a blank result line for terminal + multiplexer
       versions. Use the final command names/flags from the implementation.
-- [ ] **Final sweep (not human checks)**
-    - [ ] All **planned** doc markers removed or justified.
-    - [ ] `os` skill, `biscuit-terminal` and `biscuit-visualized` skills,
+- [x] **Final sweep (not human checks)**
+    - [x] All **planned** doc markers removed or justified.
+    - [x] `os` skill, `biscuit-terminal` and `biscuit-visualized` skills,
           both `dependencies.md` files, and both READMEs reflect the end state.
-    - [ ] Comment-drift pass on every touched symbol; note any drift fixed.
-    - [ ] Implementation log records: ruling outcomes, spike results, PNG size
+    - [x] Comment-drift pass on every touched symbol; note any drift fixed.
+    - [x] Implementation log records: ruling outcomes, spike results, PNG size
           numbers, and whether Windows typeahead re-injection shipped.
-    - [ ] Final `just test`, `just test-l2`, `just lint` on all affected packages;
+    - [x] Final `just test`, `just test-l2`, `just lint` on all affected packages;
           Windows evidence via `just cross-check`.
-    - [ ] Stop at "implementation complete, ready for review" (do not move the
+    - [x] Stop at "implementation complete, ready for review" (do not move the
           spec to `_completed`, do not commit unless told).
 
 ## Spike results

@@ -100,29 +100,6 @@ packages:
     - "biscuit-tui"
     - "biscuit-icon"
 human_review: false
-message_to_agent: |-
-    Phase 7 (Sixel) is done; context for phase 8 (half-blocks):
-
-    - `encoder_for` (terminal_image/protocol.rs) now maps Sixel to
-      `Encoder::Sixel`; the only remaining text fallback is
-      `Encoder::Fallback(reason)`, which is where half-blocks plug in
-      (`render_with_route` validates the image, then returns alt text).
-    - `ImagePixels::into_image()` (encoded_png.rs) decodes either input kind;
-      reuse it for half-blocks instead of a new decode path.
-    - `sixel.rs::blend` composites RGBA onto a background, and
-      `SixelBackground::for_terminal` picks the measured or estimated
-      background; half-blocks need the same for transparent pixels.
-    - Colors are never queried inside a multiplexer (`color_query_wanted`
-      checks `detect_multiplexer`), so under tmux the background is always
-      the light/dark estimate.
-    - Known, not fixed: under a hidden tmux (`TERM=tmux-*` without `TMUX`,
-      across SSH) the direct exchange still sends the unwrapped Kitty query,
-      which a tmux on the far side turns into its pane title (`Gi=…`). A
-      visible tmux no longer gets it (`ProbePlan::direct_da1_only`).
-    - The CLI L2 test `level2_cursor_lands_below_rendered_image` failed three
-      times in a row early in phase 7 (WezTerm pane answered no DSR), then
-      passed four times with no code change; treat a repeat as environment
-      first.
 source_files_during_phase_5:
     - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
     - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
@@ -207,6 +184,205 @@ skills_files_updated_during_phase_7:
     - ".claude/skills/biscuit-terminal/discovery.md"
     - ".claude/skills/biscuit-terminal/image-rendering.md"
     - ".claude/skills/biscuit-visualized/diagram-components.md"
+source_files_during_phase_8:
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/src/render_tree/render.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/cli/src/commands/image.rs"
+    - "biscuit-terminal/cli/tests/l1/graphics_route.rs"
+    - "biscuit-terminal/cli/tests/level2/level2_image.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-icon/lib/src/icon.rs"
+docs_updated_during_phase_8:
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/components/two_column.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/README.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-terminal/cli/README.md"
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-terminal/cli.md"
+source_files_during_phase_9:
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/unix.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "darkmatter/lib/src/markdown/output/terminal.rs"
+    - "darkmatter/lib/src/mermaid/mod.rs"
+    - "biscuit-icon/lib/src/icon.rs"
+docs_updated_during_phase_9:
+    - "biscuit-terminal/README.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-terminal/cli/README.md"
+docs_created_during_phase_9:
+    - "biscuit-terminal/features/2026-10-13-graphics-where-possible/verification.md"
+skills_files_updated_during_phase_9: []
+source_code:
+    - "biscuit-terminal/lib/Cargo.toml"
+    - "biscuit-terminal/lib/src/components/mod.rs"
+    - "biscuit-terminal/lib/src/prelude.rs"
+    - "biscuit-terminal/lib/src/render_tree/mod.rs"
+    - "biscuit-terminal/lib/src/render_tree/options.rs"
+    - "biscuit-terminal/lib/src/render_tree/render.rs"
+    - "biscuit-terminal/lib/tests/l1/main.rs"
+    - "biscuit-terminal/lib/tests/l1/layout_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/render_tree_code_context.rs"
+    - "biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs"
+    - "biscuit-terminal/lib/tests/layout_matrix_support/mod.rs"
+    - "biscuit-terminal/cli/Cargo.toml"
+    - "biscuit-terminal/cli/src/main.rs"
+    - "biscuit-terminal/cli/src/commands/graph.rs"
+    - "biscuit-terminal/cli/src/commands/mermaid.rs"
+    - "biscuit-terminal/cli/src/commands/quadrant.rs"
+    - "biscuit-visualized/src/Cargo.toml"
+    - "biscuit-visualized/src/src/lib.rs"
+    - "biscuit-visualized/src/src/components/mod.rs"
+    - "biscuit-visualized/src/src/components/render_hook.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-visualized/src/src/components/git_graph.rs"
+    - "biscuit-visualized/src/src/components/git_graph/tests.rs"
+    - "biscuit-visualized/src/src/graph/expression.rs"
+    - "biscuit-visualized/src/src/tests/mod.rs"
+    - "biscuit-visualized/src/tests/l1/main.rs"
+    - "biscuit-visualized/src/tests/l1/mermaid_parity.rs"
+    - "biscuit-visualized/src/tests/l1/graph_expression_parity.rs"
+    - "biscuit-visualized/src/tests/l1/layout_matrix.rs"
+    - "biscuit-visualized/src/tests/l1/render_tree_diagram_hook.rs"
+    - "biscuit-visualized/src/tests/l1/snapshots/"
+    - "darkmatter/lib/Cargo.toml"
+    - "darkmatter/lib/src/markdown/render_tree/entrypoints.rs"
+    - "darkmatter/lib/src/markdown/render_tree/code_renderer.rs"
+    - "darkmatter/lib/src/mermaid/render_terminal.rs"
+    - "darkmatter/lib/benches/render_pipeline_steps.rs"
+    - "darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs"
+    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/images.rs"
+    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs"
+    - "darkmatter/lib/tests/level3-terminal/level3_image_painting.rs"
+    - "sniff/cli/Cargo.toml"
+    - "sniff/cli/src/output/filesystem/deps.rs"
+    - "worktree/cli/Cargo.toml"
+    - "worktree/cli/src/commands/git_graph.rs"
+    - "worktree/cli/src/commands/git_graph/tests.rs"
+    - "worktree/cli/src/commands/list_table.rs"
+    - "biscuit-icon/cli/tests/cli.rs"
+    - "biscuit-tui/lib/Cargo.toml"
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/src/components/image_options.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/iterm.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-visualized/src/src/artifact.rs"
+    - "biscuit-visualized/src/src/cache/file_cache.rs"
+    - "biscuit-visualized/src/src/raster/png.rs"
+    - "biscuit-visualized/src/src/graph/render.rs"
+    - "biscuit-visualized/src/src/mermaid/render.rs"
+    - "biscuit-visualized/src/src/components/display.rs"
+    - "biscuit-visualized/src/src/tests/artifact_tests.rs"
+    - "biscuit-visualized/src/src/tests/cache_tests.rs"
+    - "biscuit-visualized/src/src/tests/graph_tests.rs"
+    - "biscuit-visualized/src/src/tests/mermaid_tests.rs"
+    - "biscuit-visualized/src/src/tests/raster_tests.rs"
+    - "biscuit-visualized/src/tests/l1/display_size.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route/tests.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/versions.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/image.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
+    - "biscuit-terminal/lib/src/terminal.rs"
+    - "biscuit-terminal/lib/src/components/horizontal_rule/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/examples/terminal_info.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/parity_helpers.rs"
+    - "biscuit-terminal/lib/tests/l1/integration.rs"
+    - "biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs"
+    - "biscuit-terminal/cli/src/hints.rs"
+    - "biscuit-terminal/cli/src/output.rs"
+    - "biscuit-terminal/cli/src/commands/image.rs"
+    - "biscuit-terminal/cli/tests/l1/main.rs"
+    - "biscuit-terminal/cli/tests/l1/graphics_route.rs"
+    - "darkmatter/lib/src/markdown/output/terminal.rs"
+    - "biscuit-icon/lib/src/icon.rs"
+    - "biscuit-icon/cli/src/commands.rs"
+    - "worktree/cli/src/commands/list.rs"
+    - "biscuit-terminal/lib/src/discovery/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/raw_mode.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/mod.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/unix.rs"
+    - "biscuit-terminal/lib/src/discovery/tty_query/windows.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/color.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/query.rs"
+    - "biscuit-terminal/lib/src/discovery/osc_queries/support.rs"
+    - "biscuit-terminal/lib/tests/common/pty.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_probe_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs"
+    - "biscuit-terminal/lib/tests/level2/main.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tmux.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/placeholder.rs"
+    - "biscuit-terminal/lib/src/components/two_column.rs"
+    - "biscuit-terminal/lib/src/utils/block_constraint.rs"
+    - "biscuit-terminal/lib/tests/l1/two_column_parity.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/half_block/tests.rs"
+    - "biscuit-terminal/cli/tests/level2/level2_image.rs"
+    - "darkmatter/lib/src/mermaid/mod.rs"
+documentation:
+    - "biscuit-terminal/README.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-terminal/docs/components/index.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/dependencies.md"
+    - "biscuit-visualized/README.md"
+    - "biscuit-visualized/docs/dot-graph.md"
+    - "biscuit-visualized/docs/mermaid-gitgraph.md"
+    - "biscuit-visualized/docs/components/mermaid_diagram.md"
+    - "biscuit-visualized/docs/components/graph_expression.md"
+    - "biscuit-visualized/docs/components/git_graph.md"
+    - "biscuit-visualized/docs/data-visualization/visualizing-graph-expressions.md"
+    - "biscuit-icon/docs/dependencies.md"
+    - "biscuit-icon/lib/README.md"
+    - "darkmatter/docs/dependencies.md"
+    - "darkmatter/docs/rendering/mermaid.md"
+    - "darkmatter/lib/README.md"
+    - "darkmatter/lib/src/mermaid/README.md"
+    - "docs/dependencies.md"
+    - "sniff/docs/dependencies.md"
+    - "worktree/docs/git-graph.md"
+    - "worktree/docs/performance-testing.md"
+    - "biscuit-visualized/docs/dependencies.md"
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/research/graphics/multiplexing.md"
+    - "biscuit-terminal/docs/components/two_column.md"
+    - "biscuit-terminal/cli/README.md"
+    - "biscuit-terminal/features/2026-10-13-graphics-where-possible/verification.md"
+completed_phase: 9
+implemented: true
 ---
 
 # Implementation Log for 2026-10-13-graphics-where-possible (9 phases)
@@ -1306,3 +1482,260 @@ forwards.
 - Docs and skills were updated by a Documenter subagent from a fact sheet;
   its one unbriefed claim (colors are not queried through a multiplexer)
   was checked against `color_query_wanted` and is correct.
+
+## Phase 8
+
+### What was built
+
+- **Renderer** — new `terminal_image/half_block.rs`. Each cell is `▀` with
+  a truecolor foreground (upper pixel) and background (lower pixel); a color
+  pair is written only when it changes; every line ends with an SGR reset.
+  Width comes from the existing width resolver (layout offset → leading
+  spaces); height keeps the aspect ratio with a half-block pixel one cell
+  wide and half a cell tall (measured cell or the 8x16 fallback).
+  Transparency is composited onto `SixelBackground::for_terminal` (reusing
+  `sixel::blend`, now `pub(super)`), and an odd last pixel row gets that
+  background below. Decoding reuses `ImagePixels::into_image()`.
+- **API** — `TerminalImage::render_with_half_blocks` and
+  `ImageOutput::HalfBlocks { text, reason }`. `render_with_route` is
+  unchanged and never returns `HalfBlocks`, so diagrams (which call it) keep
+  their source-code fallback. A pixel route refused late (an image over
+  tmux's message limit) also becomes half-blocks, keeping the
+  `BlockedTransport` reason.
+- **Policy** (`half_blocks_permitted`) — tty + `TrueColor` +
+  `supports_unicode`, and the route reason is not `UserDisabled`,
+  `InvalidInput`, or `NotATerminal`.
+- **Wiring** — `TerminalRenderable::render` for `TerminalImage`,
+  `render_inline` (TwoColumn image columns become `InlineImage::Lines`), and
+  `bt image` (prints the text and still emits the route hint).
+  `render_inline_pixels` now returns the transport's refusal reason instead
+  of mapping it straight to `UnsupportedTerminal`.
+- `biscuit-visualized` `mermaid.rs` / `graph_expression.rs` and the
+  render-tree `render_terminal_image` fold the new variant into their
+  existing no-pixels arm (exhaustiveness only).
+
+### Interpretations (recorded, not escalated)
+
+- **Render tree keeps its placeholder.** The spec says half-blocks are for
+  plain images (`bt image`, `TerminalImage`) and that the render tree's
+  placeholder style is preserved. Markdown image nodes therefore never draw
+  half-blocks at any `GraphicsMode`, which also satisfies the `Off`/`Vector`
+  ceiling trivially. Darkmatter's legacy `▉ IMAGE[...]` path is untouched.
+- **Invalid override ⇒ alt text, not half-blocks.** An invalid
+  `BISCUIT_GRAPHICS` is a configuration error; drawing a substitute would
+  hide it.
+- **`FORCE_COLOR` does not override a pipe.** `Terminal::new_forced` marks
+  stdout a tty with truecolor, but the route (resolved from the real
+  stdout) says `NotATerminal`, so piped `bt image` stays plain text.
+- **No row cap.** A very tall image gives as many rows as its aspect ratio
+  needs, as the pixel paths already do.
+- U+2580 is East Asian Ambiguous width; a CJK terminal set to draw ambiguous
+  characters wide would double the image's width. Not handled (same as
+  viuer and similar crates).
+
+### Requirement → test mapping
+
+Unit tests live in `lib/src/components/terminal_image/half_block/tests.rs`
+(L1; F1 for the encoder, F2 for the public `render_with_half_blocks` /
+`render` / `TwoColumn` paths from a real PNG file and a resolved route).
+
+| Requirement | Test(s) (tier, rung) |
+| --- | --- |
+| `▀` with truecolor fg (upper) / bg (lower): golden bytes | `half_block::tests::a_fixed_fixture_encodes_to_golden_lines` (L1, F1) |
+| transparency composited (alpha 0 / 128), odd last row, run-length SGR, resize | `…::transparency_is_composited_onto_the_background`, `…::an_odd_last_pixel_row_has_the_background_below`, `…::a_repeated_color_is_written_once_per_run`, `…::the_image_is_resized_to_the_requested_cells` |
+| aspect ratio (fallback / measured / 1:3 cell / never zero) | `…::pixel_rows_keep_the_aspect_ratio` |
+| truecolor / 256 / 16 / 8 / none / no-Unicode / not-tty matrix | `…::permission::needs_a_truecolor_unicode_terminal`, `…::rendering::without_truecolor_or_unicode_the_alt_text_is_printed` (explicit alt text wins) |
+| reason kinds: none / invalid / not-a-terminal refuse; others permit | `…::permission::follows_the_reason_the_pixel_route_failed`, `…::rendering::disabled_or_invalid_graphics_settings_are_not_bypassed` (also inline) |
+| pipe ⇒ plain text, even with forced color | `…::rendering::piped_output_gets_plain_text_even_when_color_is_forced`; CLI `l1 graphics_route::image_prints_plain_text_not_half_blocks_when_piped_with_forced_color` (spawned `bt`, `FORCE_COLOR=1`, `COLORTERM=truecolor`); existing `image_prints_fallback_text_without_graphics_controls_when_piped` |
+| route reason kept (hints still apply); `render` == half-blocks; `render_with_route` unchanged | `…::rendering::a_truecolor_unicode_terminal_without_pixels_draws_half_blocks_with_the_route_reason` |
+| width/alignment offset and rows | `…::rendering::rows_and_layout_offset_follow_the_resolved_width` |
+| pixel route unaffected | `…::rendering::a_pixel_route_is_unchanged` |
+| corrupt image stays an error | `…::rendering::a_corrupt_image_is_an_error_not_half_blocks`; CLI `image_with_corrupt_png_fails_even_without_a_pixel_route` |
+| sanitization: ESC / OSC / CR / BEL / ST in alt text; control chars in a file name (unix only: Windows forbids them in names); half-blocks never carry the text | `…::rendering::alt_text_is_sanitized_and_never_part_of_half_blocks`, `…::rendering::a_file_name_with_controls_is_sanitized` |
+| inline (TwoColumn) | `…::rendering::inline_without_pixels_draws_half_block_lines`, `…::rendering::a_two_column_image_draws_half_blocks_beside_its_text` |
+| late refusal (over tmux's limit) ⇒ half-blocks + `BlockedTransport` | `…::rendering::an_image_over_the_tmux_limit_draws_half_blocks` |
+| render tree keeps its placeholder at Rich / Vector / Off | `render_tree::render::tests::render_tree_image_without_pixels_keeps_its_placeholder_not_half_blocks` |
+| live: `bt image` in a tmux pane without passthrough draws half-blocks, no escape residue, truecolor SGR in the raw capture | `biscuit-terminal-cli level2 level2_image::level2_image_half_blocks_in_tmux_without_passthrough` (L2, real tmux 3.8) |
+
+- Existing tests made deterministic: two `route_dispatch` tests asserted
+  alt text from `render` / `render_inline` on a terminal whose color depth
+  came from the host; they now pin 256 colors.
+- Mutation checks: dropping `InvalidInput | NotATerminal` from the refusal
+  list failed 3 tests; restored. The L2 test (run with
+  `BISCUIT_TEST_LEVEL_REQUIRED=2`, so a skip would fail) failed when its
+  `[Image:` assertion was flipped; its failure output showed four rows of
+  `▀` and the hint `bt: no graphics: tmux 3.8.0 has allow-passthrough off
+  for this pane (set -g allow-passthrough on)`, so the reason and hint
+  survive.
+- Input robustness: no file format or configuration reader was added; not
+  applicable.
+
+### Other changes needed by the new variant
+
+- `lib/examples/discovery_probe.rs` and `biscuit-icon/lib/src/icon.rs`
+  matched `ImageOutput` exhaustively; both call `render_with_route`, so the
+  probe marks `HalfBlocks` unreachable and biscuit-icon folds it into its
+  `Unsupported` arm.
+- Stale skill content fixed in `image-rendering.md`: the basic-usage example
+  called the now-private `render_to_terminal` and claimed unsupported
+  terminals return an empty string; the protocol table said the same.
+- Not fixed (pre-existing, unrelated): an `unused import: super::*` warning
+  in `biscuit-icon` tests (`icon.rs:335`); `cli/README.md` still says aspect
+  ratio is kept "via viuer".
+
+### Gates
+
+| Scope | Command | Result |
+| --- | --- | --- |
+| biscuit-terminal | `just lint` | clean |
+| biscuit-terminal | `just test` | 3821 passed, 0 failed, 55 skipped |
+| biscuit-terminal | `just test-l2` | lib 8/8, cli 252/252 (incl. the new test) |
+| biscuit-terminal | `just check-tier-coverage biscuit-terminal` | 0 stranded |
+| biscuit-visualized | `just lint` / `just test` | clean / 316 passed |
+| biscuit-icon | `cargo clippy --all-features -D warnings` / `just test` | clean / 230 passed |
+| darkmatter | `--features terminal-tests`, `test(/route\|graphics\|image\|mermaid\|diagram\|half/)` minus tier markers | 173 passed |
+| worktree-cli, sniff-cli, biscuit-tui, darkmatter | `cargo check --all-targets` | clean |
+
+- Scope calculator after all edits: packages `biscuit-icon,
+  biscuit-terminal, biscuit-terminal-cli, biscuit-visualized, test-toolkit,
+  darkmatter, tree-hugger-cli`, change_class `package`, so the gates were
+  required and run.
+- Windows `just cross-check` was not run: the change is pure text rendering
+  with no path, process, or console code; the one OS-specific test
+  (control characters in a file name) is `cfg(unix)` because Windows forbids
+  them. CI's nightly Windows leg covers it.
+- Subagents: a test subagent wrote the L2 test, a Documenter subagent
+  updated docs and skills from a fact sheet. Their two reports were checked:
+  the L2 test was read in full; the docs' stale-content findings led to the
+  skill fixes above.
+
+## Phase 9
+
+### Human verification checklist
+
+- Wrote `verification.md` in this folder: one section per row of the spec's
+  "Human verification checklist" (iTerm2, Windows SSH server, Windows
+  Terminal, mintty, Ghostty/Kitty/WezTerm under tmux, SSH from inside a local
+  tmux, Zellij 0.45+, Terminal.app), each with setup, exact commands, what to
+  look for, and blank lines for terminal and multiplexer versions and the
+  `Images:` line.
+- Commands use the shipped CLI: `bt` (the `Images:` line prints format,
+  transport, placement, confidence, reason kind, reason and fix),
+  `bt image --example` (16×16 fixture PNG written to the temp dir),
+  `bt flowchart --example`, `bt bar-chart --example`. Placement labels are the
+  `Debug` names `Ordinary` / `Placeholders`.
+- Checked on this host (macOS, `script` pty, `TERM_PROGRAM=Apple_Terminal`,
+  `COLORTERM=truecolor`): `bt image --example` prints `▀` rows with
+  truecolor fg/bg; `bt flowchart --example` prints the Mermaid source block;
+  `bt` prints `Images: None (Known) NoSupport: Terminal.app … has no
+  supported pixel format`.
+- Phase 3's open risk (Git Bash in a bare conhost window read as mintty and
+  sent the iTerm2 format) is added to the mintty section as an optional
+  check.
+
+### Final sweep
+
+- **Planned markers**: none remain in `biscuit-terminal/docs`, the three
+  `biscuit-terminal` READMEs, `biscuit-visualized/docs`, its README, or the
+  `biscuit-terminal`, `biscuit-visualized`, and `os` skills.
+- **Doc drift fixed**:
+  - `biscuit-terminal/cli/README.md`: two "aspect ratio … via viuer" lines
+    (viuer was removed) now read "Images always keep their proportions"; the
+    `bt image` protocol list gained Sixel, mintty, and the Windows SSH server
+    and links the graphics-routes page.
+  - `biscuit-terminal/README.md`, `biscuit-terminal/lib/README.md`: "Kitty/iTerm2"
+    image lists now include Sixel.
+- **Skills and dependencies**: `os` skill (`windows-console.md`, "Escape
+  sequences through the Windows OpenSSH server"), `biscuit-terminal` skill
+  (`image-rendering.md` route and half-block API), `biscuit-visualized` skill
+  (terminal components and the render-tree hook), and both `dependencies.md`
+  files (`icy_sixel`, the dependency flip, no `viuer`) already describe the
+  end state; no edit needed.
+- **Comment drift fixed** (comment-only; code assumed correct):
+  - `terminal_image/mod.rs`: `ViuerError` documented as no longer produced;
+    `TerminalImage` doc lists Kitty, iTerm2, Sixel chosen by the route; the
+    protocol table's fallback row says half-blocks or alt text.
+  - `terminal_image/protocol.rs`: `ImageOutput` names both producers;
+    `Fallback`/`HalfBlocks` include the late transport refusals (tmux message
+    limit, Zellij without measured cells); `render_with_route` states it never
+    returns `HalfBlocks`.
+  - `lib/examples/discovery_probe.rs`: a "viuer-based image detection"
+    comment now says what the probe avoids (startup queries waiting on a
+    silent terminal); US spelling.
+  - `discovery/tty_query/unix.rs`: US spelling.
+  - `biscuit-visualized` `components/mermaid.rs`, `components/graph_expression.rs`:
+    module docs no longer say they "delegate to `biscuit-visualized`" (they
+    live there now).
+  - `darkmatter` `markdown/output/terminal.rs` (`MermaidMode::Image`,
+    `ImageRenderer`, a test comment) and `mermaid/mod.rs`: "viuer" replaced by
+    biscuit-terminal / the route-selected format.
+  - `biscuit-icon/lib/src/icon.rs`: removed the unused `use super::*;` in
+    `render_in_cell_tests` (warned only with the `image` feature).
+- **Left alone, for the author** (not drift from this feature):
+  - `horizontal_rule/mod.rs` `render_image_tier` says iTerm2 accepts Kitty for
+    cell-sized images and sends Kitty to `ImageSupport::ITerm`; this spec found
+    width-only Kitty placement fails in iTerm2. The rule path predates this
+    feature and the spec kept "existing SVG/rule behavior"; worth a check on
+    a live iTerm2 (a candidate fix).
+  - `darkmatter` `MermaidMode::Image` / `Mermaid::render_for_terminal` docs
+    still mention mermaid.ink / `mmdc`; wrong before this branch.
+
+### Records the plan asks for (consolidated)
+
+- **Ruling outcomes** (Necessary Rules 1–11): 1 empty and non-UTF-8 overrides
+  are invalid (phase 3); 2 Sixel interim fallback, removed in phase 7; 3 tmux
+  interim "planned" route, replaced in phase 5; 4 satisfied by sequential
+  order; 5 mintty via `TERM_PROGRAM=mintty`, `MSYSTEM` only without
+  `TERM_PROGRAM`, cterm value unverified; 6 legacy-conhost definition
+  recorded in `graphics-routes.md` (phase 4); 7 sniff exposes no
+  parent-chain-with-image API, the walk lives in `biscuit-terminal`
+  (`cfg(windows)`), gap noted for the sniff owner; 8 final API
+  `Terminal::builder().probe(ProbeMode::Off)` / `.graphics_route(..)` /
+  `BISCUIT_TERMINAL_PROBE=off`, no `new_with`; 9 24-bit per-process image ID
+  counter wrapping to 1 (phase 6); 10 wider measurements left to the author;
+  11 env-var matrix with the stated default outcome (phase 3).
+- **Spike results**: S1 (Zellij) not runnable, `zellij` not installed; Zellij
+  L2 only ever skipped, the rule is unverified live (verification check 9).
+  S2 (tmux 3.8 format variables) recorded in the plan's "Spike results".
+- **PNG size numbers** (phase 2): the 400×400 iTerm2 app icon encoded to
+  53,114 bytes before and 43,044 bytes after (−19%) with
+  `Compression::Default` + adaptive filtering. Sixel binary cost (spec
+  scoping): +82 KB stripped.
+- **Windows typeahead re-injection shipped** (phase 4): the L2 test
+  `keys_typed_during_the_exchange_reach_the_program_afterwards` passed three
+  runs on `build-win-native`; re-injected keys are appended, so a key typed
+  between the last read and the write-back lands first.
+- **Still known** (phase 7): hidden tmux across SSH sends the unwrapped Kitty
+  query too, so the local tmux may retitle the pane `Gi=…`; noted in
+  verification check 8 as expected.
+
+### Gates
+
+| Scope | Command | Result |
+| --- | --- | --- |
+| biscuit-terminal | `just test` | 3821 passed, 0 failed, 55 skipped |
+| biscuit-terminal | `just test-l2` | lib 8/8, cli 252/252 |
+| biscuit-terminal | `just lint` | clean |
+| biscuit-terminal | `just check-tier-coverage biscuit-terminal` | 0 stranded |
+| biscuit-terminal (Windows) | `just cross-check biscuit-terminal --os windows` | 3433 passed, 0 failed, 61 skipped |
+| biscuit-visualized | `just test` / `just lint` | 316 passed / clean |
+| biscuit-icon | `just test` / `cargo clippy --all-features --all-targets -D warnings` | 230 passed / clean |
+| darkmatter | `--features terminal-tests`, `test(/route\|graphics\|image\|mermaid\|diagram\|half/)` minus tier markers | 173 passed |
+| darkmatter, sniff-cli, worktree-cli, biscuit-tui | `cargo check --all-targets` | clean |
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  packages `biscuit-icon, biscuit-terminal, biscuit-terminal-cli,
+  biscuit-visualized, darkmatter, test-toolkit, tree-hugger-cli`,
+  change_class `package`, so the gates were required and run. (The working
+  tree also carries phase 8's uncommitted changes.)
+- No failures, no load-sensitive reruns, no skipped gates.
+- Requirement → test mapping: this phase changed no behavior (comment edits,
+  one unused test import, docs, and `verification.md`), so no new tests;
+  the existing suites above are the regression evidence. The checklist's
+  Terminal.app commands were exercised by hand under a `script` pty (see
+  above).
+- Subagent: one comment-drift subagent (comment-only edits, scoped
+  `cargo check`); its report was checked against `git diff`.
+
+**Implementation complete, ready for review.** The spec stays in place; nothing
+was committed.

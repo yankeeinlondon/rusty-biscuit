@@ -24,6 +24,8 @@ reviewed: true
 reviewed_by: "codex/gpt-6.1-sol"
 reviewed_on: "2026-10-20"
 review_iterations: 0
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Graphics Where Possible
