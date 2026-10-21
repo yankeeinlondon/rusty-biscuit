@@ -39,13 +39,59 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/claudine/timeline.md
-message_to_agent: |-
-  Phase 3 is done; read "## Phase 3" in this log. Notes for Phase 4:
-  - The inline refusal is `CompositionError::InlineBaselineUnstampable { path, source: Box<MarkdownError> }`, code `composition.failed`, raised in `prepare_inline_on` right after the removed-grammar scans, before compose (frontmatter `$(…)`) and the guardrail write. The rendered block header is "inline baseline not editable"; the body names the file and says the prompt was not composed and the file was not changed, then shows the editor reason. The terminal renderer styles the reason's code span, so stderr shows `md clean --save <file>` without backticks and may wrap; the darkmatter CLI test strips whitespace and backticks before matching, so do the same in Claudine CLI assertions.
-  - In-process coverage already exists for the refusal (prepare_inline, loop seed, sequence probe; sentinel `$(mkdir ran)` not run; no `.claudine/inline-compose.md`) and for the agent-indented-candidate rollback (`closure::tests::a_rehearsed_baseline_still_refuses_and_rolls_back_an_agent_indented_candidate`, which fails with `InlineArtifactEditFailed(FrontmatterTextEdit)`). Phase 4 still owes the CLI-level acceptance (zero provider launches via `install_marker_provider` in `wrap_compose_validation.rs`, which is gated `test-fixtures`; then `md clean --save` and a successful run with a column-0 hash).
-  - A command in a prepare test needs `pre_approved_commands`, or the outcome depends on the host's shell whitelist. The shell policy refuses output redirection, which is why the sentinel uses `mkdir`.
-  - Behavior consequence to document: a malformed stored `hash` is now refused at launch (`InlineBaselineUnstampable` wrapping `MalformedStoredHash`), not after the agent ran.
-  - Docs are still owed (unchanged from Phase 2's list), plus `claudine/docs/topics/composition.md`. The claudine skill's `timeline.md` already has a 2026-10-20 entry; update it if Phase 4 changes behavior.
+source_files_during_phase_4:
+  - claudine/cli/tests/bin/fake_goose/main.rs
+  - claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+  - claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/cli/clean.md
+  - darkmatter/docs/cli/hash.md
+  - biscuit-file/lib/README.md
+  - claudine/docs/topics/composition.md
+  - darkmatter/cli/README.md
+  - claudine/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/cli-commands.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/darkmatter/cleanup.md
+  - .claude/skills/darkmatter/frontmatter.md
+source_code:
+  - biscuit-file/lib/src/yaml/analyze/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/root_indentation.rs
+  - darkmatter/lib/src/markdown/hash/write.rs
+  - darkmatter/lib/tests/l1/inline_document_text.rs
+  - claudine/lib/src/composition/closure.rs
+  - claudine/lib/src/composition/closure/tests.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/render/schema.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+  - darkmatter/cli/tests/l1/clean_frontmatter.rs
+  - darkmatter/dmls/tests/l1/formatting_transaction.rs
+  - claudine/cli/tests/bin/fake_goose/main.rs
+  - claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+  - claudine/cli/tests/l1/main.rs
+documentation:
+  - darkmatter/docs/cli/clean.md
+  - darkmatter/docs/cli/hash.md
+  - biscuit-file/lib/README.md
+  - claudine/docs/topics/composition.md
+  - darkmatter/cli/README.md
+  - claudine/README.md
+  - .claude/skills/claudine/timeline.md
+  - .claude/skills/claudine/cli-commands.md
+  - .claude/skills/darkmatter/cleanup.md
+  - .claude/skills/darkmatter/frontmatter.md
+  - .claude/skills/os/windows.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-10-20-handle-indented-frontmatter (4 phases)
@@ -517,3 +563,129 @@ unchanged in this phase; their document-shape matrix was covered in Phase 2.
   `packages: ['biscuit-file', 'claudine', 'darkmatter', 'darkmatter-cli', 'dmls', 'test-toolkit']`,
   `change_class: package`. The working tree still holds the uncommitted Phase 2
   changes. The packages list is non-empty, so the gates were run.
+
+## Phase 4
+
+The acceptance tests were written here. A Documenter subagent wrote the docs
+at the same time and ran no Cargo commands. The gates ran afterwards, one at a
+time.
+
+### Prove Inline Acceptance (Claudine CLI)
+
+New file `claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs` (L1,
+registered in `tests/l1/main.rs` behind `#[cfg(feature = "test-fixtures")]`;
+`test-fixtures` is the package's declared `local-features` and is in CI's
+`features`). It drives `claudine inline-compose --goose` through
+`CliProcessFixture`, using the compiled `claudine-fake-goose` on every OS in
+its marker mode, so no shell script or test-time `rustc` compile is needed:
+one line per launch in `PROVIDER_MARKER`, and an edit of `FAKE_INLINE_DOCUMENT`.
+The fixture initializes a repository, so the guardrail file has a place to go,
+and writes `.darkmatter-shell-whitelist` with `exact argv-recorder ran`. The
+recording prompt command is the frontmatter value
+`probe: "$(argv-recorder ran)"`, run by the compiled `claudine-argv-recorder`.
+The test reads its record through `ARGV_RECORDER_FILE`. A first version used
+`$(mkdir ran)` like Phase 3's in-process test, and it failed on native Windows
+with `ShellExpansionError: command not found` (`mkdir` is a `cmd` builtin with
+no executable on PATH, and the CLI looks the command up before running it).
+Phase 3's in-process tests did not hit this.
+
+Stub extension: `tests/bin/fake_goose/main.rs` marker mode now accepts
+`FAKE_INLINE_REPLACEMENT` (a file whose bytes overwrite the target). Existing
+callers that set only `FAKE_INLINE_DOCUMENT` behave as before.
+
+| Requirement | Test | Observation |
+| --- | --- | --- |
+| Indented baseline refused: nonzero exit, path and cause shown, zero launches, byte-identical, no guardrail, command not run, no audio | `an_indented_baseline_is_refused_before_anything_runs` | stderr (squeezed of whitespace, gutters, and backticks) has "inline baseline not editable", `notes.md`, "indented by 2 spaces", and `md clean --save <file>` |
+| Preview path | `an_indented_baseline_is_refused_by_a_dry_run_too` | `--dry-run` refuses; zero launches; bytes unchanged; command not run |
+| Recovery and control: after `md clean --save` the document runs | `the_cleaned_baseline_runs_and_is_stamped_at_column_zero` | refusal first; then cleaning gives column-0 keys with equal data; the run launches once, runs the command, writes guardrails, keeps the agent's body edit, and has a column-0 `hash:` that passes the `md hash --diff` comparison, with the data unchanged |
+| Valid baseline, then an agent-indented candidate: closure fails and restores the bytes | `an_agent_indented_candidate_fails_closure_and_restores_the_baseline` | one launch; nonzero exit; the file equals the original baseline exactly; stderr has the indentation reason |
+
+Departure noted: the `md clean --save` step runs the Darkmatter library
+transaction behind it (`darkmatter::markdown::cleanup::clean_document`, then
+writing the text back) in-process instead of spawning `md`. This is the route
+`inline_compose_hash.rs` already uses ("unlike a sibling CLI process it remains
+available in a nextest archive"). The `CliProcessFixture` PATH has no `md`, and
+no Claudine L1 test spawns one. Spawning `md` itself is covered by
+darkmatter-cli's `test_indented_root_is_refused_by_hash_save_until_clean_save_dedents_it`
+(Phase 3).
+
+The first run failed one assertion. The test expected the document path in the
+`md clean --save` hint, but the editor reason (Phase 2, as specified) prints the
+literal `md clean --save <file>`. The assertion was corrected; the product text
+was not changed. Targeted run: `just test-cli inline_compose_indented_frontmatter`,
+4 passed.
+
+The YAML input-robustness matrix was covered in Phases 2 and 3 at the analyzer
+and editor public APIs. These CLI tests only prove wiring (control plus one
+indented shape per path) and do not repeat the matrix.
+
+### Document Repair Workflow
+
+- `darkmatter/docs/cli/clean.md`: new section "Indented Root Mappings
+  (`yaml.root-indentation`)": eligibility, when no repair is offered, the
+  parse-equality limit (blank lines in block scalars), tab recovery then
+  dedent, DMLS parity, and a before/after example.
+- `darkmatter/docs/cli/hash.md`: new section "Indented Frontmatter" covering
+  the `--save` refusal (exit 1, file unchanged, even when nothing would be
+  written), that read-only hashing and `--diff` still work, and recovery.
+- `biscuit-file/lib/README.md`: a `yaml.root-indentation` entry beside the tab
+  repair. This README is the analyzer's only reference, so no topic page was
+  created.
+- `claudine/docs/topics/composition.md`: new "Launch-time baseline check"
+  section (what is refused and what does not happen, recovery, `--dry-run`,
+  malformed stored hash, entry points, candidate validation and rollback still
+  apply, Mermaid flow). Inline step 4 links to it. The "Malformed existing
+  hash" bullet was corrected for drift: such a hash is now refused at launch.
+- READMEs: one overview line each in `darkmatter/cli/README.md` and
+  `claudine/README.md`, linking into `docs/`.
+- Skills: `.claude/skills/claudine/cli-commands.md` (new "Inline baseline
+  rehearsal" invariant row), `.claude/skills/darkmatter/cleanup.md`, and
+  `.claude/skills/darkmatter/frontmatter.md`. The latter also fixes a drifted
+  sentence: a hash save with nothing to write no longer returns "without
+  parsing", because it now runs the indentation check. `timeline.md`'s
+  2026-10-20 entry was reviewed and is accurate. `.claude/skills/os/windows.md`:
+  the builtin bullet now also covers a CLI frontmatter `$(mkdir …)` sentinel,
+  which fails on Windows.
+- No `docs/` page names the fix directory.
+- Found but out of scope (pre-existing drift, left alone):
+  `darkmatter/docs/topics/markdown-formatting.md` § frontmatter still says
+  tab-indented frontmatter is never repaired, which contradicts `clean.md`
+  and the analyzer's existing `yaml.tab-indentation` recovery.
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: ['claudine-cli', 'test-toolkit', 'darkmatter']`, `change_class: package`,
+  so the gates were run.
+- claudine `just test`: 10461 passed (10 slow), 9 skipped, 0 failed (210.6 s).
+- claudine `just lint`: passed, both before and after the Windows fix to the
+  test (the only warning is the existing linker note about the binary's
+  `__eh_frame` size).
+- `just check-tier-coverage claudine`: 0 stranded.
+- darkmatter `just test` (includes darkmatter-cli and DMLS): 10498 passed,
+  10 skipped, 0 failed. This is the full Darkmatter run Phase 3 deferred here.
+  darkmatter `just lint`: passed.
+- biscuit-file `just test`: 1161 passed. biscuit-file `just lint`: passed.
+- After the full claudine run, the only edit was the Windows fix inside
+  `inline_compose_indented_frontmatter.rs`, which changed how the frontmatter
+  command is recorded. That file was rerun (4 passed on macOS) and linted;
+  the full suite was not rerun.
+- Cross-OS: `just cross-check claudine-cli --os windows inline_compose_indented_frontmatter`
+  passed all 4 on native Windows after the argv-recorder fix. The first
+  attempt named package `claudine` (the library), which selected 0 tests.
+  The second failed as described above.
+- Dependents: Phase 4 changed only Claudine CLI tests and fixtures, plus docs.
+  Nothing outside the area depends on them, so no reverse dependency was run.
+- No load-sensitive reruns, skipped tests, or pre-existing failures.
+
+### Requirement-to-test summary (all phases)
+
+| Success criterion | Proof |
+| --- | --- |
+| `md clean --save` dedents while keeping the parsed value | biscuit-file `tests/root_indentation.rs` (Phase 2); darkmatter `clean_frontmatter_repair.rs`, darkmatter-cli `test_indented_root_is_refused_by_hash_save_until_clean_save_dedents_it`, DMLS `formatting_transaction.rs` (Phase 3) |
+| `md hash --save` refuses an uncleaned document without changing it | darkmatter `inline_document_text.rs` (Phase 2); darkmatter-cli test above (Phase 3) |
+| Inline preparation refuses before commands or providers run | claudine `prepare::tests::inline_preparation_refuses_an_indented_baseline_before_composing` (Phase 3); CLI `an_indented_baseline_is_refused_before_anything_runs` and `…_by_a_dry_run_too` (Phase 4) |
+| The cleaned document completes with a valid column-0 hash | CLI `the_cleaned_baseline_runs_and_is_stamped_at_column_zero` (Phase 4) |
+| Agent-indented candidate: closure refuses and restores the exact bytes | `closure::tests::a_rehearsed_baseline_still_refuses_and_rolls_back_an_agent_indented_candidate` (Phase 3); CLI `an_agent_indented_candidate_fails_closure_and_restores_the_baseline` (Phase 4) |
+
+Implementation complete, ready for review. Nothing was committed or moved.

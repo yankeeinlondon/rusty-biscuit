@@ -6,9 +6,9 @@ clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-20
-review_iterations: 0
-implemented: false
-completed: false
+review_iterations: 1
+implemented: true
+completed: true
 area: claudine
 human_review: false
 $schema:
@@ -31,6 +31,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
+implemented_by: "claude/opus"
 ---
 
 # Indented frontmatter: repair it, refuse it clearly, and refuse it before the agent runs

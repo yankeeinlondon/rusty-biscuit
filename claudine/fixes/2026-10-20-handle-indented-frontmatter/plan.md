@@ -40,6 +40,59 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/claudine/timeline.md
+source_files_during_phase_4:
+  - claudine/cli/tests/bin/fake_goose/main.rs
+  - claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+  - claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/cli/clean.md
+  - darkmatter/docs/cli/hash.md
+  - biscuit-file/lib/README.md
+  - claudine/docs/topics/composition.md
+  - darkmatter/cli/README.md
+  - claudine/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/cli-commands.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/darkmatter/cleanup.md
+  - .claude/skills/darkmatter/frontmatter.md
+source_code:
+  - biscuit-file/lib/src/yaml/analyze/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/engine.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/diagnostic.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+  - biscuit-file/lib/src/yaml/analyze/tests/root_indentation.rs
+  - darkmatter/lib/src/markdown/hash/write.rs
+  - darkmatter/lib/tests/l1/inline_document_text.rs
+  - claudine/lib/src/composition/closure.rs
+  - claudine/lib/src/composition/closure/tests.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/render/schema.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - darkmatter/lib/tests/l1/clean_frontmatter_repair.rs
+  - darkmatter/cli/tests/l1/clean_frontmatter.rs
+  - darkmatter/dmls/tests/l1/formatting_transaction.rs
+  - claudine/cli/tests/bin/fake_goose/main.rs
+  - claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs
+  - claudine/cli/tests/l1/main.rs
+documentation:
+  - darkmatter/docs/cli/clean.md
+  - darkmatter/docs/cli/hash.md
+  - biscuit-file/lib/README.md
+  - claudine/docs/topics/composition.md
+  - darkmatter/cli/README.md
+  - claudine/README.md
+  - .claude/skills/claudine/timeline.md
+  - .claude/skills/claudine/cli-commands.md
+  - .claude/skills/darkmatter/cleanup.md
+  - .claude/skills/darkmatter/frontmatter.md
+  - .claude/skills/os/windows.md
+completed_phase: 4
+implemented: true
 ---
 
 # Indented Frontmatter Implementation Plan
@@ -139,14 +192,14 @@ Both tasks depend on Wave 2. Keep ownership separate: cleanup/DMLS files belong 
 
 Both tasks depend on Wave 3. The documentation task may run while the acceptance owner runs focused tests; avoid concurrent Cargo commands that can replace Claudine's fixture-enabled binary.
 
-- [ ] **Prove Inline Acceptance**
+- [x] **Prove Inline Acceptance**
   - Extend the hermetic Claudine CLI tests using `CliProcessFixture` and the existing portable provider-stub pattern. An indented baseline must exit nonzero with its source path and indentation cause, record zero provider launches, remain byte-identical, and leave the expected guardrail path absent.
   - Include a recording prompt-command stub in that document and assert its marker is absent too. Ensure the valid control executes the command/recording seam so absence on refusal is meaningful. Cover the preview path in-process or with one additional wiring check, without duplicating the YAML matrix through CLI spawns.
   - On the same representative document after `md clean --save`, prove inline-compose launches the stub, accepts an actual body edit, and persists a valid column-0 hash. Reuse the established `md` binary fixture/dependency route rather than a host-installed executable.
   - With an initially valid baseline, have a stub produce an indented candidate with a changed body; assert closure failure and exact original-byte restoration. Keep the existing successful column-0 closure checks.
   - Keep fixtures cross-platform, audio silent, and processes bounded. Reuse existing stub infrastructure rather than compiling a new helper per matrix cell.
 
-- [ ] **Document Repair Workflow**
+- [x] **Document Repair Workflow**
   - Update the current Darkmatter cleanup reference (`darkmatter/docs/cli/clean.md` and related formatting topic only as needed) and `.claude/skills/darkmatter/cleanup.md` with `yaml.root-indentation`, eligibility, scalar-proof limitations, and a compact before/after example.
   - Update biscuit-file's current YAML analyzer documentation alongside the tab-indentation diagnostic. Explain parse-equivalent formatting normalization and the cases where no repair is offered; add an appropriate topic page if no analyzer reference exists.
   - Update `claudine/docs/topics/composition.md` with the launch-time error, `md clean --save` recovery, preview behavior, and the continued need for candidate validation/rollback. Include a small Mermaid flow for preparation → refusal/launch → closure where it clarifies ordering.
@@ -155,7 +208,7 @@ Both tasks depend on Wave 3. The documentation task may run while the acceptance
 
 ### Wave 5 — Sequential Final Validation
 
-- [ ] **Run Scoped Gates**
+- [x] **Run Scoped Gates**
   - After all edits merge, run each affected area's L1 suite once using `just test` from `biscuit-file/`, `darkmatter/`, and `claudine/`. Darkmatter's area recipe includes DMLS. Use nextest-backed recipes; do not run workspace-wide suites, live-provider tests, or L2/L3 tiers.
   - Run `just lint` in each affected area after tests, sequentially with Claudine tests and tier listing. Do not run `cargo fmt` or automatic formatting; use lint/check feedback for targeted manual corrections.
   - Run `just check-tier-coverage claudine` after Claudine testing/linting, and confirm any newly added test module is registered in its existing suite. Do not run these commands concurrently with fixture-enabled CLI tests.
