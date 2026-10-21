@@ -977,3 +977,47 @@ fn right_column_is_the_slack_sink() {
         "left column is fixed at 10 cells: {left_cell:?}"
     );
 }
+
+/// Through tmux to a kitty client, an image column is drawn with Unicode
+/// placeholders: ordinary text lines that sit beside the other column and
+/// keep every row the same width, rather than a cursor overlay.
+#[test]
+fn placeholder_image_column_renders_as_aligned_text_lines() {
+    use biscuit_terminal::discovery::detection::{
+        GraphicsPlacement, Passthrough, RouteInputs, TmuxClient, TmuxFacts, ToolVersion,
+        resolve_graphics_route,
+    };
+    use biscuit_terminal::utils::block_constraint::visible_width;
+
+    let mut inputs = RouteInputs::new(true)
+        .with_var("TMUX", "/tmp/tmux-501/default,1234,0")
+        .with_var("TMUX_PANE", "%3");
+    inputs.tmux = TmuxFacts {
+        version: Some(ToolVersion::new(3, 4, 0)),
+        passthrough: Passthrough::On,
+        clients: Some(vec![TmuxClient {
+            termname: "xterm-kitty".into(),
+            termtype: String::new(),
+            utf8: true,
+            termfeatures: "RGB".into(),
+        }]),
+    };
+    let route = resolve_graphics_route(&inputs);
+    assert_eq!(route.placement, GraphicsPlacement::Placeholders, "{route:?}");
+    let mut term = test_terminal(40);
+    term.is_tty = true;
+    term.graphics_route = route;
+
+    let (_dir, image) = temp_terminal_image();
+    let out = TwoColumn::new(image, "text right").render(&term);
+
+    assert!(!out.contains("\x1b[s"), "no cursor overlay: {out:?}");
+    let lines: Vec<&str> = out.lines().collect();
+    let grid_rows = lines.iter().filter(|l| l.contains('\u{10EEEE}')).count();
+    assert!(grid_rows >= 1, "{out:?}");
+    assert!(lines[0].contains(",U=1,"), "the upload rides on the first row: {:?}", lines[0]);
+    let after_grid = lines[0].rsplit('\u{10EEEE}').next().unwrap();
+    assert!(strip_ansi(after_grid).contains("text right"), "{:?}", lines[0]);
+    let widths: Vec<u32> = lines.iter().map(|l| visible_width(l)).collect();
+    assert!(widths.iter().all(|w| *w == widths[0]), "rows differ in width: {widths:?} {out:?}");
+}

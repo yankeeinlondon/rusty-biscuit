@@ -4,7 +4,8 @@
 use std::path::Path;
 
 use crate::discovery::detection::{
-    GraphicsFormat, GraphicsRoute, GraphicsTransport, RouteConfidence, RouteReason, RouteReasonKind, TerminalApp,
+    GraphicsFormat, GraphicsPlacement, GraphicsRoute, GraphicsTransport, RouteConfidence, RouteReason,
+    RouteReasonKind, TerminalApp,
 };
 use crate::discovery::fonts::CellSize;
 
@@ -19,6 +20,7 @@ use super::{TerminalImage, TerminalImageError};
 pub(super) enum Encoder {
     Kitty,
     Iterm2,
+    Sixel,
     Fallback(RouteReason),
 }
 
@@ -44,12 +46,7 @@ pub(super) fn encoder_for(term: &crate::terminal::Terminal) -> Encoder {
         }
         GraphicsFormat::Kitty => Encoder::Kitty,
         GraphicsFormat::Iterm2 => Encoder::Iterm2,
-        GraphicsFormat::Sixel => Encoder::Fallback(RouteReason {
-            kind: RouteReasonKind::NoSupport,
-            message: "the route selects Sixel, whose encoder is not implemented yet (planned)"
-                .to_string(),
-            fix: None,
-        }),
+        GraphicsFormat::Sixel => Encoder::Sixel,
         GraphicsFormat::None => Encoder::Fallback(route.reason.clone()),
     }
 }
@@ -79,6 +76,28 @@ pub enum ImageOutput {
         /// Why no pixels were sent.
         reason: RouteReason,
     },
+}
+
+/// An image rendered into a column of a layout ([`TerminalImage::render_inline`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InlineImage {
+    /// Escape sequences that draw the image at the cursor and return the
+    /// cursor to where it started; the image covers `rows` lines from there.
+    Overlay { sequence: String, rows: u32 },
+    /// Lines of text that draw the image (Unicode placeholders), one per
+    /// image row; the first also carries the upload.
+    Lines(Vec<String>),
+}
+
+#[cfg(test)]
+impl InlineImage {
+    /// The overlay's sequence and rows; panics for [`InlineImage::Lines`].
+    pub(super) fn into_overlay(self) -> (String, u32) {
+        match self {
+            Self::Overlay { sequence, rows } => (sequence, rows),
+            Self::Lines(lines) => panic!("expected an overlay, got lines: {lines:?}"),
+        }
+    }
 }
 
 impl ImageOutput {
@@ -130,10 +149,36 @@ impl TerminalImage {
         term: &crate::terminal::Terminal,
         encoder: &Encoder,
     ) -> Result<ImageOutput, TerminalImageError> {
+        if matches!(encoder, Encoder::Kitty)
+            && term.graphics_route.placement == GraphicsPlacement::Placeholders
+            && let Some(sequence) = self.render_kitty_placeholders_for_terminal(term)?
+        {
+            // The grid is ordinary text that already ends on the line below
+            // the image, so no cursor rows are reserved.
+            return Ok(match for_transport(term, "kitty", sequence) {
+                Ok(sequence) => ImageOutput::Pixels(sequence),
+                Err(reason) => ImageOutput::Fallback {
+                    text: strip_controls(&self.generate_alt_text()),
+                    reason,
+                },
+            });
+        }
+        if matches!(encoder, Encoder::Sixel) {
+            let image = self.render_sixel_for_terminal(term)?;
+            // The rows are already reserved, so the image never scrolls the
+            // viewport under the saved cursor and needs no compensation.
+            return Ok(match for_transport(term, "sixel", image.sequence) {
+                Ok(sequence) => ImageOutput::Pixels(format!("{sequence}\x1b[{}B\r", image.rows)),
+                Err(reason) => ImageOutput::Fallback {
+                    text: strip_controls(&self.generate_alt_text()),
+                    reason,
+                },
+            });
+        }
         let (protocol, (sequence, height_cells, raw_height)) = match encoder {
             Encoder::Kitty => ("kitty", self.render_kitty_for_terminal(term)?),
             Encoder::Iterm2 => ("iterm2", self.render_iterm2_for_terminal(term)?),
-            Encoder::Fallback(_) => unreachable!("fallback routes are handled by the caller"),
+            Encoder::Sixel | Encoder::Fallback(_) => unreachable!("handled above or by the caller"),
         };
         let sequence = match for_transport(term, protocol, sequence) {
             Ok(sequence) => sequence,
@@ -192,10 +237,17 @@ impl TerminalImage {
         Ok(ImageOutput::Pixels(output))
     }
 
+    /// Renders the image into a layout column `term.width()` cells wide.
+    ///
+    /// ## Errors
+    ///
+    /// [`TerminalImageError::UnsupportedTerminal`] when stdout is not a
+    /// terminal, the route has no usable pixel format, or the wrapped image
+    /// is over tmux's message limit; otherwise the load or encoding error.
     pub(crate) fn render_inline(
         &self,
         term: &crate::terminal::Terminal,
-    ) -> Result<(String, u32), TerminalImageError> {
+    ) -> Result<InlineImage, TerminalImageError> {
         if !term.is_tty {
             return Err(TerminalImageError::UnsupportedTerminal);
         }
@@ -210,6 +262,15 @@ impl TerminalImage {
         let dims = self.resolve_dimensions_for_image(term.width(), cell, pixel_width);
         let width_cells = dims.image_width;
         let x_offset = dims.x_offset;
+        if matches!(encoder, Encoder::Sixel) {
+            let image = self.render_sixel(pixels, width_cells, x_offset, term)?;
+            let sequence = for_transport(term, "sixel", image.sequence)
+                .map_err(|_| TerminalImageError::UnsupportedTerminal)?;
+            return Ok(InlineImage::Overlay {
+                sequence,
+                rows: image.rows,
+            });
+        }
 
         let (cell_pixel_width, cell_pixel_height) = cell
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
@@ -221,6 +282,19 @@ impl TerminalImage {
         );
 
         let png_data = pixels.png()?;
+        if matches!(encoder, Encoder::Kitty)
+            && term.graphics_route.placement == GraphicsPlacement::Placeholders
+            && let Some(image) =
+                self.render_kitty_placeholders(&png_data, width_cells, height_cells, x_offset)
+        {
+            let upload = for_transport(term, "kitty", image.upload)
+                .map_err(|_| TerminalImageError::UnsupportedTerminal)?;
+            let mut lines = image.rows;
+            if let Some(first) = lines.first_mut() {
+                first.insert_str(0, &upload);
+            }
+            return Ok(InlineImage::Lines(lines));
+        }
         let tmux = term.graphics_route.transport == GraphicsTransport::Tmux;
         let image = match encoder {
             Encoder::Kitty => {
@@ -239,7 +313,7 @@ impl TerminalImage {
                     .unwrap_or_else(|| "image.png".to_string());
                 self.render_iterm2(&png_data, &width_cells.to_string(), &filename)
             }
-            Encoder::Fallback(_) => return Err(TerminalImageError::UnsupportedTerminal),
+            Encoder::Sixel | Encoder::Fallback(_) => return Err(TerminalImageError::UnsupportedTerminal),
         };
 
         let prefix = if x_offset > 0 {
@@ -253,7 +327,10 @@ impl TerminalImage {
         let sequence = for_transport(term, protocol, sequence)
             .map_err(|_| TerminalImageError::UnsupportedTerminal)?;
 
-        Ok((sequence, height_cells))
+        Ok(InlineImage::Overlay {
+            sequence,
+            rows: height_cells,
+        })
     }
 }
 

@@ -38,6 +38,8 @@ base64 = "0.22"
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5", "file-reference"] }
 ignore = "0.4"
 image = "0.25"
+# Sixel encoding (with its own quantizer) for the Sixel graphics route.
+icy_sixel = "0.7"
 renderable = { path = "../../renderable" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0"

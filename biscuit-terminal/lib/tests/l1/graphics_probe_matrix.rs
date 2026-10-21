@@ -307,6 +307,14 @@ probe_rows! {
         => None, Direct, Unknown, Unknown, fix: Some("BISCUIT_GRAPHICS=sixel"), msg: ["no Sixel"];
     windows_terminal_new_version_needs_no_da1: windows_terminal(v(1, 22))
         => Sixel, Direct, Known, Supported, fix: None, msg: ["1.22.0"];
+    // The measured system conhost strips Sixel: neither a Sixel DA1 nor an
+    // inherited Windows Terminal identity selects it over Windows SSH.
+    windows_ssh_never_selects_sixel_from_a_sixel_reply: {
+        let mut inputs = direct(windows_terminal(v(1, 22)), replied(KittyReply::NoReply, SIXEL))
+            .with_var("SSH_CONNECTION", SSH);
+        inputs.is_windows = true;
+        inputs
+    } => None, Direct, Known, BlockedTransport, fix: None, msg: ["Windows SSH server"];
 }
 
 // Zellij: the pane query decides.
@@ -404,10 +412,12 @@ probe_rows! {
 const BOTH: ProbePlan = ProbePlan {
     direct: true,
     tunneled: true,
+    direct_da1_only: false,
 };
 const TUNNELED: ProbePlan = ProbePlan {
     direct: false,
     tunneled: true,
+    direct_da1_only: false,
 };
 
 macro_rules! plan_rows {

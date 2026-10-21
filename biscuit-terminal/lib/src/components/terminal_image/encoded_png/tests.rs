@@ -192,11 +192,13 @@ fn the_inline_path_sends_the_same_bytes_as_the_standalone_path() {
 
     let (kitty, kitty_rows) = image
         .render_inline(&terminal(TerminalApp::Kitty, ImageSupport::Kitty))
-        .unwrap();
+        .unwrap()
+        .into_overlay();
     assert_eq!(kitty_payload(&kitty), fast_png());
     let (iterm2, iterm2_rows) = image
         .render_inline(&terminal(TerminalApp::ITerm2, ImageSupport::ITerm))
-        .unwrap();
+        .unwrap()
+        .into_overlay();
     assert_eq!(iterm2_payload(&iterm2), fast_png());
     assert_eq!((kitty_rows, iterm2_rows), (3, 3));
 }

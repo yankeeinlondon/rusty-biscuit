@@ -7,9 +7,35 @@
 use std::path::Path;
 
 use biscuit_terminal::components::terminal_image::{
-    EncodedPng, ImageWidth, TerminalImage, TerminalImageError,
+    BackgroundSource, EncodedPng, ImageWidth, SixelBackground, TerminalImage, TerminalImageError,
 };
+use biscuit_terminal::discovery::detection::GraphicsFormat;
 use biscuit_terminal::discovery::fonts::CellSize;
+use biscuit_terminal::terminal::Terminal;
+
+use crate::artifact::Background;
+
+/// The background to rasterize a diagram on for `term`'s graphics route.
+///
+/// Sixel has no transparency, so a [`Transparent`](Background::Transparent)
+/// diagram is drawn on the terminal's measured background instead, or on the
+/// theme's own opaque background when the terminal reported none. Every
+/// other route and every other background is kept as requested. The
+/// artifact cache keys on the background, so the two never share a PNG.
+pub(crate) fn display_background(requested: Background, term: &Terminal) -> Background {
+    if requested != Background::Transparent || term.graphics_route.format != GraphicsFormat::Sixel {
+        return requested;
+    }
+    let background = SixelBackground::for_terminal(term);
+    match background.source {
+        BackgroundSource::Measured => Background::Solid {
+            r: background.color.r,
+            g: background.color.g,
+            b: background.color.b,
+        },
+        BackgroundSource::Estimated => Background::Theme,
+    }
+}
 
 /// The raster width and row height, in pixels, of `columns` cells.
 ///
@@ -33,6 +59,45 @@ pub(crate) fn display_image(png_path: &Path, columns: u32) -> Result<TerminalIma
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::discovery::detection::{GraphicsRoute, ImageSupport};
+    use biscuit_terminal::discovery::osc_queries::RgbValue;
+
+    fn terminal(support: ImageSupport, background: Option<RgbValue>) -> Terminal {
+        Terminal {
+            graphics_route: GraphicsRoute::from(support),
+            background_color: background,
+            ..Terminal::default()
+        }
+    }
+
+    const MEASURED: RgbValue = RgbValue { r: 1, g: 2, b: 3 };
+
+    #[test]
+    fn sixel_draws_a_transparent_diagram_on_the_measured_background() {
+        let term = terminal(ImageSupport::Sixel, Some(MEASURED));
+        assert_eq!(
+            display_background(Background::Transparent, &term),
+            Background::Solid { r: 1, g: 2, b: 3 }
+        );
+    }
+
+    #[test]
+    fn sixel_without_a_measured_background_uses_the_theme_background() {
+        let term = terminal(ImageSupport::Sixel, None);
+        assert_eq!(display_background(Background::Transparent, &term), Background::Theme);
+    }
+
+    #[test]
+    fn other_routes_and_explicit_backgrounds_are_kept() {
+        for support in [ImageSupport::Kitty, ImageSupport::ITerm, ImageSupport::None] {
+            let term = terminal(support, Some(MEASURED));
+            assert_eq!(display_background(Background::Transparent, &term), Background::Transparent);
+        }
+        let sixel = terminal(ImageSupport::Sixel, Some(MEASURED));
+        let solid = Background::Solid { r: 9, g: 9, b: 9 };
+        assert_eq!(display_background(Background::Theme, &sixel), Background::Theme);
+        assert_eq!(display_background(solid, &sixel), solid);
+    }
 
     #[test]
     fn columns_become_pixels_through_the_measured_cell() {

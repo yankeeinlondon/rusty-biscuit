@@ -1872,8 +1872,8 @@ impl Writer<'_> {
         }
 
         let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
-        // A fallback (for example a Sixel route before its encoder) keeps the
-        // render tree's own placeholder style.
+        // A fallback (for example an image too large for tmux's message
+        // limit) keeps the render tree's own placeholder style.
         match image.render_with_route(&term).ok()? {
             crate::components::terminal_image::ImageOutput::Pixels(output) => {
                 (!output.is_empty()).then_some(output)

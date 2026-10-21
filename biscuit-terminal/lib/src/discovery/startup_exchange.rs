@@ -1,6 +1,8 @@
 //! The once-per-process exchange `Terminal::new()` makes: the OSC 10/11
 //! color queries and, when the environment cannot decide the graphics route,
 //! the Kitty graphics query, written together and ended by one DA1 sentinel.
+//! Inside a visible tmux the graphics part is the DA1 reply alone: tmux
+//! answers it for itself, and the Kitty query is left out.
 //!
 //! Whichever caller needs the exchange first (the color lookup or the
 //! graphics route) sends everything the process needs, so graphics probing
@@ -14,7 +16,7 @@
 use std::sync::Mutex;
 
 use crate::discovery::detection::probe::{
-    ProbeReply, ProbeResult, ProbeSkip, kitty_query, next_kitty_id, wrap_for_tmux,
+    Da1Reply, KittyReply, ProbeReply, ProbeResult, ProbeSkip, kitty_query, next_kitty_id, wrap_for_tmux,
 };
 use crate::discovery::detection::{RouteInputs, probe_plan};
 use crate::discovery::osc_queries::RgbValue;
@@ -45,14 +47,17 @@ pub(crate) fn live_fg_bg() -> [Option<RgbValue>; 2] {
     if let Some(colors) = state.colors {
         return colors;
     }
-    let graphics = state.graphics.is_none() && graphics_probe_wanted();
+    let plan = probe_plan(&RouteInputs::from_process());
+    let graphics = (state.graphics.is_none() && plan.direct).then_some(!plan.direct_da1_only);
     run_direct(&mut state, true, graphics);
     state.colors.unwrap_or([None, None])
 }
 
 /// The direct graphics probe's result, sending the exchange if no earlier
 /// caller did. The colors ride along when they are wanted and not yet known.
-pub(crate) fn direct_probe() -> ProbeResult {
+/// `kitty` adds the Kitty query to the DA1 request; without it the result
+/// only carries the DA1 reply.
+pub(crate) fn direct_probe(kitty: bool) -> ProbeResult {
     let Ok(mut state) = DIRECT.lock() else {
         return ProbeResult::Skipped(ProbeSkip::Unavailable("probe state poisoned".into()));
     };
@@ -60,7 +65,7 @@ pub(crate) fn direct_probe() -> ProbeResult {
         return result.clone();
     }
     let colors = state.colors.is_none() && color_query_wanted();
-    run_direct(&mut state, colors, true)
+    run_direct(&mut state, colors, Some(kitty))
         .unwrap_or_else(|| ProbeResult::Skipped(ProbeSkip::Unavailable("probe not sent".into())))
 }
 
@@ -95,18 +100,15 @@ pub(crate) fn tunneled_probe() -> ProbeResult {
     result
 }
 
-/// Whether this process's graphics route wants a direct probe.
-fn graphics_probe_wanted() -> bool {
-    probe_plan(&RouteInputs::from_process()).direct
-}
-
-/// Sends one direct exchange and records what it answered. Returns the
-/// graphics result when the graphics query was part of it.
-fn run_direct(state: &mut DirectState, colors: bool, graphics: bool) -> Option<ProbeResult> {
-    if !colors && !graphics {
+/// Sends one direct exchange and records what it answered. `graphics` is
+/// `None` when no graphics probe is wanted, otherwise whether the Kitty query
+/// joins the DA1 request. Returns the graphics result when it was part of
+/// the exchange.
+fn run_direct(state: &mut DirectState, colors: bool, graphics: Option<bool>) -> Option<ProbeResult> {
+    if !colors && graphics.is_none() {
         return None;
     }
-    let id = graphics.then(next_kitty_id);
+    let id = (graphics == Some(true)).then(next_kitty_id);
     let mut request = Vec::new();
     if colors {
         for code in [10u8, 11] {
@@ -126,7 +128,7 @@ fn run_direct(state: &mut DirectState, colors: bool, graphics: bool) -> Option<P
         record_silence: true,
         // Colors have always been read regardless of waiting input; only the
         // graphics query holds back.
-        skip_if_input_pending: graphics,
+        skip_if_input_pending: graphics.is_some(),
     };
 
     match exchange(&request, DA1_REQUEST, DEFAULT_TIMEOUT, options) {
@@ -137,7 +139,15 @@ fn run_direct(state: &mut DirectState, colors: bool, graphics: bool) -> Option<P
                     find_osc_color(&reply.bytes, 11),
                 ]);
             }
-            let result = id.map(|id| ProbeResult::Replied(ProbeReply::parse(&reply.bytes, id)));
+            let result = graphics.map(|_| {
+                ProbeResult::Replied(match id {
+                    Some(id) => ProbeReply::parse(&reply.bytes, id),
+                    None => ProbeReply {
+                        kitty: KittyReply::NoReply,
+                        da1: Da1Reply::find(&reply.bytes),
+                    },
+                })
+            });
             if let Some(result) = &result {
                 tracing::debug!(?result, "direct graphics probe");
                 state.graphics = Some(result.clone());
@@ -147,7 +157,7 @@ fn run_direct(state: &mut DirectState, colors: bool, graphics: bool) -> Option<P
         Err(TtyQueryError::InputPending) => {
             tracing::debug!("graphics probe skipped: input was waiting");
             if colors {
-                run_direct(state, true, false);
+                run_direct(state, true, None);
             }
             Some(ProbeResult::Skipped(ProbeSkip::BusyInput))
         }
@@ -156,7 +166,7 @@ fn run_direct(state: &mut DirectState, colors: bool, graphics: bool) -> Option<P
             if colors {
                 state.colors = Some([None, None]);
             }
-            let result = id.map(|_| probe_error(error));
+            let result = graphics.map(|_| probe_error(error));
             if let Some(result) = &result {
                 state.graphics = Some(result.clone());
             }
@@ -170,7 +180,7 @@ fn run_direct(state: &mut DirectState, colors: bool, graphics: bool) -> Option<P
 fn probe_error(error: TtyQueryError) -> ProbeResult {
     match error {
         TtyQueryError::Silent => ProbeResult::Replied(ProbeReply {
-            kitty: crate::discovery::detection::probe::KittyReply::NoReply,
+            kitty: KittyReply::NoReply,
             da1: None,
         }),
         TtyQueryError::InputPending => ProbeResult::Skipped(ProbeSkip::BusyInput),

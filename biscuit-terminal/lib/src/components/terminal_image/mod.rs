@@ -1,14 +1,14 @@
-//! Terminal image rendering with Kitty graphics protocol and iTerm2 fallback.
-//!
-//! This module provides terminal image display using the Kitty graphics protocol
-//! with automatic fallback to iTerm2 inline images or plain text for unsupported
-//! terminals.
+//! Terminal image rendering in the format the terminal's graphics route
+//! selects: the Kitty graphics protocol, iTerm2 inline images, or Sixel,
+//! with plain text for terminals that have no pixel route.
 //!
 //! ## Module Layout
 //!
 //! - [`width`] — `ImageWidth` plus the spec/filepath parsers.
 //! - [`kitty`] — Kitty protocol render paths.
+//! - [`placeholder`] — Kitty Unicode placeholder grids.
 //! - [`iterm`] — iTerm2 protocol render paths.
+//! - [`sixel`] — Sixel render paths and the opaque background they use.
 //! - [`cursor`] — cursor row computation and scroll compensation helpers.
 //! - [`protocol`] — protocol dispatch (`render_to_terminal`, `render_inline`).
 //! - [`tmux`] — tmux passthrough wrapping and its message budget.
@@ -41,12 +41,16 @@ mod cursor;
 mod encoded_png;
 mod iterm;
 mod kitty;
+mod placeholder;
 mod protocol;
+mod sixel;
 mod tmux;
 mod width;
 
 pub use self::encoded_png::EncodedPng;
 pub use self::protocol::ImageOutput;
+pub use self::sixel::{BackgroundSource, SIXEL_PALETTE_COLORS, SixelBackground};
+pub(crate) use self::protocol::InlineImage;
 use self::encoded_png::ImagePixels;
 pub use self::width::{
     ImageWidth, SCALE_REFERENCE_TEXT_UNITS, calculate_display_dimensions,

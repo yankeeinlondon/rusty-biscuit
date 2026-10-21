@@ -30,7 +30,7 @@ use biscuit_terminal::components::terminal_image::{
 use biscuit_terminal::discovery::fonts::CellSize;
 use biscuit_terminal::utils::layout::LayoutTerminalExt;
 
-use super::display::{display_image, display_pixels};
+use super::display::{display_background, display_image, display_pixels};
 use crate::artifact::{Background, OutputFormat, RenderRequest};
 
 use renderable::tree::{RenderNode, TreeRenderable};
@@ -345,7 +345,8 @@ impl MermaidRenderer {
         Ok(self.diagram.natural_size()?)
     }
 
-    /// Renders the diagram to a cached PNG at the specified target pixel width.
+    /// Renders the diagram to a cached PNG at the specified target pixel width,
+    /// on `background` in place of the renderer's own.
     ///
     /// Height is derived from the SVG's aspect ratio, then padded to whole
     /// rows `row_height` pixels tall. The rasterizer renders the SVG fresh at
@@ -359,13 +360,14 @@ impl MermaidRenderer {
         &self,
         target_width: u32,
         row_height: u32,
+        background: Background,
     ) -> Result<(PathBuf, bool), MermaidRenderError> {
         let request = RenderRequest {
             format: OutputFormat::Png,
             scale: self.scale,
             target_width: Some(target_width),
             row_height: Some(row_height),
-            background: self.background,
+            background,
         };
 
         let artifact = self.diagram.render(&request)?;
@@ -650,7 +652,11 @@ impl MermaidDiagram {
 
         let (png_path, cache_hit) = self
             .renderer
-            .render_to_cached_png_at_width(target_width_px, row_height_px)?;
+            .render_to_cached_png_at_width(
+                target_width_px,
+                row_height_px,
+                display_background(self.renderer.background, term),
+            )?;
 
         let term_image = display_image(&png_path, dims.image_width)
             .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?;

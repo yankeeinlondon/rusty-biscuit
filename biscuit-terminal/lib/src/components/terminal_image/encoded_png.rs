@@ -116,7 +116,24 @@ pub(super) enum ImagePixels<'a> {
     Decoded(DynamicImage),
 }
 
-impl ImagePixels<'_> {
+impl<'a> ImagePixels<'a> {
+    /// [`png`](Self::png), keeping a borrow of the caller's bytes alive
+    /// past the pixels themselves.
+    pub(super) fn into_png(self) -> Result<Cow<'a, [u8]>, TerminalImageError> {
+        match self {
+            Self::Encoded(png) => Ok(Cow::Borrowed(png.bytes())),
+            Self::Decoded(img) => encode_png(&img).map(Cow::Owned),
+        }
+    }
+
+    /// The pixels decoded, for encoders that need them (Sixel).
+    pub(super) fn into_image(self) -> Result<DynamicImage, TerminalImageError> {
+        match self {
+            Self::Encoded(png) => png.decode(),
+            Self::Decoded(img) => Ok(img),
+        }
+    }
+
     /// Pixel width and height.
     pub(super) fn size(&self) -> (u32, u32) {
         match self {

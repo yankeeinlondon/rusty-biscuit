@@ -47,6 +47,19 @@ pub struct TmuxClient {
     /// `#{client_termtype}`: the outer terminal's own answer to tmux's
     /// identity query; empty when it did not answer.
     pub termtype: String,
+    /// `#{client_utf8}`: tmux sends UTF-8 to this client.
+    pub utf8: bool,
+    /// `#{client_termfeatures}`: the comma-separated features tmux uses for
+    /// this client, such as `RGB` when it sends 24-bit color unchanged.
+    pub termfeatures: String,
+}
+
+impl TmuxClient {
+    /// Whether `feature` is one of this client's [`termfeatures`](Self::termfeatures).
+    #[must_use]
+    pub fn has_feature(&self, feature: &str) -> bool {
+        self.termfeatures.split(',').any(|f| f.trim() == feature)
+    }
 }
 
 /// Parses `tmux show-options -Apv … allow-passthrough` output.
@@ -59,18 +72,27 @@ pub fn parse_passthrough(output: &str) -> Passthrough {
     }
 }
 
-/// Parses `tmux list-clients -F '#{client_termname}\t#{client_termtype}'`
-/// output, one client per non-empty line.
+/// The `list-clients -F` format [`parse_clients`] reads.
+const CLIENT_FORMAT: &str =
+    "#{client_termname}\t#{client_termtype}\t#{client_utf8}\t#{client_termfeatures}";
+
+/// Parses `tmux list-clients -F` output whose tab-separated fields are
+/// `client_termname`, `client_termtype`, `client_utf8`, and
+/// `client_termfeatures`, one client per non-empty line. A missing field reads as empty, and a `client_utf8` other
+/// than `1` as no UTF-8.
 #[must_use]
 pub fn parse_clients(output: &str) -> Vec<TmuxClient> {
     output
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let (termname, termtype) = line.split_once('\t').unwrap_or((line, ""));
+            let mut fields = line.split('\t').map(str::trim);
+            let mut next = || fields.next().unwrap_or("").to_string();
             TmuxClient {
-                termname: termname.trim().to_string(),
-                termtype: termtype.trim().to_string(),
+                termname: next(),
+                termtype: next(),
+                utf8: next() == "1",
+                termfeatures: next(),
             }
         })
         .collect()
@@ -106,7 +128,7 @@ pub(crate) fn read_facts(pane: Option<&str>) -> TmuxFacts {
             "-t",
             pane,
             "-F",
-            "#{client_termname}\t#{client_termtype}",
+            CLIENT_FORMAT,
         ],
         TMUX_COMMAND_DEADLINE,
     )
@@ -136,15 +158,21 @@ mod tests {
     #[test]
     fn client_lines() {
         assert_eq!(
-            parse_clients("xterm-kitty\tkitty(0.39.1)\nwezterm\t\n\n"),
+            parse_clients(
+                "xterm-kitty\tkitty(0.39.1)\t1\tbpaste,clipboard,RGB,title\nwezterm\t\t0\t\n\n"
+            ),
             vec![
                 TmuxClient {
                     termname: "xterm-kitty".into(),
                     termtype: "kitty(0.39.1)".into(),
+                    utf8: true,
+                    termfeatures: "bpaste,clipboard,RGB,title".into(),
                 },
                 TmuxClient {
                     termname: "wezterm".into(),
                     termtype: String::new(),
+                    utf8: false,
+                    termfeatures: String::new(),
                 },
             ]
         );
@@ -153,8 +181,23 @@ mod tests {
             parse_clients("xterm-256color"),
             vec![TmuxClient {
                 termname: "xterm-256color".into(),
-                termtype: String::new(),
+                ..TmuxClient::default()
             }]
         );
+        // Only `1` is UTF-8.
+        assert!(!parse_clients("xterm-kitty\t\tyes\tRGB")[0].utf8);
+    }
+
+    #[test]
+    fn features_match_whole_names() {
+        let client = TmuxClient {
+            termfeatures: "bpaste,RGB,sixel".into(),
+            ..TmuxClient::default()
+        };
+        assert!(client.has_feature("RGB"));
+        assert!(client.has_feature("sixel"));
+        assert!(!client.has_feature("rgb"));
+        assert!(!client.has_feature("RG"));
+        assert!(!TmuxClient::default().has_feature("RGB"));
     }
 }

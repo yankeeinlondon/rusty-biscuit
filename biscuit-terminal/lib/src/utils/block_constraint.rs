@@ -131,6 +131,29 @@ fn escape_sequence_end(content: &str, start: usize) -> usize {
             }
             idx
         }
+        // DCS (ESC P ... ST), including a tmux passthrough envelope: inside
+        // it every ESC of the wrapped sequence is doubled, so only an ESC \
+        // that is not part of a doubled pair ends it.
+        b'P' => {
+            let mut idx = start + 2;
+            while idx < bytes.len() {
+                if bytes[idx] == 0x1b && idx + 1 < bytes.len() {
+                    match bytes[idx + 1] {
+                        b'\\' => {
+                            idx += 2;
+                            break;
+                        }
+                        0x1b => {
+                            idx += 2;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                idx += 1;
+            }
+            idx
+        }
         // APC sequences (ESC _ ... ST) - used by Kitty graphics protocol
         b'_' => {
             let mut idx = start + 2;
@@ -828,6 +851,17 @@ mod tests {
     fn visible_width_strips_kitty_graphics() {
         let content = "\x1b_Gf=100,a=T,t=d,c=10,m=0;AAAA\x1b\\text";
         assert_eq!(visible_width(content), 4);
+    }
+
+    #[test]
+    fn visible_width_strips_tmux_passthrough_envelopes() {
+        let wrapped = "\x1bPtmux;\x1b\x1b_Gq=2,i=7,m=0;AAAA\x1b\x1b\\\x1b\\text";
+        assert_eq!(visible_width(wrapped), 4);
+        // A doubled ESC before the backslash is the wrapped sequence's own ST.
+        let osc = "\x1bPtmux;\x1b\x1b]1337;File=:AA\x07\x1b\\ab";
+        assert_eq!(visible_width(osc), 2);
+        // An unterminated DCS hides the rest of the line.
+        assert_eq!(visible_width("ab\x1bPtmux;\x1b\x1b_Gm=0;"), 2);
     }
 
     #[test]

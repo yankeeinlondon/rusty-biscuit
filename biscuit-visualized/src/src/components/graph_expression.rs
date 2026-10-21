@@ -32,7 +32,7 @@ use biscuit_terminal::components::terminal_image::{ImageOutput, ImageWidth, Term
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 
-use super::display::{display_image, display_pixels};
+use super::display::{display_background, display_image, display_pixels};
 use crate::artifact::{Background, OutputFormat, RenderRequest};
 
 // Re-export types from biscuit-visualized
@@ -316,22 +316,23 @@ impl GraphExpression {
         &self,
         target_width: u32,
     ) -> Result<(PathBuf, bool), GraphRenderError> {
-        self.render_png(target_width, None)
+        self.render_png(target_width, None, self.background)
     }
 
-    /// Renders a PNG `target_width` pixels wide, its height padded to whole
-    /// rows `row_height` pixels tall when given.
+    /// Renders a PNG `target_width` pixels wide on `background`, its height
+    /// padded to whole rows `row_height` pixels tall when given.
     fn render_png(
         &self,
         target_width: u32,
         row_height: Option<u32>,
+        background: Background,
     ) -> Result<(PathBuf, bool), GraphRenderError> {
         let request = RenderRequest {
             format: OutputFormat::Png,
             scale: self.scale,
             target_width: Some(target_width),
             row_height,
-            background: self.background,
+            background,
         };
 
         let artifact = self.diagram.render(&request)?;
@@ -365,7 +366,8 @@ impl GraphExpression {
     ) -> Result<(String, PathBuf, bool), GraphRenderError> {
         let dims = TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
         let (target_width_px, row_height_px) = display_pixels(dims.image_width, term.cell_size());
-        let (png_path, cache_hit) = self.render_png(target_width_px, Some(row_height_px))?;
+        let background = display_background(self.background, term);
+        let (png_path, cache_hit) = self.render_png(target_width_px, Some(row_height_px), background)?;
 
         let term_image = display_image(&png_path, dims.image_width)
             .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?;

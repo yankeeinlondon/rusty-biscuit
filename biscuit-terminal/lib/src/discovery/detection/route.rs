@@ -40,6 +40,9 @@ const WINDOWS_TERMINAL_SIXEL_MIN: ToolVersion = ToolVersion::new(1, 22, 0);
 /// The first tmux release with `allow-passthrough`.
 const TMUX_PASSTHROUGH_MIN: ToolVersion = ToolVersion::new(3, 3, 0);
 
+/// The first tmux release that draws Sixel images itself.
+const TMUX_NATIVE_SIXEL_MIN: ToolVersion = ToolVersion::new(3, 4, 0);
+
 /// Every environment variable resolution reads.
 const ROUTE_ENV_VARS: &[&str] = &[
     GRAPHICS_ENV,
@@ -636,8 +639,10 @@ pub fn resolve_graphics_route(inputs: &RouteInputs) -> GraphicsRoute {
 ///
 /// Empty for nonterminal output, CI, invalid or disabling overrides, a
 /// forced format, probing turned off, the Windows SSH server, a legacy
-/// Windows console, a visible tmux whose `allow-passthrough` could be read,
-/// and every terminal whose identity already decides the route.
+/// Windows console, and every terminal whose identity already decides the
+/// route. A visible tmux is asked only what it can answer: its own DA1
+/// (`direct_da1_only`) when it could draw Sixel itself, and the wrapped
+/// query when its `allow-passthrough` could not be read.
 ///
 /// ## Examples
 ///
@@ -813,6 +818,7 @@ fn resolve_detected(inputs: &RouteInputs, transport: Choice, probing: Probing) -
         let plan = ProbePlan {
             direct: true,
             tunneled: true,
+            direct_da1_only: false,
         };
         return (resolve_hidden_tmux(inputs, &hint, probing), plan);
     }
@@ -1070,13 +1076,76 @@ fn resolve_windows_terminal(inputs: &RouteInputs, probing: Probing) -> (Graphics
     (route, ProbePlan::DIRECT)
 }
 
-/// A tmux this process can see (`TMUX` is set). Passthrough needs tmux 3.3
-/// or later with `allow-passthrough` on for the pane; the format comes from
-/// the terminals of the clients attached to the pane's session. Only when
-/// `allow-passthrough` could not be read does the wrapped probe run: its
-/// reply proves passthrough works. A `forced` format keeps the version and
-/// passthrough checks but skips identification.
+/// A tmux this process can see (`TMUX` is set). Sixel that tmux draws
+/// itself comes first, because the image then stays with the pane; it is
+/// established only when tmux is 3.4 or later, every client of the pane's
+/// session has the `sixel` terminal feature, and tmux's own (unwrapped) DA1
+/// reply reports attribute `4`. Otherwise the route goes through passthrough
+/// (see [`resolve_tmux_passthrough`]). A forced Sixel goes to tmux itself
+/// when the version and clients allow it, without asking for its DA1.
 fn resolve_visible_tmux(
+    inputs: &RouteInputs,
+    forced: Option<(GraphicsFormat, &str)>,
+    probing: Probing,
+) -> (GraphicsRoute, ProbePlan) {
+    let native_possible = inputs.tmux.version.filter(|v| *v >= TMUX_NATIVE_SIXEL_MIN).is_some()
+        && inputs
+            .tmux
+            .clients
+            .as_deref()
+            .is_some_and(|clients| !clients.is_empty() && clients.iter().all(|c| c.has_feature("sixel")));
+    if !native_possible {
+        return resolve_tmux_passthrough(inputs, forced, probing);
+    }
+    let subject = format!("tmux {}", inputs.tmux.version.expect("checked above"));
+    if let Some((format, requested)) = forced {
+        if format == GraphicsFormat::Sixel {
+            let route = GraphicsRoute::pixels(
+                GraphicsFormat::Sixel,
+                RouteConfidence::Forced,
+                format!("forced by {requested}, drawn by {subject} itself (every client has the sixel terminal feature)"),
+            );
+            return (route, ProbePlan::NONE);
+        }
+        return resolve_tmux_passthrough(inputs, forced, probing);
+    }
+    if probing == Probing::Allowed
+        && let Some(ProbeResult::Replied(reply)) = &inputs.probe.direct
+        && reply.da1.as_ref().is_some_and(Da1Reply::has_sixel)
+    {
+        let route = GraphicsRoute::pixels(
+            GraphicsFormat::Sixel,
+            RouteConfidence::Verified,
+            format!(
+                "{subject} draws Sixel itself: its DA1 reply reports attribute 4 and every client has the sixel terminal feature"
+            ),
+        );
+        return (route, NATIVE_SIXEL_PLAN);
+    }
+    let (route, plan) = resolve_tmux_passthrough(inputs, None, probing);
+    let plan = ProbePlan {
+        tunneled: plan.tunneled,
+        ..NATIVE_SIXEL_PLAN
+    };
+    (route, plan)
+}
+
+/// The direct exchange that asks a visible tmux about its own Sixel: DA1
+/// alone, which tmux answers without the outer terminal.
+const NATIVE_SIXEL_PLAN: ProbePlan = ProbePlan {
+    direct: true,
+    tunneled: false,
+    direct_da1_only: true,
+};
+
+/// The route through a visible tmux's passthrough. Passthrough needs tmux
+/// 3.3 or later with `allow-passthrough` on for the pane; the format comes
+/// from the terminals of the clients attached to the pane's session. Only
+/// when `allow-passthrough` could not be read does the wrapped probe run:
+/// its reply proves passthrough works. A `forced` format keeps the version
+/// and passthrough checks and skips identifying the format; the clients
+/// still decide whether Kitty is placed with Unicode placeholders.
+fn resolve_tmux_passthrough(
     inputs: &RouteInputs,
     forced: Option<(GraphicsFormat, &str)>,
     probing: Probing,
@@ -1115,6 +1184,7 @@ fn resolve_visible_tmux(
         .with_fix("set -g allow-passthrough on");
         return (route, ProbePlan::NONE);
     }
+    let outer = outer_terminal(facts.clients.as_deref());
     if let Some((format, requested)) = forced {
         let route = GraphicsRoute::pixels(
             format,
@@ -1122,9 +1192,8 @@ fn resolve_visible_tmux(
             format!("forced by {requested}, through {subject} passthrough"),
         )
         .through_tmux();
-        return (route, ProbePlan::NONE);
+        return (with_placement(route, &outer), ProbePlan::NONE);
     }
-    let outer = outer_terminal(facts.clients.as_deref());
     if facts.passthrough == Passthrough::On {
         return (passthrough_route(&subject, &outer, None), ProbePlan::NONE);
     }
@@ -1132,6 +1201,7 @@ fn resolve_visible_tmux(
     let plan = ProbePlan {
         direct: false,
         tunneled: true,
+        direct_da1_only: false,
     };
     let unread = format!("{subject}: allow-passthrough could not be read");
     let route = match probe_reply(&unread, inputs.probe.tunneled.as_ref(), probing) {
@@ -1154,12 +1224,11 @@ fn passthrough_route(subject: &str, outer: &OuterTerminal, reply: Option<&ProbeR
         None => ("has allow-passthrough on", RouteConfidence::Known),
     };
     match (outer, reply) {
-        (OuterTerminal::Identified { format, names }, _) => GraphicsRoute::pixels(
-            *format,
-            confidence,
-            format!("{subject} {how}, to {names}"),
-        )
-        .through_tmux(),
+        (OuterTerminal::Identified { format, names, .. }, _) => with_placement(
+            GraphicsRoute::pixels(*format, confidence, format!("{subject} {how}, to {names}"))
+                .through_tmux(),
+            outer,
+        ),
         (OuterTerminal::Disagree(names), _) => GraphicsRoute::unavailable(
             RouteReasonKind::NoSupport,
             RouteConfidence::Known,
@@ -1185,6 +1254,31 @@ fn passthrough_route(subject: &str, outer: &OuterTerminal, reply: Option<&ProbeR
     }
 }
 
+/// `route` with Unicode placeholders when it sends Kitty to an `outer`
+/// terminal whose every client can draw them. A Kitty or Ghostty client that
+/// tmux does not send UTF-8 and 24-bit color keeps ordinary placement, and
+/// the reason says why: the placeholder cells carry the image ID in their
+/// foreground color.
+fn with_placement(mut route: GraphicsRoute, outer: &OuterTerminal) -> GraphicsRoute {
+    let OuterTerminal::Identified { placeholders, .. } = outer else {
+        return route;
+    };
+    if route.format != GraphicsFormat::Kitty {
+        return route;
+    }
+    match placeholders {
+        PlaceholderCells::Usable => {
+            route.placement = GraphicsPlacement::Placeholders;
+            route.reason.message.push_str(", placed with Unicode placeholders");
+        }
+        PlaceholderCells::NeedColorAndUtf8 => route.reason.message.push_str(
+            "; placed ordinarily, because Unicode placeholders need tmux to send UTF-8 and 24-bit color (the RGB terminal feature) to every client",
+        ),
+        PlaceholderCells::Unsupported => {}
+    }
+    route
+}
+
 /// The outer terminal behind a visible tmux, from its attached clients.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum OuterTerminal {
@@ -1192,9 +1286,27 @@ enum OuterTerminal {
     /// terminal is recognized.
     Unidentified,
     /// Every client renders `format`; `names` lists the terminals.
-    Identified { format: GraphicsFormat, names: String },
+    Identified {
+        format: GraphicsFormat,
+        names: String,
+        placeholders: PlaceholderCells,
+    },
     /// The clients' terminals have no format in common.
     Disagree(String),
+}
+
+/// Whether Kitty images can be placed with Unicode placeholder cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaceholderCells {
+    /// Every client is Kitty or Ghostty, and tmux sends each UTF-8 and
+    /// 24-bit color.
+    Usable,
+    /// Every client is Kitty or Ghostty, but tmux does not send at least one
+    /// of them UTF-8 or 24-bit color.
+    NeedColorAndUtf8,
+    /// A client's terminal does not draw placeholders (WezTerm ignores
+    /// `U=1`) or is not identified.
+    Unsupported,
 }
 
 /// The pixel formats a client's terminal renders through passthrough.
@@ -1202,28 +1314,33 @@ enum OuterTerminal {
 struct ClientFormats {
     kitty: bool,
     iterm2: bool,
+    /// Draws Kitty images through Unicode placeholder cells (`U=1`).
+    placeholders: bool,
 }
 
 /// A client's terminal and its formats. `client_termtype` (the terminal's
 /// own answer to tmux) is read first, then `client_termname`; a generic
 /// `TERM` such as `xterm-256color` identifies nothing.
 fn client_terminal(client: &TmuxClient) -> Option<(&'static str, ClientFormats)> {
-    const KITTY: ClientFormats = ClientFormats {
+    const KITTY_PLACEHOLDERS: ClientFormats = ClientFormats {
         kitty: true,
         iterm2: false,
+        placeholders: true,
     };
     const BOTH: ClientFormats = ClientFormats {
         kitty: true,
         iterm2: true,
+        placeholders: false,
     };
     const ITERM2: ClientFormats = ClientFormats {
         kitty: false,
         iterm2: true,
+        placeholders: false,
     };
     let termtype = client.termtype.to_ascii_lowercase();
     let by_type = [
-        ("kitty", "kitty", KITTY),
-        ("ghostty", "Ghostty", KITTY),
+        ("kitty", "kitty", KITTY_PLACEHOLDERS),
+        ("ghostty", "Ghostty", KITTY_PLACEHOLDERS),
         ("wezterm", "WezTerm", BOTH),
         ("konsole", "Konsole", BOTH),
         ("iterm2", "iTerm2", ITERM2),
@@ -1233,8 +1350,8 @@ fn client_terminal(client: &TmuxClient) -> Option<(&'static str, ClientFormats)>
     }
     let termname = client.termname.to_ascii_lowercase();
     let by_name = [
-        ("kitty", "kitty", KITTY),
-        ("ghostty", "Ghostty", KITTY),
+        ("kitty", "kitty", KITTY_PLACEHOLDERS),
+        ("ghostty", "Ghostty", KITTY_PLACEHOLDERS),
         ("wezterm", "WezTerm", BOTH),
     ];
     by_name
@@ -1256,6 +1373,7 @@ fn outer_terminal(clients: Option<&[TmuxClient]>) -> OuterTerminal {
     let mut common = ClientFormats {
         kitty: true,
         iterm2: true,
+        placeholders: true,
     };
     for terminal in &identified {
         let (name, formats) = terminal.unwrap_or((
@@ -1263,6 +1381,7 @@ fn outer_terminal(clients: Option<&[TmuxClient]>) -> OuterTerminal {
             ClientFormats {
                 kitty: true,
                 iterm2: false,
+                placeholders: false,
             },
         ));
         if !names.contains(&name) {
@@ -1270,17 +1389,27 @@ fn outer_terminal(clients: Option<&[TmuxClient]>) -> OuterTerminal {
         }
         common.kitty &= formats.kitty;
         common.iterm2 &= formats.iterm2;
+        common.placeholders &= formats.placeholders;
     }
     let names = names.join(", ");
+    let placeholders = if !common.placeholders {
+        PlaceholderCells::Unsupported
+    } else if clients.iter().all(|c| c.utf8 && c.has_feature("RGB")) {
+        PlaceholderCells::Usable
+    } else {
+        PlaceholderCells::NeedColorAndUtf8
+    };
     if common.kitty {
         OuterTerminal::Identified {
             format: GraphicsFormat::Kitty,
             names,
+            placeholders,
         }
     } else if common.iterm2 {
         OuterTerminal::Identified {
             format: GraphicsFormat::Iterm2,
             names,
+            placeholders,
         }
     } else {
         OuterTerminal::Disagree(names)
@@ -1333,6 +1462,7 @@ fn resolve_declared_tmux(inputs: &RouteInputs, probing: Probing) -> (GraphicsRou
     let plan = ProbePlan {
         direct: false,
         tunneled: true,
+        direct_da1_only: false,
     };
     if let Some((terminal, source)) = identify_terminal(inputs) {
         let route = match terminal {
@@ -1416,7 +1546,7 @@ impl RouteInputs {
     pub fn probed(mut self) -> Self {
         let plan = probe_plan(&self);
         if plan.direct {
-            self.probe.direct = Some(crate::discovery::startup_exchange::direct_probe());
+            self.probe.direct = Some(crate::discovery::startup_exchange::direct_probe(!plan.direct_da1_only));
         }
         if plan.tunneled {
             self.probe.tunneled = Some(crate::discovery::startup_exchange::tunneled_probe());

@@ -405,6 +405,7 @@ fn probe_graphics() {
         let route = &term.graphics_route;
         println!("graphics_format[{i}]={:?}", route.format);
         println!("graphics_transport[{i}]={:?}", route.transport);
+        println!("graphics_placement[{i}]={:?}", route.placement);
         println!("graphics_confidence[{i}]={:?}", route.confidence);
         println!("graphics_reason_kind[{i}]={:?}", route.reason.kind);
         println!("graphics_reason[{i}]={}", route.reason.message);

@@ -1,5 +1,6 @@
 //! Diagrams are rasterized once, at their display size, and their PNG bytes
-//! reach the Kitty and iTerm2 encoders unchanged.
+//! reach the Kitty and iTerm2 encoders unchanged. A Sixel route, which has
+//! no transparency, gets an opaque raster on the terminal's background.
 
 use std::rc::Rc;
 
@@ -10,6 +11,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::ImageWidth;
 use biscuit_terminal::discovery::detection::{ImageSupport, TerminalApp};
 use biscuit_terminal::discovery::fonts::CellSize;
+use biscuit_terminal::discovery::osc_queries::RgbValue;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
@@ -178,4 +180,53 @@ fn the_hook_sizes_to_the_available_columns_not_the_terminal_width() {
 
     assert_eq!(kitty_columns(&output), 24, "{output:?}");
     assert_eq!(png_size(&kitty_payload(&output)).0, 24 * 8);
+}
+
+/// The top-left pixel of a PNG artifact: the diagram's background.
+fn corner(path: &std::path::Path) -> [u8; 4] {
+    image::open(path).unwrap().to_rgba8().get_pixel(0, 0).0
+}
+
+fn sixel_terminal(background: Option<RgbValue>) -> Terminal {
+    let mut term = terminal(TerminalApp::Other("xterm".into()), ImageSupport::Sixel, 80);
+    term.background_color = background;
+    term
+}
+
+#[test]
+fn a_mermaid_diagram_on_a_sixel_route_is_opaque_on_the_measured_background() {
+    let term = sixel_terminal(Some(RgbValue { r: 10, g: 20, b: 30 }));
+    let diagram = MermaidDiagram::new(FLOW).with_width(ImageWidth::Characters(30));
+
+    let sixel = diagram.try_render(&term).expect("render");
+    assert!(sixel.output.contains("\x1bP9;1;0q"), "{:?}", sixel.output);
+    assert_eq!(corner(&sixel.png_path), [10, 20, 30, 255]);
+
+    // The transparent Kitty raster is a different cache artifact.
+    let kitty = diagram
+        .try_render(&terminal(TerminalApp::Kitty, ImageSupport::Kitty, 80))
+        .expect("render");
+    assert_ne!(kitty.png_path, sixel.png_path);
+    assert_eq!(corner(&kitty.png_path)[3], 0, "Kitty keeps transparency");
+}
+
+#[test]
+fn a_mermaid_diagram_on_a_sixel_route_without_a_measurement_uses_the_theme_background() {
+    let result = MermaidDiagram::new(FLOW)
+        .with_width(ImageWidth::Characters(30))
+        .try_render(&sixel_terminal(None))
+        .expect("render");
+    assert!(result.output.contains("\x1bP9;1;0q"), "{:?}", result.output);
+    assert_eq!(corner(&result.png_path)[3], 255, "the theme background is opaque");
+}
+
+#[test]
+fn a_graph_on_a_sixel_route_is_opaque_on_the_measured_background() {
+    let result = GraphExpression::for_terminal("a -> b", GraphInputSyntax::Auto)
+        .unwrap()
+        .with_width(ImageWidth::Characters(20))
+        .try_render(&sixel_terminal(Some(RgbValue { r: 200, g: 210, b: 220 })))
+        .expect("render");
+    assert!(result.output.contains("\x1bP9;1;0q"), "{:?}", result.output);
+    assert_eq!(corner(&result.png_path), [200, 210, 220, 255]);
 }

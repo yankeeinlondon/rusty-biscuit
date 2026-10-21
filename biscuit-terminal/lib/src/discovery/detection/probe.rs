@@ -18,8 +18,13 @@ pub fn kitty_query(id: u32) -> Vec<u8> {
     format!("\x1b_Gi={id},s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\").into_bytes()
 }
 
-/// A nonzero Kitty image ID not used earlier in this process, by a probe or
-/// by an image upload.
+/// The largest Kitty image ID this crate allocates: 24 bits, so a Unicode
+/// placeholder cell can carry the ID in a truecolor foreground.
+pub const MAX_KITTY_ID: u32 = 0xFF_FFFF;
+
+/// A nonzero Kitty image ID, at most [`MAX_KITTY_ID`], not used recently in
+/// this process by a probe or by an image upload. After
+/// [`MAX_KITTY_ID`] IDs the sequence wraps back to 1.
 ///
 /// The sequence starts at a per-process offset, so two programs sharing a
 /// terminal are unlikely to correlate each other's replies or overwrite each
@@ -29,18 +34,22 @@ pub fn next_kitty_id() -> u32 {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let _ = NEXT.compare_exchange(
         0,
-        // Kitty image IDs are 32-bit; keeping the start below 2^31 leaves
-        // room for the counter before it wraps.
-        (std::process::id().wrapping_mul(2_654_435_761) & 0x7fff_ffff) | 1,
+        (std::process::id().wrapping_mul(2_654_435_761) & MAX_KITTY_ID) | 1,
         Ordering::Relaxed,
         Ordering::Relaxed,
     );
     loop {
-        let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        if id != 0 {
+        if let Some(id) = kitty_id_from_counter(NEXT.fetch_add(1, Ordering::Relaxed)) {
             return id;
         }
     }
+}
+
+/// The image ID for counter value `counter`, or `None` for the zero ID the
+/// sequence skips.
+fn kitty_id_from_counter(counter: u32) -> Option<u32> {
+    let id = counter & MAX_KITTY_ID;
+    (id != 0).then_some(id)
 }
 
 /// What a terminal said about one Kitty query.
@@ -198,16 +207,22 @@ pub struct GraphicsProbe {
 pub struct ProbePlan {
     pub direct: bool,
     pub tunneled: bool,
+    /// The direct exchange sends the DA1 request without the Kitty query.
+    /// A visible tmux answers DA1 itself (its own Sixel support) and would
+    /// take an unwrapped Kitty query as a new pane title.
+    pub direct_da1_only: bool,
 }
 
 impl ProbePlan {
     pub const NONE: Self = Self {
         direct: false,
         tunneled: false,
+        direct_da1_only: false,
     };
     pub const DIRECT: Self = Self {
         direct: true,
         tunneled: false,
+        direct_da1_only: false,
     };
 
     /// Whether any exchange is planned.
@@ -256,6 +271,17 @@ mod tests {
         assert_ne!(first, 0);
         assert_ne!(second, 0);
         assert_ne!(first, second);
+        assert!(first <= MAX_KITTY_ID && second <= MAX_KITTY_ID);
+    }
+
+    #[test]
+    fn ids_stay_in_24_bits_and_wrap_past_zero() {
+        assert_eq!(kitty_id_from_counter(1), Some(1));
+        assert_eq!(kitty_id_from_counter(MAX_KITTY_ID), Some(MAX_KITTY_ID));
+        assert_eq!(kitty_id_from_counter(MAX_KITTY_ID + 1), None);
+        assert_eq!(kitty_id_from_counter(MAX_KITTY_ID + 2), Some(1));
+        assert_eq!(kitty_id_from_counter(u32::MAX), Some(MAX_KITTY_ID));
+        assert_eq!(kitty_id_from_counter(0), None);
     }
 
     #[test]
