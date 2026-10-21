@@ -1,6 +1,6 @@
 # MermaidDiagram
 
-Renders Mermaid diagrams inline in the terminal as raster images. The diagram is rendered by this crate's Mermaid renderer and displayed through `biscuit-terminal`'s `TerminalImage` using the terminal's image protocol (Kitty or iTerm2). Falls back to a code block on terminals without image support.
+Renders Mermaid diagrams inline in the terminal as raster images. The diagram is rendered by this crate's Mermaid renderer and displayed through `biscuit-terminal`'s `TerminalImage` using the terminal's image protocol (Kitty, iTerm2, or Sixel). Falls back to a code block on terminals without image support.
 
 Requires the `terminal` feature; import it from `biscuit_visualized::components`.
 
@@ -54,7 +54,7 @@ let diagram = MermaidDiagram::new("pie\n    \"A\" : 40\n    \"B\" : 60")
 
 The default width is `ImageWidth::Scale(1.0)`: the diagram's 16-unit body text is one terminal line tall, so nodes and text are the same size in every diagram whatever its content. The natural width comes from `mermaid-rs-renderer`'s `measure_svg_dimensions` (the root `viewBox` width), measured with the same theme as the render. The result is clamped to the available columns, so only a terminal too narrow for the diagram shrinks it. `Percent`, `Characters`, and `Fill` still work as before.
 
-The diagram is rasterized once, at its final display size: the PNG is as many pixels wide as the resolved columns (margins included) times the measured cell width, and its height is padded with blank rows below the drawing up to a whole number of cell rows. When the terminal reports no cell size, the 8x16 fallback is used. Those PNG bytes reach Kitty and iTerm2 unchanged (see [`EncodedPng`](../../../biscuit-terminal/docs/components/terminal_image.md#already-encoded-png-input)), so the terminal shows the raster 1:1 in exactly the rows it reserves, with no stretching or re-encoding. The size is measured on every render, so after a terminal or font resize the next render produces a new raster.
+The diagram is rasterized once, at its final display size: the PNG is as many pixels wide as the resolved columns (margins included) times the measured cell width, and its height is padded with blank rows below the drawing up to a whole number of cell rows. When the terminal reports no cell size, the 8x16 fallback is used. Those PNG bytes reach Kitty and iTerm2 unchanged (see [`EncodedPng`](../../../biscuit-terminal/docs/components/terminal_image.md#already-encoded-png-input)), so the terminal shows the raster 1:1 in exactly the rows it reserves, with no stretching or re-encoding. A Sixel route decodes the PNG and encodes it as Sixel at the same size. The size is measured on every render, so after a terminal or font resize the next render produces a new raster.
 
 ### Error Handling
 
@@ -78,11 +78,13 @@ The background decides what paints the area behind the diagram, and also the bla
 
 | Background | Result |
 |------------|--------|
-| `Background::Transparent` (default) | Nothing is painted; Kitty and iTerm2 composite the diagram over the terminal's own background |
+| `Background::Transparent` (default) | Nothing is painted; Kitty and iTerm2 composite the diagram over the terminal's own background; a Sixel route paints one (below) |
 | `Background::Theme` | The theme's background color |
 | `Background::Solid { r, g, b }` | One opaque color in place of the theme's |
 
 `with_transparent_background(bool)` remains as a shorthand: `true` is `Transparent`, `false` is `Theme`. `inverted(..)` switches to the inverse theme with its opaque `Theme` background.
+
+**On a Sixel route** a transparent diagram cannot stay transparent: Sixel has no transparency, so `TerminalImage` would composite it onto an estimated color. Instead, a `Background::Transparent` diagram is rasterized on `Background::Solid` with the terminal's measured background (its OSC 11 answer), or on `Background::Theme` when the terminal reported none, so the diagram's own text and lines stay readable. A `Theme` or `Solid` background you request is kept as it is. The artifact cache keys on the background, so the Sixel raster and the Kitty raster of the same diagram are separate cache entries.
 
 ### Quadrant Chart Configuration
 

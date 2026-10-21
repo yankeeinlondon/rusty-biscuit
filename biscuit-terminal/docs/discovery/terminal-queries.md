@@ -62,6 +62,18 @@ already ended the exchange answers the second question: attribute `4` in the
 reply means Sixel. Graphics therefore add no extra round trip and no new
 moment at which the library reads input.
 
+Inside a visible tmux (`TMUX` set) that is 3.4 or later with the `sixel`
+feature on every client, the graphics part is the DA1 request alone, with no
+Kitty query (`ProbePlan::direct_da1_only`). tmux answers DA1 itself, which
+tells the library whether tmux can draw Sixel on its own, and it treats an
+unwrapped APC (`ESC _ … ESC \`) as a pane-title change, so a Kitty query
+written as-is would retitle the pane `Gi=…` instead of reaching a terminal.
+The probe result records `kitty: NoReply` and tmux's DA1 reply:
+
+```text
+ESC[c   -> ESC[?1;2;4c   (tmux built with Sixel; colors are not asked through tmux)
+```
+
 Whichever caller needs the exchange first, the color lookup or the graphics
 route, sends every part the process needs, and both answers are cached
 together. Each part keeps its own gate:
@@ -69,7 +81,7 @@ together. Each part keeps its own gate:
 | Part | Sent when |
 |------|-----------|
 | OSC 10/11 colors | Stdout is a terminal, not CI, probing is not turned off, the terminal is on the color list (below), and no multiplexer (tmux, Zellij, GNU Screen) is in the way |
-| Kitty graphics query | The graphics route asks for a probe and no input is waiting |
+| Kitty graphics query | The graphics route asks for a probe and no input is waiting, except to a visible tmux asked about its own Sixel (DA1 only) |
 | DA1 sentinel | Always, as the last part of any exchange that is sent |
 
 So inside Zellij the colors are still not queried but the graphics query is:

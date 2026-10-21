@@ -64,6 +64,16 @@
 
     _Tags: image, graphics_
 
+- [icy_sixel](https://github.com/mkrueger/icy_sixel) _v0.7_
+
+    _Sixel encoder for the Sixel graphics route. Its own quantizer
+    (`quantette`, Wu's method) builds the bounded 256-color palette;
+    `TerminalImage` turns dithering off so the output is deterministic. No
+    cargo feature: Sixel is one of the route's formats, like Kitty and
+    iTerm2. About 82 KB of a stripped release binary._
+
+    _Tags: image, graphics, sixel_
+
 ### Logging & Tracing
 
 - [tracing](https://github.com/tokio-rs/tracing) _v0.1_

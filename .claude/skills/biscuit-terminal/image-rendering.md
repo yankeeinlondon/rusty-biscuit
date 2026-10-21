@@ -1,6 +1,6 @@
 # Image Rendering
 
-`TerminalImage` renders inline images as escape-sequence strings (Kitty or iTerm2 protocol), with terminal-aware cursor management in `render_to_terminal()`.
+`TerminalImage` renders inline images as escape-sequence strings (Kitty, iTerm2, or Sixel), with terminal-aware cursor management in `render_to_terminal()`.
 
 ## Basic Usage
 
@@ -179,8 +179,20 @@ The policy-style variants are primarily tied to helper checks; they are not all 
   Load/decode errors stay `Err` either way; `render()` maps errors to `""`.
 - A Kitty route to `TerminalApp::ITerm2` uses the iTerm2 format unless the
   route is `Forced` (iTerm2 ignores `q=2` and places nothing for width-only `c=`).
-- A Sixel route falls back (encoder not built yet); a route with no pixels
-  falls back with the route's reason.
+- A Sixel route draws via `sixel.rs` (`Encoder::Sixel`, `icy_sixel` 0.7, no
+  cargo feature): Wu quantization, `SIXEL_PALETTE_COLORS` (256), diffusion 0,
+  so output is deterministic. Resized to columns × cell width (measured or
+  `CellSize::FALLBACK`), padded below with the background to whole rows
+  (never stretched). DCS `ESC P 9;1;0 q` + `"1;1;W;H`. Every image is
+  composited onto `SixelBackground::for_terminal` (`Measured` = OSC 11
+  `background_color`; `Estimated` = white for `ColorMode::Light`, else
+  black; logged at debug in "Sixel image render").
+- Sixel cursor: IND (`ESC D`) per row first (scroll happens before drawing,
+  never under a saved cursor), CUU back, `ESC[s`, optional CUF, DCS,
+  `ESC[u`; standalone adds CUD rows + CR, inline (`TwoColumn`) omits it. No
+  scroll compensation, and never set/reset private modes 80 or 1070.
+  Through tmux passthrough only the DCS is wrapped (1 MiB budget applies).
+- A route with no pixels falls back with the route's reason.
 - Transport `Tmux`: `protocol::for_transport` wraps every APC/OSC/DCS in its
   own envelope (`terminal_image/tmux.rs`, `wrap_graphics_for_tmux`; CSI such
   as `ESC[s`/`ESC[u`/mode 2026 stays unwrapped, an existing envelope is never
@@ -189,6 +201,21 @@ The policy-style variants are primarily tied to helper checks; they are not all 
   over `TMUX_MESSAGE_BUDGET` (1 MiB) → `Fallback` (`BlockedTransport`, size in
   the message) before rows are reserved; `render_inline` returns
   `UnsupportedTerminal` instead.
+- Placement `Placeholders` (Kitty through tmux): `render_kitty_placeholders`
+  uploads with `a=T,U=1,i=<id>,c=,r=` (wrapped) and returns one text row per
+  image row from `placeholder.rs::placeholder_rows` (`U+10EEEE` + row and
+  column marks from Kitty's 297-entry diacritic table, ID as `38;2;R;G;B`,
+  `SGR 39` per row; never wrapped). Standalone ends each row with `\r\n`;
+  `render_inline` returns `InlineImage::Lines` (upload prefixed to row 0)
+  versus `InlineImage::Overlay` for cursor overlays, and `TwoColumn` lays
+  `Lines` out as ordinary text. A grid over 297 cells either way, or an ID
+  over 24 bits, places ordinarily. `next_kitty_id` stays within
+  `MAX_KITTY_ID` (24 bits) and wraps to 1. `visible_width` treats a DCS /
+  tmux envelope (doubled ESCs inside) as zero columns.
+- L2: `level2_tmux_kitty_client_gets_unicode_placeholders` attaches a
+  `script`-hosted client with `TERM=xterm-kitty` (system terminfo, else
+  kitty.app's bundled one; skips without either) and reads what tmux
+  forwards to it.
 - A `needs_measured_cells` route (Zellij) falls back when `term.cell_size()`
   is `None` (`unmeasured_cells_reason`); never size such a route from the
   8×16 estimate. The library never prints hints; `bt`

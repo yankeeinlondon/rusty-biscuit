@@ -105,17 +105,38 @@ The graphics probe (`detection::probe`, live exchange in
   `allow-passthrough` is unreadable (wrapped only). Never for: known terminals,
   non-tty, CI, forced/none/invalid overrides, probing off, Windows SSH server,
   legacy Windows console (no `WT_SESSION`/`TERM_PROGRAM`/`MSYSTEM`, not SSH →
-  NoSupport), visible tmux whose passthrough was read.
+  NoSupport), visible tmux whose passthrough was read and that cannot draw
+  Sixel itself.
 - Visible tmux (`TMUX` set): `RouteInputs::tmux` (`TmuxFacts { version,
   passthrough, clients }`, `detection/tmux.rs`) is read in `from_process` via
   `tmux -V`, `show-options -Apv -t $TMUX_PANE allow-passthrough`,
-  `list-clients -t $TMUX_PANE -F '#{client_termname}\t#{client_termtype}'`
+  `list-clients -t $TMUX_PANE -F` (termname, termtype, `client_utf8`,
+  `client_termfeatures`; tab-separated)
   (500 ms deadline each, no shell; unreadable = unknown, never off). < 3.3 →
   BlockedTransport + upgrade fix; `off` → BlockedTransport + fix
   `set -g allow-passthrough on`; `on` → the clients' common format (Kitty
   preferred; unrecognized client = Kitty-only; none recognized → Kitty with
-  confidence `Unknown`), ordinary placement. Rows:
+  confidence `Unknown`). Placement (`route.rs::with_placement`, also for a
+  forced Kitty): `Placeholders` only when every client is kitty/Ghostty AND
+  each has `utf8` and the `RGB` feature (tmux would round the 24-bit ID color
+  otherwise); kitty/Ghostty missing either → ordinary + "placed ordinarily"
+  in the reason; WezTerm/unidentified/hidden or declared tmux → ordinary. Rows:
   `lib/tests/l1/graphics_tmux_matrix.rs`; live: `tests/level2/level2_graphics_tmux.rs`.
+- tmux-drawn Sixel (`route.rs::resolve_visible_tmux`) comes before every
+  passthrough route, even when clients could take Kitty: tmux ≥ 3.4
+  (`TMUX_NATIVE_SIXEL_MIN`), every client of the pane's session has `sixel`
+  in `client_termfeatures` (empty/unreadable list → no), and tmux's own
+  unwrapped DA1 reports `4` → Sixel, `Direct`, `Verified`. Independent of
+  `allow-passthrough` (off blocks tunneled graphics only). Probing off/CI →
+  DA1 not asked → passthrough rules. Forced `sixel` with version + clients
+  qualifying → Sixel `Direct` `Forced`, no DA1; otherwise passthrough.
+  Forced kitty/iterm2 unchanged.
+- `ProbePlan::direct_da1_only`: set for that candidate (`direct` +
+  `direct_da1_only`, plus `tunneled` if passthrough unreadable); the direct
+  exchange sends DA1 alone (colors only if wanted), result `kitty: NoReply`.
+  **Trap:** never send an unwrapped APC/Kitty query to a visible tmux: tmux
+  treats `ESC _ … ESC \` as a pane-title change and the pane is retitled
+  `Gi=…` (seen live on tmux 3.8).
 - Busy input: graphics query not sent, route `Unknown`, skip not cached.
 - Tests set probe answers through `RouteInputs::probe` (`GraphicsProbe`,
   `ProbeResult`, `ProbeReply`, `KittyReply`, `Da1Reply`); see

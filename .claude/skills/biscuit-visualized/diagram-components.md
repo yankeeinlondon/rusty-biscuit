@@ -32,7 +32,13 @@ raster (cache keys differ by geometry).
 Background: `with_background(Background)` on both; `with_transparent_background(bool)`
 remains (`false` = `Background::Theme`). Terminal defaults are
 `Transparent` (Kitty/iTerm2 composite over the terminal); `inverted(..)` uses
-the opaque theme background. `MermaidRenderer::render_to_cached_png_at_width`
+the opaque theme background. On a Sixel route (no transparency),
+`components/display.rs::display_background` swaps a `Transparent` request for
+`Solid` = the terminal's measured background (`SixelBackground` `Measured`),
+or `Theme` when none was reported; explicit `Theme`/`Solid` are kept. The
+cache keys on background, so Sixel and Kitty rasters are separate entries;
+`TerminalImage` then decodes the PNG and Sixel-encodes it (Kitty/iTerm2 get
+the PNG bytes unchanged). `MermaidRenderer::render_to_cached_png_at_width`
 (crate-private) takes `(target_width, row_height)`;
 `GraphExpression::render_to_cached_png_at_width(target_width)` is unchanged
 (no row padding).

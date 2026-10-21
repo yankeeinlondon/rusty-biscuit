@@ -138,6 +138,10 @@ Use the `renderable` skill for shared IR/layout/style definitions. Use the
   a stale probe: run `cargo build -p biscuit-terminal --example
   discovery_probe` after changing the library (a mutation check passed
   vacuously this way on 2026-10-05).
+- The tmux L2 Sixel test attaches its client with `tmux -T sixel` (a
+  per-client feature); never change the server-wide `terminal-features`,
+  since other tests share the server. It gates on `#{sixel_support}`. tmux
+  does not redraw Sixel for a `script` client that has no pixel size.
 - The library's integration tests build as two binaries (`autotests = false`):
   `lib/tests/l1/` and `lib/tests/level2/` (`terminal-tests`). Each former test
   file is a module, so select one with `--test l1 <module>::`, never

@@ -122,7 +122,8 @@ rendered with that `Terminal` follows it.
 
 - Kitty-family terminals (Kitty, Ghostty, WezTerm, Warp, Konsole): Kitty protocol
 - iTerm2, mintty, cterm: iTerm2's native inline images (iTerm2 accepts Kitty but mishandles it)
-- No usable format (including Sixel, whose encoder is planned): the alt text
+- Sixel terminals (Windows Terminal 1.22+, Zellij, a tmux 3.4+ that draws Sixel itself, or a DA1 reply reporting Sixel): Sixel, composited onto the terminal's background
+- No usable format: the alt text
 - `BISCUIT_GRAPHICS` (`auto`, `kitty`, `iterm2`, `sixel`, `none`) forces or disables a format; `BISCUIT_GRAPHICS_TRANSPORT` (`auto`, `direct`, `tmux`) declares a tmux layer
 
 See [Graphics Routes](../docs/discovery/graphics-routes.md) for the full

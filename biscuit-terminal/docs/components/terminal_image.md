@@ -1,6 +1,6 @@
 # TerminalImage
 
-Renders images inline in the terminal in the format chosen by the terminal's [graphics route](../discovery/graphics-routes.md) (Kitty or iTerm2 today), and as alt text when the route has no usable format. Handles cursor positioning, scroll compensation, and terminal-specific quirks across Kitty, Ghostty, WezTerm, Warp, and iTerm2.
+Renders images inline in the terminal in the format chosen by the terminal's [graphics route](../discovery/graphics-routes.md) (Kitty, iTerm2, or Sixel), and as alt text when the route has no usable format. Handles cursor positioning, scroll compensation, and terminal-specific quirks across Kitty, Ghostty, WezTerm, Warp, iTerm2, and Sixel terminals.
 
 ## Programmatic Use
 
@@ -55,14 +55,14 @@ let (path, width) = parse_filepath_and_width("photo.jpg|75%");
 |--------------|--------------|
 | Kitty | Kitty graphics, except to iTerm2, which gets its own format unless `BISCUIT_GRAPHICS=kitty` forced Kitty |
 | iTerm2 | iTerm2's `OSC 1337;File=` format |
-| Sixel | The text fallback; the Sixel encoder is **planned** |
+| Sixel | A Sixel image composited onto an opaque background; see [Sixel](#sixel) |
 | none | The text fallback |
 
-A route with transport `Tmux` sends the same image wrapped for tmux passthrough: each Kitty chunk in its own `ESC P tmux; … ESC \` envelope (with a fresh nonzero image ID, quiet mode, and explicit rows), and the iTerm2 `File=` message as one envelope. Cursor movement stays unwrapped for tmux to handle. See [tmux in Graphics Routes](../discovery/graphics-routes.md#tmux) for the wire format and the known limits of ordinary placement through tmux.
+A route with transport `Tmux` sends the same image wrapped for tmux passthrough: each Kitty chunk in its own `ESC P tmux; … ESC \` envelope (with a fresh nonzero image ID, quiet mode, and explicit rows), and the iTerm2 `File=` message or the Sixel DCS as one envelope. Cursor movement stays unwrapped for tmux to handle. When every tmux client is Kitty or Ghostty, the route's placement is `Placeholders`: the upload carries a virtual placement (`U=1`) and the image is drawn by lines of Unicode placeholder text that tmux keeps in the pane, so the image follows it. See [tmux in Graphics Routes](../discovery/graphics-routes.md#tmux) for the wire format, [Unicode placeholders](../discovery/graphics-routes.md#unicode-placeholders) for when they are used, and the known limits of ordinary placement through tmux.
 
 Two properties of a pixel route can still send it to the text fallback, each with its own reason so the caller can tell why:
 
-- **An iTerm2 image over tmux's limit.** Through tmux, a wrapped `File=` message larger than 1 MiB (1,048,576 bytes, counted after base64, ESC doubling, and the envelope) renders the fallback with a `BlockedTransport` reason giving the size. The check runs before any row is reserved, and the message is never split.
+- **An iTerm2 or Sixel image over tmux's limit.** Through tmux, a wrapped `File=` message or Sixel DCS larger than 1 MiB (1,048,576 bytes, counted after base64, ESC doubling, and the envelope) renders the fallback with a `BlockedTransport` reason giving the size. The check runs before any row is reserved, and the message is never split.
 - **`needs_measured_cells` without a measured cell size.** Zellij sizes an image from its own measurement of the host's cells, so a Zellij route is drawn only when `Terminal::cell_size()` returns a measured size; otherwise the fallback says the multiplexer did not report its cell size in pixels. The 8×16 estimate is never used for such a route.
 
 `render_with_route` returns an `ImageOutput` so a caller can tell the two outcomes apart:
@@ -85,6 +85,47 @@ match image.render_with_route(&term)? {
 - **Errors come first.** The image is loaded and decoded before anything is produced, so a missing, unreadable, or corrupt image is an error even when the route has no pixels, rather than becoming alt text.
 - `render()` and `display()` call `render_with_route` and print either outcome; they turn an error into an empty string (logged as a warning).
 
+### Sixel
+
+A route whose format is Sixel draws the image with the [`icy_sixel`](https://github.com/mkrueger/icy_sixel) encoder. The settings are fixed so the output is deterministic: Wu quantization, a palette of at most `SIXEL_PALETTE_COLORS` (256) colors, and no dithering. The same image always encodes to the same bytes, and a crisp diagram gains no dithering noise.
+
+**Size.** The image is resized to its display size: the resolved columns times the cell's pixel width, with the height following the aspect ratio. The cell size is the measured one, or `CellSize::FALLBACK` (8×16) when the terminal reported none. The rows the image covers are rounded up, and the raster is padded below with the background color to fill whole cell rows; the image is never stretched to fit them.
+
+**Background.** Sixel has no transparency, so every image is composited onto an opaque `SixelBackground` before it is encoded. `SixelBackground::for_terminal` picks the color and records where it came from:
+
+| `BackgroundSource` | Color |
+|--------------------|-------|
+| `Measured` | The terminal's answer to the OSC 11 background query (`Terminal::background_color`) |
+| `Estimated` | White for `ColorMode::Light`, black for a dark or unknown color mode |
+
+An estimated background may not match the terminal's exactly, so a transparent image can show a visible box around it. The choice is logged at debug level (the `Sixel image render` event's `background` field), and a caller can check it ahead of time:
+
+```rust
+use biscuit_terminal::components::terminal_image::{BackgroundSource, SixelBackground};
+use biscuit_terminal::terminal::Terminal;
+
+let background = SixelBackground::for_terminal(&Terminal::new());
+if background.source == BackgroundSource::Estimated {
+    eprintln!("Sixel images use an estimated background: {:?}", background.color);
+}
+```
+
+**Cursor and rows.** Drawing Sixel moves the cursor and, at the bottom of the viewport, can scroll the screen, so the image reserves its rows first and draws with the cursor saved:
+
+```mermaid
+flowchart LR
+    A["IND once per row<br/>(scrolls now, if needed)"] --> B["CUU back up<br/>the same rows"]
+    B --> C["save cursor,<br/>CUF left offset"]
+    C --> D["Sixel DCS"]
+    D --> E["restore cursor"]
+    E --> F["CUD past the rows, CR<br/>(standalone only)"]
+```
+
+Any scrolling happens while the rows are reserved, never under a saved cursor, so Sixel needs none of the scroll compensation the Kitty and iTerm2 paths apply. The DCS introducer is `ESC P 9;1;0 q` (square pixels; `P2=1` so a terminal that rounds the height up to a six-pixel band leaves the extra pixels alone) followed by raster attributes giving the pixel size. No private mode is set or reset: Sixel scrolling (mode 80) and private palette (mode 1070) stay as the terminal had them.
+
+- **Inline** (an image inside `TwoColumn`): the same reservation and save, draw, restore, without the final move down; the column reserves the rows.
+- **Through tmux passthrough** (for example `BISCUIT_GRAPHICS=sixel` forced to a tmux whose clients lack the `sixel` feature): only the DCS is wrapped in the passthrough envelope; the index and cursor movement go to tmux unwrapped. The 1 MiB message limit applies as for iTerm2. When tmux draws Sixel itself the route's transport is `Direct` and nothing is wrapped; see [tmux in Graphics Routes](../discovery/graphics-routes.md#tmux).
+
 ### Image Options
 
 Use `TerminalImageOptionsBuilder` for advanced configuration:
@@ -102,7 +143,7 @@ let options = TerminalImageOptionsBuilder::default()
 
 ### Already-encoded PNG input
 
-When your program has already produced a PNG in memory, such as a diagram rasterized at its display size, wrap the bytes in an `EncodedPng` and build the image with `TerminalImage::from_encoded_png`. Kitty and iTerm2 then receive those exact bytes; nothing is decoded and encoded again, and the image is not written to a file first.
+When your program has already produced a PNG in memory, such as a diagram rasterized at its display size, wrap the bytes in an `EncodedPng` and build the image with `TerminalImage::from_encoded_png`. Kitty and iTerm2 then receive those exact bytes; nothing is decoded and encoded again, and the image is not written to a file first. A Sixel route decodes the PNG, since Sixel is its own pixel encoding.
 
 ```rust
 use biscuit_terminal::components::terminal_image::EncodedPng;
@@ -126,7 +167,7 @@ println!("{}", image.display(&Terminal::new()));
 
 `bytes()`, `width()`, and `height()` return the bytes and the pixel size read from the header.
 
-The bytes are sent unchanged by the standalone Kitty and iTerm2 paths, the inline (`TwoColumn`) path, and `render_as_kitty`. They are decoded only by `load_image()`, or by an actual resize: `render_as_iterm2` resizes when the target pixel width (columns × cell width) differs from the PNG's width. To skip that resize, produce the PNG at exactly the width it will be shown at, as `biscuit-visualized`'s diagram components do.
+The bytes are sent unchanged by the standalone Kitty and iTerm2 paths, the inline (`TwoColumn`) path, and `render_as_kitty`. They are decoded only by `load_image()`, by a Sixel route, or by an actual resize: `render_as_iterm2` resizes when the target pixel width (columns × cell width) differs from the PNG's width. To skip that resize, produce the PNG at exactly the width it will be shown at, as `biscuit-visualized`'s diagram components do.
 
 `EncodedPng` is meant for images the program produced itself. Caller-supplied files should still go through the path constructors (`new`, `from_spec`), which require the file to exist and resolve to a local path, together with whatever `TerminalImageOptions` policy your application enforces. An `EncodedPng` image has no file name, so iTerm2 receives `name=image.png` and the alt text is `[Image: image]` unless you set `with_alt_text`.
 
