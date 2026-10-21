@@ -118,7 +118,7 @@ bare `{{ … }}` value (`review: {{ ctx.area }}/review.md`), is a supported
 document. Cleanup keeps that block exactly as written, applies no repair to
 it, reports the YAML finding as a suggestion, and formats the body.
 
-Tab-indented frontmatter is recovered instead: each indentation tab becomes
+With repair on, tab-indented frontmatter is recovered instead: each indentation tab becomes
 two spaces, which Darkmatter reads as the same value, and any other
 [repair](../cli/clean.md#frontmatter-repair-and-schema-precedence) the block
 needs then applies.
