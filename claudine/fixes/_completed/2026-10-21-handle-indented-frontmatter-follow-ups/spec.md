@@ -46,7 +46,7 @@ reported no findings blocking that fix.
 **Defect, as drafted:** the guide's `frontmatter` section listed tab
 indentation among the frontmatter that cleanup "keeps exactly as written" and
 does not repair. Cleanup actually recovers tab indentation, as the
-[`md clean` repair reference](../../../darkmatter/docs/cli/clean.md#frontmatter-repair-and-schema-precedence)
+[`md clean` repair reference](../../../../darkmatter/docs/cli/clean.md#frontmatter-repair-and-schema-precedence)
 and the tests named below show. The statement predated the origin fix, which
 did not change it.
 
@@ -59,7 +59,7 @@ read as overriding `frontmatter: false`.
 ## Scope and design decision
 
 This is a documentation correction to Darkmatter's
-[formatting guide](../../../darkmatter/docs/topics/markdown-formatting.md#frontmatter).
+[formatting guide](../../../../darkmatter/docs/topics/markdown-formatting.md#frontmatter).
 It adopts the existing cleanup behavior; it introduces no change to YAML
 acceptance, repair safety, command output, or editor formatting. No Claudine
 code change is required despite this follow-up being filed in that area.
@@ -73,7 +73,7 @@ The guide must explain these cases:
   In particular, `yaml.root-indentation` moves an eligible indented root
   mapping to column zero while preserving its parsed value. Do not imply that
   every YAML root form receives this repair. Link to the
-  [`md clean` repair reference](../../../darkmatter/docs/cli/clean.md#frontmatter-repair-and-schema-precedence)
+  [`md clean` repair reference](../../../../darkmatter/docs/cli/clean.md#frontmatter-repair-and-schema-precedence)
   for eligibility and safety details rather than duplicating its catalog.
 - Supported bare expression values such as
   `review: {{ ctx.area }}/review.md` remain the example of frontmatter that
@@ -96,9 +96,9 @@ causes cleanup to refuse an edit.
    tab recovery and preserved bare expressions, the two-space conversion,
    the repair-reference link, and the repair-disabled contract above.
 2. Check the wording against the existing cleanup tests in
-   [Darkmatter's frontmatter repair suite](../../../darkmatter/lib/tests/l1/clean_frontmatter_repair.rs)
+   [Darkmatter's frontmatter repair suite](../../../../darkmatter/lib/tests/l1/clean_frontmatter_repair.rs)
    and the language server's
-   [formatting transaction suite](../../../darkmatter/dmls/tests/l1/formatting_transaction.rs).
+   [formatting transaction suite](../../../../darkmatter/dmls/tests/l1/formatting_transaction.rs).
    Both contain a tab-indented root example that is recovered and dedented
    in one run; both verify that a second cleanup offers no further change.
 3. If the requirements are already met, record that result without making a
