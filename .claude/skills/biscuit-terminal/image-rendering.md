@@ -1,23 +1,20 @@
 # Image Rendering
 
-`TerminalImage` renders inline images as escape-sequence strings (Kitty, iTerm2, or Sixel), with terminal-aware cursor management in `render_to_terminal()`.
+`TerminalImage` renders inline images as escape-sequence strings (Kitty, iTerm2, or Sixel) for the terminal's graphics route, with terminal-aware cursor management; without a pixel route a plain image becomes half-blocks or alt text.
 
 ## Basic Usage
 
 ```rust
-use biscuit_terminal::components::terminal_image::TerminalImage;
+use biscuit_terminal::components::terminal_image::{ImageOutput, TerminalImage};
 use biscuit_terminal::terminal::Terminal;
 use std::path::Path;
 
 let term = Terminal::new();
 let img = TerminalImage::new(Path::new("photo.jpg"))?;
 
-let output = img.render_to_terminal(&term)?;
-if output.is_empty() {
-    // Unsupported terminals currently return an empty render string.
-    println!("{}", img.generate_alt_text());
-} else {
-    print!("{}", output);
+match img.render_with_half_blocks(&term)? {
+    ImageOutput::Pixels(sequence) => print!("{sequence}"),
+    ImageOutput::HalfBlocks { text, .. } | ImageOutput::Fallback { text, .. } => println!("{text}"),
 }
 ```
 
@@ -81,7 +78,7 @@ from 53,114 to 43,044 bytes.
 
 `TerminalImageOptions` is a policy helper (`base_path`, `max_file_size`, `allow_remote`, `width`) that your application can enforce before rendering.
 
-Current runtime flow (`TerminalImage::new()`, `from_spec()`, `render_to_terminal()`) does **not** automatically enforce remote/path/size policy checks.
+Current runtime flow (`TerminalImage::new()`, `from_spec()`, `render_with_route()` / `render_with_half_blocks()`) does **not** automatically enforce remote/path/size policy checks.
 
 ### TerminalImageOptions Fields
 
@@ -128,7 +125,7 @@ image.png|fill      -> Fill available width
 
 ## Protocol Selection and Cursor Behavior
 
-`render_to_terminal()` selects protocol and terminal-specific cursor handling:
+The route's encoder selects protocol and terminal-specific cursor handling:
 
 | Terminal | Protocol | Sizing Strategy | Cursor Behavior |
 |----------|----------|-----------------|-----------------|
@@ -136,9 +133,9 @@ image.png|fill      -> Fill available width
 | WezTerm | Kitty (`c=` + `r=`) | Explicit rows required | Explicit row advance + carriage return |
 | iTerm2 | iTerm2 OSC 1337 | Native scaling (`preserveAspectRatio=1`) | Overshoot correction + row advance |
 | Warp | Kitty (`c=` only) | Terminal derives rows | Uses floor-based row count to avoid blank-line overshoot |
-| Others | None | N/A | Returns empty output |
+| Others | None | N/A | Half-blocks or alt text (`render_with_half_blocks`); alt text (`render_with_route`) |
 
-`render_to_terminal()` normalizes back to column 0 with `\r`. It usually avoids trailing newlines, but may append one `\n` when bottom-of-screen scroll compensation is needed.
+Pixel output normalizes back to column 0 with `\r`. It usually avoids trailing newlines, but may append one `\n` when bottom-of-screen scroll compensation is needed.
 
 ## Direct Protocol Methods
 
@@ -177,6 +174,23 @@ The policy-style variants are primarily tied to helper checks; they are not all 
 - `render_with_route(&term)` returns `ImageOutput::Pixels(seq)` or
   `ImageOutput::Fallback { text, reason }` (alt text with controls stripped).
   Load/decode errors stay `Err` either way; `render()` maps errors to `""`.
+  It **never** returns `HalfBlocks`; diagrams (`MermaidDiagram`,
+  `GraphExpression`) must keep using it so their fallback stays the source.
+- `render_with_half_blocks(&term)` is the plain-image variant (used by
+  `render()`/`display()`, the `TwoColumn` inline path via `render_inline` →
+  `InlineImage::Lines`, and `bt image`): no pixel format, or a pixel route
+  refused late (tmux 1 MiB, unmeasured Zellij cells) →
+  `ImageOutput::HalfBlocks { text, reason }` (`▀` cells, truecolor fg = upper
+  pixel, bg = lower; rows joined with `\n`, no trailing newline; never the alt
+  text; `into_text()` returns it). Permitted only when `term.is_tty`,
+  `TrueColor`, `supports_unicode`, and the reason kind is not `UserDisabled`,
+  `InvalidInput`, or `NotATerminal` (`half_blocks_permitted`); otherwise
+  `Fallback`. So pipes get alt text even with `FORCE_COLOR=1`. Width uses the
+  pixel paths' resolver; height keeps aspect (half-block pixel = 1 cell wide,
+  ½ cell tall, measured or 8×16); transparency composites onto
+  `SixelBackground::for_terminal`; triangle filter. Not image support:
+  `ImageSupport`/route `format` unchanged. Render-tree image nodes and
+  Darkmatter's legacy `▉ IMAGE[...]` never draw half-blocks.
 - A Kitty route to `TerminalApp::ITerm2` uses the iTerm2 format unless the
   route is `Forced` (iTerm2 ignores `q=2` and places nothing for width-only `c=`).
 - A Sixel route draws via `sixel.rs` (`Encoder::Sixel`, `icy_sixel` 0.7, no

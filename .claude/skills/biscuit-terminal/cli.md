@@ -101,7 +101,7 @@ bt image "photo.jpg|fill"    # Fill available width
 Protocol selection:
 - **Kitty**: Kitty, WezTerm, Ghostty, Konsole, Warp
 - **iTerm2**: iTerm2 (forced even if Kitty advertised)
-- **Fallback**: Alt text for unsupported terminals
+- **Fallback**: half-blocks on a truecolor, Unicode terminal, else alt text (always alt text when piped)
 
 ## Diagram Commands
 

@@ -31,7 +31,7 @@ This derives `clap::ValueEnum` on supported enums, enabling:
 ## Capabilities
 
 - **Terminal App Detection**: Recognize 13+ terminal emulators with capability profiles
-- **Image Rendering**: Inline images via Kitty/iTerm2 protocols, chosen by a detected [graphics route](../docs/discovery/graphics-routes.md), with security guards
+- **Image Rendering**: Inline images via Kitty/iTerm2/Sixel, chosen by a detected [graphics route](../docs/discovery/graphics-routes.md), with security guards
 - **Diagram Hook**: Render-tree hook through which a caller (for example `biscuit-visualized`) draws Mermaid fences
 - **OS Detection**: Identify operating system and Linux distribution
 - **Repo Detection**: Detect git repo root and monorepo status via `sniff`
@@ -123,7 +123,7 @@ rendered with that `Terminal` follows it.
 - Kitty-family terminals (Kitty, Ghostty, WezTerm, Warp, Konsole): Kitty protocol
 - iTerm2, mintty, cterm: iTerm2's native inline images (iTerm2 accepts Kitty but mishandles it)
 - Sixel terminals (Windows Terminal 1.22+, Zellij, a tmux 3.4+ that draws Sixel itself, or a DA1 reply reporting Sixel): Sixel, composited onto the terminal's background
-- No usable format: the alt text
+- No usable format: half-blocks on a truecolor, Unicode terminal (`render_with_half_blocks`, used by `render`/`display`), else the alt text
 - `BISCUIT_GRAPHICS` (`auto`, `kitty`, `iterm2`, `sixel`, `none`) forces or disables a format; `BISCUIT_GRAPHICS_TRANSPORT` (`auto`, `direct`, `tmux`) declares a tmux layer
 
 See [Graphics Routes](../docs/discovery/graphics-routes.md) for the full

@@ -10,7 +10,7 @@
         <li>terminal <b>metadata</b> (<i>13+ terminal emulators, color depth, light/dark mode, dimensions, font, OS</i>)</li>
         <li>OSC8 links, OSC52 clipboard, and OSC10/11/12 color queries</li>
         <li>multiplex detection for tmux/Zellij plus native WezTerm/Ghostty/Kitty support</li>
-        <li>inline image rendering via Kitty/iTerm2, following a detected <a href="./docs/discovery/graphics-routes.md">graphics route</a>, with an alt-text fallback</li>
+        <li>inline image rendering via Kitty/iTerm2/Sixel, following a detected <a href="./docs/discovery/graphics-routes.md">graphics route</a>, with a half-block or alt-text fallback</li>
         <li>terminal-facing Mermaid rendering via <code>MermaidDiagram</code>, backed by <code>biscuit-visualized</code> (pure Rust)</li>
         <li>terminal-facing graph rendering via <code>GraphExpression</code>, with arrow, dash, and DOT syntax support</li>
         <li>color system: BasicColor (16 ANSI), RgbColor, WebColor (148 CSS), Tailwind (22 families × 11 shades)</li>

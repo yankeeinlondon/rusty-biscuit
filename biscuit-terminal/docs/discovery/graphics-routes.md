@@ -24,8 +24,9 @@ reply that ends it. Identified terminals are never probed.
   one of its exact accepted values gives no pixel route, and the reason lists
   the accepted values.
 - **No route means text, not an empty string.** A valid image whose route has
-  no usable format renders as its alt text. A missing or corrupt image is
-  still an error.
+  no usable format renders as half-blocks where the terminal can show them,
+  and as its alt text otherwise (see [Fallback](#fallback)). A missing or
+  corrupt image is still an error.
 - **A fix is named only when the blocker was observed.** The reason carries a
   `fix` only for causes the resolver actually saw, such as a Zellij or Windows
   Terminal release that is too old, tmux `allow-passthrough` read as `off`, or
@@ -755,14 +756,31 @@ In code, `GraphicsRoute::forced_by_caller()` applies the `force_graphics` rule.
 
 When the route has no usable format, a valid image renders as text:
 
-- **Plain images** (`TerminalImage`, `bt image`): the alt text, or
-  `[Image: <file name>]` when none was set, with control characters removed so
-  a file name cannot inject terminal controls. A half-block rendering in
-  truecolor is **planned** as the first fallback before alt text.
+- **Plain images** (`TerminalImage`'s `render`/`display`, an image column in
+  `TwoColumn`, and `bt image`): half-blocks first, then alt text. Half-blocks
+  draw the image as colored `▀` cells, two image pixels per cell, and are used
+  only when all of these hold:
+  - stdout is a terminal (`Terminal::is_tty`), so piped output gets alt text
+    even with `FORCE_COLOR=1`;
+  - the color depth is `TrueColor` and the terminal supports Unicode, so
+    256-color, 16-color, no-color, and non-Unicode terminals get alt text;
+  - the reason is not `UserDisabled` (`BISCUIT_GRAPHICS=none`),
+    `InvalidInput` (an invalid `BISCUIT_GRAPHICS` or
+    `BISCUIT_GRAPHICS_TRANSPORT`: a configuration error is reported, not
+    guessed around), or `NotATerminal`.
+
+  The alt text is the caller's alt text, or `[Image: <file name>]` when none
+  was set, with control characters removed so a file name cannot inject
+  terminal controls. Half-blocks are a text fallback, not image support: the
+  route's `format` stays `None`, and the reason is still returned.
 - **Some pixel routes fall back too**, each with its own reason: an iTerm2 or
   Sixel image over tmux's 1 MiB passthrough message limit, and a Zellij route
   when no measured cell size is available.
-- **Diagrams** keep the source code block they produce today.
+- **Diagrams** (`MermaidDiagram`, `GraphExpression`) show their source code
+  block, never half-blocks.
+- **Markdown images in the render tree** keep their placeholder (`[alt]` or
+  the block placeholder) at every `GraphicsMode`; the tree never draws
+  half-blocks.
 - A missing, unreadable, or corrupt image is an error, whether or not the
   route has pixels.
 
