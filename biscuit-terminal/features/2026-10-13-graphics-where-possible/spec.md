@@ -146,7 +146,7 @@ below; this keeps images attached to the pane.
 | Setup | Outcome |
 | --- | --- |
 | Direct, local terminal | Unchanged from today |
-| Zellij 0.45+, graphics enabled and a working host path | Kitty after a successful pane query, ordinary placement; never the iTerm2 format |
+| Zellij 0.45+, graphics enabled and a working host path | Kitty after a successful pane query (until the probe ships: under a Kitty-family host identity, as today), ordinary placement; never the iTerm2 format |
 | Zellij before 0.45, or Kitty support disabled | Sixel if Zellij reports it, otherwise fallback |
 | WezTerm multiplexer domain | Unchanged from today (works) |
 | tmux, Kitty or Ghostty outside, passthrough on | Kitty with Unicode placeholders; images follow the pane |
@@ -417,8 +417,15 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 
 - Kitty with ordinary placements only. Version 0.45+ establishes eligibility,
   not enablement: query the pane endpoint to establish active Kitty support.
-  Never infer it from an inherited outer `TERM_PROGRAM`; never use tmux wrapping,
-  placeholders, or the iTerm2 format.
+  Never infer it from an inherited outer `TERM_PROGRAM` alone; never use tmux
+  wrapping, placeholders, or the iTerm2 format.
+- **Until the probe is enabled** (see the input-ownership open question),
+  Zellij 0.45+ under an inherited Kitty-family identity keeps today's
+  behavior: Kitty, ordinary placement, confidence "known terminal". Zellij
+  enables its Kitty support by querying a Kitty-capable host, so that identity
+  is reasonable interim evidence, and it is what works today. Without this,
+  phase 3 would turn working Zellij sessions into fallback. The pane query
+  replaces the interim rule once it ships.
 - Earlier versions, unknown versions, or Kitty disabled: use a positive Sixel
   reply when available, otherwise fallback. Do not inspect a local config file
   as proof of the running server's state. Zellij's
@@ -614,7 +621,7 @@ routes. Probe enablement waits for the input-safety decision below.
   tier/feature gating. Level 2 terminal windows must never gain focus. Exercise
   platform-independent route/encoder logic on macOS, Linux, native Windows,
   and WSL2 through the normal test scope; distinguish compile evidence from
-  live terminal behavior. This review itself does not claim those runs occurred.
+  live terminal behavior.
 
 ## Documentation
 
@@ -710,7 +717,12 @@ supports Sixel. The measured system-conhost SSH route must still avoid APC/DCS.
 
 1. **Keep native Windows detection conservative for now (recommended).** Use
    known supporting version evidence when available, explicit overrides, and
-   useful fallback otherwise. Pros: bounded scope and preserves the existing
+   useful fallback otherwise. Version evidence does not need a live query:
+   on native Windows (not over SSH), the terminal's executable can be found
+   by walking the parent process chain to `WindowsTerminal.exe` and reading
+   its file version (1.22 or later supports Sixel). Without this, Windows
+   Terminal, the main reason Sixel joined this spec, would get Sixel only
+   through `BISCUIT_GRAPHICS`. Pros: bounded scope and preserves the existing
    no-live-query contract. Cons: an unidentified capable Windows terminal may
    need an override. Recommended because the motivating Windows SSH route uses
    terminal identity and cannot safely rely on the stripped queries anyway.
