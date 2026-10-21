@@ -97,6 +97,7 @@ fn terminal_options() -> TerminalRenderOptions {
         context: TerminalRenderContext::from_terminal(&term),
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        diagram_renderer: None,
     }
 }
 

@@ -4,7 +4,7 @@ use crate::commands::shared::{
     format_axis_label, print_example_command_with_terminal, terminal_for_render,
 };
 use crate::commands::{CliContext, Run};
-use biscuit_terminal::components::mermaid::QuadrantTheme;
+use biscuit_visualized::components::mermaid::QuadrantTheme;
 use clap::Args as ClapArgs;
 use std::io::Write;
 
@@ -181,7 +181,7 @@ impl Run for QuadrantArgs {
         }
 
         let config = {
-            use biscuit_terminal::components::mermaid::MermaidConfig;
+            use biscuit_visualized::components::mermaid::MermaidConfig;
             let mut cfg = MermaidConfig::new();
 
             if let Some(r) = self.point_radius {

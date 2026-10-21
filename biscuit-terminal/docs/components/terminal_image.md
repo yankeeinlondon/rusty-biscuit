@@ -30,7 +30,7 @@ let (path, width) = parse_filepath_and_width("photo.jpg|75%");
 | `filename.jpg\|50%` | 50% of terminal width |
 | `filename.jpg\|fill` | Fill available width |
 
-`ImageWidth::Scale(f32)` has no string form. It sizes an image from its natural width relative to terminal text: pixels per unit = scale × cell height ÷ 16, and columns = natural width × pixels per unit ÷ cell width, rounded up and clamped to the available columns. At `1.0`, 16 units (Mermaid's body text) are one terminal line tall. A raster image's natural width is its pixel width; `MermaidDiagram` passes the SVG's measured width. An unknown cell size (native Windows, CI, every stream redirected) uses `CellSize::FALLBACK` (8×16).
+`ImageWidth::Scale(f32)` has no string form. It sizes an image from its natural width relative to terminal text: pixels per unit = scale × cell height ÷ 16, and columns = natural width × pixels per unit ÷ cell width, rounded up and clamped to the available columns. At `1.0`, 16 units (Mermaid's body text) are one terminal line tall. A raster image's natural width is its pixel width; `biscuit-visualized`'s `MermaidDiagram` passes the SVG's measured width. An unknown cell size (native Windows, CI, every stream redirected) uses `CellSize::FALLBACK` (8×16).
 
 ### Key API
 

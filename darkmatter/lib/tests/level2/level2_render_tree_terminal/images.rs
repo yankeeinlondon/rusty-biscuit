@@ -62,6 +62,7 @@ fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
         context,
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        diagram_renderer: None,
     };
     let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
 

@@ -19,10 +19,7 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `BlockQuote` | `block_quote.rs` | Yes | Quoted text with left border and attribution |
 | `Compose` | `compose.rs` | No | Combine multiple renderables into one output |
 | `FileSystem` | `filesystem.rs` | Yes | File/directory tree rendering with icons and gitignore awareness |
-| `GitGraph` | `git_graph.rs` | Yes | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule, merges, the no-substitution rule, and fits the terminal by trimming commits and lanes (`image` feature; see below) |
-| `GraphExpression` | `graph_expression.rs` | Yes | Graph diagrams via biscuit-visualized with terminal image display |
 | `InlineContent` | `inline_content.rs` | No | Inline concatenation of items without newlines |
-| `MermaidDiagram` | `mermaid.rs` | Yes | Mermaid diagram rendering via biscuit-visualized; defaults to `ImageWidth::Scale(1.0)` (body text one line tall), measured from the SVG before rasterizing |
 | `OrderedList` | `list.rs` | Yes | Numbered list with nested renderable support |
 | `UnorderedList` | `list.rs` | Yes | Bullet list with custom bullets, hanging indent |
 | `PadLeft` | `pad.rs` | No | Right-align content by padding with spaces on the left |
@@ -38,6 +35,8 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `TextBlock` | `text_block.rs` | No | Uniform styling across text (bold, color, underline) |
 | `Todo` | `todo.rs` | No | Task item with state (Open, InProgress, Completed, Blocked, Cancelled) |
 | `TwoColumn` | `two_column.rs` | Yes | Side-by-side columns (supports inline images) |
+
+Diagram components (`GitGraph`, `GraphExpression`, `MermaidDiagram`) are in `biscuit-visualized`; see that skill's `diagram-components.md`.
 
 ## Compose
 
@@ -215,16 +214,6 @@ New builder APIs for selective tree rendering:
 - `.with_root_icon(icon)` — `RootIconKind::Directory` or `RootIconKind::Repository`
 
 These are used by the `::file-links` compose directive to render bounded document trees.
-
-## GitGraph
-
-Full contract: `biscuit-terminal/docs/components/git_graph.md`. The caller runs git; the component never does.
-
-- `GraphLine::with_tip(sha)` is the branch's own tip. A line without commits is labeled there. `tip()` falls back to the newest drawn commit, **never** `fork_sha`. `forked_at` unset (`fork_sha == None`) means an unknown connection, not "tip here".
-- `GraphLine::with_merge(source, destination)` appends a `LaneMerge` (oldest first; `merges` field). Every merge is drawn from its own source: it emits `merge <lane> id: "…" tag: "…"` at the destination commit on whatever lane draws it, only when the source was already emitted and the destination lane has a head (the parser drops a labeled merge into a headless lane). A lane pauses after a mid-lane source (and the lanes forked at it) until the destination is emitted, then resumes after the `merge` with `checkout <source>`; paused lanes left over (a cycle) have their blocking merge dropped and resume. `biscuit-visualized` restores the merge's second parent (the source). Siblings hanging from one commit are reordered so a lane whose merges land on a sibling's subtree is emitted first (`emit_merged_lanes_first`). A second merge into one commit is not drawn; every undrawn merge sets `incomplete`.
-- **No substitution:** a lane whose fork is undrawn or unknown is drawn unconnected (declared `branch` before the root lane's first commit), never from another lane's start. An undrawn tag, label, or merge destination is left out. Each sets `GitGraphPlan::incomplete`, as does the caller's `with_incomplete_history()`, and renders the dim `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown") after the hidden-lanes note. Tags of lanes the height cap hid are not counted twice.
-- Trimming (`trim_one_commit`) never folds lane tips, forks, merge sources and destinations, or tagged commits. The height cap (`fit_lanes`) keeps a lane's ancestors: the lanes holding its fork commit and every merge destination, and its parent's lane.
-- `biscuit-visualized` widens the commit step only for colliding tags (different commits, overlapping rows) and only to a one-em gap, so a single long label (e.g. `main`/`origin/main` stacked on one tip) keeps the default step and trimming works normally; a graph with colliding tags is widened everywhere and may still need to shrink. Assert the step against `biscuit_visualized::mermaid::default_gitgraph_commit_step()`. Prove tag placement with `biscuit_visualized::mermaid::MermaidDiagram::gitgraph_geometry()` (`tag_overlaps()`), never with Mermaid text.
 
 ## InlineContent
 

@@ -36,10 +36,10 @@ let graph = GraphDiagram::parse(input, GraphInputSyntax::Auto)?;
 let artifact = graph.render(&RenderRequest::default())?;
 ```
 
-For terminal display, wrap with [`biscuit-terminal::components::graph_expression::GraphExpression`]:
+For terminal display, wrap with [`GraphExpression`](components/graph_expression.md) (`terminal` feature):
 
 ```rust
-use biscuit_terminal::components::graph_expression::{GraphExpression, GraphInputSyntax};
+use biscuit_visualized::components::graph_expression::{GraphExpression, GraphInputSyntax};
 
 let graph = GraphExpression::for_terminal(dot_source, GraphInputSyntax::Dot)?
     .with_width(ImageWidth::Percent(0.75));
@@ -201,7 +201,7 @@ The DOT pipeline ultimately produces a PNG that's shown inline in a terminal. Th
 
 For terminal display, the first form is what you want.
 
-### How `biscuit-terminal::GraphExpression` uses it
+### How `GraphExpression` uses it
 
 `GraphExpression::render_to_image` computes the target before calling the rasterizer:
 
@@ -285,7 +285,7 @@ This is what `build_deps_dot()` in `sniff/cli/src/output/filesystem/deps.rs` doe
 | `biscuit-visualized/src/graph/dot.rs` | `validate_dot()`, `render_dot_to_svg()`, expression-to-DOT conversion |
 | `biscuit-visualized/src/graph/render.rs` | `GraphDiagram` post-processing (orientation, title, theme injection) |
 | `biscuit-visualized/src/raster/png.rs` | `rasterize_svg_to_png_bytes()` — the `scale` parameter feeds in here |
-| `biscuit-terminal/lib/src/components/graph_expression.rs` | Terminal-side wrapper, image width handling, fallback |
+| `biscuit-visualized/src/src/components/graph_expression.rs` | Terminal-side component, image width handling, fallback |
 | `biscuit-terminal/lib/src/components/terminal_image/` | Inline image protocols (iTerm2, Kitty, …) and the `min(img_width)` downscaling rule |
 | `sniff/cli/src/output/filesystem/deps.rs` | Reference consumer — DOT generation, fontsize=48, focus subgraph + dashed externals |
 

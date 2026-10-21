@@ -124,6 +124,7 @@ pub(super) fn render_tree_terminal_spanned_vector_to_tempfile(
         context,
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        diagram_renderer: None,
     };
     let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
 
@@ -167,6 +168,7 @@ pub(super) fn write_doc_to_tempfile(
         context: TerminalRenderContext::from_terminal(&term),
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        diagram_renderer: None,
     };
     let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
 

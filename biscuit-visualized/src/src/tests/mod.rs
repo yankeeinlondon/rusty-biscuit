@@ -30,6 +30,8 @@ use crate::cache::file_cache::CACHE_DIR_ENV;
 #[cfg(feature = "image")]
 fn isolated_cache_dir() -> TempDir {
     let dir = TempDir::new().expect("Failed to create temp dir");
-    std::env::set_var(CACHE_DIR_ENV, dir.path());
+    // SAFETY: callers are `#[serial]` (see above), so no other thread reads
+    // or writes the environment meanwhile.
+    unsafe { std::env::set_var(CACHE_DIR_ENV, dir.path()) };
     dir
 }

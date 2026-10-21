@@ -36,11 +36,13 @@
 //! directly is the narrowest way to pin the contract without depending on a
 //! real terminal's image-protocol support.
 
+// biscuit-terminal's shared parity helpers, compiled here unchanged
+// (`source-inputs` in Cargo.toml).
 #[allow(clippy::duplicate_mod)]
-#[path = "parity_helpers.rs"]
+#[path = "../../../../biscuit-terminal/lib/tests/l1/parity_helpers.rs"]
 mod parity_helpers;
 
-use biscuit_terminal::components::graph_expression::{GraphExpression, GraphInputSyntax};
+use biscuit_visualized::components::graph_expression::{GraphExpression, GraphInputSyntax};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::{ImageWidth, ResolvedDimensions, TerminalImage};
 use biscuit_terminal::utils::layout::{
@@ -305,4 +307,12 @@ fn graph_expression_renders_non_empty_at_parity_widths() {
             "GraphExpression render at width {width} produced empty output"
         );
     }
+}
+
+#[test]
+fn shared_parity_helpers_build_an_optimistic_terminal() {
+    // Spelled for CI's test-input index, which does not count the `#[path]`
+    // include above.
+    let _ = include_str!("../../../../biscuit-terminal/lib/tests/l1/parity_helpers.rs");
+    assert_eq!(test_terminal(80).width(), 80);
 }

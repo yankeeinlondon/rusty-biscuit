@@ -1,6 +1,6 @@
 ---
 name: biscuit-visualized
-description: Expert knowledge for the biscuit-visualized Rust library - the authority for diagram and graph visualization rendering in the rusty-biscuit monorepo. Provides Mermaid diagram rendering (flowcharts, sequence, pie, quadrant, gantt, ER, and more), graph/network diagram rendering (expression syntax and DOT format), SVG-to-PNG rasterization via resvg, content-addressed file caching, and dark/light theming. Use when rendering diagrams or graphs to SVG/PNG, working with Mermaid syntax, parsing graph expressions or DOT, building graphs programmatically, configuring visualization themes, or debugging cache behavior. biscuit-terminal depends on this for all diagram artifact generation.
+description: Expert knowledge for the biscuit-visualized Rust library - the authority for diagram and graph visualization rendering in the rusty-biscuit monorepo. Provides Mermaid diagram rendering (flowcharts, sequence, pie, quadrant, gantt, ER, and more), graph/network diagram rendering (expression syntax and DOT format), SVG-to-PNG rasterization via resvg, content-addressed file caching, and dark/light theming. Use when rendering diagrams or graphs to SVG/PNG, working with Mermaid syntax, parsing graph expressions or DOT, building graphs programmatically, configuring visualization themes, or debugging cache behavior. Also owns the terminal diagram components (`MermaidDiagram`, `GraphExpression`, `GitGraph`) and the render-tree Mermaid hook behind its `terminal` feature; it depends on biscuit-terminal, never the reverse.
 ---
 
 # biscuit-visualized
@@ -40,6 +40,7 @@ For the legacy HiDPI multiplier path, omit `target_width` and set `scale: N` dir
 | Topic | Description |
 |-------|-------------|
 | [Mermaid Rendering](./mermaid-rendering.md) | MermaidDiagram API, themes, config, quadrant charts, gitGraph corrections |
+| [Diagram Components](./diagram-components.md) | Terminal components, `TerminalDiagramRenderer` hook, GitGraph contract, `l1` tests |
 | [Graph Rendering](./graph-rendering.md) | Expression syntax, DOT format, GraphBuilder, orientation, color themes, terminal resolution tuning |
 | [Artifacts & Caching](./artifacts-caching.md) | RenderRequest, RenderedArtifact, FileCache, cache layout |
 | [Rasterization](./rasterization.md) | SVG-to-PNG via resvg, scale factors, font handling, terminal protocol ceiling |
@@ -170,14 +171,21 @@ let fallback = diagram.fallback_code_block();
 
 ## Relationship to biscuit-terminal
 
-`biscuit-terminal` wraps this library's types with terminal-aware adapters:
+**This crate decides what a diagram shows; `biscuit-terminal` decides how it
+reaches the screen.** The `terminal` feature adds the diagram components,
+which wrap this library's artifact types and display through
+`biscuit-terminal`'s `TerminalImage`:
 
-| biscuit-visualized | biscuit-terminal adapter |
+| Artifact type | Component (`terminal` feature) |
 |---|---|
 | `mermaid::MermaidDiagram` | `components::mermaid::MermaidDiagram` |
 | `graph::GraphDiagram` | `components::graph_expression::GraphExpression` |
+| — | `components::git_graph::GitGraph` |
 
-The adapters handle terminal width selection, image protocol rendering, and CLI argument integration. When working on diagram features, changes to rendering logic go in `biscuit-visualized`; changes to terminal display go in `biscuit-terminal`.
+The dependency runs one way (this crate → `biscuit-terminal`). Changes to
+diagram rendering, sizing, and the components go here; changes to image
+protocols and terminal detection go in `biscuit-terminal`. See
+[Diagram Components](./diagram-components.md).
 
 ## Error Types
 

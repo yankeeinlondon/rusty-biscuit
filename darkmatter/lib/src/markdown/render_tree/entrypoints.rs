@@ -35,6 +35,7 @@ use biscuit_terminal::render_tree::{
     ImagePlaceholder, TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
 use biscuit_terminal::terminal::Terminal;
+use biscuit_visualized::components::TerminalDiagramRenderer;
 use renderable::browser::feature::{FeatureContext, FeatureResolver, PageFeature};
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect,
@@ -769,6 +770,8 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new_with_code_block_mode(
             opts.code_block_mode,
         ))),
+        // Consulted only when `mermaid_mode` above promotes a fence.
+        diagram_renderer: Some(Rc::new(TerminalDiagramRenderer)),
     }
 }
 
@@ -957,6 +960,31 @@ mod tests {
             "inline code must not use reverse video, raw:\n{:?}",
             result.output,
         );
+    }
+
+    /// biscuit-terminal draws no diagrams itself: a `MermaidMode::Image` fence
+    /// becomes an image only because this entry point installs
+    /// biscuit-visualized's diagram hook. `Force` makes the snapshot a Kitty
+    /// TTY whatever the host, so the image escape is deterministic.
+    #[test]
+    fn render_tree_terminal_draws_mermaid_through_the_installed_hook() {
+        use crate::markdown::output::terminal::{MermaidMode, TerminalImageMode};
+
+        let md: Markdown = "```mermaid\nflowchart LR\n    A --> B\n```\n".into();
+        let options = |mermaid_mode| TerminalOptions {
+            mermaid_mode,
+            image_mode: TerminalImageMode::Force,
+            max_width: Some(80),
+            ..TerminalOptions::default()
+        };
+
+        let drawn = render_tree_terminal(&md, &options(MermaidMode::Image)).expect("render");
+        assert!(drawn.output.contains("\x1b_G"), "a Kitty image: {:?}", drawn.output);
+        assert!(!drawn.output.contains("A --> B"), "not the fence source: {:?}", drawn.output);
+
+        let as_code = render_tree_terminal(&md, &options(MermaidMode::Text)).expect("render");
+        assert!(!as_code.output.contains("\x1b_G"), "{:?}", as_code.output);
+        assert!(as_code.output.contains("A --> B"), "{:?}", as_code.output);
     }
 
     #[test]

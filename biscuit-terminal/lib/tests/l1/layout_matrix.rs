@@ -73,13 +73,10 @@ use renderable::tree::{
 };
 
 #[test]
-fn component_case_count_is_sixteen_without_image_feature() {
+fn component_case_count_is_sixteen() {
     // 11 original dual-path components + Prose, FileSystem, HorizontalRule,
-    // MetricsTree, TerminalImage. When the `image` feature is enabled two more
-    // bespoke components (GraphExpression, MermaidDiagram) are included.
-    #[cfg(feature = "image")]
-    assert_eq!(component_cases().len(), 18);
-    #[cfg(not(feature = "image"))]
+    // MetricsTree, TerminalImage. The diagram rows (GraphExpression,
+    // MermaidDiagram) run in biscuit-visualized's own layout matrix.
     assert_eq!(component_cases().len(), 16);
 }
 

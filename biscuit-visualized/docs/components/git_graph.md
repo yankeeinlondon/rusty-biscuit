@@ -2,12 +2,13 @@
 
 Draws git branch topology as a Mermaid `gitGraph`, rendered through [MermaidDiagram](./mermaid_diagram.md). The caller gathers the git facts and hands them over typed; the component runs no git commands. It decides which refs get lanes and which become tags, orders the lanes, draws merges, marks elided commits, works around `mermaid-rs-renderer`'s parser, and fits the graph to the terminal by trimming commits and lanes rather than shrinking it. It never draws something at a commit other than the one it was given: what it cannot draw is reported as incomplete history.
 
-Requires the `image` feature. `wt list` is its main caller; [the `wt list` graph](../../../worktree/docs/git-graph.md) shows how a caller gathers the facts.
+Requires the `terminal` feature; import it from `biscuit_visualized::components`. `wt list` is its main caller; [the `wt list` graph](../../../worktree/docs/git-graph.md) shows how a caller gathers the facts.
 
 ## Programmatic Use
 
 ```rust
 use biscuit_terminal::prelude::*;
+use biscuit_visualized::components::*;
 
 let graph = GitGraph::new(
     "main",
@@ -155,12 +156,12 @@ A caller that lists its own notes (as `wt list` does) calls `render_without_note
 | `GraphViewport::for_terminal(term, layout)` | Available columns after margins, terminal rows, and cell size. |
 | `mermaid()` | The untrimmed Mermaid text. |
 
-The image is sized with `ImageWidth::Scale` (see [TerminalImage](./terminal_image.md)): at 125%, gitGraph's 10-unit commit IDs and 14–16-unit branch labels read comfortably. Fitting works in two steps:
+The image is sized with `ImageWidth::Scale` (see [TerminalImage](../../../biscuit-terminal/docs/components/terminal_image.md)): at 125%, gitGraph's 10-unit commit IDs and 14–16-unit branch labels read comfortably. Fitting works in two steps:
 
 1. **Height (base view only).** Past half the terminal's rows, or the `with_max_rows(rows)` a caller set instead, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork commit and every one of its merge destinations, and its parent's lane), until the next would not fit. Lanes whose tips share a second are equally recent: when one of them does not fit, the others are tried before stopping, so a tie never hides a lane that fits behind one that does not. So a merge between two branch lanes is drawn with both lanes or with neither. A dim line then says `N more worktrees not shown`.
 2. **Width.** While the graph is wider than the available columns, commits move into `+N` squares one at a time. A commit beside an existing square goes first, then the oldest commit on the lane showing the most. Lane tips, fork points, merge sources and destinations, and tagged commits are never trimmed. Only when nothing more can be trimmed does the image shrink to fit.
 
-`biscuit-visualized` keeps neighboring tags from overlapping (see [its gitGraph corrections](../../../biscuit-visualized/docs/mermaid-gitgraph.md)). It widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
+`biscuit-visualized` keeps neighboring tags from overlapping (see [its gitGraph corrections](../mermaid-gitgraph.md)). It widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
 
 Text measurement uses the host's fonts, so exact sizes differ slightly by OS.
 

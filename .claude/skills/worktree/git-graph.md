@@ -9,9 +9,9 @@ this page holds the implementation facts and traps.
 - `worktree::graph` (library) only **gathers** `GraphFacts` (full SHAs, fork
   points, merge commits, refs, `incomplete`) in library-owned types
   (`GraphLine`, `LaneEntry`, `LaneMerge`). The library must not depend on
-  biscuit-terminal, so never reuse the terminal component's types there.
+  biscuit-terminal or biscuit-visualized, so never reuse the component's types there.
 - `cli/src/commands/git_graph.rs::to_git_graph` maps those facts onto a
-  biscuit-terminal `GitGraph`; `GitGraph` owns lanes, tags, merges, trimming,
+  biscuit-visualized `GitGraph` (`biscuit_visualized::components`); `GitGraph` owns lanes, tags, merges, trimming,
   and sizing.
 - `to_git_graph` filters PRs by source repository first, because `GitGraph`
   matches by branch name alone.

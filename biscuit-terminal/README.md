@@ -49,8 +49,6 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
 
     - [`BlockQuote`](./docs/components/block_quote.md)
     - [`FileSystem`](./docs/components/file_system.md) — directory trees with terminal-aware icons and linked entries
-    - [`GraphExpression`](./docs/components/graph_expression.md) (graph adapter backed by `biscuit-visualized`)
-    - [`MermaidDiagram`](./docs/components/mermaid_diagram.md) (Mermaid adapter backed by `biscuit-visualized`)
     - [`OrderedList` and `UnorderedList`](./docs/components/list.md)
     - [`PadLeft`](./docs/components/pad_left.md) and [`PadRight`](./docs/components/pad_right.md)
     - [`Progress`](./docs/components/progress.md)
@@ -70,6 +68,8 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`TextBlock`](./docs/components/text_block.md)
     - [`Todo`](./docs/components/todo.md)
     - [`TwoColumn`](./docs/components/two_column.md)
+
+    Diagram components (`MermaidDiagram`, `GraphExpression`, `GitGraph`) live in [`biscuit-visualized`](../biscuit-visualized/README.md), which depends on this library.
 
     As well as compositional components:
 

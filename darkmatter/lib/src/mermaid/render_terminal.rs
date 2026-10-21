@@ -1,19 +1,18 @@
 //! Terminal rendering for Mermaid diagrams.
 //!
-//! This module provides thin wrappers around `biscuit_terminal::components::mermaid`
-//! for rendering Mermaid diagrams in the terminal. The actual implementation
-//! (pure-Rust rendering via biscuit-visualized, image display, caching) is handled
-//! by biscuit-terminal.
+//! This module provides thin wrappers around `biscuit_visualized::components::mermaid`
+//! for rendering Mermaid diagrams in the terminal. biscuit-visualized renders and
+//! caches the diagram; biscuit-terminal displays the image.
 //!
 //! ## Re-exports
 //!
-//! This module re-exports the error type from biscuit-terminal:
+//! This module re-exports the error type from biscuit-visualized:
 //! - [`MermaidRenderError`] - Error type for mermaid terminal rendering
 
-// Re-export the error type from biscuit-terminal for API compatibility
-pub use biscuit_terminal::components::mermaid::MermaidRenderError;
+// Re-export the error type from biscuit-visualized for API compatibility
+pub use biscuit_visualized::components::mermaid::MermaidRenderError;
 
-use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_visualized::components::mermaid::MermaidDiagram;
 
 /// Renders a Mermaid diagram to the terminal.
 ///

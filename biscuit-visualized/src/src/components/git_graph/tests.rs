@@ -1,5 +1,5 @@
 use super::*;
-use crate::discovery::detection::ImageSupport;
+use biscuit_terminal::discovery::detection::ImageSupport;
 
 /// A full 40-character SHA whose display ID is `short`.
 fn sha(short: &str) -> String {
@@ -271,8 +271,8 @@ fn a_default_lane_without_commits_draws_nothing() {
 // Merges, explicit tips, and accounting for undrawn history
 // ---------------------------------------------------------------------------
 
-fn geometry_of(text: &str) -> biscuit_visualized::mermaid::GitGraphGeometry {
-    biscuit_visualized::mermaid::MermaidDiagram::new(text)
+fn geometry_of(text: &str) -> crate::mermaid::GitGraphGeometry {
+    crate::mermaid::MermaidDiagram::new(text)
         .gitgraph_geometry()
         .unwrap_or_else(|error| panic!("{error}: {text}"))
         .expect("a gitGraph")
@@ -1060,7 +1060,7 @@ fn every_emitted_graph_parses() {
         nested_merges(),
     ] {
         let text = mermaid(&graph);
-        biscuit_visualized::mermaid::MermaidDiagram::new(text.as_str())
+        crate::mermaid::MermaidDiagram::new(text.as_str())
             .natural_size()
             .unwrap_or_else(|error| panic!("{error}: {text}"));
     }
@@ -1137,7 +1137,7 @@ fn trimming_stops_when_only_pinned_commits_remain() {
     // Still wider than the viewport, so the image will shrink.
     assert!(planned.columns > 5, "{planned:?}");
     assert!(
-        biscuit_visualized::mermaid::MermaidDiagram::new(text.as_str())
+        crate::mermaid::MermaidDiagram::new(text.as_str())
             .natural_size()
             .is_ok(),
         "{text}"
@@ -1303,7 +1303,7 @@ fn the_viewport_comes_from_the_terminal_after_margins() {
         })
         .build();
     let mut layout = Layout::default();
-    layout.margin.left = crate::utils::layout::TargetValue::universal(crate::utils::layout::Length::ch(4));
+    layout.margin.left = biscuit_terminal::utils::layout::TargetValue::universal(biscuit_terminal::utils::layout::Length::ch(4));
     let viewport = GraphViewport::for_terminal(&term, &layout);
     assert_eq!(viewport.columns, 96);
     assert_eq!(viewport.rows, 30);
@@ -1319,7 +1319,7 @@ fn measured_sizes_trim_to_the_width_cap() {
     let graph = spec_example().with_theme(MermaidTheme::Default);
     let wide = graph.plan(viewport(400, 60)).unwrap();
     assert_eq!(wide.trimmed_commits, 0);
-    let size = biscuit_visualized::mermaid::MermaidDiagram::new(wide.mermaid.as_str())
+    let size = crate::mermaid::MermaidDiagram::new(wide.mermaid.as_str())
         .with_theme(MermaidTheme::Default)
         .natural_size()
         .unwrap();

@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - terminal capability detection, rich terminal rendering, terminal components, inline image rendering, Mermaid/graph adapters, `TerminalRenderable`, `Prose`, and the terminal renderer for the renderable tree. Use when building CLI terminal output, using terminal-aware components, rendering images or diagrams, detecting color/underline/italics support, or folding `renderable::tree` nodes to terminal text.
+description: Expert knowledge for the biscuit-terminal Rust library - terminal capability detection, rich terminal rendering, terminal components, inline image rendering, the render-tree diagram hook, `TerminalRenderable`, `Prose`, and the terminal renderer for the renderable tree. Use when building CLI terminal output, using terminal-aware components, rendering images or diagrams, detecting color/underline/italics support, or folding `renderable::tree` nodes to terminal text.
 hash: a552a21dc0a66232-95f568f032e66a02
 ---
 
@@ -43,6 +43,10 @@ library, and renders `renderable::tree` nodes to terminal output.
    `TerminalImageOptions`.
 5. Keep nested components structural by projecting them into the render tree
    instead of degrading them to ANSI-stripped text.
+6. Know nothing about diagrams. `MermaidDiagram`, `GraphExpression`, and
+   `GitGraph` live in `biscuit-visualized` (`terminal` feature), which depends
+   on this crate; Mermaid fences reach them only through the render-tree
+   diagram hook (`diagrams.md`).
 
 ## Common Entry Points
 
@@ -90,7 +94,7 @@ Open only the topic file needed for the task:
 | Component catalog | `components.md` |
 | Render-tree terminal renderer | `render-tree.md` |
 | Inline images | `image-rendering.md` |
-| Mermaid diagrams | `mermaid-diagrams.md` |
+| Diagram hook, package boundary, `bt` diagram commands | `diagrams.md` |
 | Colors | `color-system.md` |
 | Detection functions | `discovery.md` |
 | OS/environment detection | `os-environment.md` |

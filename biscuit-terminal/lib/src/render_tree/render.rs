@@ -37,14 +37,11 @@ use renderable::tree::{
     HrWeight, InheritedStyle, NodeKind, ProgressHints, RenderError, RenderNode, RenderStrictness,
     Rendered, Severity, TableColumnHints, TableTerminalHints, TextLayoutHints, TextOverflow,
 };
-#[cfg(feature = "image")]
 use renderable::tree::TerminalMermaidMode;
 use renderable::tree::{ValidationError, ValidationMode, is_html_comment_only, validate};
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
-#[cfg(feature = "image")]
-use crate::components::mermaid::MermaidDiagram;
 use crate::components::prose::{LineBreaks, Prose};
 use crate::components::renderable::TerminalRenderable;
 use crate::components::terminal_image::TerminalImage;
@@ -64,7 +61,7 @@ use crate::utils::block_constraint::{
 use crate::utils::layout::{Alignment, WordWrap};
 use crate::utils::word_wrap::truncate;
 
-use super::options::{ImagePlaceholder, TerminalRenderOptions};
+use super::options::{DiagramRenderRequest, ImagePlaceholder, TerminalRenderOptions};
 use super::style;
 
 /// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
@@ -1714,14 +1711,15 @@ impl Writer<'_> {
     ///
     /// ## Mermaid promotion
     ///
-    /// A `lang="mermaid"` block is promoted to a rasterized image only when the
-    /// Mermaid opt-in ([`TerminalRenderContext::mermaid_mode`] is
+    /// A `lang="mermaid"` block is handed to the
+    /// [`diagram_renderer`](TerminalRenderOptions::diagram_renderer) hook only
+    /// when the Mermaid opt-in ([`TerminalRenderContext::mermaid_mode`] is
     /// [`TerminalMermaidMode::Image`]) *and* the fidelity ceiling
     /// ([`TerminalRenderContext::graphics_mode`] is [`GraphicsMode::Rich`]) both
     /// permit it. [`GraphicsMode`] alone never promotes a fence — that keeps the
-    /// public default ("Mermaid stays code") intact. When promotion is not
-    /// requested the block degrades through the code-render hook and finally to
-    /// the built-in plain fallback.
+    /// public default ("Mermaid stays code") intact. With no hook installed, or
+    /// when promotion is not requested, the block degrades through the
+    /// code-render hook and finally to the built-in plain fallback.
     ///
     /// ## Errors
     ///
@@ -1735,37 +1733,45 @@ impl Writer<'_> {
         meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
     ) -> Result<String, RenderError> {
-        let _is_mermaid = lang
+        let is_mermaid = lang
             .map(|l| l.eq_ignore_ascii_case("mermaid"))
             .unwrap_or(false);
 
         // Promotion is gated by the opt-in AND the ceiling: terminal Mermaid
         // rasterizes only at `Rich`, and only when the caller opted in.
-        #[cfg(feature = "image")]
-        if _is_mermaid
+        if is_mermaid
             && self.opts.context.mermaid_mode == TerminalMermaidMode::Image
             && self.opts.context.graphics_mode == GraphicsMode::Rich
         {
-            let term = self.effective_terminal();
-            let diagram = MermaidDiagram::new(value);
-            match diagram.try_render(&term) {
-                Ok(result) => return Ok(result.output),
-                Err(e) => match self.opts.strictness {
-                    RenderStrictness::Strict => {
-                        return Err(RenderError::LossyRejected {
-                            message: format!("Mermaid promotion failed: {e}"),
-                        });
-                    }
-                    RenderStrictness::Warn => {
-                        self.diagnostics.push(Diagnostic::lossy(
-                            format!(
-                                "Mermaid rasterization failed, falling back to code block: {e}"
-                            ),
-                            None,
-                        ));
-                    }
-                    RenderStrictness::Lossy => {}
-                },
+            if let Some(diagrams) = &self.opts.diagram_renderer {
+                let term = self.effective_terminal();
+                let request = DiagramRenderRequest {
+                    source: value,
+                    attrs,
+                    terminal: &term,
+                    available_width: self.opts.context.available_width,
+                };
+                match diagrams.render_terminal_diagram(&request) {
+                    Ok(output) => return Ok(output),
+                    Err(e) => match self.opts.strictness {
+                        RenderStrictness::Strict => {
+                            return Err(RenderError::LossyRejected {
+                                message: format!("Mermaid promotion failed: {e}"),
+                            });
+                        }
+                        RenderStrictness::Warn => {
+                            self.diagnostics.push(Diagnostic::lossy(
+                                format!(
+                                    "Mermaid rasterization failed, falling back to code block: {e}"
+                                ),
+                                None,
+                            ));
+                        }
+                        RenderStrictness::Lossy => {}
+                    },
+                }
+            } else {
+                tracing::debug!("Mermaid promotion requested without hook; rendering the fence as code");
             }
         }
 
@@ -5455,14 +5461,22 @@ mod render_tree_tests {
 
     /// Finding 7 (review-1): under `RenderStrictness::Strict`, a Mermaid
     /// promotion that cannot complete must escalate to a `RenderError` rather
-    /// than silently degrading to a code block. A terminal with no image
-    /// support guarantees the promotion fails (no protocol to target, or no
-    /// rasterization deps) regardless of host capability.
+    /// than silently degrading to a code block. The hook here always fails;
+    /// `biscuit-visualized` covers the same contract with its real hook.
     #[test]
-    #[cfg(feature = "image")]
     fn mermaid_promotion_failure_rejects_under_strict() {
-        use crate::discovery::detection::ImageSupport;
+        use crate::render_tree::{DiagramRenderError, DiagramRenderRequest, DiagramRenderer};
         use renderable::tree::{GraphicsMode, TerminalMermaidMode};
+
+        struct FailingDiagrams;
+        impl DiagramRenderer for FailingDiagrams {
+            fn render_terminal_diagram(
+                &self,
+                _request: &DiagramRenderRequest<'_>,
+            ) -> Result<String, DiagramRenderError> {
+                Err(DiagramRenderError::new("no image support"))
+            }
+        }
 
         let mermaid_node =
             RenderNode::code(Some("mermaid".to_string()), None, "flowchart LR\n    A --> B");
@@ -5472,7 +5486,8 @@ mod render_tree_tests {
             .image_support(ImageSupport::None)
             .is_tty(false)
             .build();
-        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict);
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict)
+            .with_diagram_renderer(Rc::new(FailingDiagrams));
         opts.context.graphics_mode = GraphicsMode::Rich;
         opts.context.mermaid_mode = TerminalMermaidMode::Image;
 

@@ -7,7 +7,7 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use biscuit_terminal::components::mermaid::MermaidDiagram;
+//! use biscuit_visualized::components::mermaid::MermaidDiagram;
 //! use biscuit_terminal::terminal::Terminal;
 //!
 //! let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
@@ -24,22 +24,22 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::components::renderable::TerminalRenderable;
-use crate::components::terminal_image::{ImageWidth, ResolvedDimensions, TerminalImage};
-use crate::discovery::fonts::CellSize;
-use crate::utils::layout::LayoutTerminalExt;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::terminal_image::{ImageWidth, ResolvedDimensions, TerminalImage};
+use biscuit_terminal::discovery::fonts::CellSize;
+use biscuit_terminal::utils::layout::LayoutTerminalExt;
 
 use renderable::tree::{RenderNode, TreeRenderable};
 
 // Re-export types from biscuit-visualized
-pub use biscuit_visualized::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
+pub use crate::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
 
 /// Errors that can occur during terminal rendering of Mermaid diagrams.
 #[derive(Error, Debug)]
 pub enum MermaidRenderError {
     /// Visualization error from biscuit-visualized
     #[error(transparent)]
-    Visualization(#[from] biscuit_visualized::mermaid::MermaidError),
+    Visualization(#[from] crate::mermaid::MermaidError),
     /// Terminal does not support inline images
     #[error("Terminal does not support inline images")]
     NoImageSupport,
@@ -51,22 +51,22 @@ pub enum MermaidRenderError {
 /// The theme for the attached terminal's color mode; an unknown mode is dark.
 pub(crate) fn terminal_theme() -> MermaidTheme {
     let is_dark = matches!(
-        crate::discovery::detection::color_mode(),
-        crate::discovery::detection::ColorMode::Dark
-            | crate::discovery::detection::ColorMode::Unknown
+        biscuit_terminal::discovery::detection::color_mode(),
+        biscuit_terminal::discovery::detection::ColorMode::Dark
+            | biscuit_terminal::discovery::detection::ColorMode::Unknown
     );
     MermaidTheme::for_color_mode(is_dark)
 }
 
 /// A Mermaid diagram renderer for terminal output.
 ///
-/// This struct wraps `biscuit_visualized::mermaid::MermaidDiagram` and adds
+/// This struct wraps `crate::mermaid::MermaidDiagram` and adds
 /// terminal-specific display capabilities using `viuer`.
 ///
 /// ## Examples
 ///
 /// ```ignore
-/// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme, MermaidConfig};
+/// use biscuit_visualized::components::mermaid::{MermaidRenderer, MermaidTheme, MermaidConfig};
 ///
 /// // Basic usage with default settings (dark theme)
 /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
@@ -112,7 +112,7 @@ pub(crate) fn terminal_theme() -> MermaidTheme {
 #[derive(Debug, Clone)]
 pub(crate) struct MermaidRenderer {
     /// The inner diagram from biscuit-visualized
-    diagram: biscuit_visualized::mermaid::MermaidDiagram,
+    diagram: crate::mermaid::MermaidDiagram,
     /// Scale factor for output resolution (default: 2)
     scale: u32,
     /// Use transparent background
@@ -127,13 +127,13 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    /// use biscuit_visualized::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
     /// ```
     pub fn new<S: Into<String>>(instructions: S) -> Self {
         Self {
-            diagram: biscuit_visualized::mermaid::MermaidDiagram::new(instructions),
+            diagram: crate::mermaid::MermaidDiagram::new(instructions),
             scale: 2,
             transparent_background: false,
         }
@@ -146,14 +146,14 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    /// use biscuit_visualized::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::for_terminal("flowchart LR\n    A --> B");
     /// // Theme is automatically configured based on terminal color mode
     /// ```
     pub fn for_terminal<S: Into<String>>(instructions: S) -> Self {
         Self {
-            diagram: biscuit_visualized::mermaid::MermaidDiagram::new(instructions)
+            diagram: crate::mermaid::MermaidDiagram::new(instructions)
                 .with_theme(terminal_theme()),
             scale: 2,
             transparent_background: true,
@@ -165,7 +165,7 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
+    /// use biscuit_visualized::components::mermaid::{MermaidRenderer, MermaidTheme};
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
     ///     .with_theme(MermaidTheme::Neutral);
@@ -178,7 +178,7 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    /// use biscuit_visualized::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
     ///     .with_scale(3); // Extra sharp
@@ -196,7 +196,7 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    /// use biscuit_visualized::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
     ///     .with_transparent_background(true);
@@ -211,7 +211,7 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
+    /// use biscuit_visualized::components::mermaid::{MermaidRenderer, MermaidTheme};
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
     ///     .with_theme(MermaidTheme::Neutral);
@@ -226,7 +226,7 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    /// use biscuit_visualized::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
     ///     .with_title("My Flowchart");
@@ -243,7 +243,7 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidConfig};
+    /// use biscuit_visualized::components::mermaid::{MermaidRenderer, MermaidConfig};
     ///
     /// let config = MermaidConfig::new()
     ///     .with_point_label_font_size(16)
@@ -270,7 +270,7 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    /// use biscuit_visualized::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
     /// let fallback = renderer.fallback_code_block();
@@ -290,8 +290,8 @@ impl MermaidRenderer {
     ///
     /// Returns error if diagram rendering or file I/O fails.
     pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
-        let request = biscuit_visualized::artifact::RenderRequest {
-            format: biscuit_visualized::artifact::OutputFormat::Svg,
+        let request = crate::artifact::RenderRequest {
+            format: crate::artifact::OutputFormat::Svg,
             scale: self.scale,
             target_width: None,
             transparent_background: self.transparent_background,
@@ -318,17 +318,17 @@ impl MermaidRenderer {
     /// ## Examples
     ///
     /// ```ignore
-    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    /// use biscuit_visualized::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
     /// let (path, cache_hit) = renderer.render_to_cached_png()?;
     /// println!("Rendered to: {:?} (cache hit: {})", path, cache_hit);
-    /// # Ok::<(), biscuit_terminal::components::mermaid::MermaidRenderError>(())
+    /// # Ok::<(), biscuit_visualized::components::mermaid::MermaidRenderError>(())
     /// ```
     /// Measures the diagram's natural size in SVG user units.
     pub fn natural_size(
         &self,
-    ) -> Result<biscuit_visualized::mermaid::NaturalSize, MermaidRenderError> {
+    ) -> Result<crate::mermaid::NaturalSize, MermaidRenderError> {
         Ok(self.diagram.natural_size()?)
     }
 
@@ -346,8 +346,8 @@ impl MermaidRenderer {
         &self,
         target_width: u32,
     ) -> Result<(PathBuf, bool), MermaidRenderError> {
-        let request = biscuit_visualized::artifact::RenderRequest {
-            format: biscuit_visualized::artifact::OutputFormat::Png,
+        let request = crate::artifact::RenderRequest {
+            format: crate::artifact::OutputFormat::Png,
             scale: self.scale,
             target_width: Some(target_width),
             transparent_background: self.transparent_background,
@@ -396,7 +396,7 @@ impl From<&str> for MermaidRenderer {
 /// ## Examples
 ///
 /// ```rust
-/// use biscuit_terminal::components::mermaid::{MermaidDiagram, MermaidTheme};
+/// use biscuit_visualized::components::mermaid::{MermaidDiagram, MermaidTheme};
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::components::terminal_image::ImageWidth;
 ///
@@ -437,8 +437,8 @@ impl From<&str> for MermaidRenderer {
 #[derive(Debug, Clone)]
 pub struct MermaidDiagram {
     renderer: MermaidRenderer,
-    width: super::terminal_image::ImageWidth,
-    layout: crate::utils::layout::Layout,
+    width: biscuit_terminal::components::terminal_image::ImageWidth,
+    layout: biscuit_terminal::utils::layout::Layout,
 }
 
 impl MermaidDiagram {
@@ -451,13 +451,13 @@ impl MermaidDiagram {
     pub fn new<S: Into<String>>(instructions: S) -> Self {
         Self {
             renderer: MermaidRenderer::for_terminal(instructions),
-            width: super::terminal_image::ImageWidth::Scale(1.0),
-            layout: crate::utils::layout::Layout::default(),
+            width: biscuit_terminal::components::terminal_image::ImageWidth::Scale(1.0),
+            layout: biscuit_terminal::utils::layout::Layout::default(),
         }
     }
 
     /// Sets the display width for the rendered image.
-    pub fn with_width(mut self, width: super::terminal_image::ImageWidth) -> Self {
+    pub fn with_width(mut self, width: biscuit_terminal::components::terminal_image::ImageWidth) -> Self {
         self.width = width;
         self
     }
@@ -539,7 +539,7 @@ impl MermaidDiagram {
     /// ## Examples
     ///
     /// ```rust,no_run
-    /// use biscuit_terminal::components::mermaid::MermaidDiagram;
+    /// use biscuit_visualized::components::mermaid::MermaidDiagram;
     /// use biscuit_terminal::terminal::Terminal;
     ///
     /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
@@ -558,7 +558,7 @@ impl MermaidDiagram {
     #[tracing::instrument(skip(self, term))]
     pub fn try_render(
         &self,
-        term: &crate::terminal::Terminal,
+        term: &biscuit_terminal::terminal::Terminal,
     ) -> Result<MermaidRenderResult, MermaidRenderError> {
         let (output, png_path, cache_hit, width_cells) = self.render_to_image(term)?;
         // Diagrams are inherently block-cohesive (image escapes or fenced code
@@ -604,7 +604,7 @@ impl MermaidDiagram {
     ///
     /// Returns the raw image output on success, or the fallback code block
     /// on failure.
-    fn render_raw(&self, term: &crate::terminal::Terminal) -> String {
+    fn render_raw(&self, term: &biscuit_terminal::terminal::Terminal) -> String {
         match self.render_to_image(term) {
             Ok((output, _, _, _)) => output,
             Err(_) => self.renderer.fallback_code_block(),
@@ -618,7 +618,7 @@ impl MermaidDiagram {
     /// after applying margins and the configured [`ImageWidth`] spec.
     fn render_to_image(
         &self,
-        term: &crate::terminal::Terminal,
+        term: &biscuit_terminal::terminal::Terminal,
     ) -> Result<(String, PathBuf, bool, u32), MermaidRenderError> {
         // Translate the configured display width (cells) into pixels using the
         // terminal's detected cell size, and have the rasterizer render the
@@ -639,7 +639,7 @@ impl MermaidDiagram {
             ImageWidth::Scale(_) => ImageWidth::Characters(dims.image_width),
             ref other => other.clone(),
         };
-        let term_image = super::terminal_image::TerminalImage::new(&png_path)
+        let term_image = biscuit_terminal::components::terminal_image::TerminalImage::new(&png_path)
             .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
             .with_width(display_width);
 
@@ -669,15 +669,15 @@ pub struct MermaidRenderResult {
     pub width_cells: u32,
 }
 
-impl super::renderable::TerminalRenderable for MermaidDiagram {
-    fn render(&self, term: &crate::terminal::Terminal) -> String {
+impl biscuit_terminal::components::renderable::TerminalRenderable for MermaidDiagram {
+    fn render(&self, term: &biscuit_terminal::terminal::Terminal) -> String {
         let content = self.render_raw(term);
         self.layout.apply_block_layout(&content, term.width())
     }
 
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
-        let term = crate::terminal::Terminal::new_optimistic(width);
+        let term = biscuit_terminal::terminal::Terminal::new_optimistic(width);
         let content = self.render_raw(&term);
         self.layout.apply_block_layout(&content, width)
     }
@@ -690,11 +690,11 @@ impl super::renderable::TerminalRenderable for MermaidDiagram {
         self
     }
 
-    fn layout(&self) -> &crate::utils::layout::Layout {
+    fn layout(&self) -> &biscuit_terminal::utils::layout::Layout {
         &self.layout
     }
 
-    fn layout_mut(&mut self) -> &mut crate::utils::layout::Layout {
+    fn layout_mut(&mut self) -> &mut biscuit_terminal::utils::layout::Layout {
         &mut self.layout
     }
 }
@@ -801,7 +801,7 @@ mod tests {
 
     #[test]
     fn diagram_builder_methods_chain() {
-        use crate::components::terminal_image::ImageWidth;
+        use biscuit_terminal::components::terminal_image::ImageWidth;
 
         let diagram = MermaidDiagram::new("flowchart LR\n    X --> Y")
             .with_title("Test")
@@ -830,10 +830,10 @@ mod tests {
     /// resolved `ImageWidth` spec.
     #[test]
     fn diagram_try_render_populates_width_cells() {
-        use crate::components::terminal_image::ImageWidth;
+        use biscuit_terminal::components::terminal_image::ImageWidth;
 
         let diagram = MermaidDiagram::new("pie\n    A: 1").with_width(ImageWidth::Percent(0.5));
-        let term = crate::terminal::Terminal::new_optimistic(80);
+        let term = biscuit_terminal::terminal::Terminal::new_optimistic(80);
 
         match diagram.try_render(&term) {
             Ok(result) => {

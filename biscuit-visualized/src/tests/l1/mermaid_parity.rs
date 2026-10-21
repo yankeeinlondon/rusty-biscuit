@@ -24,11 +24,13 @@
 //! installation (the L2 tests exercise it); these unit tests pin the
 //! honored subset without invoking the external renderer.
 
+// biscuit-terminal's shared parity helpers, compiled here unchanged
+// (`source-inputs` in Cargo.toml).
 #[allow(clippy::duplicate_mod)]
-#[path = "parity_helpers.rs"]
+#[path = "../../../../biscuit-terminal/lib/tests/l1/parity_helpers.rs"]
 mod parity_helpers;
 
-use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_visualized::components::mermaid::MermaidDiagram;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
 use biscuit_terminal::discovery::detection::{ImageSupport, TerminalApp};
@@ -358,4 +360,12 @@ fn fill_hugs_on_degenerate_terminal_width() {
         "Fill collapses to 1 cell on a degenerate 1-cell terminal: {:?}",
         dims,
     );
+}
+
+#[test]
+fn shared_parity_helpers_build_an_optimistic_terminal() {
+    // Spelled for CI's test-input index, which does not count the `#[path]`
+    // include above.
+    let _ = include_str!("../../../../biscuit-terminal/lib/tests/l1/parity_helpers.rs");
+    assert_eq!(test_terminal(80).width(), 80);
 }

@@ -105,7 +105,7 @@ Protocol selection:
 
 ## Diagram Commands
 
-See [Mermaid Diagrams](./mermaid-diagrams.md) for comprehensive diagram documentation.
+See [Diagrams](./diagrams.md) for comprehensive diagram documentation.
 
 Render failures are reported as errors and return a non-zero exit code. `bt` does not auto-print Mermaid code-block fallback output.
 
@@ -455,4 +455,4 @@ bt --json | jq '{font, font_size, is_nerd_font}'
 
 - [Terminal Struct](./terminal-struct.md) - Same data as library API
 - [Image Rendering](./image-rendering.md) - Image implementation details
-- [Mermaid Diagrams](./mermaid-diagrams.md) - Comprehensive diagram documentation
+- [Diagrams](./diagrams.md) - Comprehensive diagram documentation

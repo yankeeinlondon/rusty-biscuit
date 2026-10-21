@@ -66,7 +66,7 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use biscuit_terminal::components::git_graph::{GitGraph, GraphLine, LaneEntry};
+//! use biscuit_visualized::components::git_graph::{GitGraph, GraphLine, LaneEntry};
 //! use biscuit_terminal::components::renderable::TerminalRenderable;
 //! use biscuit_terminal::terminal::Terminal;
 //!
@@ -90,16 +90,16 @@ use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::tree::{RenderNode, TreeRenderable};
 
 use crate::components::mermaid::{MermaidDiagram, MermaidRenderError, MermaidTheme, terminal_theme};
-use crate::components::prose::Prose;
-use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
-use crate::components::terminal_image::{
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
+use biscuit_terminal::components::terminal_image::{
     ImageWidth, SCALE_REFERENCE_TEXT_UNITS, TerminalImage,
 };
-use crate::discovery::fonts::CellSize;
-use crate::terminal::Terminal;
-use crate::utils::layout::Layout;
+use biscuit_terminal::discovery::fonts::CellSize;
+use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::Layout;
 
-pub use biscuit_visualized::mermaid::NaturalSize;
+pub use crate::mermaid::NaturalSize;
 
 /// The scale `GitGraph` draws at: gitGraph's 10-unit commit IDs and 14–16-unit
 /// branch labels need more than the 100% body-text reference to read well.
@@ -484,7 +484,7 @@ impl GitGraph {
     pub fn plan(&self, viewport: GraphViewport) -> Option<GitGraphPlan> {
         let theme = self.theme.unwrap_or_else(terminal_theme);
         self.plan_with(viewport, &|text: &str| {
-            biscuit_visualized::mermaid::MermaidDiagram::new(text)
+            crate::mermaid::MermaidDiagram::new(text)
                 .with_theme(theme)
                 .natural_size()
                 .ok()

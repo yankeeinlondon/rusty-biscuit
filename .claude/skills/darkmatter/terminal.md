@@ -164,17 +164,23 @@ to any code that paints adjacent background segments by hand.
 
 ## Mermaid Diagrams
 
-Terminal (via biscuit-terminal):
+Terminal (via biscuit-visualized's `MermaidDiagram` component):
 
 ```rust
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::terminal::Terminal;
+use biscuit_visualized::components::mermaid::MermaidDiagram;
 
-let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
-match renderer.render_for_terminal() {
-    Ok(()) => {},
-    Err(_) => println!("{}", renderer.fallback_code_block()),
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+match diagram.try_render(&Terminal::new()) {
+    Ok(result) => print!("{}", result.output),
+    Err(_) => println!("{}", diagram.fallback_code_block()),
 }
 ```
+
+In the render-tree terminal path, `MermaidMode::Image` draws fences through
+`biscuit_visualized::components::TerminalDiagramRenderer`, which
+`markdown/render_tree/entrypoints.rs` installs as the diagram hook; without
+it biscuit-terminal renders every fence as code.
 
 Browser (via darkmatter): Mermaid browser output is a page **feature**, not a
 method on `Mermaid`. Render a `lang="mermaid"` fence through

@@ -22,14 +22,15 @@ clap = ["dep:clap", "renderable/clap"]
 # RuleAlignment, RuleWeight}`). Off by default — opt in when persisting or
 # round-tripping these values through JSON/YAML.
 serde = []
-# Enables SVG rasterization via resvg for terminal image rendering.
-image = ["dep:resvg", "dep:biscuit-visualized", "biscuit-visualized/image"]
+# Enables SVG rasterization via resvg for terminal image rendering (SVG
+# images and graphical horizontal rules). Diagrams live in
+# `biscuit-visualized`, which depends on this crate, never the reverse.
+image = ["dep:resvg"]
 terminal-tests = ["dep:biscuit-test-harness", "dep:test-toolkit"]
 browser-tests = ["dep:biscuit-browser-harness"]
 
 [dependencies]
 base64 = "0.22"
-biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"], optional = true }
 # Structured config parsing for app-metadata value extraction. Normalizes
 # TOML/YAML/JSON5 to `serde_json::Value`; the underlying parsers stay indirect.
 # `file-reference` resolves Prose link destinations for terminal OSC 8 links

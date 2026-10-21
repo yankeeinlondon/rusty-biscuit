@@ -126,6 +126,15 @@ features their tier requires.
   is the only thing that detaches the controlling terminal; a new process group
   alone does not. One syscall, so the raw binding rather than a wrapper crate.
 
+## Mermaid Diagram Components
+
+- `biscuit-visualized` with the `terminal` feature supplies the
+  `MermaidDiagram` component (`mermaid::render_terminal`, SVG for
+  `render_tree::code_renderer`) and `TerminalDiagramRenderer`, the diagram
+  hook the render-tree terminal path installs. `biscuit-terminal` no longer
+  carries diagrams, so darkmatter depends on `biscuit-visualized` directly; it
+  was already in the build through `biscuit-terminal`'s former `image` feature.
+
 ## DMLS (`darkmatter/dmls`)
 
 The Darkmatter Language Server keeps its dependency surface small and

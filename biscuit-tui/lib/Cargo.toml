@@ -8,7 +8,7 @@ license = "AGPL-3.0-only"
 # Bridge biscuit-terminal / darkmatter `TerminalRenderable` components
 # (CodeBlock, Table, Prose, ...) into ratatui `Text` via `TuiRenderable`.
 # Off by default: biscuit-terminal carries heavy transitive weight (syntect,
-# and resvg via biscuit-visualized) that pure input-widget consumers should
+# and resvg under its `image` feature) that pure input-widget consumers should
 # not pay for.
 renderables = ["dep:biscuit-terminal", "dep:ansi-to-tui"]
 

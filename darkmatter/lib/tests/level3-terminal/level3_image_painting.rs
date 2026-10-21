@@ -137,6 +137,7 @@ fn level3_rich_image_node_paints_distinctive_pixels() {
         context,
         strictness: RenderStrictness::Warn,
         code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        diagram_renderer: None,
     };
     let rendered = render_terminal_document(&doc, &opts).expect("tree terminal render");
     assert!(

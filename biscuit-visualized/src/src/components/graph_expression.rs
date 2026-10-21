@@ -7,11 +7,11 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use biscuit_terminal::components::graph_expression::{GraphExpression, GraphInputSyntax};
+//! use biscuit_visualized::components::graph_expression::{GraphExpression, GraphInputSyntax};
 //! use biscuit_terminal::components::renderable::TerminalRenderable;
 //! use biscuit_terminal::terminal::Terminal;
 //!
-//! fn example() -> Result<(), biscuit_terminal::components::graph_expression::GraphRenderError> {
+//! fn example() -> Result<(), biscuit_visualized::components::graph_expression::GraphRenderError> {
 //!     let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?;
 //!     let term = Terminal::new();
 //!     println!("{}", graph.render(&term));
@@ -27,21 +27,21 @@ use thiserror::Error;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::tree::{RenderNode, TreeRenderable};
 
-use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
-use crate::components::terminal_image::{ImageWidth, TerminalImage};
-use crate::terminal::Terminal;
-use crate::utils::layout::{Layout, LayoutTerminalExt};
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
+use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
+use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 
 // Re-export types from biscuit-visualized
-pub use biscuit_visualized::graph::{GraphColorTheme, GraphInputSyntax, GraphOrientation};
-pub use biscuit_visualized::raster::available_font_families;
+pub use crate::graph::{GraphColorTheme, GraphInputSyntax, GraphOrientation};
+pub use crate::raster::available_font_families;
 
 /// Errors that can occur during terminal rendering of graph diagrams.
 #[derive(Error, Debug)]
 pub enum GraphRenderError {
     /// Visualization error from biscuit-visualized
     #[error(transparent)]
-    Visualization(#[from] biscuit_visualized::graph::GraphError),
+    Visualization(#[from] crate::graph::GraphError),
     /// Terminal does not support inline images
     #[error("Terminal does not support inline images")]
     NoImageSupport,
@@ -58,7 +58,7 @@ pub enum GraphRenderError {
 /// ## Examples
 ///
 /// ```rust,no_run
-/// use biscuit_terminal::components::graph_expression::{
+/// use biscuit_visualized::components::graph_expression::{
 ///     GraphExpression, GraphInputSyntax, GraphOrientation,
 /// };
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -69,7 +69,7 @@ pub enum GraphRenderError {
 ///     .with_title("My Graph")
 ///     .left_margin(TargetValue::universal(Length::ch(4)));
 ///
-/// # Ok::<(), biscuit_terminal::components::graph_expression::GraphRenderError>(())
+/// # Ok::<(), biscuit_visualized::components::graph_expression::GraphRenderError>(())
 /// ```
 ///
 /// ## Layout & Style Contract
@@ -105,11 +105,11 @@ pub enum GraphRenderError {
 ///   re-resolves the percentage against the margin-narrowed width (the
 ///   double-application bug).
 ///
-/// [`Layout::margin`]: crate::utils::layout::Layout::margin
-/// [`Layout::alignment`]: crate::utils::layout::Layout::alignment
+/// [`Layout::margin`]: biscuit_terminal::utils::layout::Layout::margin
+/// [`Layout::alignment`]: biscuit_terminal::utils::layout::Layout::alignment
 pub struct GraphExpression {
     /// The inner diagram from biscuit-visualized
-    diagram: biscuit_visualized::graph::GraphDiagram,
+    diagram: crate::graph::GraphDiagram,
     /// Scale factor for output resolution (default: 2)
     scale: u32,
     /// Use transparent background
@@ -142,7 +142,7 @@ impl GraphExpression {
         source: impl Into<String>,
         syntax: GraphInputSyntax,
     ) -> Result<Self, GraphRenderError> {
-        let diagram = biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?;
+        let diagram = crate::graph::GraphDiagram::parse(source, syntax)?;
 
         Ok(Self {
             diagram,
@@ -268,8 +268,8 @@ impl GraphExpression {
     /// Returns error if diagram rendering or file I/O fails.
     #[tracing::instrument(skip(self))]
     pub fn render_to_cached_png(&self) -> Result<(PathBuf, bool), GraphRenderError> {
-        let request = biscuit_visualized::artifact::RenderRequest {
-            format: biscuit_visualized::artifact::OutputFormat::Png,
+        let request = crate::artifact::RenderRequest {
+            format: crate::artifact::OutputFormat::Png,
             scale: self.scale,
             target_width: None,
             transparent_background: self.transparent_background,
@@ -303,8 +303,8 @@ impl GraphExpression {
         &self,
         target_width: u32,
     ) -> Result<(PathBuf, bool), GraphRenderError> {
-        let request = biscuit_visualized::artifact::RenderRequest {
-            format: biscuit_visualized::artifact::OutputFormat::Png,
+        let request = crate::artifact::RenderRequest {
+            format: crate::artifact::OutputFormat::Png,
             scale: self.scale,
             target_width: Some(target_width),
             transparent_background: self.transparent_background,
@@ -324,7 +324,7 @@ impl GraphExpression {
 
     /// Checks if the current terminal supports image rendering.
     pub fn terminal_supports_images() -> bool {
-        use crate::discovery::detection::ImageSupport;
+        use biscuit_terminal::discovery::detection::ImageSupport;
 
         let term = Terminal::new();
         !matches!(term.image_support, ImageSupport::None)
@@ -374,11 +374,11 @@ impl GraphExpression {
         syntax: GraphInputSyntax,
         inverse: bool,
     ) -> Result<Self, GraphRenderError> {
-        let color_mode = crate::discovery::detection::color_mode();
+        let color_mode = biscuit_terminal::discovery::detection::color_mode();
         let is_dark = matches!(
             color_mode,
-            crate::discovery::detection::ColorMode::Dark
-                | crate::discovery::detection::ColorMode::Unknown
+            biscuit_terminal::discovery::detection::ColorMode::Dark
+                | biscuit_terminal::discovery::detection::ColorMode::Unknown
         );
 
         let theme = if inverse {
@@ -394,7 +394,7 @@ impl GraphExpression {
         };
 
         let diagram =
-            biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?.with_color_theme(theme);
+            crate::graph::GraphDiagram::parse(source, syntax)?.with_color_theme(theme);
 
         Ok(Self {
             diagram,
@@ -481,8 +481,8 @@ impl GraphExpression {
     /// `<pre><code class="language-dot">…</code></pre>` so the source is
     /// still visible to the reader.
     fn render_browser_svg(&self) -> String {
-        let request = biscuit_visualized::artifact::RenderRequest {
-            format: biscuit_visualized::artifact::OutputFormat::Svg,
+        let request = crate::artifact::RenderRequest {
+            format: crate::artifact::OutputFormat::Svg,
             scale: self.scale,
             // SVG is vector — there's no rasterization step that would benefit
             // from a pixel target. Leave `target_width` unset.
@@ -555,7 +555,7 @@ pub struct GraphRenderResult {
 mod tests {
     use super::*;
 
-    use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
+    use crate::artifact::{OutputFormat, RenderRequest};
 
     #[test]
     fn test_parse() {

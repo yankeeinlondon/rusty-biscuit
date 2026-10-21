@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use std::rc::Rc;
 
-use biscuit_terminal::components::graph_expression::{
+use biscuit_visualized::components::graph_expression::{
     GraphExpression, GraphInputSyntax, GraphOrientation,
 };
 use biscuit_terminal::components::list::UnorderedList;
@@ -259,8 +259,8 @@ fn prepare_deps_graph(
 /// Render an internal dependency diagram for the repository as a graph image.
 ///
 /// Builds a DOT digraph from package dependency data and renders it inline
-/// using biscuit-terminal's [`GraphExpression`] (which layers caching and
-/// terminal-image output over biscuit-visualized). Falls back to a code
+/// using biscuit-visualized's [`GraphExpression`] component (which layers
+/// caching and terminal-image output over its graph renderer). Falls back to a code
 /// block if the terminal cannot display images.
 ///
 /// `width_spec` accepts the same syntax as [`parse_width_spec`]: a percentage
