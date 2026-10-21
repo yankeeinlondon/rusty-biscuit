@@ -159,7 +159,18 @@ when any property other than the managed hash and a bumped `last_updated`
 parses to a different value than before (`ensure_unmanaged_values_kept`).
 Parsing alone is not enough: YAML permits reusing an anchor name, so removing
 the `hash` node's `&h` can re-point a later `*h` at an earlier `&h` and still
-parse. A decision with no new stored hash returns `None` without parsing.
+parse. A decision with no new stored hash returns `None` without the full
+gate; it runs only `refuse_indented_root`, which parses only when the first
+key line is indented.
+
+All three editors (`apply_hash_save_text`, `restore_properties_text`,
+`locate_frontmatter_leaves`) refuse a parsed root mapping whose first
+non-blank, non-comment line is indented, with `FrontmatterTextEdit` reason
+``frontmatter root mapping is indented by N spaces; … (run `md clean --save
+<file>` to fix)`` and the input untouched. Indented YAML is valid and read
+paths (`Markdown`, read-only hashing, `--diff`) accept it; the remedy is
+Biscuit File's `yaml.root-indentation` repair through cleanup. Claudine
+rehearses this gate at inline launch (`rehearse_inline_baseline`).
 
 ## Literal Tokens
 

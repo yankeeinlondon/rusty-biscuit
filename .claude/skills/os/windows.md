@@ -215,8 +215,11 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   template-mode commands resolve a native executable, and `echo` has none on
   a hermetic fixture `PATH`, so `shell: 'echo {{ value }}'` fails on Windows
   while macOS finds `/bin/echo`. Use the `claudine-argv-recorder` binary
-  (copied as `argv-recorder.exe`) and assert its recorded argv; literal shell
-  commands may still use builtins. Do not add an interpreter fallback.
+  (copied as `argv-recorder.exe`) and assert its recorded argv. A literal
+  frontmatter `$(mkdir ran)` run by the `claudine` binary fails the same way
+  (`ShellExpansionError: command not found`) even though the same command
+  passed in-process with `pre_approved_commands`. Use the recorder for a CLI
+  sentinel command too. Do not add an interpreter fallback.
 
 ## Current-directory locks
 
