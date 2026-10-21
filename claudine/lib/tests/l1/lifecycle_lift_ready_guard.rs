@@ -1,13 +1,13 @@
-//! The lifecycle parser and action-model slice stays lift-ready (AC9).
+//! The lifecycle parser and action-model slice names no Claudine runtime
+//! type (AC9).
 //!
 //! `parse.rs`, `action_shape.rs`, `actions.rs`, `validate.rs`,
 //! `signatures.rs`, and `source_map.rs` under
-//! `claudine/lib/src/composition/lifecycle/` move into Darkmatter as a unit,
-//! so none of them may name a Claudine runtime type: global settings, the
+//! `darkmatter/lib/src/lifecycle/` moved into Darkmatter as a unit, so none
+//! of them may name a Claudine runtime type: global settings, the
 //! configuration layer, the provider layer, messaging, or TTS/Playa. The
 //! effect catalog the parser checks `effect` names against is supplied by its
-//! caller instead. Any textual reference fails, a comment included, so the
-//! slice never needs untangling before the lift.
+//! caller instead. Any textual reference fails, a comment included.
 
 /// Every name the slice must not mention.
 const FORBIDDEN: &[&str] = &[
@@ -48,7 +48,7 @@ fn assert_lift_ready(file: &str, source: &str) {
 fn parse_names_no_runtime_type() {
     assert_lift_ready(
         "parse.rs",
-        include_str!("../../src/composition/lifecycle/parse.rs"),
+        include_str!("../../../../darkmatter/lib/src/lifecycle/parse.rs"),
     );
 }
 
@@ -56,7 +56,7 @@ fn parse_names_no_runtime_type() {
 fn action_shape_names_no_runtime_type() {
     assert_lift_ready(
         "action_shape.rs",
-        include_str!("../../src/composition/lifecycle/action_shape.rs"),
+        include_str!("../../../../darkmatter/lib/src/lifecycle/action_shape.rs"),
     );
 }
 
@@ -64,7 +64,7 @@ fn action_shape_names_no_runtime_type() {
 fn actions_names_no_runtime_type() {
     assert_lift_ready(
         "actions.rs",
-        include_str!("../../src/composition/lifecycle/actions.rs"),
+        include_str!("../../../../darkmatter/lib/src/lifecycle/actions.rs"),
     );
 }
 
@@ -72,7 +72,7 @@ fn actions_names_no_runtime_type() {
 fn validate_names_no_runtime_type() {
     assert_lift_ready(
         "validate.rs",
-        include_str!("../../src/composition/lifecycle/validate.rs"),
+        include_str!("../../../../darkmatter/lib/src/lifecycle/validate.rs"),
     );
 }
 
@@ -80,7 +80,7 @@ fn validate_names_no_runtime_type() {
 fn signatures_names_no_runtime_type() {
     assert_lift_ready(
         "signatures.rs",
-        include_str!("../../src/composition/lifecycle/signatures.rs"),
+        include_str!("../../../../darkmatter/lib/src/lifecycle/signatures.rs"),
     );
 }
 
@@ -88,7 +88,7 @@ fn signatures_names_no_runtime_type() {
 fn source_map_names_no_runtime_type() {
     assert_lift_ready(
         "source_map.rs",
-        include_str!("../../src/composition/lifecycle/source_map.rs"),
+        include_str!("../../../../darkmatter/lib/src/lifecycle/source_map.rs"),
     );
 }
 

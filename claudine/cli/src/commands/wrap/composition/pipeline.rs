@@ -1,5 +1,7 @@
 //! Ordered setup pipeline for one composition attempt.
 
+use claudine::composition::LifecycleRunGuardExt;
+use claudine::composition::LifecycleErrorInfoExt;
 use color_eyre::eyre::WrapErr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -7,7 +9,7 @@ use std::time::Instant;
 use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize};
 use super::*;
 use claudine::composition::{
-    DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
+    DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchProtocolExt, LifecycleCatchResult,
     LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
     LifecycleTransitionError, LifecycleTransitionInput, ProxyProvenance, SurfacedHandoff,
     commit_proxy, decide_lifecycle_transition,

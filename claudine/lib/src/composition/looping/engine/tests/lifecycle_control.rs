@@ -1,5 +1,6 @@
 //! lifecycle control loop-engine tests.
 
+use crate::composition::LifecycleErrorInfoExt;
 use super::*;
 use crate::composition::lifecycle::{
     LifecycleConfig, LifecycleEmitter, LifecycleRuntimeContext, parse_lifecycle_config,

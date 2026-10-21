@@ -15,7 +15,7 @@ use claudine::composition::lifecycle::{
 };
 use claudine::composition::lifecycle_executor::{LifecycleEventOutcome, StackControl};
 use claudine::composition::{
-    CompositionError, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState,
+    CompositionError, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchProtocolExt, LifecycleCatchState,
     LifecycleErrorInfo, LifecycleTiming,
     LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionInput,
     decide_lifecycle_transition,

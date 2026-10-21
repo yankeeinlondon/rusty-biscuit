@@ -1,3 +1,5 @@
+use crate::composition::lifecycle::cancellation::CancellationCauseExt;
+use crate::composition::LifecycleErrorInfoExt;
 use super::*;
 use crate::composition::LifecycleErrorInfo;
 use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};

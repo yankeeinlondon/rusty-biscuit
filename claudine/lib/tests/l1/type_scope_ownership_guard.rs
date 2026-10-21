@@ -1,7 +1,8 @@
 //! Claudine's static presence and type decisions go through the shared
 //! `TypeScope` (`2026-10-16-type-narrowing`, acceptance 8).
 //!
-//! The guard reads production source under `claudine/lib/src` (comments,
+//! The guard reads production source under `claudine/lib/src` and
+//! `darkmatter/lib/src/lifecycle`, where Claudine's lifecycle walk lives (comments,
 //! literals, and test-only code blanked by `source_scan`) and fails when:
 //!
 //! - a scope primitive is called outside its reviewed sites: an unguarded
@@ -77,7 +78,8 @@ impl Primitive {
 /// One reviewed call site of a [`Primitive`].
 struct Allowed {
     primitive: Primitive,
-    /// Path relative to `claudine/lib/src`.
+    /// Path relative to `claudine/lib/src`, or the repository-relative path
+    /// of a file in Darkmatter's lifecycle module.
     path: &'static str,
     function: &'static str,
     count: usize,
@@ -105,7 +107,7 @@ const ALLOWED: &[Allowed] = &[
     ),
     allowed(
         Primitive::DeclaredTypes,
-        "composition/lifecycle/shell_template.rs",
+        "darkmatter/lib/src/lifecycle/shell_template.rs",
         "lifecycle_declared_types",
         1,
         "the lifecycle declared layer: the owner's schema with the lifecycle host globals",
@@ -126,7 +128,7 @@ const ALLOWED: &[Allowed] = &[
     ),
     allowed(
         Primitive::Assume,
-        "composition/lifecycle/actions.rs",
+        "darkmatter/lib/src/lifecycle/actions.rs",
         "walk_scoped",
         2,
         "a conditional's `then` and `else` bodies get the true and false sides of its `when`",
@@ -140,7 +142,7 @@ const ALLOWED: &[Allowed] = &[
     ),
     allowed(
         Primitive::PresenceLookup,
-        "composition/lifecycle/shell_template.rs",
+        "darkmatter/lib/src/lifecycle/shell_template.rs",
         PRESENCE_DECISION,
         2,
         "the one presence decision: the scope's type of the placeholder, then its guard",
@@ -352,7 +354,13 @@ fn static_presence_decisions_go_through_the_type_scope() {
     // Spelled for CI's test-input index, which does not count the `#[path]`
     // include above (`source-inputs` in Cargo.toml).
     let _ = include_str!("../../../../darkmatter/cli/tests/common/source_scan.rs");
-    let sources = production_sources(&biscuit_test_harness::manifest_dir!().join("src"));
+    let mut sources = production_sources(&biscuit_test_harness::manifest_dir!().join("src"));
+    // Claudine's lifecycle walk and templates run from Darkmatter's lifecycle
+    // module, so its reviewed sites are held to this allowlist too.
+    let lifecycle = biscuit_test_harness::manifest_dir!().join("../../darkmatter/lib/src/lifecycle");
+    sources.extend(
+        production_sources(&lifecycle).into_iter().map(|(path, text)| (format!("darkmatter/lib/src/lifecycle/{path}"), text)),
+    );
 
     let mut violations = allowlist_violations(&sources, ALLOWED);
     violations.extend(presence_violations(&sources));

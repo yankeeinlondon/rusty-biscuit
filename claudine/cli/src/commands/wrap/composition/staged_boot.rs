@@ -22,6 +22,7 @@
 // `result_large_err` lint the same way (see `harness_orch/prompt.rs`).
 #![allow(clippy::result_large_err)]
 
+use claudine::composition::LifecycleErrorInfoExt;
 use std::collections::{BTreeMap, HashSet};
 use std::io::IsTerminal;
 use std::path::Path;

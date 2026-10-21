@@ -637,14 +637,14 @@ pub fn reject_removed_loop_reads_in_lifecycle(
     source_path: &Path,
     lifecycle: &super::LifecycleConfig,
 ) -> Result<(), CompositionError> {
-    match super::validate::find_removed_loop_read(lifecycle) {
+    match super::binding_checks::find_removed_loop_read(lifecycle) {
         Some((path, retired)) => Err(removed_loop_grammar(source_path, path.to_string(), retired)),
         None => Ok(()),
     }
 }
 
 /// The first retired read in the frontmatter outside the lifecycle stacks,
-/// which [`super::validate::find_removed_loop_read`] covers.
+/// which [`super::binding_checks::find_removed_loop_read`] covers.
 fn removed_loop_read_in_frontmatter(frontmatter: &Value) -> Option<(String, RetiredLoopName)> {
     let Value::Object(map) = frontmatter else {
         return None;

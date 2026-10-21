@@ -62,6 +62,7 @@
 //! - [`diff`] - Reusable diff utilities
 //! - [`effects`] - Mutating side-effect engine (library surface only)
 //! - [`layout`] - Page-level layout primitive ([`DarkmatterPage`])
+//! - [`lifecycle`] - Lifecycle stack action model, parser, and static validators
 //! - [`mermaid`] - Mermaid diagram theming and rendering
 //! - [`prelude`] - Curated re-exports of every renderable component defined
 //!   in Darkmatter (alongside the render traits)
@@ -74,6 +75,7 @@ pub mod diff;
 pub mod editor;
 pub mod effects;
 pub mod layout;
+pub mod lifecycle;
 pub mod markdown;
 pub mod mermaid;
 pub mod prelude;

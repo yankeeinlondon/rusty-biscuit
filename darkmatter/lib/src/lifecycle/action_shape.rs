@@ -11,14 +11,14 @@ pub(super) fn parse_short_form(
     value: &serde_json::Value,
     source_file: &Path,
     property: &str,
-) -> Result<LifecycleActionKind, CompositionError> {
+) -> Result<LifecycleActionKind, LifecycleError> {
     // `break` and `prep` take one string operand at most; the generic
     // one-argument-per-element list reading would accept `break: [reason]`.
     if matches!(verb, "break" | "prep")
         && let serde_json::Value::Array(items) = value
         && !items.is_empty()
     {
-        return Err(CompositionError::LifecycleInvalidArgs {
+        return Err(LifecycleError::LifecycleInvalidArgs {
             source_path: source_file.to_path_buf(),
             property: property.to_string(),
             action: verb.to_string(),
@@ -37,7 +37,7 @@ fn classify_positional_value(
     value: &serde_json::Value,
     source_file: &Path,
     property_name: &str,
-) -> Result<Vec<Expr>, CompositionError> {
+) -> Result<Vec<Expr>, LifecycleError> {
     // The message names the operand the way the expression walker does
     // (`start[0].info.text`, `start[1].ensure_file.arg[1]`).
     let convert = |index: usize, item: &serde_json::Value| {
@@ -46,7 +46,7 @@ fn classify_positional_value(
                 Some(field) => format!("{property_name}.{field}"),
                 None => format!("{property_name}.arg[{index}]"),
             };
-            CompositionError::LifecycleActionInvalidLongForm {
+            LifecycleError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 action: verb.to_string(),
@@ -66,7 +66,7 @@ fn classify_positional_value(
             .map(|(index, item)| convert(index, item))
             .collect(),
         serde_json::Value::Object(_) => Err(
-            CompositionError::LifecycleObjectDataThroughInterpolationPositional {
+            LifecycleError::LifecycleObjectDataThroughInterpolationPositional {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 verb: verb.to_string(),
@@ -101,7 +101,7 @@ pub(super) fn validate_positional_arity_and_build(
     args: Vec<Expr>,
     source_file: &Path,
     property_name: &str,
-) -> Result<LifecycleActionKind, CompositionError> {
+) -> Result<LifecycleActionKind, LifecycleError> {
     use LifecycleControlAction as A;
 
     // Lifecycle control verbs.
@@ -189,7 +189,7 @@ fn build_non_control_positional_action(
     args: Vec<Expr>,
     source_file: &Path,
     property_name: &str,
-) -> Result<LifecycleActionKind, CompositionError> {
+) -> Result<LifecycleActionKind, LifecycleError> {
     // Communication channels.
     if let Some(channel) = CommunicationChannel::from_verb(verb) {
         check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
@@ -242,7 +242,7 @@ fn check_exact_positional_arity(
     expected: usize,
     source_file: &Path,
     property_name: &str,
-) -> Result<(), CompositionError> {
+) -> Result<(), LifecycleError> {
     if args.len() != expected {
         let message = if expected == 0 {
             format!("`{verb}` takes no arguments, got {}", args.len())
@@ -251,7 +251,7 @@ fn check_exact_positional_arity(
         } else {
             format!("`{verb}` expects exactly {expected} arguments, got {}", args.len())
         };
-        return Err(CompositionError::LifecycleWrongArity {
+        return Err(LifecycleError::LifecycleWrongArity {
             source_path: source_file.to_path_buf(),
             property: property_name.to_string(),
             verb: verb.to_string(),
@@ -269,7 +269,7 @@ fn check_optional_positional_arity(
     max: usize,
     source_file: &Path,
     property_name: &str,
-) -> Result<(), CompositionError> {
+) -> Result<(), LifecycleError> {
     if args.len() < min || args.len() > max {
         let message = if min == max {
             format!("`{verb}` expects exactly {min} argument(s), got {}", args.len())
@@ -279,7 +279,7 @@ fn check_optional_positional_arity(
                 args.len()
             )
         };
-        return Err(CompositionError::LifecycleWrongArity {
+        return Err(LifecycleError::LifecycleWrongArity {
             source_path: source_file.to_path_buf(),
             property: property_name.to_string(),
             verb: verb.to_string(),
@@ -296,7 +296,7 @@ fn check_positional_signature(
     signature: &super::actions::Signature,
     source_file: &Path,
     property_name: &str,
-) -> Result<(), CompositionError> {
+) -> Result<(), LifecycleError> {
     let min = signature.required_count();
     let max = signature.max_count();
 
@@ -321,7 +321,7 @@ fn check_positional_signature(
                 args.len()
             ),
         };
-        return Err(CompositionError::LifecycleWrongArity {
+        return Err(LifecycleError::LifecycleWrongArity {
             source_path: source_file.to_path_buf(),
             property: property_name.to_string(),
             verb: verb.to_string(),
@@ -339,11 +339,11 @@ pub(super) fn did_you_mean_verb(verb: &str) -> Option<&'static str> {
 /// The candidate closest to the unknown `word` by case-insensitive edit
 /// distance, within a third of the word's length (at least 2). The first of
 /// equally close candidates wins.
-pub(crate) fn closest_spelling(
+pub fn closest_spelling(
     word: &str,
     candidates: impl IntoIterator<Item = &'static str>,
 ) -> Option<&'static str> {
-    use darkmatter::catalog::levenshtein;
+    use crate::catalog::levenshtein;
 
     let normalized = word.to_lowercase();
     let threshold = (normalized.chars().count() / 3).max(2);
@@ -378,7 +378,7 @@ pub(crate) fn closest_spelling(
 ///
 /// The `when`/`until`/`while` keys are **not** action parameters — they remain
 /// boolean expressions parsed by [`parse_condition`].
-pub(crate) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
+pub fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
     match value {
         serde_json::Value::String(s) => {
             let trimmed = s.trim();
@@ -435,7 +435,7 @@ pub(super) fn build_action_from_params(
     with: Option<WithOverlay>,
     source_file: &Path,
     property: &str,
-) -> Result<LifecycleActionKind, CompositionError> {
+) -> Result<LifecycleActionKind, LifecycleError> {
     // Params are consumed via `params_map.remove(...)` as each verb reads its
     // known keys; any leftovers are reported by `reject_extra_params`.
     let mut params_map = params.into_iter().collect::<std::collections::HashMap<_, _>>();
@@ -451,7 +451,7 @@ pub(super) fn build_action_from_params(
     // Communication actions: one payload parameter, `text`.
     if let Some(channel) = CommunicationChannel::from_verb(verb) {
         let text = params_map.remove("text").ok_or_else(|| {
-            CompositionError::LifecycleActionInvalidLongForm {
+            LifecycleError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property.to_string(),
                 action: verb.to_string(),
@@ -466,7 +466,7 @@ pub(super) fn build_action_from_params(
     // Shell action: `command` required, `on_error` optional.
     if verb == "shell" {
         let command = params_map.remove("command").ok_or_else(|| {
-            CompositionError::LifecycleActionInvalidLongForm {
+            LifecycleError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property.to_string(),
                 action: verb.to_string(),
@@ -489,7 +489,7 @@ pub(super) fn build_action_from_params(
     // functions (`and`, `or`) are positional-only and reject long form.
     if let Some(signature) = expression_function_signature(verb) {
         if signature.variadic {
-            return Err(CompositionError::LifecycleExpressionFunctionKeyValueUnsupported {
+            return Err(LifecycleError::LifecycleExpressionFunctionKeyValueUnsupported {
                 source_path: source_file.to_path_buf(),
                 property: property.to_string(),
                 verb: verb.to_string(),
@@ -538,9 +538,9 @@ fn parse_lifecycle_control_long(
     _signal: LifecycleSignal,
     source_file: &Path,
     property: &str,
-) -> Result<Option<LifecycleControlAction>, CompositionError> {
+) -> Result<Option<LifecycleControlAction>, LifecycleError> {
     use LifecycleControlAction as A;
-    let invalid_args = |message: String| CompositionError::LifecycleInvalidArgs {
+    let invalid_args = |message: String| LifecycleError::LifecycleInvalidArgs {
         source_path: source_file.to_path_buf(),
         property: property.to_string(),
         action: verb.to_string(),
@@ -625,9 +625,9 @@ fn parse_lifecycle_control_long(
 }
 
 /// A `break` reason is text: a literal (`""` included) or an interpolation.
-fn break_reason(reason: Expr, source_file: &Path, property: &str) -> Result<Expr, CompositionError> {
+fn break_reason(reason: Expr, source_file: &Path, property: &str) -> Result<Expr, LifecycleError> {
     match reason {
-        Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => Err(CompositionError::LifecycleInvalidArgs {
+        Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => Err(LifecycleError::LifecycleInvalidArgs {
             source_path: source_file.to_path_buf(),
             property: property.to_string(),
             action: "break".to_string(),
@@ -650,7 +650,7 @@ fn break_code(code: &Expr) -> Option<u8> {
 }
 
 /// A `prep` target is a non-empty file reference or an interpolation.
-fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr, CompositionError> {
+fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr, LifecycleError> {
     let message = match &target {
         Expr::StringLiteral(text) if text.trim().is_empty() => {
             "`prep.target` cannot be empty; name the document, group, or sequence to run".to_string()
@@ -660,7 +660,7 @@ fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr,
         }
         _ => return Ok(target),
     };
-    Err(CompositionError::LifecycleInvalidArgs {
+    Err(LifecycleError::LifecycleInvalidArgs {
         source_path: source_file.to_path_buf(),
         property: property.to_string(),
         action: "prep".to_string(),
@@ -683,7 +683,7 @@ fn collect_named_signature_args(
     params_map: &mut std::collections::HashMap<String, Expr>,
     property: &str,
     source_file: &Path,
-) -> Result<Vec<Expr>, CompositionError> {
+) -> Result<Vec<Expr>, LifecycleError> {
     let required = signature.required_count();
     let mut args = Vec::with_capacity(signature.params.len());
     let mut missing: Vec<&str> = Vec::new();
@@ -695,7 +695,7 @@ fn collect_named_signature_args(
         }
     }
     if !missing.is_empty() {
-        return Err(CompositionError::LifecycleActionInvalidLongForm {
+        return Err(LifecycleError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
             property: property.to_string(),
             action: verb.to_string(),
@@ -716,13 +716,13 @@ fn reject_extra_params(
     leftovers: &std::collections::HashMap<String, Expr>,
     property: &str,
     source_file: &Path,
-) -> Result<(), CompositionError> {
+) -> Result<(), LifecycleError> {
     if leftovers.is_empty() {
         return Ok(());
     }
     let mut keys: Vec<&str> = leftovers.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    Err(CompositionError::LifecycleActionInvalidLongForm {
+    Err(LifecycleError::LifecycleActionInvalidLongForm {
         source_path: source_file.to_path_buf(),
         property: property.to_string(),
         action: verb.to_string(),
@@ -742,4 +742,4 @@ fn expr_to_string(expr: &Expr) -> String {
 }
 
 use super::*;
-use super::super::json_util::json_type_name;
+use crate::markdown::compose::context::merge::json_type_name;

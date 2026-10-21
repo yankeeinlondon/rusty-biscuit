@@ -2,6 +2,7 @@
 //! stack, terminal-event downgrade handling, and
 //! the shared stack-context and `timing` capture helpers.
 
+use claudine::composition::LifecycleRunGuardExt;
 use super::*;
 
 /// Execute a terminal lifecycle event, converting an explicit `Error` control

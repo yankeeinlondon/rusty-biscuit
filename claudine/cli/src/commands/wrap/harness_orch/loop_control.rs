@@ -4,6 +4,8 @@
 // `commands/compose/`, `commands/sequence.rs`).
 #![allow(clippy::result_large_err)]
 
+use claudine::composition::LifecycleRunGuardExt;
+use claudine::composition::LifecycleErrorInfoExt;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::LifecycleSignal;
 use claudine::composition::lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};

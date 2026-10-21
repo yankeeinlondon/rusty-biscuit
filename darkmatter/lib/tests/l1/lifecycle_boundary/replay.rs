@@ -1,32 +1,39 @@
-//! The Stage 1 gate: every production trace recorded by
-//! `claudine/cli/tests/l1/lifecycle_traces.rs` replayed through the prototype
-//! engine by a scripted Claudine-profile host.
+//! The Stage 1 gate, now run against production: every trace recorded by
+//! `claudine/cli/tests/l1/lifecycle_traces.rs` replayed through
+//! `darkmatter::lifecycle::run::Run` by a scripted Claudine host.
 //!
-//! The host answers each request with facts only: an event's outcome
-//! (mutations, an evaluation error, a directive), preparation readiness or a
-//! failure with its stage and entry, an operation's outcome and session, and a
-//! recovery's admission, exhaustion, refusal, adoption, or abort. It also writes
-//! the trace lines production's authored actions and fake services write:
-//! `event`, `err` (rendered from the request's `err` binding), `state`, `shell`
-//! (only when [`Run::shell_permission`] grants it), `work`, and `task`. Each
-//! scenario's documents are its `.md` fixtures transcribed into the small stack
+//! The host answers each request with facts only: an event's
+//! `LifecycleEventOutcome` (an evaluation error, a control) and, for `loop`,
+//! its iteration verdict; preparation readiness or a failure with its stage and
+//! entry; an operation's verdict and session; and a recovery's budget ceiling,
+//! refusal, adoption, or abort. It also writes the trace lines production's
+//! authored actions and fake services write: `event`, `err` (rendered from the
+//! request's selected error), `state`, `shell` (only when
+//! [`Run::shell_permission`] grants it), `work`, and `task`. Each scenario's
+//! documents are its `.md` fixtures transcribed into the small stack
 //! vocabulary [`Host::step`] interprets; its facts are the trace's `# given:`
-//! lines. Claudine's own concerns stay here: retry/resume budgets, sessions,
-//! proxy target resolution and parsing, and container scheduling (one [`Run`]
-//! per subject, sequence order, `fail_fast` cancellation through
-//! [`Run::cancel`]).
+//! lines. Claudine's own concerns stay here: document state and `set`,
+//! retry/resume budgets, proxy target resolution and parsing, `loop`
+//! `until`/`max`, and container scheduling (one [`Run`] per subject, sequence
+//! order, `fail_fast` cancellation through [`Run::cancel`]).
 
 use std::collections::BTreeSet;
+use std::error::Error as StdError;
 use std::fs;
+use std::sync::Arc;
 
-use serde_json::{Map, Value, json};
-
-use super::engine::{
-    ApprovalEpoch, Directive, DocumentInput, Entry, EventOutcome, EventRequest, FailureStage, Finish, HostError,
-    HostFailure, LifecycleError, OperationReport, Outcome, Preparation, RecoveryKind, RecoveryReply, RecoveryRequest,
-    Registry, Reply, RequestKind, Run, SessionAvailability, Ticket,
+use darkmatter::lifecycle::LifecycleSignal;
+use darkmatter::lifecycle::actions::{LifecyclePath, RetryBackoff};
+use darkmatter::lifecycle::envelope::{DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticCatalog, DiagnosticSnapshot};
+use darkmatter::lifecycle::executor::{ActionLocation, LifecycleEventOutcome, StackControl};
+use darkmatter::lifecycle::run::{
+    ApprovalEpoch, AuthoredEvents, CompletionVerdict, EntryReason, EventRequest, FailureStage, Finish, HostFailure,
+    OperationReport, Preparation, RecoveryReply, RecoveryRequest, Reply, RequestKind, Run, RunError, RunSettings,
+    SessionAvailability, Ticket,
 };
-use super::profiles::claudine_profile;
+use darkmatter::lifecycle::LifecycleErrorInfo;
+use indexmap::IndexMap;
+use serde_json::{Map, Value, json};
 
 /// Claudine's refusal of a lifecycle shell before `start`; it is raised like
 /// an evaluation error.
@@ -35,6 +42,63 @@ const SHELL_LOCKED: &str =
 
 /// The code a failed sequence task or group reports to its parent subject.
 const COMPOSITION_FAILED: &str = "composition.failed";
+
+/// Claudine's cancellation cause, read as `err` by a cancelled subject.
+const COMPOSITION_CANCELLED: &str = "composition.cancelled";
+
+/// The fixtures' explicit `error(...)` failures are uncoded.
+struct NoCodes;
+
+impl DiagnosticCatalog for NoCodes {
+    fn select(&self, _: &(dyn StdError + 'static)) -> Option<DiagnosticSnapshot> {
+        None
+    }
+    fn snapshot_for_code(&self, _: &str, _: String) -> Option<DiagnosticSnapshot> {
+        None
+    }
+    fn snapshot_for_error_kind(&self, _: &str, _: String) -> Option<DiagnosticSnapshot> {
+        None
+    }
+}
+
+/// A frontmatter document: its lifecycle keys and its data.
+#[derive(Clone, Debug)]
+pub struct DocumentInput {
+    frontmatter: Map<String, Value>,
+}
+
+impl DocumentInput {
+    pub fn new(_label: &str) -> Self {
+        Self { frontmatter: Map::new() }
+    }
+
+    #[must_use]
+    pub fn with(mut self, key: &str, value: Value) -> Self {
+        self.frontmatter.insert(key.to_string(), value);
+        self
+    }
+
+    fn signal(key: &str) -> Option<LifecycleSignal> {
+        LifecycleSignal::ALL.into_iter().find(|signal| signal.property_name() == key)
+    }
+
+    /// The events this document authors a non-empty stack for.
+    fn authored(&self) -> AuthoredEvents {
+        AuthoredEvents::of(self.frontmatter.iter().filter_map(|(key, value)| {
+            let empty = value.as_array().is_some_and(Vec::is_empty);
+            Self::signal(key).filter(|_| !empty)
+        }))
+    }
+
+    /// The document's data: every key that is not a lifecycle event.
+    fn data(&self) -> Map<String, Value> {
+        self.frontmatter.iter().filter(|(key, _)| Self::signal(key).is_none()).map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    fn stack(&self, signal: LifecycleSignal) -> Option<&Value> {
+        self.frontmatter.get(signal.property_name())
+    }
+}
 
 /// One lifecycle subject: a document, step, group, leg, or nested sequence.
 struct Subject {
@@ -121,9 +185,11 @@ impl World {
 struct RunContext<'w> {
     /// The run's documents by ticket document number (1-based).
     documents: Vec<&'w Subject>,
+    /// The current document's data, which `set` writes.
+    state: Map<String, Value>,
     /// The entry of the latest preparation or operation request, which a
     /// failure must name.
-    entry: Entry,
+    entry: EntryReason,
     /// Claudine's recovery ceiling, fixed by a document's first recovery.
     budget: Option<u32>,
     launched_model: Option<Value>,
@@ -136,7 +202,6 @@ struct Race<'w> {
 
 struct Host<'w> {
     world: &'w World,
-    registry: Registry,
     lines: Vec<String>,
     launches: usize,
     /// The entry document's `model` on disk; `set_frontmatter` rewrites it.
@@ -151,38 +216,87 @@ struct Evaluation<'a> {
     prefix: &'a str,
     event: &'a EventRequest,
     state: Map<String, Value>,
-    outcome: EventOutcome,
+    outcome: LifecycleEventOutcome,
 }
 
 impl Evaluation<'_> {
+    fn name(&self) -> &'static str {
+        self.event.signal.property_name()
+    }
+
     /// Ends the stack with an evaluation error.
-    fn raise(&mut self, error: LifecycleError) -> bool {
+    fn raise(&mut self, error: LifecycleErrorInfo) -> bool {
         self.outcome.evaluation_error = Some(error);
         false
     }
 
-    /// Ends the stack with a directive.
-    fn direct(&mut self, directive: Directive) -> bool {
-        self.outcome.directive = Some(directive);
+    /// Ends the stack with a control.
+    fn direct(&mut self, control: StackControl) -> bool {
+        self.outcome.control = Some(control);
         false
     }
 }
 
-fn uncoded(message: &str) -> LifecycleError {
-    LifecycleError::Host(HostError::new("", message))
+fn snapshot(code: &str, message: &str) -> DiagnosticSnapshot {
+    DiagnosticSnapshot {
+        schema_version: DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
+        category: code.split('.').next().unwrap_or(code).to_string(),
+        code: code.to_string(),
+        disposition: "correctable".to_string(),
+        origin: "author".to_string(),
+        severity: "error".to_string(),
+        detail: json!({}),
+        message: message.to_string(),
+        cause: None,
+        frontmatter_excerpt: None,
+    }
+}
+
+/// A failure Claudine's catalog classifies under `code`.
+fn coded(code: &str, message: &str) -> LifecycleErrorInfo {
+    LifecycleErrorInfo::from_snapshot("Host", code.to_string(), snapshot(code, message))
+}
+
+fn uncoded(message: &str) -> LifecycleErrorInfo {
+    LifecycleErrorInfo::from_action_failure_with(&NoCodes, "host", message)
+}
+
+/// A reached template shell whose placeholder reads `null`; Claudine reports
+/// it with the generic composition code.
+fn missing_value(key: &str) -> LifecycleErrorInfo {
+    coded(COMPOSITION_FAILED, &format!("the command reads `{key}`, which is missing"))
+}
+
+fn settings() -> RunSettings {
+    RunSettings::new(Arc::new(NoCodes)).with_cancellation_error(coded(COMPOSITION_CANCELLED, "the run was cancelled"))
+}
+
+/// Expression truthiness for the values the fixtures guard on.
+fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(flag) => *flag,
+        Value::String(text) => !text.is_empty(),
+        _ => true,
+    }
 }
 
 /// The fixtures' `err.code || 'uncoded: ' + err.msg`.
-fn render(error: &LifecycleError) -> String {
+fn render(error: &RunError) -> String {
     match error {
-        LifecycleError::Host(error) if error.code.is_empty() => format!("uncoded: {}", error.message),
-        other => other.code().to_string(),
+        RunError::Reported(error) => match &error.snapshot {
+            Some(snapshot) => snapshot.code.clone(),
+            None => format!("uncoded: {}", error.msg),
+        },
+        other => other.label().to_string(),
     }
 }
 
 fn render_value(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
+        // `{{ key }}` renders a null as empty text.
+        Value::Null => String::new(),
         other => other.to_string(),
     }
 }
@@ -191,11 +305,26 @@ fn answer(run: &mut Run, reply: Reply) {
     run.answer(reply).unwrap_or_else(|error| panic!("{error:?} after {:?}", run.transcript_lines()));
 }
 
+fn retry(max_attempts: u32) -> StackControl {
+    StackControl::Retry { max_attempts, backoff: RetryBackoff::Fixed, delay: "0s".to_string(), overlay: IndexMap::new() }
+}
+
+fn resume(max_attempts: u32) -> StackControl {
+    StackControl::Resume { message: String::new(), max_attempts }
+}
+
+fn proxy(signal: LifecycleSignal, target: &str) -> StackControl {
+    StackControl::Proxy {
+        target: target.to_string(),
+        overlay: IndexMap::new(),
+        location: ActionLocation::new(signal, LifecyclePath::root(signal.property_name())),
+    }
+}
+
 impl<'w> Host<'w> {
     fn new(world: &'w World) -> Self {
         Self {
             world,
-            registry: claudine_profile(),
             lines: Vec::new(),
             launches: 0,
             disk_model: world.root.document.frontmatter.get("model").cloned(),
@@ -205,22 +334,35 @@ impl<'w> Host<'w> {
 
     /// Drives one subject's run to its finish.
     fn drive(&mut self, subject: &'w Subject) -> Finish {
-        let mut run = Run::start(&self.registry, subject.document.clone()).expect("fixture documents start");
-        let mut cx = RunContext { documents: vec![subject], entry: Entry::Initial, budget: None, launched_model: None };
+        let mut run = Run::start(settings(), subject.document.authored());
+        let mut cx = RunContext {
+            documents: vec![subject],
+            state: subject.document.data(),
+            entry: EntryReason::Initial,
+            budget: None,
+            launched_model: None,
+        };
         loop {
             let request = run.pending();
             let ticket = request.ticket();
             let current: &'w Subject = cx.documents[ticket.document() as usize - 1];
             let reply = match request.kind() {
                 RequestKind::Done(finish) => return *finish,
-                RequestKind::EvaluateEvent(event) => Reply::Event(self.evaluate(&run, &ticket, current.prefix, event)),
+                RequestKind::EvaluateEvent(event) => {
+                    let (outcome, iterate) = self.evaluate(&run, &ticket, current, event, &mut cx.state);
+                    if event.signal == LifecycleSignal::Loop {
+                        Reply::Gate { outcome, iterate }
+                    } else {
+                        Reply::Event(outcome)
+                    }
+                }
                 RequestKind::Prepare { entry } => {
                     cx.entry = *entry;
                     Reply::Prepared(match current.preflight {
                         Some(code) => Preparation::Failed(HostFailure {
                             stage: FailureStage::Preflight,
                             entry: *entry,
-                            error: HostError::new(code, code),
+                            error: coded(code, code),
                         }),
                         None => Preparation::Ready { epoch: ApprovalEpoch(u64::from(ticket.document())) },
                     })
@@ -232,8 +374,8 @@ impl<'w> Host<'w> {
                     } else {
                         answer(&mut run, Reply::Operation(OperationReport::Started { session: SessionAvailability::Unavailable }));
                         match self.perform(&current.operation) {
-                            Some(outcome) => {
-                                Reply::Operation(OperationReport::Completed { outcome, session: SessionAvailability::Unavailable })
+                            Some(verdict) => {
+                                Reply::Operation(OperationReport::Completed { verdict, session: SessionAvailability::Unavailable })
                             }
                             None => {
                                 run.cancel().expect("a subject awaiting its work can be cancelled");
@@ -249,18 +391,32 @@ impl<'w> Host<'w> {
         }
     }
 
-    fn evaluate(&mut self, run: &Run, ticket: &Ticket, prefix: &str, event: &EventRequest) -> EventOutcome {
-        let mut eval = Evaluation { run, ticket, prefix, event, state: event.state.clone(), outcome: EventOutcome::default() };
-        match (event.name.as_str(), &event.stack) {
+    /// The event's outcome, and for `loop` whether another iteration runs.
+    fn evaluate(
+        &mut self,
+        run: &Run,
+        ticket: &Ticket,
+        subject: &Subject,
+        event: &EventRequest,
+        state: &mut Map<String, Value>,
+    ) -> (LifecycleEventOutcome, bool) {
+        let mut eval = Evaluation {
+            run,
+            ticket,
+            prefix: subject.prefix,
+            event,
+            state: state.clone(),
+            outcome: LifecycleEventOutcome::default(),
+        };
+        let mut iterate = false;
+        match (event.signal, subject.document.stack(event.signal)) {
             // Claudine's `loop` key holds the gate's configuration and stack.
-            ("loop", Some(config)) => {
+            (LifecycleSignal::Loop, Some(config)) => {
                 let steps = config.get("gate").and_then(Value::as_array).cloned().unwrap_or_default();
                 if self.steps(&mut eval, &steps) {
                     let max = config.get("max").and_then(Value::as_u64).unwrap_or(1);
                     let satisfied = config.get("until") == Some(&json!("true"));
-                    if !satisfied && u64::from(ticket.iteration()) < max {
-                        eval.outcome.directive = Some(Directive::Iterate);
-                    }
+                    iterate = !satisfied && u64::from(ticket.iteration()) < max;
                 }
             }
             (_, Some(Value::Array(steps))) => {
@@ -268,7 +424,8 @@ impl<'w> Host<'w> {
             }
             _ => {}
         }
-        eval.outcome
+        *state = eval.state;
+        (eval.outcome, iterate)
     }
 
     /// Runs `steps` in order; `false` when one ended the stack.
@@ -278,24 +435,22 @@ impl<'w> Host<'w> {
 
     /// One authored action. The vocabulary mirrors the fixture documents:
     /// `"event"`/`"err"` are their two `append_line`s, `"loop.count"` the
-    /// loop-state line, `{"state": key}` a state line, and `{"frontmatter":
-    /// file}` a guard reading a missing file.
+    /// loop-state line, `{"state": key}` a state line, `{"frontmatter":
+    /// file}` a guard reading a missing file, and `{"template_shell": key}` a
+    /// shell approved only as its template, which reads `key` when it starts.
     fn step(&mut self, eval: &mut Evaluation<'_>, step: &Value) -> bool {
-        let name = format!("{}{}", eval.prefix, eval.event.name);
+        let name = format!("{}{}", eval.prefix, eval.name());
         if let Some(verb) = step.as_str() {
             match verb {
                 "event" => self.lines.push(format!("event {name}")),
-                "err" => match eval.event.read_err() {
-                    Ok(error) => self.lines.push(format!("err {}", error.map_or_else(|| "none".to_string(), render))),
-                    Err(unavailable) => return eval.raise(unavailable),
-                },
+                "err" => self.lines.push(format!("err {}", eval.event.error.as_ref().map_or_else(|| "none".to_string(), render))),
                 "loop.count" => self.lines.push(format!("state loop.count={}", eval.ticket.iteration())),
                 "shell" => match eval.run.shell_permission(eval.ticket) {
                     Ok(_) => self.lines.push(format!("shell {name}")),
                     Err(_) => return eval.raise(uncoded(SHELL_LOCKED)),
                 },
-                "skip" => return eval.direct(Directive::Skip),
-                "break" => return eval.direct(Directive::Break),
+                "skip" => return eval.direct(StackControl::Skip),
+                "break" => return eval.direct(StackControl::Break { reason: None, code: 0 }),
                 other => panic!("unknown step {other}"),
             }
             return true;
@@ -303,7 +458,8 @@ impl<'w> Host<'w> {
         let action = step.as_object().expect("a step is a verb or a one-key action");
         if let Some(condition) = action.get("when") {
             let holds = match condition {
-                Value::String(read) if read == "err" => matches!(eval.event.read_err(), Ok(Some(_))),
+                Value::String(read) if read == "err" => eval.event.error.is_some(),
+                Value::String(key) => eval.state.get(key).is_some_and(truthy),
                 Value::Object(test) => test.get("loop.count").and_then(Value::as_u64) == Some(u64::from(eval.ticket.iteration())),
                 other => panic!("unknown condition {other}"),
             };
@@ -317,7 +473,6 @@ impl<'w> Host<'w> {
             "set" => {
                 for (key, value) in operand.as_object().expect("a `set` map") {
                     eval.state.insert(key.clone(), value.clone());
-                    eval.outcome.mutations.push((key.clone(), value.clone()));
                 }
             }
             "state" => {
@@ -325,61 +480,70 @@ impl<'w> Host<'w> {
                 let value = eval.state.get(key).map_or_else(|| "null".to_string(), render_value);
                 self.lines.push(format!("state {key}={value}"));
             }
+            "template_shell" => {
+                let key = text();
+                if eval.run.shell_permission(eval.ticket).is_err() {
+                    return eval.raise(uncoded(SHELL_LOCKED));
+                }
+                // The host fills the template: a placeholder that reads `null`
+                // when the action starts is a missing value, and nothing runs.
+                match eval.state.get(key).filter(|value| !value.is_null()) {
+                    Some(value) => self.lines.push(format!("shell {} {}", eval.name(), render_value(value))),
+                    None => return eval.raise(missing_value(key)),
+                }
+            }
             "set_frontmatter" => self.disk_model = Some(operand.clone()),
             "frontmatter" => return eval.raise(uncoded(&format!("invalid file path: {}", text()))),
-            "error" => return eval.direct(Directive::Error(uncoded(text()))),
-            "retry" => return eval.direct(Directive::Retry { max_attempts: attempts() }),
-            "resume" => return eval.direct(Directive::Resume { max_attempts: attempts() }),
-            "proxy" => return eval.direct(Directive::Proxy { target: text().to_string() }),
+            "error" => return eval.direct(StackControl::Error { reason: Some(text().to_string()) }),
+            "retry" => return eval.direct(retry(attempts())),
+            "resume" => return eval.direct(resume(attempts())),
+            "proxy" => {
+                let control = proxy(eval.event.signal, text());
+                return eval.direct(control);
+            }
             other => panic!("unknown action {other}"),
         }
         true
     }
 
-    fn launch(&mut self, entry: Entry, cx: &mut RunContext<'w>) -> OperationReport {
-        if entry == Entry::Resume && cx.launched_model != self.disk_model {
+    fn launch(&mut self, entry: EntryReason, cx: &mut RunContext<'w>) -> OperationReport {
+        if entry == EntryReason::Resume && cx.launched_model != self.disk_model {
             return OperationReport::NotStarted(HostFailure {
                 stage: FailureStage::ResumeIncompatible,
                 entry,
-                error: HostError::new(COMPOSITION_FAILED, "the session's launch identity changed"),
+                error: coded(COMPOSITION_FAILED, "the session's launch identity changed"),
             });
         }
         let exits = self.world.provider_exits;
         let status = exits[self.launches.min(exits.len() - 1)];
         self.launches += 1;
         cx.launched_model = self.disk_model.clone();
-        let mode = if entry == Entry::Resume { "resume" } else { "fresh" };
+        let mode = if entry == EntryReason::Resume { "resume" } else { "fresh" };
         self.lines.push(format!("work {mode} {status}"));
-        let outcome = if status == 0 {
-            Outcome::Succeeded
+        let verdict = if status == 0 {
+            CompletionVerdict::Succeeded
         } else {
-            Outcome::Failed(HostError::new("provider.exited", "the provider exited without a result"))
+            CompletionVerdict::Failed(coded("provider.exited", "the provider exited without a result"))
         };
-        OperationReport::Completed { outcome, session: SessionAvailability::Available }
+        OperationReport::Completed { verdict, session: SessionAvailability::Available }
     }
 
     fn recover(&mut self, recovery: &RecoveryRequest, ticket: &Ticket, cx: &mut RunContext<'w>) -> RecoveryReply {
-        let failure = |stage, code| HostFailure { stage, entry: cx.entry, error: HostError::new(code, code) };
-        match &recovery.directive {
-            Directive::Retry { max_attempts } | Directive::Resume { max_attempts } => {
-                let budget = *cx.budget.get_or_insert(ticket.attempt() + max_attempts);
-                if ticket.attempt() >= budget {
-                    RecoveryReply::Exhausted
-                } else if recovery.kind == RecoveryKind::Resume && recovery.session == SessionAvailability::Unavailable {
-                    RecoveryReply::Aborted(failure(FailureStage::RecoveryRefused, "composition.lifecycle_resume_without_session"))
-                } else {
-                    RecoveryReply::Admitted
-                }
+        let failure = |stage, code| HostFailure { stage, entry: cx.entry, error: coded(code, code) };
+        match &recovery.control {
+            StackControl::Retry { max_attempts, .. } | StackControl::Resume { max_attempts, .. } => {
+                RecoveryReply::Budget { ceiling: *cx.budget.get_or_insert(ticket.attempt() + max_attempts) }
             }
-            Directive::Proxy { target } => match self.world.targets.iter().find(|(path, _)| path == target) {
+            StackControl::Proxy { target, .. } => match self.world.targets.iter().find(|(path, _)| path == target) {
                 None => RecoveryReply::Refused(failure(FailureStage::HandoffRefused, "composition.invalid_file_reference")),
                 Some((_, target)) if target.initialize_runs_shell() => {
                     RecoveryReply::Aborted(failure(FailureStage::Setup, "composition.lifecycle_parse"))
                 }
                 Some((_, target)) => {
                     cx.documents.push(target);
+                    cx.state = target.document.data();
                     cx.budget = None;
-                    RecoveryReply::Adopted(target.document.clone())
+                    RecoveryReply::Adopted(target.document.authored())
                 }
             },
             other => unreachable!("{other:?} is not a recovery"),
@@ -387,8 +551,8 @@ impl<'w> Host<'w> {
     }
 
     /// A container's work; `None` when the subject must be cancelled.
-    fn perform(&mut self, operation: &'w Operation) -> Option<Outcome> {
-        let failed = || Outcome::Failed(HostError::new(COMPOSITION_FAILED, "a task failed"));
+    fn perform(&mut self, operation: &'w Operation) -> Option<CompletionVerdict> {
+        let failed = || CompletionVerdict::Failed(coded(COMPOSITION_FAILED, "a task failed"));
         match operation {
             Operation::Agent => unreachable!("an agent subject launches its provider"),
             Operation::Tasks(tasks) => {
@@ -397,14 +561,14 @@ impl<'w> Host<'w> {
                         return Some(failed());
                     }
                 }
-                Some(Outcome::Succeeded)
+                Some(CompletionVerdict::Succeeded)
             }
             Operation::Race { leg, sibling, fail_fast } => {
                 let cancel = *fail_fast && leg.document.frontmatter.contains_key("cancelled");
                 self.race = Some(Race { sibling, cancel });
                 let leg = self.drive(leg);
                 assert!(self.race.is_none(), "the leg's waiting shell let the sibling run");
-                Some(if sibling.succeeds && leg == Finish::Succeeded { Outcome::Succeeded } else { failed() })
+                Some(if sibling.succeeds && leg == Finish::Succeeded { CompletionVerdict::Succeeded } else { failed() })
             }
         }
     }
@@ -499,10 +663,15 @@ replay_traces! {
     #[test] fn retry_admitted() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-admitted.trace") }
     #[test] fn retry_exhausted() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-exhausted.trace") }
     #[test] fn retry_in_finalize() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-in-finalize.trace") }
+    #[test] fn retry_in_initialize() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize.trace") }
+    #[test] fn retry_in_preflight_blocked() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-in-preflight-blocked.trace") }
+    #[test] fn retry_in_start() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/retry-in-start.trace") }
     #[test] fn sequence_nested_group() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/sequence-nested-group.trace") }
     #[test] fn shell_locked_blocked() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/shell-locked-blocked.trace") }
     #[test] fn shell_relocked_after_proxy() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/shell-relocked-after-proxy.trace") }
     #[test] fn shell_unlocked_blocked_after_start() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/shell-unlocked-blocked-after-start.trace") }
+    #[test] fn guarded_shell_null() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-null.trace") }
+    #[test] fn guarded_shell_present() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.trace") }
     #[test] fn skip() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/skip.trace") }
     #[test] fn success() { include_str!("../../../../../claudine/cli/tests/fixtures/lifecycle_traces/success.trace") }
 }
@@ -524,8 +693,7 @@ fn every_recorded_trace_has_a_replay() {
 mod worlds {
     use serde_json::{Value, json};
 
-    use super::super::engine::DocumentInput;
-    use super::{COMPOSITION_FAILED, Operation, Shell, Subject, Task, World};
+    use super::{COMPOSITION_FAILED, DocumentInput, Operation, Shell, Subject, Task, World};
 
     /// The stacks every fixture authors: each event writes its name, and the
     /// error-reading events write `err`.
@@ -718,6 +886,18 @@ mod worlds {
     }
 
     /// `max_parallel: 1` runs the group's legs in declaration order.
+    pub(super) fn retry_in_initialize() -> World {
+        World::new(entry(document("retry-in-initialize.md").with("initialize", json!(["event", { "retry": 1 }]))))
+    }
+
+    pub(super) fn retry_in_preflight_blocked() -> World {
+        World::new(shell_denied(document("retry-in-preflight-blocked.md").with("blocked", json!(["event", "err", { "retry": 1 }]))))
+    }
+
+    pub(super) fn retry_in_start() -> World {
+        World::new(entry(document("retry-in-start.md").with("start", json!(["event", { "retry": 1 }]))))
+    }
+
     pub(super) fn sequence_nested_group() -> World {
         let leg = |prefix: &'static str, line: &'static str| {
             Task::Subject(Subject::new(prefix, document(prefix)).operation(Operation::Tasks(vec![Task::Shell(shell(line, true))])))
@@ -757,6 +937,23 @@ mod worlds {
         World::new(entry(
             shells_everywhere(document("shell-unlocked-blocked-after-start.md"))
                 .with("start", json!(["event", "shell", { "proxy": "./shell-unlocked-blocked-after-start.missing.md" }])),
+        ))
+    }
+
+    pub(super) fn guarded_shell_present() -> World {
+        World::new(entry(
+            document("guarded-shell-present.md")
+                .with("note", json!("hello"))
+                .with("start", json!(["event", { "when": "note", "then": [{ "template_shell": "note" }] }])),
+        ))
+    }
+
+    pub(super) fn guarded_shell_null() -> World {
+        World::new(entry(
+            document("guarded-shell-null.md").with("note", json!("hello")).with(
+                "start",
+                json!(["event", { "when": "note", "then": [{ "set": { "note": null } }, { "state": "note" }, { "template_shell": "note" }] }]),
+            ),
         ))
     }
 

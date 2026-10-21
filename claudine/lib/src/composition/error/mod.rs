@@ -31,6 +31,7 @@ use crate::harness::ResolutionDetail;
 use crate::provider::Provider;
 use thiserror::Error;
 
+mod lifecycle_authoring;
 #[allow(missing_docs)]
 mod render;
 use render::pointer_to_dotted;
@@ -3149,45 +3150,9 @@ pub enum LoopExpressionCause {
     Evaluate(#[from] Box<ExpressionError>),
 }
 
-/// Lower-layer cause of an `action_value_to_expr` failure.
-///
-/// Carried as the optional typed `#[source]` of
-/// [`CompositionError::LifecycleActionInvalidLongForm`] so a handler can
-/// recover the concrete Darkmatter [`ParseError`] through
-/// [`std::error::Error::source`] instead of re-parsing the flattened message,
-/// whether the failing expression was a whole value or one span of mixed text.
-/// The [`Invalid`](ActionExprError::Invalid) arm carries the genuinely-prose
-/// rejections (a null, an unsupported number, or object/array scalar data)
-/// that never had a typed lower cause.
-///
-/// `Display` is byte-identical to the strings `action_value_to_expr` built
-/// before the cause was typed — typing an error is not a licence to reword it.
-#[derive(Error, Debug)]
-pub enum ActionExprError {
-    /// A whole-value `{{ … }}` interpolation span did not parse.
-    ///
-    /// Boxed to keep `ActionExprError` (and thus the unboxed
-    /// `LifecycleActionInvalidLongForm` source slot) small — [`ParseError`]
-    /// is the heavy member, mirroring how [`MarkdownLoadCause::Parse`] boxes
-    /// its own. The unboxed enum keeps the field downcastable while the boxed
-    /// payload keeps `CompositionError` under `clippy::result_large_err`.
-    #[error("whole-value expression is not valid: {0}")]
-    Parse(#[from] Box<ParseError>),
-    /// A `{{ … }}` span inside mixed text (`"status {{ fm. }}"`) did not
-    /// parse. The text stays a literal template; only its spans' syntax is
-    /// checked, so nothing is evaluated.
-    #[error("interpolation span `{{{{ {expression} }}}}` is not valid: {source}")]
-    SpanParse {
-        /// The span's inner expression text, as authored.
-        expression: String,
-        /// The Darkmatter parse failure.
-        #[source]
-        source: Box<ParseError>,
-    },
-    /// A scalar shape that cannot become an action expression at all.
-    #[error("{0}")]
-    Invalid(String),
-}
+/// Lower-layer cause of an `action_value_to_expr` failure; see
+/// [`darkmatter::lifecycle::error::ActionExprError`].
+pub use darkmatter::lifecycle::error::ActionExprError;
 
 impl LoopExpressionCause {
     /// The failing stage, as the verb both loop variants' `Display` reads.
@@ -3865,19 +3830,7 @@ impl CompositionError {
     }
 }
 
-/// Why an event-time lifecycle evaluation failed.
-///
-/// Typed so the renderer chooses a remediation without matching message text.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum LifecycleEvaluationReason {
-    /// An expression raised: a malformed span, an unknown function, an
-    /// unavailable global, or a function error.
-    #[default]
-    Expression,
-    /// A `break` fired outside any loop; see
-    /// [`CompositionError::LifecycleBreakWithoutLoop`].
-    BreakWithoutLoop,
-}
+pub use darkmatter::lifecycle::LifecycleEvaluationReason;
 
 /// What a frontmatter-rooted error's excerpt should focus on.
 ///
@@ -3915,9 +3868,7 @@ pub(crate) fn overlay_directive(property: &str) -> Option<&str> {
 
 /// The rendered path of a `LifecycleWith*` error: `path` below its owner,
 /// or `path` alone when the owner is the external task file itself.
-pub(crate) fn with_property_path(property: &str, path: &str) -> String {
-    if property.is_empty() { path.to_string() } else { format!("{property}.{path}") }
-}
+pub(crate) use darkmatter::lifecycle::error::with_property_path;
 
 /// What a `with` was resolved for, in a sentence: "the `proxy` to `x.md`", or
 /// "the task running `x.md`".

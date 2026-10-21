@@ -96,8 +96,9 @@ pub fn build_attempt_outcome(
 /// The message becomes the lifecycle `err.msg`, which feeds TTS, outbound
 /// messaging routes, and the stderr banner — it is the headline, not the
 /// archive. The full text stays available in `stderr_text` and the stream
-/// summary.
-const FAILURE_MESSAGE_MAX_CHARS: usize = 240;
+/// summary. The bound is the lifecycle envelope's; tests read it here.
+#[cfg(test)]
+const FAILURE_MESSAGE_MAX_CHARS: usize = darkmatter::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS;
 
 /// Build the operator-facing message for a failed attempt.
 ///
@@ -119,7 +120,7 @@ const FAILURE_MESSAGE_MAX_CHARS: usize = 240;
 /// timeout, stderr, and the fallbacks) plus any `(attempt N)` suffix — is
 /// passed through one final hygiene stage: escapes stripped, collapsed to a
 /// single line, and clamped so the returned string is always ≤
-/// [`FAILURE_MESSAGE_MAX_CHARS`] characters. The suffix is budget-reserved,
+/// [`CONCISE_MESSAGE_MAX_CHARS`](darkmatter::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS) characters. The suffix is budget-reserved,
 /// so it survives truncation rather than being cut off. The `(attempt N)`
 /// suffix is appended only when `attempt > 1` — at attempt 1 it would imply
 /// a retry that may never happen.
@@ -270,37 +271,12 @@ fn headline(text: &str, pick: LinePick) -> Option<String> {
 /// input can reach the lifecycle `err.msg` (TTS, messaging routes, desktop
 /// notifications, stderr banner).
 ///
-/// Strips escapes, collapses any surviving newline/control characters to a
-/// single space-joined line, and clamps so that the returned `base + suffix`
-/// is always ≤ [`FAILURE_MESSAGE_MAX_CHARS`]. The suffix budget is reserved
-/// first (and the trailing `…` counts against the cap), so the `(attempt N)`
-/// suffix always survives intact.
+/// The rule is the lifecycle envelope's
+/// [`concise_message_with_suffix`](darkmatter::lifecycle::envelope::concise_message_with_suffix),
+/// so `base + suffix` is always ≤ [`CONCISE_MESSAGE_MAX_CHARS`](darkmatter::lifecycle::envelope::CONCISE_MESSAGE_MAX_CHARS) and the
+/// `(attempt N)` suffix always survives intact.
 fn sanitize_message(base: &str, suffix: &str) -> String {
-    let single_line = collapse_to_line(&strip_ansi_codes(base));
-    let budget = FAILURE_MESSAGE_MAX_CHARS.saturating_sub(suffix.chars().count());
-    format!("{}{suffix}", clamp_chars(&single_line, budget))
-}
-
-/// Fold a (possibly multi-line) string to a single line: split on any control
-/// character (newlines, tabs, stray escape bytes), trim each segment, and
-/// rejoin with a single space.
-fn collapse_to_line(text: &str) -> String {
-    text.split(|c: char| c.is_control())
-        .map(str::trim)
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Clamp `line` to at most `budget` characters, reserving one character for
-/// the trailing `…` when truncation occurs so the returned string never
-/// exceeds `budget`.
-fn clamp_chars(line: &str, budget: usize) -> String {
-    if line.chars().count() <= budget {
-        return line.to_string();
-    }
-    let clamped: String = line.chars().take(budget.saturating_sub(1)).collect();
-    format!("{clamped}…")
+    darkmatter::lifecycle::envelope::concise_message_with_suffix(base, suffix)
 }
 
 #[cfg(test)]

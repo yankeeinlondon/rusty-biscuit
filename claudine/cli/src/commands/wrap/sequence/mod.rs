@@ -1,5 +1,6 @@
 //! Serial sequence orchestrator.
 
+use claudine::composition::LifecycleErrorInfoExt;
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};

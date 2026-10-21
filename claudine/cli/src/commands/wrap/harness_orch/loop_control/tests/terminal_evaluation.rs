@@ -1,5 +1,6 @@
 //! terminal evaluation harness-loop tests.
 
+use claudine::composition::LifecycleRunGuardExt;
 use super::*;
 
 /// Asserts that a surfaced lifecycle evaluation error names the expected

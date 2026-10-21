@@ -1,6 +1,7 @@
 //! Ordered nested containers keep their output accumulator lexical while
 //! retaining invocation mutations and the outer invocation identity.
 
+use crate::composition::LifecycleErrorInfoExt;
 use std::sync::Arc;
 
 use darkmatter::markdown::compose::EffectiveStateBuilder;
@@ -8,7 +9,7 @@ use serde_json::{Map, Value};
 
 use super::{PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskStage, TaskStatus};
 use crate::composition::error::CompositionError;
-use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
 use crate::composition::lifecycle::bindings::SequenceBinding;
 use crate::composition::lifecycle::executor::StackExecutionContext;
 use crate::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};

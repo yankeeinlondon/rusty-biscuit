@@ -44,6 +44,16 @@ const INIT_EVENT: &str =
     r#"{"type":"system","subtype":"init","session_id":"session-1","model":"claude-test"}"#;
 const RESULT_EVENT: &str = r#"{"type":"result","subtype":"success","result":"done","session_id":"session-1","is_error":false}"#;
 
+/// The guarded-shell scenarios approve only the command's shape, so the
+/// selected action reads its placeholder live rather than running bytes
+/// resolved at pre-flight.
+const GUARDED_SHELL_RULES: &str = "template trace-shell start {{ string }}\n";
+
+/// `trace-shell <event> <value>` appends `shell <event> <value>` to the trace.
+/// A template command starts its program directly and refuses `>>`, so the
+/// guarded-shell scenarios write through this helper instead of `printf`.
+const TRACE_SHELL: &str = "#!/bin/sh\nprintf 'shell %s %s\\n' \"$1\" \"$2\" >> trace.log\n";
+
 struct Scenario {
     id: &'static str,
     /// Exit status of launch `n` (0-based, across every provider launch of the
@@ -105,6 +115,9 @@ fn check(scenario: &Scenario) {
     }
     let trace_path = fixture.cwd().join(TRACE_FILE);
     launch_recorder::install(&fixture, "claude", &provider_behavior(&trace_path, scenario.provider_exits));
+    let helper = fixture.bin_dir().join("trace-shell");
+    fs::write(&helper, TRACE_SHELL).unwrap();
+    fs::set_permissions(&helper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
 
     let output = fixture.command().args(scenario.args).arg(entry).output().unwrap();
 
@@ -299,6 +312,33 @@ scenarios! {
     }
 
     #[test]
+    fn retry_in_initialize() {
+        id: "retry-in-initialize",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [("retry-in-initialize.md", include_str!("../fixtures/lifecycle_traces/retry-in-initialize.md"))],
+        trace: include_str!("../fixtures/lifecycle_traces/retry-in-initialize.trace"),
+    }
+
+    #[test]
+    fn retry_in_preflight_blocked() {
+        id: "retry-in-preflight-blocked",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [("retry-in-preflight-blocked.md", include_str!("../fixtures/lifecycle_traces/retry-in-preflight-blocked.md"))],
+        trace: include_str!("../fixtures/lifecycle_traces/retry-in-preflight-blocked.trace"),
+    }
+
+    #[test]
+    fn retry_in_start() {
+        id: "retry-in-start",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [("retry-in-start.md", include_str!("../fixtures/lifecycle_traces/retry-in-start.md"))],
+        trace: include_str!("../fixtures/lifecycle_traces/retry-in-start.trace"),
+    }
+
+    #[test]
     fn resume_admitted() {
         id: "resume-admitted",
         exits: [1, 0],
@@ -434,6 +474,30 @@ scenarios! {
             ("shell-relocked-after-proxy.target.md", include_str!("../fixtures/lifecycle_traces/shell-relocked-after-proxy.target.md")),
         ],
         trace: include_str!("../fixtures/lifecycle_traces/shell-relocked-after-proxy.trace"),
+    }
+
+    #[test]
+    fn guarded_shell_present() {
+        id: "guarded-shell-present",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("guarded-shell-present.md", include_str!("../fixtures/lifecycle_traces/guarded-shell-present.md")),
+            (".darkmatter-shell-whitelist", GUARDED_SHELL_RULES),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/guarded-shell-present.trace"),
+    }
+
+    #[test]
+    fn guarded_shell_null() {
+        id: "guarded-shell-null",
+        exits: [0],
+        args: ["compose", "--claude"],
+        documents: [
+            ("guarded-shell-null.md", include_str!("../fixtures/lifecycle_traces/guarded-shell-null.md")),
+            (".darkmatter-shell-whitelist", GUARDED_SHELL_RULES),
+        ],
+        trace: include_str!("../fixtures/lifecycle_traces/guarded-shell-null.trace"),
     }
 }
 

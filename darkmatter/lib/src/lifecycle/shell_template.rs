@@ -28,22 +28,20 @@
 //! A site approval has not settled runs in neither mode. The record is shared
 //! by every clone of the parsed lifecycle, so a guard that copied the
 //! configuration before its audit sees the audit's answer.
-//!
-//! This module names no Claudine runtime type, like the parser slice it
-//! extends.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use darkmatter::markdown::compose::ShellCommandOrigin;
-use darkmatter::markdown::compose::expression::{DeclaredTypes, GuardOrigin, TypeScope};
-use darkmatter::markdown::compose::shell_expansion::template::{
+use crate::markdown::compose::ShellCommandOrigin;
+use crate::markdown::compose::expression::{DeclaredTypes, GuardOrigin, TypeScope};
+use crate::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, HoleTiming, ModeRequirement, ShellCandidate, ShellPreApprovals, SiteValues,
     TemplateShape, parse_authored,
 };
 
-/// The roots a lifecycle placeholder can read that Claudine, not the
+/// The roots a lifecycle placeholder can read that the host, not the
 /// document, supplies. A placeholder reading one is typed `string`.
+// The host registry will supply these roots once hosts declare their globals.
 pub const LIFECYCLE_HOST_GLOBALS: [&str; 4] = ["loop", "err", "timing", "group"];
 
 /// How an approved lifecycle shell site runs.
@@ -104,7 +102,7 @@ impl LifecycleShellTemplate {
 
     /// This site, filling the holes `late` holds without evaluating them:
     /// the values a host validated at its step barrier
-    /// ([`resolve_late_values`](darkmatter::markdown::compose::shell_expansion::template::resolve_late_values)).
+    /// ([`resolve_late_values`](crate::markdown::compose::shell_expansion::template::resolve_late_values)).
     /// Every other hole is still read when the action executes.
     #[must_use]
     pub fn with_late_values(mut self, late: SiteValues) -> Self {
@@ -190,7 +188,7 @@ impl LifecycleShellTemplate {
 /// `schema` is typed against: the schema, with [`LIFECYCLE_HOST_GLOBALS`] as
 /// host roots.
 pub fn lifecycle_declared_types(
-    schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
+    schema: Option<&crate::markdown::schemas::SimplifiedSchema>,
 ) -> DeclaredTypes<'_> {
     DeclaredTypes::new(schema).with_host_globals(&LIFECYCLE_HOST_GLOBALS)
 }
@@ -212,7 +210,7 @@ pub fn typed_template(raw: &str, scope: &TypeScope<'_>) -> Option<CommandTemplat
 /// present, if one does. A declaration is not a guard, and a guard on one
 /// expression proves nothing about another.
 pub fn placeholder_guard(expression: &str, scope: &TypeScope<'_>) -> Option<GuardOrigin> {
-    let expr = darkmatter::markdown::compose::expression::parse(expression).ok()?;
+    let expr = crate::markdown::compose::expression::parse(expression).ok()?;
     scope.type_of_expr(&expr)?.guard_presence().cloned()
 }
 
@@ -237,7 +235,7 @@ pub fn lifecycle_shell_has_placeholders(lifecycle: &super::LifecycleConfig) -> b
     for signal in super::LifecycleSignal::ALL {
         super::actions::for_each_action(lifecycle.stack(signal), &mut |action| match &action.kind {
             super::actions::LifecycleActionKind::Shell(shell) => {
-                found |= matches!(&shell.command, darkmatter::markdown::compose::expression::Expr::StringLiteral(raw) if raw.contains("{{"));
+                found |= matches!(&shell.command, crate::markdown::compose::expression::Expr::StringLiteral(raw) if raw.contains("{{"));
             }
             super::actions::LifecycleActionKind::RuntimeSet(set) => {
                 found |= set.shell_values().any(|(_, value)| value.authored.contains("{{"));
@@ -252,7 +250,7 @@ pub fn lifecycle_shell_has_placeholders(lifecycle: &super::LifecycleConfig) -> b
 /// accepts. A value that inserted a pipe, `;`, or an unbalanced quote makes
 /// them unreadable, and the site may then run only as its template.
 pub fn reads_as_command(bytes: &str) -> bool {
-    use darkmatter::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokenize};
+    use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokenize};
     let ctx = biscuit_terminal::errors::SourceContext::new(
         PathBuf::from("<lifecycle-shell>"),
         PathBuf::from("<lifecycle-shell>"),

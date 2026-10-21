@@ -1,3 +1,5 @@
+use claudine::diagnostics::DiagnosticSnapshotExt;
+use claudine::composition::LifecycleErrorInfoExt;
 use super::*;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use color_eyre::eyre::eyre;

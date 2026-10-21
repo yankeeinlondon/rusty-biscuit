@@ -111,7 +111,7 @@ pub fn reject_removed_sequence_reads(
     if let Some(lifecycle) = lifecycle {
         for signal in super::super::LifecycleSignal::ALL {
             let mut found = None;
-            super::super::validate::walk_stack(lifecycle.stack(signal), &mut |path, surface| {
+            darkmatter::lifecycle::walk_stack(lifecycle.stack(signal), &mut |path, surface| {
                 if found.is_none() {
                     let retired = match surface.expr {
                         Expr::StringLiteral(text) if !surface.predicate => text_read(text),

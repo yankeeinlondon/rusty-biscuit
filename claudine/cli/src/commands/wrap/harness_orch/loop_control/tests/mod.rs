@@ -2,7 +2,7 @@
 
 use super::*;
 use claudine::composition::{
-    LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext,
+    LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext,
     parse_lifecycle_config,
 };
 use claudine::events::GlobalSettings;

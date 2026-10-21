@@ -1,6 +1,8 @@
 //! Concurrent group legs use isolated runtime branches and declaration-order
 //! admission and folding. A failed atomic group publishes no leg state or result.
 
+use crate::composition::lifecycle::cancellation::CancellationCauseExt;
+use crate::composition::LifecycleErrorInfoExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -61,7 +63,7 @@ pub(super) struct ValidatedGroup {
 impl TaskExecution<'_> {
     pub(super) fn run_group_container(&self, group: &PreflightGroup) -> PrimaryOutcome {
         if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
-        use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+        use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
         use crate::composition::lifecycle::executor::DisabledShellRunner;
         use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
 

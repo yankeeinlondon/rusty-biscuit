@@ -14,6 +14,8 @@
 // shape they need to keep.
 #![allow(clippy::result_large_err)]
 
+use claudine::composition::LifecycleRunGuardExt;
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::collections::{BTreeMap, HashMap};
 use std::io::IsTerminal;
 use std::sync::{Arc, Mutex};

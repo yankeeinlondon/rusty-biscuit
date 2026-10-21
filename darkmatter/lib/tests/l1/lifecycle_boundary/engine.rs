@@ -17,7 +17,7 @@
 //!     let reply = match request.kind() {
 //!         RequestKind::EvaluateEvent(event) => Reply::Event(host.evaluate(event)),
 //!         RequestKind::Prepare { entry } => Reply::Prepared(host.prepare(*entry)),
-//!         RequestKind::PerformOperation { .. } | RequestKind::AwaitCompletion => Reply::Operation(host.perform()),
+//!         RequestKind::PerformOperation { .. } => Reply::Operation(host.perform()),
 //!         RequestKind::Recover(recovery) => Reply::Recovery(host.recover(recovery)),
 //!         RequestKind::Done(finish) => break *finish,
 //!     };
@@ -27,9 +27,6 @@
 //!
 //! [`Run::transcript_lines`] then reads the ordered record of events (host
 //! spelling), shell-lock transitions, selected-error changes, and the finish.
-// The surface beyond what this binary's own tests call is kept for the
-// Stage 1 trace-replay test, which drives a Claudine-profile host through it.
-#![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -130,13 +127,6 @@ enum Slot {
 impl EventId {
     pub const fn core(event: CoreEvent) -> Self {
         Self(Slot::Core(event))
-    }
-
-    pub fn as_core(self) -> Option<CoreEvent> {
-        match self.0 {
-            Slot::Core(event) => Some(event),
-            Slot::Host(_) => None,
-        }
     }
 }
 
@@ -260,7 +250,6 @@ struct RegistryInner {
     core: BTreeMap<CoreEvent, CoreSlot>,
     events: Vec<EventDescriptor>,
     pair: Option<Pair>,
-    cancellation: Option<HostError>,
 }
 
 /// A host's event registry. Mutation fails with
@@ -283,7 +272,7 @@ impl Registry {
             })
             .collect();
         Self {
-            inner: Arc::new(RegistryInner { host: host.to_string(), core, events: Vec::new(), pair: None, cancellation: None }),
+            inner: Arc::new(RegistryInner { host: host.to_string(), core, events: Vec::new(), pair: None }),
         }
     }
 
@@ -370,20 +359,6 @@ impl Registry {
             inner.core.get_mut(&event).expect("every core event has a slot").actions = actions;
             Ok(())
         })
-    }
-
-    /// The error a cancelled run selects, so `cancelled` and `finalize` read
-    /// it as `err`. Without one, cancellation leaves the selected error as it
-    /// was (`null` for a run that had not failed).
-    pub fn set_cancellation_error(&mut self, error: HostError) -> Result<(), RegistrationError> {
-        self.edit(|inner| {
-            inner.cancellation = Some(error);
-            Ok(())
-        })
-    }
-
-    pub fn host(&self) -> &str {
-        &self.inner.host
     }
 
     /// The host's spelling of `id`.
@@ -480,9 +455,7 @@ impl Registry {
     fn admits_recovery(&self, id: EventId, kind: RecoveryKind) -> bool {
         match self.kind(id) {
             Kind::Outcome | Kind::Core(CoreEvent::Finalize) => true,
-            // The host judges a resume before launch (it has no session) and
-            // a handoff; a retry before launch stays unsupported.
-            Kind::Core(CoreEvent::Composed) => matches!(kind, RecoveryKind::Proxy | RecoveryKind::Resume),
+            Kind::Core(CoreEvent::Composed) => matches!(kind, RecoveryKind::Proxy),
             _ => false,
         }
     }
@@ -585,34 +558,10 @@ pub struct Ticket {
     generation: u64,
 }
 
-impl Ticket {
-    pub fn run(&self) -> RunId {
-        self.run
-    }
-
-    pub fn document(&self) -> u32 {
-        self.document
-    }
-
-    pub fn attempt(&self) -> u32 {
-        self.attempt
-    }
-
-    pub fn iteration(&self) -> u32 {
-        self.iteration
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-}
-
 /// Why this attempt's preparation runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {
     Initial,
-    Retry,
-    Resume,
 }
 
 /// How an event was entered, which decides whether its directives count.
@@ -625,15 +574,10 @@ pub enum EvaluationMode {
     /// Cleanup after the run refused to continue: a host refusal, a refused
     /// or unsupported recovery, or a setup failure or explicit error.
     RefusalCleanup,
-    /// `cancelled` and `finalize` after [`Run::cancel`]. Not one of the
-    /// spec's three named modes; cancellation cleanup also ignores directives.
-    CancellationCleanup,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecoveryKind {
-    Retry,
-    Resume,
     Proxy,
 }
 
@@ -756,8 +700,6 @@ pub struct RecoveryRequest {
 pub enum Finish {
     Succeeded,
     Failed,
-    Skipped,
-    Cancelled,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -765,8 +707,6 @@ pub enum RequestKind {
     EvaluateEvent(Box<EventRequest>),
     Prepare { entry: Entry },
     PerformOperation { entry: Entry },
-    /// The operation reported that it started; its completion is owed.
-    AwaitCompletion,
     Recover(RecoveryRequest),
     Done(Finish),
 }
@@ -802,26 +742,8 @@ impl Request {
 /// evaluated arguments; the host owns budgets and targets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Directive {
-    Stop,
-    Skip,
-    Break,
-    /// From an iteration gate: admit another iteration.
-    Iterate,
     Error(LifecycleError),
-    Retry { max_attempts: u32 },
-    Resume { max_attempts: u32 },
     Proxy { target: String },
-}
-
-impl Directive {
-    fn recovery(&self) -> Option<RecoveryKind> {
-        match self {
-            Self::Retry { .. } => Some(RecoveryKind::Retry),
-            Self::Resume { .. } => Some(RecoveryKind::Resume),
-            Self::Proxy { .. } => Some(RecoveryKind::Proxy),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -867,12 +789,6 @@ pub enum FailureStage {
     Preflight,
     /// Internal setup (materialization, target lifecycle parse).
     Setup,
-    HandoffRefused,
-    /// A recovery the host would not admit (for example, no session).
-    RecoveryRefused,
-    /// Launch construction or the pre-spawn part of an attempt.
-    LaunchConstruction,
-    ResumeIncompatible,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -898,26 +814,13 @@ pub enum Outcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperationReport {
-    Started { session: SessionAvailability },
     Completed { outcome: Outcome, session: SessionAvailability },
-    NotStarted(HostFailure),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RecoveryReply {
-    /// A retry or resume the host admitted within its budget.
-    Admitted,
     /// A proxy handoff the host committed, with the target document.
     Adopted(DocumentInput),
-    /// The budget was spent; the run continues as if no recovery was asked.
-    Exhausted,
-    Refused(HostFailure),
-    /// The run ends here with the failure selected and no further event:
-    /// a resume the host cannot honor at all (no session; stage
-    /// [`FailureStage::RecoveryRefused`]), or a committed handoff whose target
-    /// never bootstrapped (stage [`FailureStage::Setup`]), which leaves neither
-    /// the source's relinquished stacks nor a target lifecycle to run.
-    Aborted(HostFailure),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -931,23 +834,13 @@ pub enum Reply {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplyError {
     ForeignRun,
-    /// The ticket's work was invalidated by [`Run::cancel`].
-    CancelledWork { generation: u64 },
     Duplicate { generation: u64 },
     Stale { generation: u64, current: u64 },
     Finished,
     WrongKind { expected: &'static str, received: &'static str },
     EntryMismatch { expected: Entry, received: Entry },
     StageNotApplicable { stage: FailureStage, request: &'static str },
-    DirectiveNotPermitted { directive: &'static str, event: String },
-    WrongRecovery { requested: RecoveryKind },
     Document(StartError),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CancelError {
-    Finished,
-    AlreadyCancelled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -971,13 +864,10 @@ pub enum TranscriptEntry {
     Event { name: String, mode: EvaluationMode },
     Prepare(Entry),
     Operation,
-    OperationStarted,
     Recover(RecoveryKind),
     Adopted { document: u32 },
-    Iteration(u32),
     Shell(ShellLock),
     Error(LifecycleError),
-    Cancel,
     Finish(Finish),
 }
 
@@ -987,14 +877,11 @@ impl fmt::Display for TranscriptEntry {
             Self::Event { name, .. } => write!(f, "event {name}"),
             Self::Prepare(entry) => write!(f, "prepare {}", format!("{entry:?}").to_lowercase()),
             Self::Operation => f.write_str("operation"),
-            Self::OperationStarted => f.write_str("operation started"),
             Self::Recover(kind) => write!(f, "recover {}", format!("{kind:?}").to_lowercase()),
             Self::Adopted { document } => write!(f, "adopt document {document}"),
-            Self::Iteration(iteration) => write!(f, "iteration {iteration}"),
             Self::Shell(ShellLock::Locked) => f.write_str("shell locked"),
             Self::Shell(ShellLock::Unlocked) => f.write_str("shell unlocked"),
             Self::Error(error) => write!(f, "error {}", error.code()),
-            Self::Cancel => f.write_str("cancel"),
             Self::Finish(finish) => write!(f, "finish {}", format!("{finish:?}").to_lowercase()),
         }
     }
@@ -1029,7 +916,6 @@ pub struct Run {
     pending: Request,
     generation: u64,
     answered: Option<u64>,
-    cancel_floor: Option<u64>,
     document: u32,
     attempt: u32,
     iteration: u32,
@@ -1043,8 +929,6 @@ pub struct Run {
     error: Option<LifecycleError>,
     catch: Option<Catch>,
     halted: bool,
-    broken: bool,
-    cancelled: bool,
     transcript: Vec<TranscriptEntry>,
 }
 
@@ -1082,7 +966,6 @@ fn request_name(kind: &RequestKind) -> &'static str {
         RequestKind::EvaluateEvent(_) => "evaluate-event",
         RequestKind::Prepare { .. } => "prepare",
         RequestKind::PerformOperation { .. } => "perform-operation",
-        RequestKind::AwaitCompletion => "await-completion",
         RequestKind::Recover(_) => "recover",
         RequestKind::Done(_) => "done",
     }
@@ -1105,7 +988,6 @@ impl Run {
             },
             generation: 0,
             answered: None,
-            cancel_floor: None,
             document: 1,
             attempt: 1,
             iteration: 1,
@@ -1119,16 +1001,10 @@ impl Run {
             error: None,
             catch: None,
             halted: false,
-            broken: false,
-            cancelled: false,
             transcript: Vec::new(),
         };
         run.fire(INITIALIZE, EvaluationMode::NormalRecovery);
         Ok(run)
-    }
-
-    pub fn id(&self) -> RunId {
-        self.id
     }
 
     pub fn registry(&self) -> &Registry {
@@ -1168,10 +1044,6 @@ impl Run {
         &self.state
     }
 
-    pub fn shell_lock(&self) -> ShellLock {
-        self.shell
-    }
-
     /// Replies to whatever is pending; convenient for scripted hosts.
     pub fn answer(&mut self, reply: Reply) -> Result<(), ReplyError> {
         self.reply(self.pending.ticket, reply)
@@ -1199,38 +1071,6 @@ impl Run {
         }
     }
 
-    /// Invalidates outstanding normal work, then runs `cancelled` (when
-    /// authored) and `finalize`. A cancel during cleanup lets that cleanup
-    /// finish; it never starts a second pass.
-    pub fn cancel(&mut self) -> Result<(), CancelError> {
-        if self.finish().is_some() {
-            return Err(CancelError::Finished);
-        }
-        if self.cancelled {
-            return Err(CancelError::AlreadyCancelled);
-        }
-        self.cancelled = true;
-        self.transcript.push(TranscriptEntry::Cancel);
-        let in_cleanup = self.catch.is_some()
-            || self.halted
-            || self.pending.event().is_some_and(|event| event.event == FINALIZE || event.event == CANCELLED);
-        if in_cleanup {
-            return Ok(());
-        }
-        self.cancel_floor = Some(self.generation);
-        if let Some(error) = self.registry.inner.cancellation.clone() {
-            self.set_error(LifecycleError::Host(error));
-        }
-        if self.finalized {
-            self.conclude();
-        } else if self.stacks.contains_key(&CANCELLED) {
-            self.fire(CANCELLED, EvaluationMode::CancellationCleanup);
-        } else {
-            self.fire(FINALIZE, EvaluationMode::CancellationCleanup);
-        }
-        Ok(())
-    }
-
     /// Applies `reply` to the pending request. Every error leaves the run
     /// exactly as it was.
     pub fn reply(&mut self, ticket: Ticket, reply: Reply) -> Result<(), ReplyError> {
@@ -1247,12 +1087,6 @@ impl Run {
                 self.set_error(LifecycleError::Host(failure.error));
                 self.fire_terminal(FAILED, EvaluationMode::NormalRecovery);
             }
-            (_, Reply::Operation(OperationReport::Started { session })) => {
-                self.launched = true;
-                self.session = session;
-                self.transcript.push(TranscriptEntry::OperationStarted);
-                self.issue(RequestKind::AwaitCompletion);
-            }
             (_, Reply::Operation(OperationReport::Completed { outcome, session })) => {
                 self.launched = true;
                 self.session = session;
@@ -1268,15 +1102,7 @@ impl Run {
                     None => self.finish_or_finalize(EvaluationMode::NormalRecovery),
                 }
             }
-            (_, Reply::Operation(OperationReport::NotStarted(failure)))
-            | (_, Reply::Recovery(RecoveryReply::Refused(failure))) => self.refuse(failure),
-            (RequestKind::Recover(recovery), Reply::Recovery(RecoveryReply::Admitted)) => self.reenter(recovery.kind),
             (_, Reply::Recovery(RecoveryReply::Adopted(document))) => self.adopt(document),
-            (_, Reply::Recovery(RecoveryReply::Aborted(failure))) => {
-                self.set_error(LifecycleError::Host(failure.error));
-                self.conclude();
-            }
-            (RequestKind::Recover(recovery), Reply::Recovery(RecoveryReply::Exhausted)) => self.advance(recovery.from),
             (kind, reply) => unreachable!("check_reply admitted {} for {}", reply_name(&reply), request_name(&kind)),
         }
         Ok(())
@@ -1285,9 +1111,6 @@ impl Run {
     fn check_ticket(&self, ticket: Ticket) -> Result<(), ReplyError> {
         if ticket.run != self.id {
             return Err(ReplyError::ForeignRun);
-        }
-        if self.cancel_floor.is_some_and(|floor| ticket.generation <= floor) {
-            return Err(ReplyError::CancelledWork { generation: ticket.generation });
         }
         if self.answered == Some(ticket.generation) {
             return Err(ReplyError::Duplicate { generation: ticket.generation });
@@ -1312,49 +1135,15 @@ impl Run {
             Ok(())
         };
         match (&self.pending.kind, reply) {
-            (RequestKind::EvaluateEvent(request), Reply::Event(outcome)) => {
-                let misplaced = match outcome.directive {
-                    Some(Directive::Skip) if request.event != INITIALIZE => Some("skip"),
-                    Some(Directive::Iterate) if self.registry.kind(request.event) != Kind::Gate => Some("iterate"),
-                    _ => None,
-                };
-                match misplaced {
-                    Some(directive) => Err(ReplyError::DirectiveNotPermitted { directive, event: request.name.clone() }),
-                    None => Ok(()),
-                }
-            }
+            (RequestKind::EvaluateEvent(_), Reply::Event(_)) => Ok(()),
             (RequestKind::Prepare { .. }, Reply::Prepared(Preparation::Failed(failure))) => {
                 entry_matches(failure, &[FailureStage::Preflight, FailureStage::Setup], "prepare")
             }
             (RequestKind::Prepare { .. }, Reply::Prepared(Preparation::Ready { .. })) => Ok(()),
-            (RequestKind::PerformOperation { .. }, Reply::Operation(OperationReport::NotStarted(failure))) => entry_matches(
-                failure,
-                &[FailureStage::Setup, FailureStage::LaunchConstruction, FailureStage::ResumeIncompatible],
-                "perform-operation",
-            ),
-            (RequestKind::PerformOperation { .. }, Reply::Operation(_))
-            | (RequestKind::AwaitCompletion, Reply::Operation(OperationReport::Completed { .. })) => Ok(()),
-            (RequestKind::Recover(recovery), Reply::Recovery(answer)) => match answer {
-                RecoveryReply::Admitted if recovery.kind == RecoveryKind::Proxy => {
-                    Err(ReplyError::WrongRecovery { requested: recovery.kind })
-                }
-                RecoveryReply::Adopted(_) if recovery.kind != RecoveryKind::Proxy => {
-                    Err(ReplyError::WrongRecovery { requested: recovery.kind })
-                }
-                RecoveryReply::Adopted(document) => {
-                    split_document(&self.registry, document.clone()).map(|_| ()).map_err(ReplyError::Document)
-                }
-                RecoveryReply::Refused(failure) => entry_matches(
-                    failure,
-                    &[FailureStage::HandoffRefused, FailureStage::RecoveryRefused, FailureStage::Setup],
-                    "recover",
-                ),
-                RecoveryReply::Aborted(failure) => {
-                    let stage = if recovery.kind == RecoveryKind::Proxy { FailureStage::Setup } else { FailureStage::RecoveryRefused };
-                    entry_matches(failure, &[stage], "recover")
-                }
-                RecoveryReply::Admitted | RecoveryReply::Exhausted => Ok(()),
-            },
+            (RequestKind::PerformOperation { .. }, Reply::Operation(_)) => Ok(()),
+            (RequestKind::Recover(_), Reply::Recovery(RecoveryReply::Adopted(document))) => {
+                split_document(&self.registry, document.clone()).map(|_| ()).map_err(ReplyError::Document)
+            }
             (kind, reply) => Err(ReplyError::WrongKind { expected: request_name(kind), received: reply_name(reply) }),
         }
     }
@@ -1365,7 +1154,6 @@ impl Run {
             RequestKind::EvaluateEvent(event) => Some(TranscriptEntry::Event { name: event.name.clone(), mode: event.mode }),
             RequestKind::Prepare { entry } => Some(TranscriptEntry::Prepare(*entry)),
             RequestKind::PerformOperation { .. } => Some(TranscriptEntry::Operation),
-            RequestKind::AwaitCompletion => None,
             RequestKind::Recover(recovery) => Some(TranscriptEntry::Recover(recovery.kind)),
             RequestKind::Done(finish) => Some(TranscriptEntry::Finish(*finish)),
         };
@@ -1434,9 +1222,7 @@ impl Run {
     }
 
     fn conclude(&mut self) {
-        let finish = if self.cancelled {
-            Finish::Cancelled
-        } else if self.error.is_some() || self.terminal_failed() {
+        let finish = if self.error.is_some() || self.terminal_failed() {
             Finish::Failed
         } else {
             Finish::Succeeded
@@ -1470,12 +1256,6 @@ impl Run {
             });
             return self.drive_catch();
         }
-        if self.cancelled {
-            if let Some(error) = evaluation_error.or(failure) {
-                self.set_error(error);
-            }
-            return if event == FINALIZE { self.conclude() } else { self.finish_or_finalize(EvaluationMode::CancellationCleanup) };
-        }
         if request.mode == EvaluationMode::NormalRecovery
             && evaluation_error.is_none()
             && failure.is_none()
@@ -1504,25 +1284,13 @@ impl Run {
             self.set_error(error);
         }
         match directive {
-            Some(Directive::Skip) => self.issue(RequestKind::Done(Finish::Skipped)),
-            Some(Directive::Iterate) => self.iterate(),
             Some(Directive::Error(error)) => {
                 self.set_error(error);
                 self.halted = true;
                 self.finish_or_finalize(EvaluationMode::RefusalCleanup);
             }
-            Some(Directive::Break) => {
-                self.broken = true;
-                if self.registry.is_setup(event) {
-                    self.finish_or_finalize(EvaluationMode::NormalRecovery);
-                } else {
-                    self.advance(event);
-                }
-            }
-            Some(directive @ (Directive::Retry { .. } | Directive::Resume { .. } | Directive::Proxy { .. })) => {
-                self.request_recovery(event, directive);
-            }
-            Some(Directive::Stop) | None => self.advance(event),
+            Some(directive @ Directive::Proxy { .. }) => self.request_recovery(event, directive),
+            None => self.advance(event),
         }
     }
 
@@ -1574,7 +1342,7 @@ impl Run {
     }
 
     fn request_recovery(&mut self, event: EventId, directive: Directive) {
-        let kind = directive.recovery().expect("only recovery directives reach here");
+        let kind = RecoveryKind::Proxy;
         if self.registry.admits_recovery(event, kind) {
             let recovery = RecoveryRequest {
                 kind,
@@ -1592,43 +1360,12 @@ impl Run {
         }
     }
 
-    /// Selects the event for a host refusal from its stage and launch state
-    /// (spec section 8), never firing a second terminal event.
-    fn refuse(&mut self, failure: HostFailure) {
-        self.set_error(LifecycleError::Host(failure.error));
-        self.halted = true;
-        let selected = match failure.stage {
-            FailureStage::Preflight | FailureStage::Setup | FailureStage::HandoffRefused | FailureStage::RecoveryRefused
-                if !self.launched =>
-            {
-                Some(FAILED)
-            }
-            _ => self.registry.failed_alternative(),
-        };
-        match selected {
-            Some(event) if self.terminal.is_none() => self.fire_terminal(event, EvaluationMode::RefusalCleanup),
-            _ => self.finish_or_finalize(EvaluationMode::RefusalCleanup),
-        }
-    }
-
     fn reset_attempt(&mut self) {
         self.terminal = None;
         self.finalized = false;
         self.launched = false;
         self.error = None;
         self.halted = false;
-        self.broken = false;
-    }
-
-    fn reenter(&mut self, kind: RecoveryKind) {
-        self.attempt += 1;
-        self.entry = if kind == RecoveryKind::Retry { Entry::Retry } else { Entry::Resume };
-        if kind == RecoveryKind::Retry {
-            self.session = SessionAvailability::Unavailable;
-        }
-        self.reset_attempt();
-        self.set_shell(ShellLock::Locked);
-        self.issue(RequestKind::Prepare { entry: self.entry });
     }
 
     fn adopt(&mut self, document: DocumentInput) {
@@ -1645,14 +1382,6 @@ impl Run {
         self.set_shell(ShellLock::Locked);
         self.transcript.push(TranscriptEntry::Adopted { document: self.document });
         self.fire(INITIALIZE, EvaluationMode::NormalRecovery);
-    }
-
-    fn iterate(&mut self) {
-        self.iteration += 1;
-        self.attempt = 1;
-        self.reset_attempt();
-        self.transcript.push(TranscriptEntry::Iteration(self.iteration));
-        self.fire(COMPOSED, EvaluationMode::NormalRecovery);
     }
 
     /// The next step after `event` completed normally.
@@ -1681,9 +1410,8 @@ impl Run {
             Position::BeforeComposition => self.issue(RequestKind::Prepare { entry: self.entry }),
             Position::AfterComposition => self.issue(RequestKind::PerformOperation { entry: self.entry }),
             Position::AfterFinalize => match self.registry.gate() {
-                // A gate admits another iteration only after a successful,
-                // unbroken pass; a failed pass ends the loop before it.
-                Some(gate) if !self.broken && self.error.is_none() && !self.terminal_failed() => {
+                // A failed pass ends the loop before its gate.
+                Some(gate) if self.error.is_none() && !self.terminal_failed() => {
                     self.fire(gate, EvaluationMode::NormalRecovery);
                 }
                 _ => self.conclude(),

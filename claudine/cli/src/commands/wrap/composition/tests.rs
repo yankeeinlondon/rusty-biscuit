@@ -3,6 +3,9 @@
 //! resolution state classification, picker scoping, and interactive-timeout
 //! conflict detection.
 
+use claudine::composition::LifecycleRunGuardExt;
+use claudine::diagnostics::DiagnosticSnapshotExt;
+use claudine::composition::LifecycleErrorInfoExt;
 use super::*;
 
 /// W0 regression: when the executor is given a precomputed

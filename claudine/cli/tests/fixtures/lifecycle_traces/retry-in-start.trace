@@ -1,0 +1,14 @@
+# scenario: retry-in-start
+# doc: retry-in-start.md
+# given: invoked as `claudine compose --claude retry-in-start.md` from the directory holding the fixture documents
+# given: start returns retry with one extra attempt before any provider launched, so pre-flight re-runs (attempt 2) without initialize or finalize
+# given: the second start's retry finds the budget spent and the run continues to launch
+# given: launch 1 exits 0 with a result
+event initialize
+event start
+event start
+work fresh 0
+event success
+event finalize
+err none
+exit 0

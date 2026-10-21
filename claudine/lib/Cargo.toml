@@ -147,9 +147,25 @@ disallowed_methods = "allow"
 
 [package.metadata.ci.tests]
 # The context construction and path lookup guards include darkmatter-cli's
-# shared engines by `#[path]` and spell those files in their tests.
+# shared engines by `#[path]` and spell those files in their tests. The
+# lifecycle lift-ready guard spells Darkmatter's lifecycle parser slice.
 source-inputs = [
   "darkmatter/cli/tests/common/context_guard.rs",
   "darkmatter/cli/tests/common/path_lookup_guard.rs",
   "darkmatter/cli/tests/common/source_scan.rs",
+  "darkmatter/lib/src/lifecycle/action_shape.rs",
+  "darkmatter/lib/src/lifecycle/actions.rs",
+  "darkmatter/lib/src/lifecycle/control.rs",
+  "darkmatter/lib/src/lifecycle/executor.rs",
+  "darkmatter/lib/src/lifecycle/executor/host.rs",
+  "darkmatter/lib/src/lifecycle/executor/outcome.rs",
+  "darkmatter/lib/src/lifecycle/executor/shell.rs",
+  "darkmatter/lib/src/lifecycle/parse.rs",
+  "darkmatter/lib/src/lifecycle/run.rs",
+  "darkmatter/lib/src/lifecycle/run/protocol.rs",
+  "darkmatter/lib/src/lifecycle/run_guard.rs",
+  "darkmatter/lib/src/lifecycle/runtime.rs",
+  "darkmatter/lib/src/lifecycle/signatures.rs",
+  "darkmatter/lib/src/lifecycle/source_map.rs",
+  "darkmatter/lib/src/lifecycle/validate.rs",
 ]

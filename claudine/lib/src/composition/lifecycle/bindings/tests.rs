@@ -1,6 +1,7 @@
 //! The lifecycle binding matrix: every catalog global in every scope, checked
 //! through Darkmatter's passive validation and its runtime session alike.
 
+use crate::composition::LifecycleErrorInfoExt;
 use darkmatter::markdown::compose::expression::{
     AuthoredMode, BindingError, EvaluationLookup, EvaluationSession, ExpressionError, evaluate,
     parse, prepare_value, validate_prepared,

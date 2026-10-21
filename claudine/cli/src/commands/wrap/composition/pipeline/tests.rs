@@ -1,3 +1,4 @@
+use claudine::composition::LifecycleRunGuardExt;
 use super::*;
 
 #[test]

@@ -1,7 +1,7 @@
 /// Rejects a `{{ … }}` span authored inside a quoted string literal on a
 /// single-pass lifecycle surface.
 ///
-/// Covers every surface Claudine evaluates exactly once: `loop.while` /
+/// Covers every surface a host evaluates exactly once: `loop.while` /
 /// `loop.until`, and every surface [`walk_stack`] yields — `when` predicates
 /// in both branches, action operands, and `set`/`with` values. A mixed string
 /// (`"a {{ … }} b"`) rescans and resolves, and a short-form action body is a
@@ -14,15 +14,15 @@
 ///
 /// ## Errors
 ///
-/// - [`CompositionError::LifecycleNestedSpanInLiteral`] for the first defect.
-/// - [`CompositionError::LifecycleInvalid`] when a parsed stack surface has no
+/// - [`LifecycleError::LifecycleNestedSpanInLiteral`] for the first defect.
+/// - [`LifecycleError::LifecycleInvalid`] when a parsed stack surface has no
 ///   authored source record — an internal inconsistency between the parser and
 ///   the source map, never a silent skip.
 pub fn validate_no_nested_spans_in_literals(
     frontmatter: &serde_json::Value,
     lifecycle: &LifecycleConfig,
     source_path: &Path,
-) -> Result<(), CompositionError> {
+) -> Result<(), LifecycleError> {
     let sources = LifecycleSourceMap::from_frontmatter(frontmatter);
     let surfaces = event_surfaces(lifecycle);
     for signal in LifecycleSignal::ALL {
@@ -42,7 +42,7 @@ pub fn validate_no_nested_spans_in_literals(
                 }
                 Some(AuthoredValue::NonText) => {}
                 None => {
-                    return Err(CompositionError::LifecycleInvalid {
+                    return Err(LifecycleError::LifecycleInvalid {
                         property: path.to_string(),
                         message: "internal error: no authored source was recorded for this \
                                   lifecycle surface, so it cannot be checked for nested \
@@ -66,7 +66,7 @@ fn reject_nested_span(
     property: &str,
     text: &str,
     predicate: bool,
-) -> Result<(), CompositionError> {
+) -> Result<(), LifecycleError> {
     let (source, mode) = if predicate {
         (text.to_string(), ParseMode::Condition)
     } else {
@@ -82,7 +82,7 @@ fn reject_nested_span(
         return Ok(());
     };
     let ExpressionLintKind::NestedSpanInStringLiteral { literal, .. } = &lint.kind;
-    Err(CompositionError::LifecycleNestedSpanInLiteral {
+    Err(LifecycleError::LifecycleNestedSpanInLiteral {
         source_path: source_path.to_path_buf(),
         property: property.to_string(),
         literal: source[literal.clone()].to_string(),
@@ -93,11 +93,11 @@ fn reject_nested_span(
 
 /// One expression surface [`walk_stack`] reaches.
 #[derive(Clone, Copy)]
-pub(crate) struct Surface<'a> {
+pub struct Surface<'a> {
     /// The parsed expression tree.
-    pub(crate) expr: &'a Expr,
+    pub expr: &'a Expr,
     /// A `when` predicate: condition text rather than an action value.
-    pub(crate) predicate: bool,
+    pub predicate: bool,
 }
 
 /// Visit every expression surface of a stack, in authored order, through both
@@ -111,7 +111,7 @@ pub(crate) struct Surface<'a> {
 /// `{item}.when`; an operand hangs off its action's verb path
 /// (`failure[0].else[1].shell.command`, `start[0].say.text`,
 /// `success[0].set.key`, `failure[0].retry.with.reason`).
-pub(crate) fn walk_stack<'a>(
+pub fn walk_stack<'a>(
     nodes: &'a [LifecycleNode],
     visit: &mut impl FnMut(&LifecyclePath, Surface<'a>),
 ) {
@@ -226,6 +226,8 @@ fn walk_action<'a>(
                 walk_with_value(value, &prefix.map_key(key.as_str()), &mut operand);
             }
         }
+        // An ignored verb's operand was never parsed, so it has no surface.
+        LifecycleActionKind::Ignored(_) => {}
     }
 }
 
@@ -254,40 +256,9 @@ fn walk_with_value<'a>(
     }
 }
 
-/// The first read of a retired `_loop_*` name in any lifecycle stack, with its
-/// authored path and the retired name and `loop` member it names.
-///
-/// Stacks are walked in [`LifecycleSignal::ALL`] order through both branches.
-/// A guard is read as the condition it is; an operand that stayed literal text
-/// (`"pass {{ _loop_count }}"`) is read through its `{{ … }}` spans, so a quoted
-/// literal or plain text naming `_loop_count` is data, never a read.
-pub(crate) fn find_removed_loop_read(
-    lifecycle: &LifecycleConfig,
-) -> Option<(LifecyclePath, (&'static str, &'static str))> {
-    for signal in LifecycleSignal::ALL {
-        let mut found = None;
-        walk_stack(lifecycle.stack(signal), &mut |path, surface| {
-            if found.is_some() {
-                return;
-            }
-            let retired = match surface.expr {
-                Expr::StringLiteral(text) if !surface.predicate => {
-                    bindings::removed_loop_read_in_text(text)
-                }
-                expr => bindings::removed_loop_read(expr),
-            };
-            found = retired.map(|retired| (path.clone(), retired));
-        });
-        if found.is_some() {
-            return found;
-        }
-    }
-    None
-}
-
 /// Every surface of every configured event, with its owning signal, in
 /// [`LifecycleSignal::ALL`] order.
-fn event_surfaces(config: &LifecycleConfig) -> Vec<(LifecycleSignal, LifecyclePath, Surface<'_>)> {
+pub fn event_surfaces(config: &LifecycleConfig) -> Vec<(LifecycleSignal, LifecyclePath, Surface<'_>)> {
     let mut surfaces = Vec::new();
     for signal in LifecycleSignal::ALL {
         walk_stack(config.stack(signal), &mut |path, surface| {
@@ -295,73 +266,6 @@ fn event_surfaces(config: &LifecycleConfig) -> Vec<(LifecycleSignal, LifecyclePa
         });
     }
     surfaces
-}
-
-/// Validates that no lifecycle expression reads a global its event declares
-/// unavailable, in any branch.
-///
-/// A thin adapter over Darkmatter's passive validation: each event's
-/// [`bindings::binding_view`] declares `err` unavailable in `initialize`,
-/// `start`, `success`, and `loop` (`claudine.event-has-no-error`), and every
-/// authored surface [`walk_stack`] yields, in both branches, is prepared from
-/// its authored text and checked against that view. Group membership is not known yet, so
-/// `group` is deferred to runtime. `fm.err` reads the document everywhere.
-/// Nothing is evaluated and no provider runs.
-///
-/// Expression syntax is not this check's concern: the parser has already
-/// rejected every guard, whole-value operand, and mixed-text span that does
-/// not parse, in both branches. An unknown function is reported when the event
-/// evaluates it.
-///
-/// ## Errors
-///
-/// [`CompositionError::LifecycleErrNotAvailable`] for the first surface, in
-/// [`LifecycleSignal::ALL`] order, that reads an unavailable global, carrying
-/// Darkmatter's typed unavailable-binding error as its source.
-pub fn validate_no_err_in_no_error_events(
-    frontmatter: &serde_json::Value,
-    lifecycle: &LifecycleConfig,
-    source_path: &Path,
-) -> Result<(), CompositionError> {
-    let sources = LifecycleSourceMap::from_frontmatter(frontmatter);
-    let surfaces = event_surfaces(lifecycle);
-    for signal in LifecycleSignal::ALL {
-        let view = bindings::binding_view(
-            bindings::LifecycleScope::Event(signal),
-            bindings::GroupMembership::Unknown,
-        );
-        let mut authored: Vec<(String, &str, AuthoredMode)> = Vec::new();
-        for (_, path, surface) in surfaces.iter().filter(|(owner, ..)| *owner == signal) {
-            if let Some(AuthoredValue::Text(text)) = sources.get(path) {
-                let mode = if surface.predicate {
-                    AuthoredMode::Expression(ParseMode::Condition)
-                } else {
-                    AuthoredMode::InterpolatedValue
-                };
-                authored.push((path.to_string(), text, mode));
-            }
-        }
-        for (property, text, mode) in authored {
-            // Unreachable for a parsed config (see above); a syntax failure is
-            // the parser's to report, not a missing-`err` diagnostic.
-            let Ok(prepared) = prepare_value(&serde_json::Value::String(text.to_string()), mode)
-            else {
-                continue;
-            };
-            let unavailable = validate_prepared(&prepared, &view)
-                .into_iter()
-                .find(|diagnostic| bindings::unavailable_root(&diagnostic.error).is_some());
-            if let Some(diagnostic) = unavailable {
-                return Err(CompositionError::LifecycleErrNotAvailable {
-                    source_path: source_path.to_path_buf(),
-                    property,
-                    event: signal.property_name().to_string(),
-                    source: Some(Box::new(diagnostic.error)),
-                });
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Collects the shell commands reachable from every lifecycle stack, for
@@ -439,7 +343,6 @@ fn expr_as_string_literal(expr: &Expr) -> Option<String> {
 use super::*;
 use super::actions::{WithValue, for_each_action};
 use super::source_map::{AuthoredValue, LifecycleSourceMap};
-use darkmatter::markdown::compose::expression::{
-    AuthoredMode, ExpressionLintKind, ParseMode, is_whole_value_span, lint_expression,
-    prepare_value, validate_prepared,
+use crate::markdown::compose::expression::{
+    ExpressionLintKind, ParseMode, is_whole_value_span, lint_expression,
 };

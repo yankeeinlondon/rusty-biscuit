@@ -249,7 +249,7 @@ const LIFECYCLE_CONTROL_VERBS: &[&str] = &[
 ];
 
 /// Returns `true` when `verb` names a lifecycle control action.
-pub(crate) fn is_lifecycle_control_verb(verb: &str) -> bool {
+pub fn is_lifecycle_control_verb(verb: &str) -> bool {
     LIFECYCLE_CONTROL_VERBS.contains(&verb)
 }
 
@@ -325,7 +325,7 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
     verbs.dedup();
     verbs
 }
-use darkmatter::effects::EFFECT_DESCRIPTORS;
-use darkmatter::markdown::compose::expression::expression_function_descriptors;
+use crate::effects::EFFECT_DESCRIPTORS;
+use crate::markdown::compose::expression::expression_function_descriptors;
 
 use super::*;

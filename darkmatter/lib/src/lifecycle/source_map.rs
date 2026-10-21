@@ -1,6 +1,6 @@
 //! Authored lifecycle scalars keyed by canonical typed surface path.
 //!
-//! The parsed stack keeps only [`darkmatter::markdown::compose::expression::Expr`]
+//! The parsed stack keeps only [`crate::markdown::compose::expression::Expr`]
 //! trees, but a nested-span lint must read the authored text: a synthesized
 //! literal and an authored quoted literal are indistinguishable once parsed.
 //! [`LifecycleSourceMap`] projects the frontmatter the lifecycle config was
@@ -26,7 +26,7 @@ use super::parse::LOOP_ITERATION_KEYS;
 
 /// An authored lifecycle value at one canonical property path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum AuthoredValue {
+pub enum AuthoredValue {
     /// A YAML string scalar, as decoded by the frontmatter parser.
     Text(String),
     /// A number or boolean scalar; it holds no authored literal.
@@ -131,13 +131,13 @@ impl fmt::Display for LifecyclePath {
 
 /// Authored lifecycle scalars keyed by canonical typed paths.
 #[derive(Debug, Default)]
-pub(super) struct LifecycleSourceMap {
+pub struct LifecycleSourceMap {
     entries: HashMap<LifecyclePath, AuthoredValue>,
 }
 
 impl LifecycleSourceMap {
     /// Build the map from the frontmatter object `parse_lifecycle_config` read.
-    pub(super) fn from_frontmatter(frontmatter: &Value) -> Self {
+    pub fn from_frontmatter(frontmatter: &Value) -> Self {
         let mut map = Self::default();
         let Some(root) = frontmatter.as_object() else {
             return map;
@@ -173,7 +173,7 @@ impl LifecycleSourceMap {
     }
 
     /// The authored value at `path`, or `None` when nothing was recorded.
-    pub(super) fn get(&self, path: &LifecyclePath) -> Option<&AuthoredValue> {
+    pub fn get(&self, path: &LifecyclePath) -> Option<&AuthoredValue> {
         self.entries.get(path)
     }
 

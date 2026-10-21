@@ -1,7 +1,7 @@
 //! A moving JSON-Pointer cursor over one document's authored mapping order.
 //!
 //! Authored key order is recorded per document by Darkmatter as a
-//! [`MappingOrders`] index keyed by JSON Pointer. Claudine reaches the mappings
+//! [`MappingOrders`] index keyed by JSON Pointer. A host reaches the mappings
 //! that need it — a lifecycle `set:` — by walking *into* a document: a sequence
 //! step, a group's member task, a stack item's action. Rebuilding the full
 //! pointer at each of those sites is how the order channel came to cover only
@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use darkmatter::markdown::MappingOrders;
+use crate::markdown::MappingOrders;
 
 /// One document's authored mapping order, positioned at a node inside it.
 ///

@@ -9,8 +9,8 @@
 //! node lists. Dictionary bundles are expanded into that list at parse time,
 //! so the executor never iterates a mapping to choose order.
 //!
-//! This module is part of the lift-ready parser slice: it names no Claudine
-//! runtime type (settings, providers, messaging, TTS, or Playa).
+//! The model names no host runtime type (settings, providers, messaging,
+//! TTS, or sound playback); a host executes it.
 //!
 //! ## Categories
 //!
@@ -27,9 +27,9 @@
 //! - [`ExpressionFunctionAction`] — read-only Darkmatter expression
 //!   functions invoked for their result.
 
-use darkmatter::markdown::compose::expression::{Expr, GuardOrigin, Polarity, TypeScope, WriteSet};
-use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
-use darkmatter::markdown::compose::{ResolvedShellValue, check_frontmatter_shell_value};
+use crate::markdown::compose::expression::{Expr, GuardOrigin, Polarity, TypeScope, WriteSet};
+use crate::markdown::compose::shell_expansion::ShellExpansionError;
+use crate::markdown::compose::{ResolvedShellValue, check_frontmatter_shell_value};
 use indexmap::IndexMap;
 
 use super::LifecycleSignal;
@@ -212,6 +212,24 @@ pub enum LifecycleActionKind {
 
     /// Read-only Darkmatter expression function invoked for its result.
     ExpressionFunction(ExpressionFunctionAction),
+
+    /// A verb the parsing profile does not know, kept opaque under
+    /// [`UnknownVerbPolicy::Ignore`](super::UnknownVerbPolicy::Ignore).
+    ///
+    /// Carries no operand: nothing about it is evaluated, scanned for shells,
+    /// or checked for nested spans. A profile that rejects unknown verbs
+    /// never produces it.
+    Ignored(IgnoredAction),
+}
+
+/// An unknown verb kept by name and authored path only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IgnoredAction {
+    /// The verb key as authored.
+    pub verb: String,
+    /// The authored path of the verb key (equal to the owning
+    /// [`LifecycleAction::path`]).
+    pub path: LifecyclePath,
 }
 
 /// A flow-control directive.
@@ -289,10 +307,7 @@ pub enum LifecycleControlAction {
 
     /// `break` / `break: "reason"` — end the nearest enclosing loop.
     ///
-    /// Firing outside every loop is
-    /// [`CompositionError::LifecycleBreakWithoutLoop`].
-    ///
-    /// [`CompositionError::LifecycleBreakWithoutLoop`]: crate::composition::CompositionError::LifecycleBreakWithoutLoop
+    /// Firing outside every loop is a runtime error the host raises.
     Break {
         /// Optional reason recorded as the loop's outcome. An authored `""`
         /// is an explicit empty reason, distinct from `None`.
@@ -305,11 +320,8 @@ pub enum LifecycleControlAction {
     /// `prep: "@target.md"` — run another primitive to completion, then
     /// continue the event with the next item.
     ///
-    /// The thread's installed [`PrepRunner`](crate::composition::lifecycle::prep::PrepRunner)
-    /// runs the target; a target that did not return successfully fails the
-    /// event with [`CompositionError::LifecyclePrepFailed`].
-    ///
-    /// [`CompositionError::LifecyclePrepFailed`]: crate::composition::CompositionError::LifecyclePrepFailed
+    /// The host runs the target; a target that did not return successfully
+    /// fails the event.
     Prep {
         /// File reference expression resolving to the target. A literal is
         /// never empty.
@@ -408,7 +420,7 @@ pub struct SetShellValue {
 
 /// The message of a shell-value parse error, without the directive location
 /// prefix the lifecycle diagnostic supplies itself.
-pub(crate) fn shell_value_error_message(error: &ShellExpansionError) -> String {
+pub fn shell_value_error_message(error: &ShellExpansionError) -> String {
     match error {
         ShellExpansionError::ParseDirective { message, .. }
         | ShellExpansionError::ExpressionEvaluation { message, .. } => message.clone(),
@@ -571,7 +583,7 @@ impl RuntimeSet {
 /// ## Examples
 ///
 /// ```
-/// use claudine::composition::lifecycle::actions::{WithOverlay, WithOverlayError};
+/// use darkmatter::lifecycle::actions::{WithOverlay, WithOverlayError};
 /// use indexmap::IndexMap;
 ///
 /// let mut authored = IndexMap::new();

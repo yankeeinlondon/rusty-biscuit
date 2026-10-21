@@ -1,7 +1,13 @@
 //! Tests for lifecycle action execution.
 
 use super::*;
+use std::path::PathBuf;
 use std::sync::Mutex;
+
+use darkmatter::markdown::compose::expression::Expr;
+use darkmatter::markdown::compose::shell_expansion::template::TemplateShape;
+
+use super::super::actions::{LifecycleAction, LifecycleActionKind, LifecycleNode, RetryBackoff, RuntimeSet};
 
 use serde_json::json;
 

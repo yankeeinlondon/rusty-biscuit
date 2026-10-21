@@ -38,10 +38,12 @@
 //!
 //! ## Scanner scope
 //!
-//! Production `.rs` under `lib/src/` and `cli/src/` only. Comments, string and
-//! char literals, and `#[cfg(test)]` module bodies are blanked before matching,
-//! so prose mentioning `compose_with` cannot trip the guard. Whole-file test
-//! modules (`tests.rs`, `tests/`) are excluded by path.
+//! Production `.rs` under `lib/src/` and `cli/src/`, plus Darkmatter's
+//! `darkmatter/lib/src/lifecycle/`, where Claudine's lifecycle executor engine
+//! lives. Comments, string and char literals, and `#[cfg(test)]` module bodies
+//! are blanked before matching, so prose mentioning `compose_with` cannot trip
+//! the guard. Whole-file test modules (`tests.rs`, `tests/`) are excluded by
+//! path.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -728,7 +730,11 @@ fn locations(found: &[Found], site: &str) -> String {
 /// each resolved to a `{module}::{enclosing_item}[::{name}]` identity.
 fn scan_all(finder: impl Fn(&[u8]) -> Vec<Occurrence>) -> Vec<Found> {
     let area = area_root();
-    let mut out = Vec::new();
+    // Claudine's lifecycle executor engine moved to Darkmatter's lifecycle
+    // module; its files are keyed `darkmatter/lib/src/lifecycle/…`, whose
+    // module identities (`lifecycle::executor`) match the baselines.
+    let lifecycle = biscuit_test_harness::manifest_dir!().join("../../darkmatter/lib/src/lifecycle");
+    let mut files = Vec::new();
     for root in ["lib/src", "cli/src"] {
         for file in rust_files(&area.join(root)) {
             let rel = file
@@ -736,22 +742,30 @@ fn scan_all(finder: impl Fn(&[u8]) -> Vec<Occurrence>) -> Vec<Found> {
                 .unwrap_or(&file)
                 .to_string_lossy()
                 .replace('\\', "/");
-            if is_test_path(&rel) {
-                continue;
-            }
-            let src = fs::read_to_string(&file).expect("read source");
-            let sanitized = sanitize(&src);
-            for found in finder(&sanitized) {
-                let module = module_identity(&rel);
-                let item = enclosing_item(&sanitized, found.offset)
-                    .unwrap_or_else(|| "<file-scope>".to_string());
-                let suffix = found.name.map(|n| format!("::{n}")).unwrap_or_default();
-                out.push(Found {
-                    site: format!("{module}::{item}{suffix}"),
-                    path: rel.clone(),
-                    line: line_of(&sanitized, found.offset),
-                });
-            }
+            files.push((file, rel));
+        }
+    }
+    for file in rust_files(&lifecycle) {
+        let rel = file.strip_prefix(&lifecycle).unwrap_or(&file).to_string_lossy().replace('\\', "/");
+        files.push((file, format!("darkmatter/lib/src/lifecycle/{rel}")));
+    }
+    let mut out = Vec::new();
+    for (file, rel) in files {
+        if is_test_path(&rel) {
+            continue;
+        }
+        let src = fs::read_to_string(&file).expect("read source");
+        let sanitized = sanitize(&src);
+        for found in finder(&sanitized) {
+            let module = module_identity(&rel);
+            let item = enclosing_item(&sanitized, found.offset)
+                .unwrap_or_else(|| "<file-scope>".to_string());
+            let suffix = found.name.map(|n| format!("::{n}")).unwrap_or_default();
+            out.push(Found {
+                site: format!("{module}::{item}{suffix}"),
+                path: rel.clone(),
+                line: line_of(&sanitized, found.offset),
+            });
         }
     }
     out.sort();

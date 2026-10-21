@@ -50,17 +50,37 @@ pub fn scan_removed_validation_keys(
 
 /// What the lifecycle parser needs from its caller.
 ///
-/// The parser is part of the lift-ready slice and names no Claudine runtime
-/// type, so the catalog it checks literal `effect` names against is supplied
-/// here. The check, its error ([`CompositionError::LifecycleUnknownEffect`]),
-/// and its timing (parse time, literal names only) are the caller's
-/// guarantee; a `{{ … }}` name is checked when the event resolves it.
+/// The parser names no host runtime type, so the catalog it checks literal
+/// `effect` names against is supplied here (a host such as Claudine passes
+/// its sound-effect catalog). The check, its error
+/// ([`LifecycleError::LifecycleUnknownEffect`]), and its timing (parse time,
+/// literal names only) are the caller's guarantee; a `{{ … }}` name is checked
+/// when the event resolves it.
 pub struct LifecycleParseOptions<'a> {
     /// Whether a literal `effect` name is in the effect catalog.
     pub is_known_effect: &'a dyn Fn(&str) -> bool,
     /// The authored frontmatter, whose retained mapping order gives a `set:`
     /// mapping its authored key order. `None` falls back to sorted order.
-    pub authored: Option<&'a darkmatter::markdown::Frontmatter>,
+    pub authored: Option<&'a crate::markdown::Frontmatter>,
+    /// What a verb outside the lifecycle verb inventory becomes.
+    pub unknown_verbs: UnknownVerbPolicy,
+}
+
+/// How the parser treats a verb key it does not know.
+///
+/// Known verbs and the `when`/`then`/`else` structure validate identically
+/// under both policies; only an unknown verb's treatment differs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UnknownVerbPolicy {
+    /// Reject it with [`LifecycleError::LifecycleUnknownVerb`]: a closed
+    /// profile whose every verb is executable.
+    #[default]
+    Reject,
+    /// Keep it as an opaque [`IgnoredAction`] holding only its name and
+    /// authored path. Its operand is never parsed, evaluated, or scanned, so
+    /// a profile that does not run lifecycle stacks can still read a document
+    /// written for one that does.
+    Ignore,
 }
 
 /// Conditionals nest at most this deep. The limit lives only in the parser.
@@ -69,7 +89,7 @@ const MAX_CONDITIONAL_DEPTH: usize = 5;
 /// The `loop:` keys the looping parser owns. Every other key of a `loop:`
 /// block is a lifecycle concern. `fail_fast` stays here although it is
 /// removed: the looping parser owns its typed rejection.
-pub(crate) const LOOP_ITERATION_KEYS: &[&str] = &[
+pub const LOOP_ITERATION_KEYS: &[&str] = &[
     "while",
     "until",
     "action",
@@ -81,12 +101,23 @@ pub(crate) const LOOP_ITERATION_KEYS: &[&str] = &[
 
 /// Parse every lifecycle stack of `frontmatter`.
 ///
-/// See [`super::parse_lifecycle_config`], which supplies the effect catalog.
-pub(crate) fn parse_lifecycle_config_with(
+/// Every event and the `loop:` block's lifecycle concerns parse into an
+/// ordered [`LifecycleNode`] stack on [`LifecycleConfig::stacks`]. Literal
+/// `effect` names are checked against `options.is_known_effect` here, so an
+/// unknown name fails before anything runs.
+///
+/// ## Errors
+///
+/// The [`LifecycleError`] authoring family: shape violations
+/// ([`LifecycleError::LifecycleStackInvalidShape`]), removed spellings
+/// ([`LifecycleError::RemovedGrammar`]), unknown verbs (under
+/// [`UnknownVerbPolicy::Reject`]) or parameters, directive placement and
+/// order, and [`LifecycleError::LifecycleUnknownEffect`].
+pub fn parse_lifecycle_config_with(
     frontmatter: &serde_json::Value,
     source_file: &Path,
     options: &LifecycleParseOptions<'_>,
-) -> Result<LifecycleConfig, CompositionError> {
+) -> Result<LifecycleConfig, LifecycleError> {
     let Some(fm_obj) = frontmatter.as_object() else {
         return Ok(LifecycleConfig::default());
     };
@@ -131,7 +162,7 @@ pub(crate) fn parse_lifecycle_config_with(
         && !loop_value.is_null()
     {
         let Some(loop_obj) = loop_value.as_object() else {
-            return Err(CompositionError::LifecycleInvalid {
+            return Err(LifecycleError::LifecycleInvalid {
                 property: "loop".to_string(),
                 message: format!("`loop` must be an object, got {}", json_type_name(loop_value)),
                 source_file: source_file.to_path_buf(),
@@ -156,13 +187,13 @@ pub(crate) fn parse_lifecycle_config_with(
 
 /// Parse the lifecycle concerns of a `loop:` block authored at `property`
 /// (`loop`, `tasks[2].loop`): the same grammar a document's `loop:` has.
-pub(crate) fn parse_loop_concerns_with(
+pub fn parse_loop_concerns_with(
     loop_obj: &serde_json::Map<String, serde_json::Value>,
     source_file: &Path,
     property: &str,
     authored: &AuthoredOrder,
     options: &LifecycleParseOptions<'_>,
-) -> Result<Vec<LifecycleNode>, CompositionError> {
+) -> Result<Vec<LifecycleNode>, LifecycleError> {
     let parser = StackParser {
         signal: LifecycleSignal::Loop,
         source_file,
@@ -174,7 +205,7 @@ pub(crate) fn parse_loop_concerns_with(
 /// Initialization is shell-free: a `shell` action, or a `set` value that runs
 /// a command, is refused in either branch of every conditional, before
 /// anything runs.
-fn refuse_initialize_shells(nodes: &[LifecycleNode], source_file: &Path) -> Result<(), CompositionError> {
+fn refuse_initialize_shells(nodes: &[LifecycleNode], source_file: &Path) -> Result<(), LifecycleError> {
     let mut offending: Option<&LifecycleAction> = None;
     for_each_action(nodes, &mut |action| {
         if offending.is_none() && runs_a_shell(action) {
@@ -183,7 +214,7 @@ fn refuse_initialize_shells(nodes: &[LifecycleNode], source_file: &Path) -> Resu
     });
     match offending {
         None => Ok(()),
-        Some(action) => Err(CompositionError::LifecycleActionPlacement {
+        Some(action) => Err(LifecycleError::LifecycleActionPlacement {
             source_path: source_file.to_path_buf(),
             property: action.path.to_string(),
             action: "shell".to_string(),
@@ -194,14 +225,14 @@ fn refuse_initialize_shells(nodes: &[LifecycleNode], source_file: &Path) -> Resu
 
 /// Parse a task's `setup:`/`teardown:` value into a typed stack rooted at
 /// `property`.
-pub(crate) fn parse_task_action_stack_with(
+pub fn parse_task_action_stack_with(
     signal: LifecycleSignal,
     raw: &serde_json::Value,
     source_file: &Path,
     property: &str,
     authored: &AuthoredOrder,
     options: &LifecycleParseOptions<'_>,
-) -> Result<Vec<LifecycleNode>, CompositionError> {
+) -> Result<Vec<LifecycleNode>, LifecycleError> {
     let parser = StackParser {
         signal,
         source_file,
@@ -218,13 +249,13 @@ pub(crate) fn parse_task_action_stack_with(
 /// stacks, not of its `side_effect:` action, so a whole-value `$( … )` there
 /// would have no approved bytes. It is refused rather than stored as its own
 /// text.
-fn refuse_task_set_shell(action: &LifecycleAction, source_file: &Path) -> Result<(), CompositionError> {
+fn refuse_task_set_shell(action: &LifecycleAction, source_file: &Path) -> Result<(), LifecycleError> {
     let LifecycleActionKind::RuntimeSet(set) = &action.kind else {
         return Ok(());
     };
     match set.shell_values().next() {
         None => Ok(()),
-        Some((key, _)) => Err(CompositionError::LifecycleActionInvalidLongForm {
+        Some((key, _)) => Err(LifecycleError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
             property: action.path.parent().to_string(),
             action: "set".to_string(),
@@ -243,14 +274,14 @@ fn refuse_task_set_shell(action: &LifecycleAction, source_file: &Path) -> Result
 ///
 /// `property` is the source-rooted path of the value itself
 /// (`tasks[0].side_effect`); the action is `{property}.{verb}`.
-pub(crate) fn parse_single_action_with(
+pub fn parse_single_action_with(
     signal: LifecycleSignal,
     raw: &serde_json::Value,
     source_file: &Path,
     property: &str,
     authored_set_order: Option<&[String]>,
     options: &LifecycleParseOptions<'_>,
-) -> Result<LifecycleAction, CompositionError> {
+) -> Result<LifecycleAction, LifecycleError> {
     let path = LifecyclePath::root(property);
     let serde_json::Value::Object(map) = raw else {
         return Err(shape_error(
@@ -309,7 +340,7 @@ impl StackParser<'_> {
         value: &serde_json::Value,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
-    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+    ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         match value {
             serde_json::Value::Null => Ok(Vec::new()),
             serde_json::Value::Array(items) => self.parse_list(items, path, authored, 0),
@@ -338,7 +369,7 @@ impl StackParser<'_> {
         loop_obj: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
-    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+    ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         // `action`/`actions` at the loop root are iteration controls, so only
         // the other removed keys are checked here, before filtering.
         let without_iteration: serde_json::Map<String, serde_json::Value> = loop_obj
@@ -407,12 +438,12 @@ impl StackParser<'_> {
         path: &LifecyclePath,
         authored: &AuthoredOrder,
         depth: usize,
-    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+    ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         let mut nodes = Vec::with_capacity(items.len());
         let mut terminal: Option<LifecyclePath> = None;
         for (index, item) in items.iter().enumerate() {
             if let Some(directive) = terminal.take() {
-                return Err(CompositionError::LifecycleActionOrder {
+                return Err(LifecycleError::LifecycleActionOrder {
                     source_path: self.source_file.to_path_buf(),
                     property: directive.to_string(),
                 });
@@ -437,7 +468,7 @@ impl StackParser<'_> {
         path: &LifecyclePath,
         authored: &AuthoredOrder,
         depth: usize,
-    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+    ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         let map = match value {
             serde_json::Value::String(raw) => {
                 return self.parse_bare_verb(raw, path).map(|action| vec![LifecycleNode::Action(action)]);
@@ -560,7 +591,7 @@ impl StackParser<'_> {
         path: &LifecyclePath,
         authored: &AuthoredOrder,
         depth: usize,
-    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+    ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         let branch = path.to_string();
         let branch = branch.rsplit('.').next().unwrap_or("then");
         match value {
@@ -593,7 +624,7 @@ impl StackParser<'_> {
         map: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
-    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+    ) -> Result<Vec<LifecycleNode>, LifecycleError> {
         self.reject_removed_keys(map, path)?;
         for key in ["when", "then", "else"] {
             if map.contains_key(key) {
@@ -623,7 +654,7 @@ impl StackParser<'_> {
         &self,
         map: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
-    ) -> Result<(), CompositionError> {
+    ) -> Result<(), LifecycleError> {
         let removed = if map.contains_key("stack") {
             Some((
                 "stack",
@@ -654,7 +685,7 @@ impl StackParser<'_> {
         };
         match removed {
             None => Ok(()),
-            Some((key, replacement)) => Err(CompositionError::RemovedGrammar {
+            Some((key, replacement)) => Err(LifecycleError::RemovedGrammar {
                 source_path: self.source_file.to_path_buf(),
                 path: path.field(key).to_string(),
                 removed: key.to_string(),
@@ -663,12 +694,12 @@ impl StackParser<'_> {
         }
     }
 
-    fn parse_when(&self, value: &serde_json::Value, path: &LifecyclePath) -> Result<Expr, CompositionError> {
+    fn parse_when(&self, value: &serde_json::Value, path: &LifecyclePath) -> Result<Expr, LifecycleError> {
         // `when` is always a boolean expression, never routed through the
         // literal-default action-value rule.
         match value {
             serde_json::Value::String(text) => parse_condition(text).map_err(|source| {
-                CompositionError::LifecycleWhenExpressionInvalid {
+                LifecycleError::LifecycleWhenExpressionInvalid {
                     source_path: self.source_file.to_path_buf(),
                     property: path.to_string(),
                     message: format!("`when` is not a valid expression: {source}"),
@@ -685,11 +716,11 @@ impl StackParser<'_> {
 
     /// A bare verb name as a list item: a zero-argument action such as
     /// `- stop`.
-    fn parse_bare_verb(&self, raw: &str, item: &LifecyclePath) -> Result<LifecycleAction, CompositionError> {
+    fn parse_bare_verb(&self, raw: &str, item: &LifecyclePath) -> Result<LifecycleAction, LifecycleError> {
         let verb = raw.trim();
         let property = item.to_string();
         if verb.is_empty() {
-            return Err(CompositionError::LifecycleActionInvalidShortForm {
+            return Err(LifecycleError::LifecycleActionInvalidShortForm {
                 source_path: self.source_file.to_path_buf(),
                 property,
                 raw: raw.to_string(),
@@ -698,14 +729,14 @@ impl StackParser<'_> {
         }
         if verb.contains('(') {
             if is_set_call(verb) {
-                return Err(CompositionError::LifecycleSetNotMapping {
+                return Err(LifecycleError::LifecycleSetNotMapping {
                     source_path: self.source_file.to_path_buf(),
                     property,
                     path: "set".to_string(),
                     actual: "call spelling".to_string(),
                 });
             }
-            return Err(CompositionError::LifecycleShortFormRemoved {
+            return Err(LifecycleError::LifecycleShortFormRemoved {
                 source_path: self.source_file.to_path_buf(),
                 property,
                 raw: raw.to_string(),
@@ -713,7 +744,7 @@ impl StackParser<'_> {
             });
         }
         if verb == "set" {
-            return Err(CompositionError::LifecycleSetNotMapping {
+            return Err(LifecycleError::LifecycleSetNotMapping {
                 source_path: self.source_file.to_path_buf(),
                 property,
                 path: "set".to_string(),
@@ -723,6 +754,9 @@ impl StackParser<'_> {
         let path = item.field(verb);
         let property = path.to_string();
         if !is_known_lifecycle_verb(verb) {
+            if self.options.unknown_verbs == UnknownVerbPolicy::Ignore {
+                return Ok(ignored_action(verb, path));
+            }
             return Err(unknown_verb(self.source_file, &property, verb));
         }
         let kind = validate_positional_arity_and_build(self.signal, verb, Vec::new(), self.source_file, &property)?;
@@ -749,7 +783,7 @@ impl StackParser<'_> {
         map: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
         authored: &AuthoredOrder,
-    ) -> Result<Vec<LifecycleAction>, CompositionError> {
+    ) -> Result<Vec<LifecycleAction>, LifecycleError> {
         let sibling_no_error = match map.get("no_error") {
             None => None,
             Some(serde_json::Value::Bool(flag)) => Some(*flag),
@@ -770,13 +804,14 @@ impl StackParser<'_> {
                 "`no_error` needs an action beside it".to_string(),
             ));
         }
+        let ignore_unknown = self.options.unknown_verbs == UnknownVerbPolicy::Ignore;
         for (verb, _) in &verbs {
-            if verb.as_str() != "set" && !is_known_lifecycle_verb(verb) {
+            if verb.as_str() != "set" && !is_known_lifecycle_verb(verb) && !ignore_unknown {
                 return Err(unknown_verb(self.source_file, &path.field(verb.as_str()).to_string(), verb));
             }
         }
         if map.contains_key("say") && map.contains_key("speak") {
-            return Err(CompositionError::LifecycleSayConflict(path.to_string()));
+            return Err(LifecycleError::LifecycleSayConflict(path.to_string()));
         }
         if sibling_no_error.is_some() && verbs.len() == 1 && verbs[0].0 == "set" {
             return Err(shape_error(
@@ -787,7 +822,7 @@ impl StackParser<'_> {
             ));
         }
         if verbs.iter().filter(|(verb, _)| is_lifecycle_control_verb(verb)).count() > 1 {
-            return Err(CompositionError::LifecycleMultipleLifecycleActions {
+            return Err(LifecycleError::LifecycleMultipleLifecycleActions {
                 source_path: self.source_file.to_path_buf(),
                 property: path.to_string(),
             });
@@ -797,7 +832,11 @@ impl StackParser<'_> {
         let mut ranked = Vec::with_capacity(verbs.len());
         for (verb, value) in verbs {
             let verb_path = path.field(verb.as_str());
-            let mut action = if verb == "set" {
+            let mut action = if verb != "set" && !is_known_lifecycle_verb(verb) {
+                // Only reachable under `UnknownVerbPolicy::Ignore`: the operand
+                // is never read, so its shape cannot fail the bundle.
+                ignored_action(verb, verb_path)
+            } else if verb == "set" {
                 self.parse_runtime_set(value, &verb_path, authored.child("set").key_order())?
             } else if let serde_json::Value::Object(params) = value {
                 if several {
@@ -850,7 +889,7 @@ impl StackParser<'_> {
         verb: &str,
         map: &serde_json::Map<String, serde_json::Value>,
         path: &LifecyclePath,
-    ) -> Result<(LifecycleAction, bool), CompositionError> {
+    ) -> Result<(LifecycleAction, bool), LifecycleError> {
         let property = path.to_string();
         let communication = CommunicationChannel::from_verb(verb).is_some();
         let mut no_error: Option<bool> = None;
@@ -861,7 +900,7 @@ impl StackParser<'_> {
                 no_error = Some(match value {
                     serde_json::Value::Bool(flag) => *flag,
                     other => {
-                        return Err(CompositionError::LifecycleActionInvalidLongForm {
+                        return Err(LifecycleError::LifecycleActionInvalidLongForm {
                             source_path: self.source_file.to_path_buf(),
                             property,
                             action: verb.to_string(),
@@ -883,7 +922,7 @@ impl StackParser<'_> {
                 } else {
                     format!("name the payload `text`: `{verb}: {{ text: … }}`")
                 };
-                return Err(CompositionError::RemovedGrammar {
+                return Err(LifecycleError::RemovedGrammar {
                     source_path: self.source_file.to_path_buf(),
                     path: path.field(key.as_str()).to_string(),
                     removed: format!("{verb}.{key}"),
@@ -894,7 +933,7 @@ impl StackParser<'_> {
             // directives that read a document take it.
             if key == "with" {
                 if !matches!(verb, "proxy" | "retry" | "prep") {
-                    return Err(CompositionError::LifecycleWithUnsupported {
+                    return Err(LifecycleError::LifecycleWithUnsupported {
                         source_path: self.source_file.to_path_buf(),
                         property,
                         verb: verb.to_string(),
@@ -906,7 +945,7 @@ impl StackParser<'_> {
             // `break.code` is a literal exit code: a quoted or interpolated
             // number would pass the expression rule below.
             if verb == "break" && key == "code" && !value.is_number() {
-                return Err(CompositionError::LifecycleInvalidArgs {
+                return Err(LifecycleError::LifecycleInvalidArgs {
                     source_path: self.source_file.to_path_buf(),
                     property,
                     action: verb.to_string(),
@@ -919,7 +958,7 @@ impl StackParser<'_> {
             // Direct YAML object literals are not parameter values; object
             // data must be passed through a whole-value `{{ ... }}` span.
             if let serde_json::Value::Object(_) = value {
-                return Err(CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+                return Err(LifecycleError::LifecycleObjectDataThroughInterpolationParameter {
                     source_path: self.source_file.to_path_buf(),
                     property,
                     verb: verb.to_string(),
@@ -927,7 +966,7 @@ impl StackParser<'_> {
                 });
             }
             let expr = action_value_to_expr(value).map_err(|source| {
-                CompositionError::LifecycleActionInvalidLongForm {
+                LifecycleError::LifecycleActionInvalidLongForm {
                     source_path: self.source_file.to_path_buf(),
                     property: property.clone(),
                     action: verb.to_string(),
@@ -955,16 +994,16 @@ impl StackParser<'_> {
         value: &serde_json::Value,
         path: &LifecyclePath,
         authored_order: Option<&[String]>,
-    ) -> Result<LifecycleAction, CompositionError> {
+    ) -> Result<LifecycleAction, LifecycleError> {
         parse_runtime_set(value, self.source_file, path, authored_order)
     }
 
     /// Cancellation permits only `stop`; `skip` belongs to initialization.
-    fn check_placement(&self, action: &LifecycleAction) -> Result<(), CompositionError> {
+    fn check_placement(&self, action: &LifecycleAction) -> Result<(), LifecycleError> {
         if let LifecycleActionKind::LifecycleControl(control) = &action.kind
             && !control.is_valid_for(self.signal)
         {
-            return Err(CompositionError::LifecycleActionPlacement {
+            return Err(LifecycleError::LifecycleActionPlacement {
                 source_path: self.source_file.to_path_buf(),
                 property: action.path.to_string(),
                 action: control.verb().to_string(),
@@ -976,14 +1015,14 @@ impl StackParser<'_> {
 
     /// A literal `effect` name must be in the caller's catalog. A
     /// `{{ … }}` name is checked when the event resolves it.
-    fn check_effect(&self, action: &LifecycleAction) -> Result<(), CompositionError> {
+    fn check_effect(&self, action: &LifecycleAction) -> Result<(), LifecycleError> {
         if let LifecycleActionKind::Communication(comm) = &action.kind
             && comm.channel == CommunicationChannel::Effect
             && let Expr::StringLiteral(name) = &comm.text
             && !name.contains("{{")
             && !(self.options.is_known_effect)(name)
         {
-            return Err(CompositionError::LifecycleUnknownEffect(
+            return Err(LifecycleError::LifecycleUnknownEffect(
                 action.path.to_string(),
                 name.clone(),
             ));
@@ -1011,23 +1050,36 @@ fn canonical_rank(verb: &str) -> (u8, u8, String) {
     }
 }
 
-fn shape_error(source_file: &Path, path: &LifecyclePath, message: String) -> CompositionError {
-    CompositionError::LifecycleStackInvalidShape {
+fn shape_error(source_file: &Path, path: &LifecyclePath, message: String) -> LifecycleError {
+    LifecycleError::LifecycleStackInvalidShape {
         source_path: source_file.to_path_buf(),
         property: path.to_string(),
         message,
     }
 }
 
-fn unknown_verb(source_file: &Path, property: &str, verb: &str) -> CompositionError {
+fn unknown_verb(source_file: &Path, property: &str, verb: &str) -> LifecycleError {
     let rewrite = did_you_mean_verb(verb)
         .map(|suggestion| format!("; did you mean `{suggestion}`?"))
         .unwrap_or_default();
-    CompositionError::LifecycleUnknownVerb {
+    LifecycleError::LifecycleUnknownVerb {
         source_path: source_file.to_path_buf(),
         property: property.to_string(),
         verb: verb.to_string(),
         rewrite,
+    }
+}
+
+/// The opaque action an unknown verb becomes under
+/// [`UnknownVerbPolicy::Ignore`].
+fn ignored_action(verb: &str, path: LifecyclePath) -> LifecycleAction {
+    LifecycleAction {
+        kind: LifecycleActionKind::Ignored(IgnoredAction {
+            verb: verb.to_string(),
+            path: path.clone(),
+        }),
+        no_error: false,
+        path,
     }
 }
 
@@ -1044,12 +1096,12 @@ fn parse_runtime_set(
     source_file: &Path,
     path: &LifecyclePath,
     authored_order: Option<&[String]>,
-) -> Result<LifecycleAction, CompositionError> {
+) -> Result<LifecycleAction, LifecycleError> {
     let owner = path.parent().to_string();
     let Some(map) = value.as_object() else {
         let actual = match value {
             serde_json::Value::Array(_) => {
-                return Err(CompositionError::LifecycleSetPositionalRemoved {
+                return Err(LifecycleError::LifecycleSetPositionalRemoved {
                     source_path: source_file.to_path_buf(),
                     property: owner,
                     path: "set".to_string(),
@@ -1070,7 +1122,7 @@ fn parse_runtime_set(
             }
             _ => json_type_name(value),
         };
-        return Err(CompositionError::LifecycleSetNotMapping {
+        return Err(LifecycleError::LifecycleSetNotMapping {
             source_path: source_file.to_path_buf(),
             property: owner,
             path: "set".to_string(),
@@ -1083,14 +1135,14 @@ fn parse_runtime_set(
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     let set = RuntimeSet::new_with_order(authored, authored_order).map_err(|error| match error {
-        RuntimeSetError::EmptyKey => CompositionError::LifecycleSetInvalidKey {
+        RuntimeSetError::EmptyKey => LifecycleError::LifecycleSetInvalidKey {
             source_path: source_file.to_path_buf(),
             property: owner.clone(),
             path: "set".to_string(),
             key: String::new(),
             message: "destination keys must not be empty".to_string(),
         },
-        RuntimeSetError::DynamicKey(key) => CompositionError::LifecycleSetInvalidKey {
+        RuntimeSetError::DynamicKey(key) => LifecycleError::LifecycleSetInvalidKey {
             source_path: source_file.to_path_buf(),
             property: owner.clone(),
             path: if is_safe_path_segment(&key) {
@@ -1104,7 +1156,7 @@ fn parse_runtime_set(
         RuntimeSetError::Value {
             path: value_path,
             message,
-        } => CompositionError::LifecycleActionInvalidLongForm {
+        } => LifecycleError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
             property: owner.clone(),
             action: "set".to_string(),
@@ -1130,7 +1182,7 @@ fn parse_with(
     source_file: &Path,
     action: &LifecyclePath,
     verb: &str,
-) -> Result<WithOverlay, CompositionError> {
+) -> Result<WithOverlay, LifecycleError> {
     let property = action.to_string();
     let map = with_mapping_shape(value, source_file, &property)?;
     let authored: IndexMap<String, serde_json::Value> = map
@@ -1146,7 +1198,7 @@ fn parse_with(
         WithOverlayError::Value {
             path: value_path,
             message,
-        } => CompositionError::LifecycleActionInvalidLongForm {
+        } => LifecycleError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
             property: property.clone(),
             action: verb.to_string(),
@@ -1161,15 +1213,15 @@ fn parse_with(
 ///
 /// `property` is the owner's authored path (the directive, or the task; empty
 /// for the task an external `kind: task` file is). A lone whole-value span is
-/// [`CompositionError::LifecycleWithWholeMapping`], checked before the generic
-/// [`CompositionError::LifecycleWithNotMapping`] (which `null` also raises), and
+/// [`LifecycleError::LifecycleWithWholeMapping`], checked before the generic
+/// [`LifecycleError::LifecycleWithNotMapping`] (which `null` also raises), and
 /// a key carrying a `{{ … }}` or `$( … )` span is
-/// [`CompositionError::LifecycleWithDynamicKey`]. Values are not judged here.
-pub(crate) fn with_mapping_shape<'a>(
+/// [`LifecycleError::LifecycleWithDynamicKey`]. Values are not judged here.
+pub fn with_mapping_shape<'a>(
     value: &'a serde_json::Value,
     source_file: &Path,
     property: &str,
-) -> Result<&'a serde_json::Map<String, serde_json::Value>, CompositionError> {
+) -> Result<&'a serde_json::Map<String, serde_json::Value>, LifecycleError> {
     let Some(map) = value.as_object() else {
         // A lone whole-value span reads as "supply the entire mapping from one
         // expression". That is a named non-goal rather than a type error, so
@@ -1182,7 +1234,7 @@ pub(crate) fn with_mapping_shape<'a>(
                 && span.start == 0
                 && span.end == trimmed.len()
             {
-                return Err(CompositionError::LifecycleWithWholeMapping {
+                return Err(LifecycleError::LifecycleWithWholeMapping {
                     source_path: source_file.to_path_buf(),
                     property: property.to_string(),
                     path: "with".to_string(),
@@ -1190,7 +1242,7 @@ pub(crate) fn with_mapping_shape<'a>(
                 });
             }
         }
-        return Err(CompositionError::LifecycleWithNotMapping {
+        return Err(LifecycleError::LifecycleWithNotMapping {
             source_path: source_file.to_path_buf(),
             property: property.to_string(),
             path: "with".to_string(),
@@ -1205,12 +1257,12 @@ pub(crate) fn with_mapping_shape<'a>(
 
 /// Whether a `with:` key carries an interpolation span. Keys name target
 /// frontmatter properties and are never interpolated.
-pub(crate) fn is_dynamic_with_key(key: &str) -> bool {
+pub fn is_dynamic_with_key(key: &str) -> bool {
     !ExpressionFinder::find_all_plain(key).is_empty() || key.contains("$(")
 }
 
-fn with_dynamic_key_error(source_file: &Path, property: &str, key: &str) -> CompositionError {
-    CompositionError::LifecycleWithDynamicKey {
+fn with_dynamic_key_error(source_file: &Path, property: &str, key: &str) -> LifecycleError {
+    LifecycleError::LifecycleWithDynamicKey {
         source_path: source_file.to_path_buf(),
         // A dynamic key has no honest dotted representation — `with.{{ x }}`
         // would name a property that does not exist — so the path stays
@@ -1238,12 +1290,12 @@ use indexmap::IndexMap;
 
 use super::*;
 use super::actions::{LifecycleConditional, for_each_action, is_lifecycle_control_verb};
-use super::super::authored_order::AuthoredOrder;
-use super::super::json_util::json_type_name;
+use super::authored_order::AuthoredOrder;
+use crate::markdown::compose::context::merge::json_type_name;
 
 /// Whether an action runs a shell command: a `shell` action, or a `set` whose
 /// mapping holds a whole-value `$( … )`.
-pub(crate) fn runs_a_shell(action: &LifecycleAction) -> bool {
+pub fn runs_a_shell(action: &LifecycleAction) -> bool {
     match &action.kind {
         LifecycleActionKind::Shell(_) => true,
         LifecycleActionKind::RuntimeSet(set) => set.has_shell_values(),

@@ -12,6 +12,7 @@
 
 mod group;
 mod shell;
+use crate::composition::LifecycleErrorInfoExt;
 pub(crate) use shell::run_owned_lifecycle_command;
 mod sequence;
 mod templates;
@@ -757,7 +758,7 @@ impl TaskExecution<'_> {
         let document_runner = self.document.and_then(|document| {
             self.stack
                 .shell_runner
-                .for_child_environment(document.env_baseline())
+                .for_child_environment(&document.env_baseline().shell_child_environment())
         });
         let in_document;
         let stack = match document_runner.as_deref() {
@@ -1725,6 +1726,9 @@ fn describe_action(action: &LifecycleAction) -> String {
         }
         LifecycleActionKind::SideEffect(effect) => format!("`{}` is a side effect", effect.verb),
         LifecycleActionKind::RuntimeSet(_) => "`set` is a side effect".to_string(),
+        // Claudine's parse profile rejects unknown verbs, so it never
+        // produces an ignored action.
+        LifecycleActionKind::Ignored(ignored) => format!("`{}` is not a lifecycle verb", ignored.verb),
     }
 }
 

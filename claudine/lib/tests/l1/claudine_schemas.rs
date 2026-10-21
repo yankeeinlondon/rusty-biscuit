@@ -1525,7 +1525,7 @@ fn imported_group_leg_cancelled_rejects_forbidden_actions() {
 // ── Cancellation stacks at every conditional depth ─────────────────────────
 
 /// The deepest conditional level Claudine's lifecycle parser accepts
-/// (`MAX_CONDITIONAL_DEPTH` in `composition/lifecycle/parse.rs`).
+/// (`MAX_CONDITIONAL_DEPTH` in `darkmatter/lib/src/lifecycle/parse.rs`).
 const PARSER_MAX_CONDITIONAL_DEPTH: usize = 5;
 
 /// A cancellation stack's site: the frontmatter, with `ITEMS` standing for

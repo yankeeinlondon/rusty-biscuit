@@ -26,6 +26,12 @@ const EXCEPTIONS: &[Exception] = &[
         "the shell cache's only key producer; a spelling mismatch costs a re-run, never a wrong result",
     ),
     private(
+        "darkmatter/lib/src/lifecycle/control.rs",
+        "proxy_handoff_allowed",
+        2,
+        "both operands are canonicalized identically and only the \"same file\" verdict leaves",
+    ),
+    private(
         "darkmatter/lib/src/effects/fs_write.rs",
         "canonicalize_with_missing_tail",
         1,

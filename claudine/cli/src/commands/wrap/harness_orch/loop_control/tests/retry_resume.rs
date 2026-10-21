@@ -1,5 +1,6 @@
 //! retry resume harness-loop tests.
 
+use claudine::composition::LifecycleRunGuardExt;
 use super::*;
 
 #[derive(Default)]

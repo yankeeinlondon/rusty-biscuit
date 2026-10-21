@@ -1,5 +1,6 @@
 //! Tests for composition errors.
 
+use crate::diagnostics::DiagnosticSnapshotExt;
 use super::*;
 
 fn source_from(text: &str) -> ResolvedCompositionSource {

@@ -12,6 +12,7 @@
 //! The runner is installed per thread by the top-level composition commands
 //! ([`install_for`]); the library refuses a `prep` on a thread without one.
 
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::sync::Arc;
 
 use claudine::composition::lifecycle::prep::{self, PrepCall, PrepFailure, PrepRunner, PrepScope};

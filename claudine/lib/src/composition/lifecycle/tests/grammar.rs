@@ -3,6 +3,8 @@
 //! authored paths through expansion (AC1–AC4, AC6, AC17; `with` placement for
 //! AC5).
 
+use crate::composition::LifecycleErrorInfoExt;
+use crate::composition::LifecycleCatchProtocolExt;
 use super::*;
 use actions::{LifecycleConditional, LifecycleNode};
 

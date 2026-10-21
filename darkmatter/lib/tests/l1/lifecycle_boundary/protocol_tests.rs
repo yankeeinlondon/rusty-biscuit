@@ -1,14 +1,15 @@
-//! Registration, the reply protocol, cancellation, shell permission, and the
-//! spec section 8 behavior, driven through the Claudine and `md` profiles.
+//! The prototype's registry-phase tests: registration, renames, the core-only
+//! `md` profile, per-event `err` views, and registered action types. The run
+//! protocol itself is tested against production in `lifecycle_run_protocol`.
 
 use darkmatter::markdown::compose::expression::Availability;
 use serde_json::json;
 
 use super::engine::{
-    ActionTypes, ApprovalEpoch, CancelError, CoreEvent, Directive, DocumentInput, Entry, EvaluationMode, EventDescriptor,
+    ActionTypes, ApprovalEpoch, CoreEvent, Directive, DocumentInput, Entry, EventDescriptor,
     EventId, EventOutcome, FailureStage, Finish, HostError, HostFailure, KeyResolution, LifecycleError, OperationReport,
-    Outcome, OutcomePair, Position, Preparation, RecoveryKind, RecoveryReply, RegistrationError, Reply, ReplyError,
-    RequestKind, Role, Run, SessionAvailability, ShellLock, ShellRefusal, StartError, TranscriptEntry, err_view,
+    Outcome, OutcomePair, Position, Preparation, RecoveryReply, RegistrationError, Reply, ReplyError,
+    Role, Run, SessionAvailability, ShellRefusal, StartError, err_view,
 };
 use super::profiles::{claudine_profile, md_profile};
 
@@ -22,10 +23,6 @@ fn host(code: &str) -> HostError {
 
 fn raised(code: &str) -> LifecycleError {
     LifecycleError::Host(host(code))
-}
-
-fn raised_as(code: &str, message: &str) -> LifecycleError {
-    LifecycleError::Host(HostError::new(code, message))
 }
 
 fn failure(stage: FailureStage, entry: Entry, code: &str) -> HostFailure {
@@ -71,16 +68,6 @@ fn failed_run() -> Run {
 
 fn events(run: &Run) -> Vec<String> {
     run.transcript_lines().into_iter().filter_map(|line| line.strip_prefix("event ").map(str::to_string)).collect()
-}
-
-fn mode_of(run: &Run, name: &str) -> Vec<EvaluationMode> {
-    run.transcript()
-        .iter()
-        .filter_map(|entry| match entry {
-            TranscriptEntry::Event { name: fired, mode } if fired == name => Some(*mode),
-            _ => None,
-        })
-        .collect()
 }
 
 fn note(name: &str, position: Position) -> EventDescriptor {
@@ -284,470 +271,6 @@ fn darkmatter_spellings_fail_under_a_renaming_host_and_host_only_keys_are_data_u
 }
 
 #[test]
-fn every_request_is_bound_to_run_document_attempt_iteration_and_a_rising_generation() {
-    let mut run = failed_run();
-    let mut tickets = vec![run.pending().ticket()];
-    let mut step = |run: &mut Run, reply: Reply| {
-        answer(run, reply);
-        tickets.push(run.pending().ticket());
-    };
-    step(&mut run, Reply::Event(ok().directive(Directive::Retry { max_attempts: 1 })));
-    step(&mut run, Reply::Recovery(RecoveryReply::Admitted));
-    assert_eq!(run.pending().kind(), &RequestKind::Prepare { entry: Entry::Retry });
-    step(&mut run, Reply::Prepared(Preparation::Ready { epoch: ApprovalEpoch(2) }));
-    step(&mut run, Reply::Event(ok()));
-    step(&mut run, Reply::Operation(OperationReport::Completed { outcome: Outcome::Succeeded, session: SessionAvailability::Available }));
-    step(&mut run, Reply::Event(ok()));
-    step(&mut run, Reply::Event(ok()));
-    assert_eq!(run.pending().event_name(), Some("loop"));
-    step(&mut run, Reply::Event(ok().directive(Directive::Iterate)));
-    step(&mut run, Reply::Event(ok()));
-    step(&mut run, Reply::Operation(OperationReport::Completed { outcome: Outcome::Failed(host("agent.failed")), session: SessionAvailability::Available }));
-    step(&mut run, Reply::Event(ok().directive(Directive::Proxy { target: "fallback.md".to_string() })));
-    step(&mut run, Reply::Recovery(RecoveryReply::Adopted(DocumentInput::new("fallback.md"))));
-
-    assert!(tickets.iter().all(|ticket| ticket.run() == run.id()));
-    assert!(tickets.windows(2).all(|pair| pair[0].generation() < pair[1].generation()));
-    let identity = |index: usize| (tickets[index].document(), tickets[index].attempt(), tickets[index].iteration());
-    assert_eq!(identity(0), (1, 1, 1), "failure, first attempt");
-    assert_eq!(identity(2), (1, 2, 1), "retry preparation");
-    assert_eq!(identity(8), (1, 1, 2), "start of the second iteration");
-    assert_eq!(identity(tickets.len() - 1), (2, 1, 1), "initialize of the adopted document");
-    assert_eq!(run.pending().event_name(), Some("initialize"));
-}
-
-#[test]
-fn stale_duplicate_foreign_wrong_kind_and_late_replies_change_nothing() {
-    let mut run = claudine(DocumentInput::new("review.md"));
-    let other = claudine(DocumentInput::new("review.md"));
-    let initialize = run.pending().ticket();
-    let rejected = |run: &mut Run, ticket, reply, error| {
-        let before = run.clone();
-        assert_eq!(run.reply(ticket, reply), Err(error));
-        assert_eq!(*run, before);
-    };
-
-    rejected(&mut run, other.pending().ticket(), Reply::Event(ok().set("x", json!(1))), ReplyError::ForeignRun);
-    rejected(
-        &mut run,
-        initialize,
-        Reply::Prepared(Preparation::Ready { epoch: ApprovalEpoch(1) }),
-        ReplyError::WrongKind { expected: "evaluate-event", received: "prepared" },
-    );
-    answer(&mut run, Reply::Event(ok().set("x", json!(1))));
-    rejected(&mut run, initialize, Reply::Event(ok().set("x", json!(2))), ReplyError::Duplicate { generation: initialize.generation() });
-    ready(&mut run);
-    let start = run.pending().ticket();
-    rejected(
-        &mut run,
-        initialize,
-        Reply::Event(ok()),
-        ReplyError::Stale { generation: initialize.generation(), current: start.generation() },
-    );
-    event(&mut run, "start", ok());
-    let operation = run.pending().ticket();
-    rejected(&mut run, operation, Reply::Event(ok()), ReplyError::WrongKind { expected: "perform-operation", received: "event" });
-    rejected(&mut run, operation, Reply::Recovery(RecoveryReply::Admitted), ReplyError::WrongKind { expected: "perform-operation", received: "recovery" });
-    answer(&mut run, Reply::Operation(OperationReport::Started { session: SessionAvailability::Available }));
-    let completion = run.pending().ticket();
-    rejected(
-        &mut run,
-        completion,
-        Reply::Operation(OperationReport::Started { session: SessionAvailability::Available }),
-        ReplyError::WrongKind { expected: "await-completion", received: "operation" },
-    );
-    complete(&mut run, Outcome::Succeeded);
-    event(&mut run, "success", ok());
-    event(&mut run, "finalize", ok());
-    event(&mut run, "loop", ok());
-    let done = run.pending().ticket();
-    assert_eq!(run.finish(), Some(Finish::Succeeded));
-    rejected(&mut run, done, Reply::Event(ok()), ReplyError::Finished);
-    assert_eq!(run.state().get("x"), Some(&json!(1)));
-}
-
-#[test]
-fn misplaced_directives_and_inconsistent_facts_change_nothing() {
-    let rejected = |run: &mut Run, reply, error| {
-        let before = run.clone();
-        assert_eq!(run.answer(reply), Err(error));
-        assert_eq!(*run, before);
-    };
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok());
-    rejected(
-        &mut run,
-        Reply::Prepared(Preparation::Failed(failure(FailureStage::Preflight, Entry::Retry, "x"))),
-        ReplyError::EntryMismatch { expected: Entry::Initial, received: Entry::Retry },
-    );
-    rejected(
-        &mut run,
-        Reply::Prepared(Preparation::Failed(failure(FailureStage::LaunchConstruction, Entry::Initial, "x"))),
-        ReplyError::StageNotApplicable { stage: FailureStage::LaunchConstruction, request: "prepare" },
-    );
-    ready(&mut run);
-    for (directive, name) in [(Directive::Skip, "skip"), (Directive::Iterate, "iterate")] {
-        rejected(
-            &mut run,
-            Reply::Event(ok().directive(directive)),
-            ReplyError::DirectiveNotPermitted { directive: name, event: "start".to_string() },
-        );
-    }
-    event(&mut run, "start", ok());
-    rejected(
-        &mut run,
-        Reply::Operation(OperationReport::NotStarted(failure(FailureStage::Preflight, Entry::Initial, "x"))),
-        ReplyError::StageNotApplicable { stage: FailureStage::Preflight, request: "perform-operation" },
-    );
-    complete(&mut run, Outcome::Failed(host("agent.failed")));
-    event(&mut run, "failure", ok().directive(Directive::Proxy { target: "other.md".to_string() }));
-    rejected(&mut run, Reply::Recovery(RecoveryReply::Admitted), ReplyError::WrongRecovery { requested: RecoveryKind::Proxy });
-    // Only a committed handoff's setup failure aborts a proxy.
-    rejected(
-        &mut run,
-        Reply::Recovery(RecoveryReply::Aborted(failure(FailureStage::RecoveryRefused, Entry::Initial, "x"))),
-        ReplyError::StageNotApplicable { stage: FailureStage::RecoveryRefused, request: "recover" },
-    );
-    rejected(
-        &mut run,
-        Reply::Recovery(RecoveryReply::Adopted(DocumentInput::new("other.md").with("composed", json!([])))),
-        ReplyError::Document(StartError::RenamedEvent { authored: "composed".to_string(), replacement: "start".to_string() }),
-    );
-}
-
-#[test]
-fn cancel_invalidates_outstanding_work_then_runs_cancelled_and_finalize() {
-    let mut run = claudine(DocumentInput::new("review.md").with("cancelled", json!([{ "info": "stopping" }])));
-    event(&mut run, "initialize", ok());
-    ready(&mut run);
-    event(&mut run, "start", ok());
-    answer(&mut run, Reply::Operation(OperationReport::Started { session: SessionAvailability::Available }));
-    let work = run.pending().ticket();
-
-    run.cancel().unwrap();
-    let cancelled = run.pending();
-    assert_eq!(cancelled.event().map(|event| (event.name.as_str(), event.mode)), Some(("cancelled", EvaluationMode::CancellationCleanup)));
-    assert_eq!(cancelled.event().and_then(|event| event.stack.clone()), Some(json!([{ "info": "stopping" }])));
-
-    let before = run.clone();
-    let late = Reply::Operation(OperationReport::Completed { outcome: Outcome::Succeeded, session: SessionAvailability::Available });
-    assert_eq!(run.reply(work, late), Err(ReplyError::CancelledWork { generation: work.generation() }));
-    assert_eq!(run, before);
-
-    event(&mut run, "cancelled", ok().directive(Directive::Retry { max_attempts: 1 }));
-    assert_eq!(mode_of(&run, "finalize"), [EvaluationMode::CancellationCleanup]);
-    event(&mut run, "finalize", ok());
-    assert_eq!(
-        run.transcript_lines()[4..],
-        ["operation", "operation started", "cancel", "error composition.cancelled", "event cancelled", "event finalize", "finish cancelled"]
-    );
-    assert_eq!(run.selected_error(), Some(&raised_as("composition.cancelled", "the run was cancelled")));
-    assert_eq!(run.cancel(), Err(CancelError::Finished));
-}
-
-#[test]
-fn cancel_without_a_cancelled_stack_runs_only_finalize_even_during_initialize() {
-    let mut run = claudine(DocumentInput::new("review.md"));
-    let initialize = run.pending().ticket();
-    run.cancel().unwrap();
-    let before = run.clone();
-    assert_eq!(run.cancel(), Err(CancelError::AlreadyCancelled));
-    assert_eq!(run, before);
-
-    let finalize = run.pending().ticket();
-    assert_eq!(run.shell_permission(&finalize), Err(ShellRefusal::Locked));
-    assert_eq!(
-        run.reply(initialize, Reply::Event(ok().directive(Directive::Skip))),
-        Err(ReplyError::CancelledWork { generation: initialize.generation() })
-    );
-    event(&mut run, "finalize", ok().directive(Directive::Retry { max_attempts: 1 }));
-    assert_eq!(
-        run.transcript_lines(),
-        ["event initialize", "cancel", "error composition.cancelled", "event finalize", "finish cancelled"]
-    );
-}
-
-#[test]
-fn late_replies_after_cancellation_cannot_emit_an_outcome_reopen_shells_or_finalize_again() {
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok());
-    let prepare = run.pending().ticket();
-    run.cancel().unwrap();
-    assert!(run.reply(prepare, Reply::Prepared(Preparation::Ready { epoch: ApprovalEpoch(9) })).is_err());
-    assert_eq!(run.shell_lock(), ShellLock::Locked);
-    let finalize = run.pending().ticket();
-    event(&mut run, "finalize", ok());
-    assert_eq!(run.reply(finalize, Reply::Event(ok())), Err(ReplyError::Duplicate { generation: finalize.generation() }));
-    assert_eq!(run.reply(prepare, Reply::Event(ok())), Err(ReplyError::CancelledWork { generation: prepare.generation() }));
-
-    // Cancelled while `success` was being evaluated: its late reply cannot
-    // request recovery, and `finalize` runs exactly once.
-    let mut run = started();
-    complete(&mut run, Outcome::Succeeded);
-    let success = run.pending().ticket();
-    run.cancel().unwrap();
-    assert!(run.reply(success, Reply::Event(ok().directive(Directive::Retry { max_attempts: 1 }))).is_err());
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "start", "success", "finalize"]);
-    assert_eq!(run.finish(), Some(Finish::Cancelled));
-}
-
-#[test]
-fn a_cancel_during_cleanup_lets_that_cleanup_finish_without_a_second_pass() {
-    let mut run = failed_run();
-    event(&mut run, "failure", ok());
-    let finalize = run.pending().ticket();
-    run.cancel().unwrap();
-    assert_eq!(run.pending().ticket(), finalize);
-    event(&mut run, "finalize", ok().directive(Directive::Retry { max_attempts: 1 }));
-    assert_eq!(events(&run), ["initialize", "start", "failure", "finalize"]);
-    assert_eq!(run.finish(), Some(Finish::Cancelled));
-}
-
-#[test]
-fn the_run_alone_answers_shell_permission_from_initialize_to_proxy_adoption() {
-    let mut registry = claudine_profile();
-    // A host declaring `shell` for `initialize` cannot relax the invariant.
-    registry.declare_core_actions(CoreEvent::Initialize, ActionTypes::all()).unwrap();
-    let mut run = Run::start(&registry, DocumentInput::new("review.md")).unwrap();
-    let initialize = run.pending().ticket();
-    assert_eq!(run.shell_permission(&initialize), Err(ShellRefusal::InitializeForbidsShell));
-    event(&mut run, "initialize", ok());
-    assert_eq!(run.shell_permission(&run.pending().ticket()), Err(ShellRefusal::NotCurrentEvent));
-    assert_eq!(run.shell_permission(&initialize), Err(ShellRefusal::NotCurrentEvent));
-    answer(&mut run, Reply::Prepared(Preparation::Ready { epoch: ApprovalEpoch(4) }));
-    assert_eq!(run.shell_permission(&run.pending().ticket()), Ok(ApprovalEpoch(4)));
-
-    event(&mut run, "start", ok());
-    complete(&mut run, Outcome::Failed(host("agent.failed")));
-    assert_eq!(run.shell_permission(&run.pending().ticket()), Ok(ApprovalEpoch(4)));
-    event(&mut run, "failure", ok().directive(Directive::Proxy { target: "fallback.md".to_string() }));
-    answer(&mut run, Reply::Recovery(RecoveryReply::Adopted(DocumentInput::new("fallback.md"))));
-    assert_eq!(run.shell_lock(), ShellLock::Locked);
-    event(&mut run, "initialize", ok());
-    answer(&mut run, Reply::Prepared(Preparation::Failed(failure(FailureStage::Preflight, Entry::Initial, "audit.denied"))));
-    assert_eq!(run.shell_permission(&run.pending().ticket()), Err(ShellRefusal::Locked), "early blocked");
-    event(&mut run, "blocked", ok());
-    assert_eq!(run.shell_permission(&run.pending().ticket()), Err(ShellRefusal::Locked), "early finalize");
-    event(&mut run, "finalize", ok());
-
-    let shell: Vec<_> = run.transcript_lines().into_iter().filter(|line| line.starts_with("shell") || line.starts_with("adopt")).collect();
-    assert_eq!(shell, ["shell unlocked", "shell locked", "adopt document 2"]);
-
-    // An event that does not admit `shell` refuses it even when unlocked.
-    let mut registry = md_profile();
-    registry.register(note("announce", Position::AfterComposition).with_actions(ActionTypes::of([]))).unwrap();
-    let mut run = Run::start(&registry, DocumentInput::new("report.md")).unwrap();
-    event(&mut run, "initialize", ok());
-    ready(&mut run);
-    event(&mut run, "composed", ok());
-    assert_eq!(run.shell_permission(&run.pending().ticket()), Err(ShellRefusal::NotAllowedInEvent { event: "announce".to_string() }));
-}
-
-#[test]
-fn the_failure_stage_and_launch_state_select_blocked_or_failure() {
-    // Composition or preflight failure: blocked, with normal recovery rules.
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok());
-    answer(&mut run, Reply::Prepared(Preparation::Failed(failure(FailureStage::Preflight, Entry::Initial, "schema.invalid"))));
-    event(&mut run, "blocked", ok());
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "blocked", "finalize"]);
-    assert_eq!(mode_of(&run, "blocked"), [EvaluationMode::NormalRecovery]);
-
-    let not_started = |stage| {
-        let mut run = started();
-        answer(&mut run, Reply::Operation(OperationReport::NotStarted(failure(stage, Entry::Initial, "setup.failed"))));
-        run
-    };
-    // Internal setup failure after `start`, before launch: blocked.
-    let mut run = not_started(FailureStage::Setup);
-    event(&mut run, "blocked", ok());
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "start", "blocked", "finalize"]);
-    assert_eq!(mode_of(&run, "blocked"), [EvaluationMode::RefusalCleanup]);
-
-    // Launch construction after `start`: failure.
-    let mut run = not_started(FailureStage::LaunchConstruction);
-    event(&mut run, "failure", ok().directive(Directive::Retry { max_attempts: 1 }));
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "start", "failure", "finalize"]);
-
-    // A proxy refused before launch, even after `start` fired: blocked.
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok());
-    ready(&mut run);
-    event(&mut run, "start", ok().directive(Directive::Proxy { target: "loop.md".to_string() }));
-    answer(&mut run, Reply::Recovery(RecoveryReply::Refused(failure(FailureStage::HandoffRefused, Entry::Initial, "proxy.cycle"))));
-    event(&mut run, "blocked", ok());
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "start", "blocked", "finalize"]);
-    assert_eq!(run.selected_error(), Some(&raised("proxy.cycle")));
-
-    // A resume refused as incompatible after re-entering at `start`: failure.
-    let mut run = failed_run();
-    event(&mut run, "failure", ok().directive(Directive::Resume { max_attempts: 1 }));
-    answer(&mut run, Reply::Recovery(RecoveryReply::Admitted));
-    assert_eq!(run.pending().kind(), &RequestKind::Prepare { entry: Entry::Resume });
-    ready(&mut run);
-    event(&mut run, "start", ok());
-    answer(&mut run, Reply::Operation(OperationReport::NotStarted(failure(FailureStage::ResumeIncompatible, Entry::Resume, "resume.incompatible"))));
-    event(&mut run, "failure", ok());
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "start", "failure", "start", "failure", "finalize"]);
-    assert_eq!(mode_of(&run, "failure"), [EvaluationMode::NormalRecovery, EvaluationMode::RefusalCleanup]);
-
-    // A handoff refused after launch: `success` already holds the slot, so
-    // no second terminal event fires; only the owed `finalize`.
-    let mut run = started();
-    complete(&mut run, Outcome::Succeeded);
-    event(&mut run, "success", ok().directive(Directive::Proxy { target: "next.md".to_string() }));
-    answer(&mut run, Reply::Recovery(RecoveryReply::Refused(failure(FailureStage::HandoffRefused, Entry::Initial, "proxy.unowned"))));
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "start", "success", "finalize"]);
-    assert_eq!((run.terminal(), run.finish()), (Some("success"), Some(Finish::Failed)));
-}
-
-#[test]
-fn an_explicit_error_downgrades_success_or_blocked_to_failure_whose_recovery_stays_eligible() {
-    let mut run = started();
-    complete(&mut run, Outcome::Succeeded);
-    event(&mut run, "success", ok().directive(Directive::Error(raised("review.rejected"))));
-    assert_eq!(run.terminal(), Some("failure"));
-    event(&mut run, "failure", ok().directive(Directive::Retry { max_attempts: 1 }));
-    assert!(matches!(run.pending().kind(), RequestKind::Recover(recovery) if recovery.kind == RecoveryKind::Retry && recovery.from_name == "failure"));
-
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok());
-    answer(&mut run, Reply::Prepared(Preparation::Failed(failure(FailureStage::Preflight, Entry::Initial, "schema.invalid"))));
-    event(&mut run, "blocked", ok().directive(Directive::Error(raised("blocked.explicit"))));
-    assert_eq!((run.terminal(), run.selected_error()), (Some("failure"), Some(&raised("blocked.explicit"))));
-    event(&mut run, "failure", ok().directive(Directive::Retry { max_attempts: 1 }));
-    assert!(matches!(run.pending().kind(), RequestKind::Recover(_)));
-
-    // `failure` has no downgrade: its explicit error ends in cleanup only.
-    let mut run = failed_run();
-    event(&mut run, "failure", ok().directive(Directive::Error(raised("failure.explicit"))));
-    event(&mut run, "finalize", ok().directive(Directive::Retry { max_attempts: 1 }));
-    assert_eq!(events(&run), ["initialize", "start", "failure", "finalize"]);
-    assert_eq!(run.finish(), Some(Finish::Failed));
-}
-
-#[test]
-fn skip_ends_the_run_from_initialize_without_finalize() {
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok().directive(Directive::Skip));
-    assert_eq!(run.transcript_lines(), ["event initialize", "finish skipped"]);
-}
-
-#[test]
-fn retry_or_resume_from_a_terminal_event_skips_that_attempts_finalize() {
-    for (directive, entry) in [(Directive::Retry { max_attempts: 1 }, Entry::Retry), (Directive::Resume { max_attempts: 1 }, Entry::Resume)] {
-        let mut run = failed_run();
-        event(&mut run, "failure", ok().directive(directive));
-        answer(&mut run, Reply::Recovery(RecoveryReply::Admitted));
-        assert_eq!(run.pending().kind(), &RequestKind::Prepare { entry });
-        ready(&mut run);
-        event(&mut run, "start", ok());
-        complete(&mut run, Outcome::Succeeded);
-        event(&mut run, "success", ok());
-        event(&mut run, "finalize", ok());
-        event(&mut run, "loop", ok());
-        assert_eq!(events(&run), ["initialize", "start", "failure", "start", "success", "finalize", "loop"]);
-        assert_eq!(run.finish(), Some(Finish::Succeeded));
-    }
-
-    // The host owns the budget; an exhausted one continues to `finalize`.
-    let mut run = failed_run();
-    event(&mut run, "failure", ok().directive(Directive::Retry { max_attempts: 1 }));
-    answer(&mut run, Reply::Recovery(RecoveryReply::Exhausted));
-    assert_eq!(mode_of(&run, "finalize"), [EvaluationMode::NormalRecovery]);
-}
-
-#[test]
-fn proxy_from_a_terminal_event_never_runs_the_source_finalize() {
-    let mut run = failed_run();
-    event(&mut run, "failure", ok().directive(Directive::Proxy { target: "fallback.md".to_string() }));
-    answer(&mut run, Reply::Recovery(RecoveryReply::Adopted(DocumentInput::new("fallback.md").with("goal", json!("retry")))));
-    assert_eq!(run.state().get("goal"), Some(&json!("retry")));
-    event(&mut run, "initialize", ok());
-    ready(&mut run);
-    event(&mut run, "start", ok());
-    complete(&mut run, Outcome::Succeeded);
-    event(&mut run, "success", ok());
-    event(&mut run, "finalize", ok());
-    event(&mut run, "loop", ok());
-    assert_eq!(events(&run), ["initialize", "start", "failure", "initialize", "start", "success", "finalize", "loop"]);
-}
-
-#[test]
-fn a_recovery_chosen_in_finalize_is_never_followed_by_a_second_finalize_for_that_attempt() {
-    let mut run = failed_run();
-    event(&mut run, "failure", ok());
-    event(&mut run, "finalize", ok().directive(Directive::Retry { max_attempts: 1 }));
-    answer(&mut run, Reply::Recovery(RecoveryReply::Admitted));
-    ready(&mut run);
-    event(&mut run, "start", ok());
-    complete(&mut run, Outcome::Failed(host("agent.failed")));
-    event(&mut run, "failure", ok());
-    event(&mut run, "finalize", ok());
-    assert_eq!(events(&run), ["initialize", "start", "failure", "finalize", "start", "failure", "finalize"]);
-
-    // An evaluation error inside `finalize` ends the run without finalizing again.
-    let mut run = failed_run();
-    event(&mut run, "failure", ok());
-    event(&mut run, "finalize", ok().evaluation_error(raised("finalize.eval")));
-    assert_eq!(events(&run), ["initialize", "start", "failure", "finalize"]);
-    assert_eq!((run.selected_error(), run.finish()), (Some(&raised("finalize.eval")), Some(Finish::Failed)));
-}
-
-#[test]
-fn blocked_reached_from_preflight_cannot_recover() {
-    for (directive, action) in [
-        (Directive::Retry { max_attempts: 1 }, RecoveryKind::Retry),
-        (Directive::Resume { max_attempts: 1 }, RecoveryKind::Resume),
-        (Directive::Proxy { target: "other.md".to_string() }, RecoveryKind::Proxy),
-    ] {
-        let mut run = claudine(DocumentInput::new("review.md"));
-        event(&mut run, "initialize", ok());
-        answer(&mut run, Reply::Prepared(Preparation::Failed(failure(FailureStage::Preflight, Entry::Initial, "audit.denied"))));
-        event(&mut run, "blocked", ok().directive(directive));
-        assert_eq!(
-            run.selected_error(),
-            Some(&LifecycleError::SetupRecoveryUnsupported { event: "blocked".to_string(), action })
-        );
-        event(&mut run, "finalize", ok());
-        assert!(!run.transcript_lines().iter().any(|line| line.starts_with("recover")));
-        assert_eq!(run.finish(), Some(Finish::Failed));
-    }
-}
-
-#[test]
-fn an_evaluation_failure_in_start_is_caught_by_failure_and_finalize_as_cleanup_only() {
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok());
-    ready(&mut run);
-    event(&mut run, "start", ok().evaluation_error(raised("start.eval")));
-    event(&mut run, "failure", ok().directive(Directive::Retry { max_attempts: 1 }));
-    event(&mut run, "finalize", ok().evaluation_error(raised("finalize.eval")));
-    assert_eq!(events(&run), ["initialize", "start", "failure", "finalize"]);
-    assert_eq!(mode_of(&run, "failure"), [EvaluationMode::FatalEvaluationCleanup]);
-    // The later evaluation error replaces the earlier one.
-    assert_eq!(run.selected_error(), Some(&raised("finalize.eval")));
-    assert_eq!((run.terminal(), run.finish()), (Some("failure"), Some(Finish::Failed)));
-
-    // An evaluation failure in `blocked` re-designates the slot to `failure`.
-    let mut run = claudine(DocumentInput::new("review.md"));
-    event(&mut run, "initialize", ok());
-    answer(&mut run, Reply::Prepared(Preparation::Failed(failure(FailureStage::Preflight, Entry::Initial, "audit.denied"))));
-    event(&mut run, "blocked", ok().evaluation_error(raised("blocked.eval")));
-    assert_eq!(run.terminal(), Some("failure"));
-    event(&mut run, "failure", ok());
-    event(&mut run, "finalize", ok());
-    assert_eq!(run.selected_error(), Some(&raised("blocked.eval")));
-}
-
-#[test]
 fn an_event_whose_view_marks_err_unavailable_yields_the_views_reason() {
     let run = claudine(DocumentInput::new("review.md").with("err", json!("a frontmatter value named err")));
     let request = run.pending();
@@ -769,39 +292,34 @@ fn an_event_whose_view_marks_err_unavailable_yields_the_views_reason() {
     assert_eq!(read.reason.code(), "claudine.success-has-no-error");
 }
 
+/// The prototype parses an adopted document through the registry; the
+/// production run receives the host's parse as a fact.
 #[test]
-fn the_iteration_gate_reenters_at_start_after_a_successful_unbroken_pass_only() {
-    let mut run = started();
-    complete(&mut run, Outcome::Succeeded);
-    event(&mut run, "success", ok());
-    event(&mut run, "finalize", ok());
-    event(&mut run, "loop", ok().directive(Directive::Iterate));
-    let ticket = run.pending().ticket();
-    assert_eq!((run.pending().event_name(), ticket.iteration(), ticket.attempt()), (Some("start"), 2, 1));
-    assert_eq!(run.shell_permission(&ticket), Ok(ApprovalEpoch(1)));
-    event(&mut run, "start", ok());
-    complete(&mut run, Outcome::Succeeded);
-    event(&mut run, "success", ok().directive(Directive::Break));
-    event(&mut run, "finalize", ok());
-    assert_eq!(
-        run.transcript_lines()[5..],
-        [
-            "event success",
-            "event finalize",
-            "event loop",
-            "iteration 2",
-            "event start",
-            "operation",
-            "event success",
-            "event finalize",
-            "finish succeeded",
-        ]
-    );
-
-    // A failed pass ends the loop before its gate.
+fn an_adopted_document_is_split_by_the_registry() {
     let mut run = failed_run();
-    event(&mut run, "failure", ok());
-    event(&mut run, "finalize", ok());
-    assert_eq!(run.finish(), Some(Finish::Failed));
-    assert!(!events(&run).contains(&"loop".to_string()));
+    event(&mut run, "failure", ok().directive(Directive::Proxy { target: "other.md".to_string() }));
+    let before = run.clone();
+    assert_eq!(
+        run.answer(Reply::Recovery(RecoveryReply::Adopted(DocumentInput::new("other.md").with("composed", json!([]))))),
+        Err(ReplyError::Document(StartError::RenamedEvent { authored: "composed".to_string(), replacement: "start".to_string() }))
+    );
+    assert_eq!(run, before);
+}
+
+/// Registered action types refine shell permission; a host cannot relax the
+/// `initialize` invariant.
+#[test]
+fn registered_action_types_refine_shell_permission() {
+    let mut registry = claudine_profile();
+    registry.declare_core_actions(CoreEvent::Initialize, ActionTypes::all()).unwrap();
+    let run = Run::start(&registry, DocumentInput::new("review.md")).unwrap();
+    assert_eq!(run.shell_permission(&run.pending().ticket()), Err(ShellRefusal::InitializeForbidsShell));
+
+    let mut registry = md_profile();
+    registry.register(note("announce", Position::AfterComposition).with_actions(ActionTypes::of([]))).unwrap();
+    let mut run = Run::start(&registry, DocumentInput::new("report.md")).unwrap();
+    event(&mut run, "initialize", ok());
+    ready(&mut run);
+    event(&mut run, "composed", ok());
+    assert_eq!(run.shell_permission(&run.pending().ticket()), Err(ShellRefusal::NotAllowedInEvent { event: "announce".to_string() }));
 }

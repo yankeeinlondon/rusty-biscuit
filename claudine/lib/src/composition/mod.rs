@@ -14,7 +14,7 @@
 use std::path::Path;
 
 pub mod agent_message;
-pub mod authored_order;
+pub use darkmatter::lifecycle::authored_order;
 pub mod closure;
 pub mod completion;
 pub mod coordinator;
@@ -87,14 +87,15 @@ pub use hints::{parse_interactive_hint, parse_selection_hints_from_frontmatter};
 pub use guardrails::{document_path_span, native_document_path};
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 pub use lifecycle::runtime::{
-    IterationSummarySignals, LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult,
+    EvaluationMode, IterationSummarySignals, LifecycleCatchExecution, LifecycleCatchProtocol,
+    LifecycleCatchProtocolExt, LifecycleCatchResult,
     LifecycleCatchState, LifecycleCatchStep, LifecycleTransitionAbort, LifecycleTransitionDecision,
     LifecycleTransitionError, LifecycleTransitionInput, decide_lifecycle_transition,
 };
 #[allow(deprecated)]
 pub use lifecycle::{
-    DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
-    LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
+    ClaudineRunHost, DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
+    LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
     parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
@@ -103,7 +104,7 @@ pub use lifecycle_actions::{
     LifecyclePath, RetryBackoff, ShellAction,
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
-pub use lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};
+pub use lifecycle_context::{LifecycleErrorInfo, LifecycleErrorInfoExt, LifecycleTiming};
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,
     parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
@@ -198,36 +199,11 @@ pub use types::{
     SharedApprovalCache,
 };
 
-/// Pairs `options` with the request's `file_resolution_context`.
-///
-/// Darkmatter aligns the options' `ctx.*` environment with the context's, so
-/// the variables Claudine layers onto the captured `ctx` for a run (`AGENT`,
-/// `MODEL`, `YOLO`, and other `env_overrides`) are added to the context's
-/// environment first. An expression, `env.*`, and a `{{VAR}}` file reference
-/// then read one environment, and none of the run's variables is lost.
-///
-/// ## Errors
-///
-/// Returns the [`ContextBuildError`](darkmatter::markdown::compose::ContextBuildError)
-/// when `file_resolution_context` fails validation.
-pub fn compose_request(
-    options: darkmatter::markdown::compose::ComposeOptions,
-    file_resolution_context: biscuit_file::FileResolutionContext,
-) -> Result<darkmatter::markdown::compose::ComposeRequest, darkmatter::markdown::compose::ContextBuildError>
-{
-    let layered = options.context().env();
-    let context = if layered
-        .iter()
-        .all(|(key, value)| file_resolution_context.env().get(key) == Some(value))
-    {
-        file_resolution_context
-    } else {
-        let mut env = file_resolution_context.env().clone();
-        env.extend(layered.iter().map(|(key, value)| (key.clone(), value.clone())));
-        file_resolution_context.with_env(env)
-    };
-    darkmatter::markdown::compose::ComposeRequest::with_context(options, context)
-}
+// The variables Claudine layers onto the captured `ctx` for a run (`AGENT`,
+// `MODEL`, `YOLO`, and other `env_overrides`) reach the request's environment
+// through this one function, which the lifecycle executor's `set` shell values
+// also use.
+pub use darkmatter::lifecycle::executor::compose_request;
 
 /// Builds Darkmatter's local expression context from the request's
 /// file-resolution context for the document that authored the expression.

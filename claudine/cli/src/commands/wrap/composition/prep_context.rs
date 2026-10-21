@@ -17,6 +17,7 @@
 //! for the existing library APIs (`eagerly_resolve_target`, `PrepareOptions`,
 //! `build_picker_plan_with_hints`, etc.) to run without rediscovery.
 
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -1,5 +1,6 @@
 //! Request-scoped launch and repository evidence for Claudine invocations.
 
+use crate::diagnostics::DiagnosticSnapshotExt;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};

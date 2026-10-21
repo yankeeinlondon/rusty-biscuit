@@ -3,7 +3,7 @@
 
 use darkmatter::markdown::compose::expression::{Availability, UnavailabilityReason};
 
-use super::engine::{CoreEvent, EventDescriptor, HostError, OutcomePair, Position, Registry, Role, err_view};
+use super::engine::{CoreEvent, EventDescriptor, OutcomePair, Position, Registry, Role, err_view};
 
 fn unavailable(reason: &str) -> Availability {
     Availability::Unavailable(UnavailabilityReason::new(reason))
@@ -17,8 +17,7 @@ pub fn md_profile() -> Registry {
 
 /// Claudine as a host: `composed` is `start`, `failed` is `blocked`, the
 /// agent loop ends in `success` or `failure` (both may downgrade to
-/// `failure` on an explicit error), `loop` gates the next iteration, and a
-/// cancelled subject reads `composition.cancelled` as `err`.
+/// `failure` on an explicit error), and `loop` gates the next iteration.
 pub fn claudine_profile() -> Registry {
     let mut registry = Registry::new("claudine");
     registry.rename(CoreEvent::Composed, "start").expect("start is free");
@@ -43,8 +42,5 @@ pub fn claudine_profile() -> Registry {
     registry
         .register_outcome_pair(OutcomePair::new("success", "failure").downgrade("success", "failure").downgrade("blocked", "failure"))
         .expect("Claudine's outcome pair registers");
-    registry
-        .set_cancellation_error(HostError::new("composition.cancelled", "the run was cancelled"))
-        .expect("a fresh registry accepts settings");
     registry
 }

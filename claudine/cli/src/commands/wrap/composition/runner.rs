@@ -7,6 +7,7 @@
 //! captured state, bundled here in [`CompositionRunCtx`] so the setup pipeline
 //! hands provider execution one cohesive context.
 
+use claudine::composition::LifecycleErrorInfoExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;

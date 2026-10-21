@@ -7,11 +7,11 @@ use tracing::info;
 
 use super::super::coordinator::{EvaluatedProxyRequest, ProxyProvenance, SurfacedHandoff};
 use super::super::error::CompositionError;
-use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+use super::super::lifecycle::{LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
 use super::super::lifecycle_context::LifecycleErrorInfo;
 use super::super::lifecycle_executor::{ShellRunner, StackControl, StackExecutionContext};
 use super::super::lifecycle::runtime::{
-    LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchResult, LifecycleCatchState,
+    LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchProtocolExt, LifecycleCatchResult, LifecycleCatchState,
 };
 use super::super::types::{LoopConfig, OnRateLimit};
 use super::expression::{LoopAmbient, LoopExpressionLookup};

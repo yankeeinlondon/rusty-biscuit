@@ -1,6 +1,8 @@
 //! Tests for lifecycle configuration parsing and validation.
 
 use super::*;
+use super::actions::{LifecycleControlAction, WithOverlay};
+use crate::composition::error::ActionExprError;
 use serde_json::json;
 use std::sync::Mutex;
 

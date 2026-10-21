@@ -1,8 +1,9 @@
 //! Root sequence lifecycle. Child results stay in the invocation cell until cleanup settles.
 
+use claudine::composition::LifecycleErrorInfoExt;
 use std::sync::Arc;
 use claudine::composition::{CompositionError, RuntimeState};
-use claudine::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+use claudine::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
 use claudine::composition::lifecycle::context::LifecycleErrorInfo;
 use claudine::composition::lifecycle::executor::StackExecutionContext;
 use claudine::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};

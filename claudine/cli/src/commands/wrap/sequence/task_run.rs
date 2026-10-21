@@ -30,6 +30,7 @@
 //! module deliberately does not touch it. The `outputs` entry stays undecorated
 //! either way: the bar is added on the rendering path only.
 
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

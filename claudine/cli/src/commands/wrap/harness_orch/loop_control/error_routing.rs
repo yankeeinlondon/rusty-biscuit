@@ -14,6 +14,9 @@
 //! The rule this seam exists to hold: no new `eyre!` stringification of an
 //! already-typed error on any transition path.
 
+use claudine::composition::LifecycleRunGuardExt;
+use claudine::composition::LifecycleCatchProtocolExt;
+use claudine::composition::lifecycle::cancellation::CancellationCauseExt;
 use super::*;
 
 #[allow(clippy::too_many_arguments)]
