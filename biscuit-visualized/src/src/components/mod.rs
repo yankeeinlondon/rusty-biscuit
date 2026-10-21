@@ -11,6 +11,7 @@
 //! [`TerminalDiagramRenderer`] is the render-tree hook that lets
 //! `biscuit-terminal`'s tree renderer draw Mermaid code fences.
 
+mod display;
 pub mod git_graph;
 pub mod graph_expression;
 pub mod mermaid;

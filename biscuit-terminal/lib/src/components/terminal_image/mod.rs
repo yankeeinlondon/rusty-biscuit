@@ -21,11 +21,10 @@
 //! - `filename.jpg|fill` - Fill available width
 //! - `filename.jpg` - Default to 50% width
 
-use std::io::Cursor;
 use std::path::Path;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use image::{DynamicImage, ImageFormat, ImageReader};
+use image::{DynamicImage, ImageReader};
 
 use crate::{
     components::renderable::TerminalRenderable,
@@ -38,11 +37,15 @@ use crate::{
 use renderable::tree::{RenderNode, TreeRenderable};
 
 mod cursor;
+mod encoded_png;
 mod iterm;
 mod kitty;
 mod protocol;
 mod width;
 
+pub use self::encoded_png::EncodedPng;
+pub use self::protocol::ImageOutput;
+use self::encoded_png::ImagePixels;
 pub use self::width::{
     ImageWidth, SCALE_REFERENCE_TEXT_UNITS, calculate_display_dimensions,
     parse_filepath_and_width, parse_width_spec,
@@ -239,6 +242,9 @@ pub struct TerminalImage {
 
     /// Layout configuration for the TerminalRenderable trait (authoritative margins/width).
     layout: Layout,
+
+    /// Set by [`TerminalImage::from_encoded_png`]; the image then has no file.
+    encoded: Option<EncodedPng>,
 }
 
 impl Default for TerminalImage {
@@ -250,17 +256,19 @@ impl Default for TerminalImage {
             width_raw: None,
             width: ImageWidth::default(),
             layout: Layout::default(),
+            encoded: None,
         }
     }
 }
 
 impl TerminalRenderable for TerminalImage {
-    /// Fallback render using terminal capabilities.
-    ///
-    /// Attempts inline rendering; if unsupported, returns an empty string (no alt text).
+    /// Renders for the terminal's graphics route: escape sequences, or the
+    /// alt text when the route has no usable pixel format (see
+    /// [`TerminalImage::render_with_route`]). A load or encoding error
+    /// renders as an empty string.
     fn render(&self, term: &Terminal) -> String {
-        match self.render_to_terminal(term) {
-            Ok(output) => output,
+        match self.render_with_route(term) {
+            Ok(output) => output.into_text(),
             Err(e) => {
                 tracing::warn!(
                     file = %self.relative,
@@ -415,19 +423,19 @@ impl TerminalImage {
         Self::resolve_dimensions_for(&self.width, &self.layout, term_width)
     }
 
-    /// Resolves dimensions for a loaded raster, whose pixel width is the
-    /// natural width `ImageWidth::Scale` scales.
+    /// Resolves dimensions for a raster `pixel_width` pixels wide, the natural
+    /// width `ImageWidth::Scale` scales.
     fn resolve_dimensions_for_image(
         &self,
         term_width: u32,
         cell: Option<CellSize>,
-        img: &DynamicImage,
+        pixel_width: u32,
     ) -> ResolvedDimensions {
         Self::resolve_scaled_dimensions_for(
             &self.width,
             &self.layout,
             term_width,
-            Some(img.width() as f32),
+            Some(pixel_width as f32),
             cell,
         )
     }
@@ -527,6 +535,19 @@ impl TerminalImage {
         })
     }
 
+    /// Create a TerminalImage from PNG bytes the program produced itself.
+    ///
+    /// Kitty and iTerm2 receive the bytes unchanged; they are decoded only for
+    /// output that needs pixels or an actual resize. The image has no file, so
+    /// its alt text and iTerm2 name are generic unless set with
+    /// [`with_alt_text`](Self::with_alt_text).
+    pub fn from_encoded_png(png: EncodedPng) -> Self {
+        Self {
+            encoded: Some(png),
+            ..Default::default()
+        }
+    }
+
     /// Create a TerminalImage from a filepath string with optional width specification.
     ///
     /// Parses strings like `"image.png|50%"` or `"photo.jpg|80"`.
@@ -548,7 +569,8 @@ impl TerminalImage {
         Ok(img)
     }
 
-    /// Load the image from disk.
+    /// Load the image's pixels: decoded from disk, or from the
+    /// [encoded PNG](Self::from_encoded_png).
     ///
     /// Supports raster formats (PNG, JPEG, GIF, WebP, etc.) via the `image` crate
     /// and SVG files via `resvg` rasterization when the `image` feature is enabled.
@@ -559,7 +581,9 @@ impl TerminalImage {
     /// Returns `TerminalImageError::UnsupportedTerminal` for SVG files when the `image`
     /// feature is disabled.
     pub fn load_image(&self) -> Result<DynamicImage, TerminalImageError> {
-        if self.is_svg() {
+        if let Some(png) = &self.encoded {
+            png.decode()
+        } else if self.is_svg() {
             #[cfg(feature = "image")]
             {
                 self.load_svg()
@@ -645,19 +669,23 @@ impl TerminalImage {
         result
     }
 
-    /// Encode a DynamicImage as PNG bytes.
+    /// The pixels the protocol paths send: the encoded PNG without decoding
+    /// it, or the file decoded.
+    fn pixels(&self) -> Result<ImagePixels<'_>, TerminalImageError> {
+        match &self.encoded {
+            Some(png) => Ok(ImagePixels::Encoded(png)),
+            None => self.load_image().map(ImagePixels::Decoded),
+        }
+    }
+
+    /// Encode a DynamicImage as PNG bytes, with zlib's default level and
+    /// adaptive filtering.
     ///
     /// ## Errors
     ///
     /// Returns `TerminalImageError::EncodingError` if PNG encoding fails.
     pub fn encode_as_png(&self, img: &DynamicImage) -> Result<Vec<u8>, TerminalImageError> {
-        let mut buffer = Cursor::new(Vec::new());
-        img.write_to(&mut buffer, ImageFormat::Png).map_err(|e| {
-            TerminalImageError::EncodingError {
-                message: format!("PNG encoding failed: {}", e),
-            }
-        })?;
-        Ok(buffer.into_inner())
+        encoded_png::encode_png(img)
     }
 
     /// Encode bytes as base64 string.

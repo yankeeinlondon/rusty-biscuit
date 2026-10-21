@@ -31,8 +31,9 @@ use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 #[cfg(test)]
 use crate::markdown::output::code_block;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
-use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
+use biscuit_terminal::components::terminal_image::{
+    ImageOutput, ImageWidth, TerminalImage, parse_width_spec,
+};
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
@@ -437,7 +438,7 @@ impl ImageRenderer {
             .build();
 
         tracing::debug!(
-            graphics_supported = ?terminal.image_support,
+            graphics_supported = ?terminal.image_support(),
             is_tty = terminal.is_tty,
             terminal_width = terminal.width(),
             image_mode = ?image_mode,
@@ -456,7 +457,7 @@ impl ImageRenderer {
     /// Returns whether graphics protocols are supported.
     #[inline]
     pub fn graphics_supported(&self) -> bool {
-        self.terminal.is_tty && !matches!(self.terminal.image_support, ImageSupport::None)
+        self.terminal.is_tty && !matches!(self.terminal.image_support(), ImageSupport::None)
     }
 
     /// Returns whether stdout is a TTY.
@@ -493,9 +494,7 @@ impl ImageRenderer {
 
         let mut forced = self.terminal.clone();
         forced.is_tty = true;
-        if matches!(forced.image_support, ImageSupport::None) {
-            forced.image_support = ImageSupport::Kitty;
-        }
+        forced.graphics_route = forced.graphics_route.forced_by_caller();
         forced
     }
 
@@ -602,13 +601,10 @@ impl ImageRenderer {
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Render via TerminalRenderable fallback (protocol-aware string output)
         let render_terminal = self.render_terminal();
-        let output = term_image.render(&render_terminal);
-        if output.is_empty() {
-            format!("▉ IMAGE[{}]\n", alt_text)
-        } else {
-            output
+        match term_image.render_with_route(&render_terminal) {
+            Ok(ImageOutput::Pixels(output)) if !output.is_empty() => output,
+            _ => format!("▉ IMAGE[{}]\n", alt_text),
         }
     }
 }
@@ -1726,12 +1722,39 @@ mod tests {
 
     #[test]
     fn test_image_renderer_force_mode_attempts_protocol_render() {
-        let renderer = ImageRenderer::new(None, TerminalImageMode::Force);
+        let mut renderer = ImageRenderer::new(None, TerminalImageMode::Force);
         assert!(renderer.should_attempt_protocol_render());
+        renderer.terminal = Terminal::builder()
+            .is_tty(false)
+            .image_support(ImageSupport::None)
+            .build();
 
         let forced_terminal = renderer.render_terminal();
         assert!(forced_terminal.is_tty);
-        assert!(!matches!(forced_terminal.image_support, ImageSupport::None));
+        assert!(!matches!(forced_terminal.image_support(), ImageSupport::None));
+    }
+
+    /// Force upgrades a terminal without image support, but never output that
+    /// is not a terminal: piped output gets no graphics controls.
+    #[test]
+    fn test_image_renderer_force_mode_keeps_piped_output_free_of_graphics() {
+        use biscuit_terminal::discovery::detection::{
+            RouteInputs, RouteReasonKind, resolve_graphics_route,
+        };
+
+        let mut renderer = ImageRenderer::new(None, TerminalImageMode::Force);
+        renderer.terminal = Terminal::builder()
+            .graphics_route(resolve_graphics_route(
+                &RouteInputs::new(false).with_var("TERM_PROGRAM", "WezTerm"),
+            ))
+            .build();
+
+        let forced_terminal = renderer.render_terminal();
+        assert_eq!(forced_terminal.image_support(), ImageSupport::None);
+        assert_eq!(
+            forced_terminal.graphics_route.reason.kind,
+            RouteReasonKind::NotATerminal
+        );
     }
 
     #[test]

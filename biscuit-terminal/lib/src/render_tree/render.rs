@@ -45,7 +45,6 @@ use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyl
 use crate::components::prose::{LineBreaks, Prose};
 use crate::components::renderable::TerminalRenderable;
 use crate::components::terminal_image::TerminalImage;
-use crate::discovery::detection::ImageSupport;
 use crate::components::table::cell::pad_cell;
 use crate::components::table::table::{
     BG_RESET, FG_RESET, apply_vertical_padding, build_border, highlight_bg_escape, row_paint,
@@ -1801,10 +1800,12 @@ impl Writer<'_> {
     ///
     /// `TerminalImageMode::Force` (mapped to `force_graphics` at the darkmatter
     /// entry point) attempts image-protocol output even when detection reports
-    /// no support: the returned terminal is marked as a TTY and, if it
-    /// advertises no image protocol, is upgraded to Kitty. This mirrors the
-    /// legacy terminal image renderer's force path so the policy is enforced at
-    /// the renderer boundary rather than dropped.
+    /// no support: the returned terminal is marked as a TTY and its route
+    /// becomes [`GraphicsRoute::forced_by_caller`], which upgrades a route
+    /// without pixels to Kitty unless `BISCUIT_GRAPHICS=none`, an invalid
+    /// override, a blocked transport, or nonterminal stdout stopped it.
+    ///
+    /// [`GraphicsRoute::forced_by_caller`]: crate::discovery::detection::GraphicsRoute::forced_by_caller
     fn effective_terminal(&self) -> std::borrow::Cow<'_, crate::terminal::Terminal> {
         use std::borrow::Cow;
 
@@ -1813,9 +1814,7 @@ impl Writer<'_> {
         }
         let mut forced = self.opts.context.terminal.clone();
         forced.is_tty = true;
-        if matches!(forced.image_support, ImageSupport::None) {
-            forced.image_support = ImageSupport::Kitty;
-        }
+        forced.graphics_route = forced.graphics_route.forced_by_caller();
         Cow::Owned(forced)
     }
 
@@ -1868,13 +1867,19 @@ impl Writer<'_> {
         let term = self.effective_terminal();
         // Without graphics support (and without force) there is no image
         // protocol to target — fall back to alt text.
-        if !term.is_tty || matches!(term.image_support, ImageSupport::None) {
+        if !term.is_tty || !term.graphics_route.has_pixels() {
             return None;
         }
 
         let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
-        let output = image.render(&term);
-        (!output.is_empty()).then_some(output)
+        // A fallback (for example a Sixel route before its encoder) keeps the
+        // render tree's own placeholder style.
+        match image.render_with_route(&term).ok()? {
+            crate::components::terminal_image::ImageOutput::Pixels(output) => {
+                (!output.is_empty()).then_some(output)
+            }
+            crate::components::terminal_image::ImageOutput::Fallback { .. } => None,
+        }
     }
 
     /// Renders an `"icon"` extended node by walking the degradation ladder
@@ -1901,7 +1906,7 @@ impl Writer<'_> {
             return Ok(unicode.clone());
         }
         if !icon.svg.is_empty()
-            && !matches!(term.image_support, ImageSupport::None)
+            && term.graphics_route.has_pixels()
             && let Ok(s) = render_svg_string(&icon.svg, term)
         {
             return Ok(s);
@@ -4126,6 +4131,65 @@ mod render_tree_tests {
         );
     }
 
+    /// `force_graphics` never lifts `BISCUIT_GRAPHICS=none`: a user-disabled
+    /// route stays without pixels, so the image renders as alt text.
+    #[test]
+    fn render_tree_force_graphics_does_not_lift_user_disabled_graphics() {
+        use crate::discovery::detection::{RouteInputs, resolve_graphics_route};
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+        let disabled = resolve_graphics_route(
+            &RouteInputs::new(true)
+                .with_var("TERM_PROGRAM", "WezTerm")
+                .with_var("BISCUIT_GRAPHICS", "none"),
+        );
+        let term = Terminal::builder()
+            .width(80)
+            .graphics_route(disabled)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(dir.path().to_path_buf());
+        opts.context.force_graphics = true;
+
+        let out = render_terminal_node(&node, &opts).expect("render").output;
+        assert!(!out.contains("\x1b_G"), "user-disabled graphics stay off: {out:?}");
+        assert!(strip_escape_codes(&out).contains("[a cat]"), "{out:?}");
+    }
+
+    /// A route forced by `BISCUIT_GRAPHICS=kitty` is still capped by the
+    /// render's `GraphicsMode`: below `Rich` nothing is rasterized.
+    #[test]
+    fn render_tree_graphics_mode_caps_a_forced_route() {
+        use crate::discovery::detection::{RouteInputs, resolve_graphics_route};
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+        let forced = resolve_graphics_route(
+            &RouteInputs::new(true).with_var("BISCUIT_GRAPHICS", "kitty"),
+        );
+        let term = Terminal::builder()
+            .width(80)
+            .graphics_route(forced)
+            .is_tty(true)
+            .build();
+        for mode in [GraphicsMode::Off, GraphicsMode::Vector] {
+            let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+            opts.context.graphics_mode = mode;
+            opts.context.image_base_path = Some(dir.path().to_path_buf());
+            let out = render_terminal_node(&node, &opts).expect("render").output;
+            assert!(!out.contains("\x1b_G"), "{mode:?} must not rasterize: {out:?}");
+            assert!(strip_escape_codes(&out).contains("[a cat]"), "{mode:?}: {out:?}");
+        }
+        let mut rich = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        rich.context.graphics_mode = GraphicsMode::Rich;
+        rich.context.image_base_path = Some(dir.path().to_path_buf());
+        let out = render_terminal_node(&node, &rich).expect("render").output;
+        assert!(out.contains("\x1b_G"), "control: Rich sends the forced format: {out:?}");
+    }
+
     #[test]
     fn render_tree_invalid_tree_errors_before_output() {
         // An orphaned TableCell inside a Paragraph is a structural error.
@@ -5483,7 +5547,7 @@ mod render_tree_tests {
 
         let term = Terminal::builder()
             .width(80)
-            .image_support(ImageSupport::None)
+            .image_support(crate::discovery::detection::ImageSupport::None)
             .is_tty(false)
             .build();
         let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict)

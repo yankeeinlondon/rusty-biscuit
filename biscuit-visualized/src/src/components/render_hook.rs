@@ -32,10 +32,14 @@ impl DiagramRenderer for TerminalDiagramRenderer {
         &self,
         request: &DiagramRenderRequest<'_>,
     ) -> Result<String, DiagramRenderError> {
+        // Size the diagram to the fence's columns (a list item's or quote's
+        // inner width), not the whole terminal.
+        let mut terminal = request.terminal.clone();
+        terminal.fixed_width = Some(request.available_width.max(1));
         // `try_render` draws the image itself; it never builds a render tree,
         // so the fence cannot be promoted again.
         MermaidDiagram::new(request.source)
-            .try_render(request.terminal)
+            .try_render(&terminal)
             .map(|rendered| rendered.output)
             .map_err(DiagramRenderError::new)
     }

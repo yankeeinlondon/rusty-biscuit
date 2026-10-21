@@ -13,6 +13,7 @@ mod layout_matrix_support;
 
 mod compose_parity;
 mod filesystem_parity;
+mod graphics_route_matrix;
 #[cfg(feature = "image")]
 mod horizontal_rule_parity;
 mod html_page_example;

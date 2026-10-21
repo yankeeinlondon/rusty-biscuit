@@ -56,9 +56,6 @@ plist = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unic-langid = "0.9.6"
 
-# Terminal image rendering
-viuer = { version = "0.11", features = ["print-file"] }
-
 # SVG rasterization for terminal image rendering
 resvg = { version = "0.45", optional = true }
 
@@ -77,6 +74,17 @@ test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# The Windows Terminal version read: the parent-process walk (Toolhelp32
+# snapshot, `QueryFullProcessImageNameW`) and the executable's version
+# resource (`GetFileVersionInfoW`, `VerQueryValueW`).
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 biscuit-test-harness = { path = "../../biscuit-test-harness" }

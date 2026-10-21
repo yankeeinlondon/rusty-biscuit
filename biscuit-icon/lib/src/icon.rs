@@ -242,7 +242,7 @@ impl TerminalRenderable for Icon {
         #[cfg(feature = "image")]
         {
             use biscuit_terminal::discovery::detection::ImageSupport;
-            if term.image_support != ImageSupport::None
+            if term.image_support() != ImageSupport::None
                 && let Ok(s) = self.render_image(term)
             {
                 return s;
@@ -276,7 +276,7 @@ impl Icon {
         file.write_all(self.svg().as_bytes())?;
         let img = TerminalImage::new(file.path())
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        Ok(img.render(term))
+        pixels_or_unsupported(&img, term)
     }
 
     /// Renders the icon as a small inline image sized to fit inside a table
@@ -291,9 +291,8 @@ impl Icon {
     pub fn render_in_cell(&self, term: &Terminal, cells_wide: u32) -> std::io::Result<String> {
         use std::io::Write;
         use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
-        use biscuit_terminal::discovery::detection::ImageSupport;
 
-        if matches!(term.image_support, ImageSupport::None) || !term.is_tty {
+        if !term.graphics_route.has_pixels() || !term.is_tty {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "terminal cannot inline images",
@@ -305,7 +304,29 @@ impl Icon {
         let img = TerminalImage::new(file.path())
             .map_err(|e| std::io::Error::other(e.to_string()))?
             .with_width(ImageWidth::Characters(cells_wide.max(1)));
-        Ok(img.render(term))
+        pixels_or_unsupported(&img, term)
+    }
+}
+
+/// The image's escape sequences, or `Unsupported` carrying the route's reason
+/// when the route has no usable pixel format, so callers fall back to their
+/// own glyph or text.
+#[cfg(feature = "image")]
+fn pixels_or_unsupported(
+    img: &biscuit_terminal::components::terminal_image::TerminalImage,
+    term: &Terminal,
+) -> std::io::Result<String> {
+    use biscuit_terminal::components::terminal_image::ImageOutput;
+
+    match img
+        .render_with_route(term)
+        .map_err(|e| std::io::Error::other(e.to_string()))?
+    {
+        ImageOutput::Pixels(output) => Ok(output),
+        ImageOutput::Fallback { reason, .. } => Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            reason.to_string(),
+        )),
     }
 }
 

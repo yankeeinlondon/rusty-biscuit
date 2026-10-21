@@ -1351,3 +1351,143 @@ fn covered_rows_are_exact_on_whole_rows() {
     // Drawn at half its pixel width, so half its height: 200 px in 20 px rows.
     assert_eq!(covered_rows(50, (1000, 400), (10, 20)), 10);
 }
+
+// Route-driven dispatch: `render_with_route` picks the encoder from the
+// terminal's graphics route, or the alt-text fallback with the route's reason.
+mod route_dispatch {
+    use super::*;
+    use crate::discovery::detection::{
+        GraphicsRoute, ImageSupport, RouteConfidence, RouteInputs, RouteReasonKind,
+        resolve_graphics_route,
+    };
+
+    fn terminal_with_route(app: TerminalApp, route: GraphicsRoute) -> Terminal {
+        Terminal::builder()
+            .app(app)
+            .is_tty(true)
+            .graphics_route(route)
+            .width(80)
+            .height(24)
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
+            .build()
+    }
+
+    fn route_for(vars: &[(&str, &str)]) -> GraphicsRoute {
+        let inputs = vars
+            .iter()
+            .fold(RouteInputs::new(true), |inputs, (k, v)| inputs.with_var(k, *v));
+        resolve_graphics_route(&inputs)
+    }
+
+    #[test]
+    fn a_valid_image_without_a_pixel_route_falls_back_to_its_alt_text_with_the_reason() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let route = route_for(&[("TERM_PROGRAM", "Apple_Terminal")]);
+        let term = terminal_with_route(TerminalApp::AppleTerminal, route.clone());
+
+        let output = image.render_with_route(&term).unwrap();
+
+        assert_eq!(
+            output,
+            ImageOutput::Fallback {
+                text: "[Image: test.png]".to_string(),
+                reason: route.reason.clone(),
+            }
+        );
+        assert_eq!(image.render(&term), "[Image: test.png]");
+    }
+
+    #[test]
+    fn a_user_disabled_route_falls_back_and_keeps_the_user_disabled_reason() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_alt_text("a red square");
+        let route = route_for(&[("TERM_PROGRAM", "WezTerm"), ("BISCUIT_GRAPHICS", "none")]);
+        let term = terminal_with_route(TerminalApp::Wezterm, route);
+
+        match image.render_with_route(&term).unwrap() {
+            ImageOutput::Fallback { text, reason } => {
+                assert_eq!(text, "a red square", "explicit alt text wins over the file name");
+                assert_eq!(reason.kind, RouteReasonKind::UserDisabled);
+            }
+            other => panic!("expected a fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_sixel_route_falls_back_until_the_sixel_encoder_exists() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let route = route_for(&[("BISCUIT_GRAPHICS", "sixel")]);
+        let term = terminal_with_route(TerminalApp::Other("xterm".into()), route);
+
+        match image.render_with_route(&term).unwrap() {
+            ImageOutput::Fallback { text, reason } => {
+                assert_eq!(text, "[Image: test.png]");
+                assert_eq!(reason.kind, RouteReasonKind::NoSupport);
+                assert!(reason.message.contains("Sixel"), "{}", reason.message);
+            }
+            other => panic!("expected a fallback, got {other:?}"),
+        }
+        assert!(matches!(
+            image.render_inline(&term),
+            Err(TerminalImageError::UnsupportedTerminal)
+        ));
+    }
+
+    #[test]
+    fn a_corrupt_image_stays_an_error_without_a_pixel_route() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("broken.png");
+        std::fs::write(&file_path, b"\x89PNG\r\n\x1a\nnot really a png").unwrap();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let term = terminal_with_route(TerminalApp::AppleTerminal, ImageSupport::None.into());
+
+        assert!(image.render_with_route(&term).is_err());
+        assert_eq!(image.render(&term), "", "a load error renders nothing");
+    }
+
+    #[test]
+    fn fallback_text_cannot_carry_terminal_controls() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_alt_text("evil\x1b]0;title\x07\x1b[31mred\n");
+        let term = terminal_with_route(TerminalApp::AppleTerminal, ImageSupport::None.into());
+
+        let ImageOutput::Fallback { text, .. } = image.render_with_route(&term).unwrap() else {
+            panic!("expected a fallback");
+        };
+        assert_eq!(text, "evil]0;title[31mred");
+    }
+
+    // The pixel cases assert the encoder choice: rendering pixels queries
+    // the live cursor position, which tests cannot answer.
+    use super::protocol::{Encoder, encoder_for};
+
+    #[test]
+    fn a_known_kitty_route_to_iterm2_uses_iterm2s_format() {
+        let term = terminal_with_route(TerminalApp::ITerm2, ImageSupport::Kitty.into());
+        assert_eq!(encoder_for(&term), Encoder::Iterm2);
+        let elsewhere = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+        assert_eq!(encoder_for(&elsewhere), Encoder::Kitty);
+    }
+
+    #[test]
+    fn a_forced_kitty_route_to_iterm2_keeps_kitty() {
+        let route = route_for(&[("TERM_PROGRAM", "iTerm.app"), ("BISCUIT_GRAPHICS", "kitty")]);
+        assert_eq!(route.confidence, RouteConfidence::Forced);
+        let term = terminal_with_route(TerminalApp::ITerm2, route);
+        assert_eq!(encoder_for(&term), Encoder::Kitty);
+    }
+
+    #[test]
+    fn an_iterm2_route_uses_the_iterm2_format_on_any_app() {
+        let route = route_for(&[("TERM_PROGRAM", "mintty")]);
+        let term = terminal_with_route(TerminalApp::Other("mintty".into()), route);
+        assert_eq!(encoder_for(&term), Encoder::Iterm2);
+    }
+}

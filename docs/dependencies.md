@@ -556,7 +556,7 @@ This is a Rust workspace with the following modules:
 
 - [biscuit-terminal](./biscuit-terminal) _v0.1.0_
 
-    _Terminal detection, image rendering (viuer), mermaid diagrams, and capability queries._
+    _Terminal detection, image rendering, mermaid diagrams, and capability queries._
 
     _Tags: workspace, library, terminal_
 
@@ -1106,12 +1106,6 @@ This is a Rust workspace with the following modules:
     _Imaging library providing basic image processing and native Rust encoders/decoders for common formats._
 
     _Tags: image, processing, encoding_
-
-- [viuer](https://github.com/atanunq/viuer) _v0.11_ [📄](https://docs.rs/viuer)
-
-    _Display images in the terminal using iTerm, Kitty graphics protocols, or lower half blocks._
-
-    _Tags: terminal, image, rendering_
 
 ### Internationalization
 

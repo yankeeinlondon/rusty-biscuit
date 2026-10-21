@@ -355,7 +355,7 @@ fn probe_terminal() {
     println!("app={:?}", term.app);
     println!("color_depth={:?}", term.color_depth);
     println!("supports_italic={}", term.supports_italic);
-    println!("image_support={:?}", term.image_support);
+    println!("image_support={:?}", term.image_support());
     println!("underline_support={:?}", term.underline_support);
     println!("osc_link_support={}", term.osc_link_support);
     println!("is_ci={}", term.is_ci);

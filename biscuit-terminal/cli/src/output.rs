@@ -4,7 +4,8 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::discovery::detection::{
-    ColorDepth, ColorMode, Connection, ImageSupport, MultiplexSupport, multiplex_support,
+    ColorDepth, ColorMode, Connection, GraphicsRoute, ImageSupport, MultiplexSupport,
+    multiplex_support,
 };
 use biscuit_terminal::discovery::fonts::FontLigature;
 use biscuit_terminal::discovery::locale::CharEncoding;
@@ -73,8 +74,10 @@ pub struct TerminalMetadata {
 
     /// Whether italics are supported
     pub supports_italic: bool,
-    /// Image rendering support
+    /// Image rendering support, projected from `graphics_route`
     pub image_support: ImageSupport,
+    /// How an image reaches the screen, or why it cannot
+    pub graphics_route: GraphicsRoute,
     /// Underline style support
     pub underline_support: UnderlineInfo,
     /// OSC8 hyperlink support
@@ -252,7 +255,8 @@ pub fn collect_metadata() -> TerminalMetadata {
         ligatures_likely: fonts::ligature_support_likely(),
 
         supports_italic: terminal.supports_italic,
-        image_support: terminal.image_support.clone(),
+        image_support: terminal.image_support(),
+        graphics_route: terminal.graphics_route.clone(),
         underline_support: UnderlineInfo {
             straight: terminal.underline_support.straight,
             double: terminal.underline_support.double,
@@ -355,6 +359,30 @@ pub fn format_connection(conn: &Connection) -> ConnectionInfo {
             connection: mosh.connection.clone(),
         },
     }
+}
+
+/// The pretty report's `Images:` line: the route's format, how it travels,
+/// and the reason (with its fix when one is known).
+fn images_line(route: &GraphicsRoute) -> String {
+    let reason = Prose::escape_text(&route.reason.message);
+    let fix = route
+        .reason
+        .fix
+        .as_deref()
+        .map(|fix| format!("; fix: {}", Prose::escape_text(fix)))
+        .unwrap_or_default();
+    let details = if route.has_pixels() {
+        format!(
+            "{:?}, {:?}, {:?}",
+            route.transport, route.placement, route.confidence
+        )
+    } else {
+        format!("{:?}", route.confidence)
+    };
+    format!(
+        "Images: <b>{:?}</b> ({details}) <dim>{:?}: {reason}{fix}</dim>",
+        route.format, route.reason.kind
+    )
 }
 
 pub fn print_pretty(metadata: &TerminalMetadata, verbose: u8, term: &Terminal) {
@@ -499,10 +527,7 @@ pub fn render_pretty(metadata: &TerminalMetadata, verbose: u8, term: &Terminal) 
             "Italics: {}",
             yes_no(metadata.supports_italic)
         )))
-        .add(Prose::new(format!(
-            "Images: <b>{:?}</b>",
-            metadata.image_support
-        )))
+        .add(Prose::new(images_line(&metadata.graphics_route)))
         .add(Prose::new(format!(
             "OSC8 Links: {}",
             yes_no(metadata.osc_link_support)
@@ -683,10 +708,51 @@ pub fn render_pretty(metadata: &TerminalMetadata, verbose: u8, term: &Terminal) 
 mod tests {
     use super::*;
     use biscuit_terminal::discovery::detection::{
-        ColorDepth, ColorMode, ImageSupport, MultiplexSupport, TerminalApp,
+        ColorDepth, ColorMode, GraphicsFormat, GraphicsPlacement, GraphicsTransport,
+        ImageSupport, MultiplexSupport, RouteConfidence, RouteReason, RouteReasonKind,
+        TerminalApp,
     };
     use biscuit_terminal::discovery::locale::CharEncoding;
     use biscuit_terminal::terminal::Terminal;
+
+    fn kitty_route() -> GraphicsRoute {
+        GraphicsRoute {
+            format: GraphicsFormat::Kitty,
+            transport: GraphicsTransport::Direct,
+            placement: GraphicsPlacement::Ordinary,
+            confidence: RouteConfidence::Known,
+            reason: RouteReason {
+                kind: RouteReasonKind::Supported,
+                message: "Kitty identified by TERM".to_string(),
+                fix: None,
+            },
+        }
+    }
+
+    #[test]
+    fn images_line_shows_route_details_for_a_pixel_route() {
+        let line = images_line(&kitty_route());
+
+        assert!(line.contains("<b>Kitty</b>"), "{line}");
+        assert!(line.contains("Direct, Ordinary, Known"), "{line}");
+        assert!(line.contains("Kitty identified by TERM"), "{line}");
+    }
+
+    #[test]
+    fn images_line_shows_reason_and_fix_when_no_pixels() {
+        let mut route = GraphicsRoute::unavailable(
+            RouteReasonKind::BlockedTransport,
+            RouteConfidence::Known,
+            "tmux drops graphics",
+        );
+        route.reason.fix = Some("set allow-passthrough on".to_string());
+
+        let line = images_line(&route);
+
+        assert!(line.contains("<b>None</b>"), "{line}");
+        assert!(line.contains("BlockedTransport: tmux drops graphics"), "{line}");
+        assert!(line.contains("fix: set allow-passthrough on"), "{line}");
+    }
 
     #[test]
     fn test_analyze_content() {
@@ -741,6 +807,7 @@ mod tests {
             ligatures_likely: false,
             supports_italic: true,
             image_support: ImageSupport::Kitty,
+            graphics_route: kitty_route(),
             underline_support: UnderlineInfo {
                 curly: true,
                 dashed: false,
@@ -773,6 +840,7 @@ mod tests {
         assert!(json.contains("\"color_depth\":\"TrueColor\""));
         assert!(json.contains("\"color_mode\":\"Dark\""));
         assert!(json.contains("\"image_support\":\"Kitty\""));
+        assert!(json.contains("\"graphics_route\":{\"format\":\"Kitty\""), "{json}");
         assert!(json.contains("\"multiplex\":\"None\""));
         assert!(json.contains("\"char_encoding\":\"Utf8\""));
     }
@@ -803,6 +871,7 @@ mod tests {
             ligatures_likely: true,
             supports_italic: true,
             image_support: ImageSupport::Kitty,
+            graphics_route: kitty_route(),
             underline_support: UnderlineInfo {
                 curly: true,
                 dashed: false,
@@ -865,6 +934,7 @@ mod tests {
             ligatures_likely: true,
             supports_italic: true,
             image_support: ImageSupport::Kitty,
+            graphics_route: kitty_route(),
             underline_support: UnderlineInfo {
                 curly: true,
                 dashed: false,

@@ -15,22 +15,23 @@ impl TerminalImage {
         term: &crate::terminal::Terminal,
     ) -> Result<(String, u32, f32), TerminalImageError> {
         let term_width = term.width().max(1);
-        let img = self.load_image()?;
+        let pixels = self.pixels()?;
+        let (pixel_width, pixel_height) = pixels.size();
         let cell = term.cell_size();
-        let dims = self.resolve_dimensions_for_image(term_width, cell, &img);
+        let dims = self.resolve_dimensions_for_image(term_width, cell, pixel_width);
         let target_cells = dims.image_width;
 
         let (cell_pixel_width, cell_pixel_height) = cell
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
             .unwrap_or((CellSize::FALLBACK.width, CellSize::FALLBACK.height));
 
-        let png_data = self.encode_as_png(&img)?;
-        let image_aspect = img.height() as f32 / img.width() as f32;
+        let png_data = pixels.png()?;
+        let image_aspect = pixel_height as f32 / pixel_width as f32;
         let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
         let raw_height = target_cells as f32 * image_aspect * cell_aspect;
         let height_cells = super::cursor::covered_rows(
             target_cells,
-            (img.width(), img.height()),
+            (pixel_width, pixel_height),
             (cell_pixel_width, cell_pixel_height),
         );
 
@@ -73,9 +74,10 @@ impl TerminalImage {
     /// * `term_width` - Terminal width in characters (defaults to 80 if 0)
     pub fn render_as_kitty(&self, term_width: u32) -> Result<String, TerminalImageError> {
         let term_width = if term_width == 0 { 80 } else { term_width };
-        let img = self.load_image()?;
+        let pixels = self.pixels()?;
+        let (pixel_width, pixel_height) = pixels.size();
         let cell = crate::discovery::fonts::cell_size();
-        let dims = self.resolve_dimensions_for_image(term_width, cell, &img);
+        let dims = self.resolve_dimensions_for_image(term_width, cell, pixel_width);
 
         // Use resolved dimensions
         let target_cells = dims.image_width;
@@ -87,12 +89,12 @@ impl TerminalImage {
 
         // Don't resize the image - send it at original resolution and let Kitty handle scaling.
         // This preserves maximum quality and lets Kitty's aspect ratio preservation work correctly.
-        let png_data = self.encode_as_png(&img)?;
+        let png_data = pixels.png()?;
 
         // Kitty preserves aspect ratio when only c= is specified (no r=).
         let display_cells_height = super::cursor::covered_rows(
             target_cells,
-            (img.width(), img.height()),
+            (pixel_width, pixel_height),
             (cell_pixel_width, cell_pixel_height),
         );
 

@@ -8,6 +8,7 @@
 #[path = "../../../../biscuit-terminal/lib/tests/layout_matrix_support/mod.rs"]
 mod layout_matrix_support;
 
+mod display_size;
 mod graph_expression_parity;
 mod layout_matrix;
 mod mermaid_parity;

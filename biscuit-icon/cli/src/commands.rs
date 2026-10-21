@@ -724,7 +724,7 @@ fn has_image_support(term: &Terminal) -> bool {
     #[cfg(feature = "image")]
     {
         use biscuit_terminal::discovery::detection::ImageSupport;
-        !matches!(term.image_support, ImageSupport::None)
+        !matches!(term.image_support(), ImageSupport::None)
     }
     #[cfg(not(feature = "image"))]
     {

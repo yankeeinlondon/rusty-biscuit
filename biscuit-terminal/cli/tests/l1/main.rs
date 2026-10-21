@@ -8,6 +8,7 @@
 
 mod about;
 mod dir_targets;
+mod graphics_route;
 mod integration_test;
 mod output_markers;
 // The pure output-marker detector the Level 2 helpers use, compiled here so

@@ -24,10 +24,14 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::components::terminal_image::{ImageWidth, ResolvedDimensions, TerminalImage};
+use biscuit_terminal::components::terminal_image::{
+    ImageOutput, ImageWidth, ResolvedDimensions, TerminalImage,
+};
 use biscuit_terminal::discovery::fonts::CellSize;
 use biscuit_terminal::utils::layout::LayoutTerminalExt;
+
+use super::display::{display_image, display_pixels};
+use crate::artifact::{Background, OutputFormat, RenderRequest};
 
 use renderable::tree::{RenderNode, TreeRenderable};
 
@@ -61,7 +65,7 @@ pub(crate) fn terminal_theme() -> MermaidTheme {
 /// A Mermaid diagram renderer for terminal output.
 ///
 /// This struct wraps `crate::mermaid::MermaidDiagram` and adds
-/// terminal-specific display capabilities using `viuer`.
+/// terminal-specific display capabilities.
 ///
 /// ## Examples
 ///
@@ -115,8 +119,7 @@ pub(crate) struct MermaidRenderer {
     diagram: crate::mermaid::MermaidDiagram,
     /// Scale factor for output resolution (default: 2)
     scale: u32,
-    /// Use transparent background
-    transparent_background: bool,
+    background: Background,
 }
 
 impl MermaidRenderer {
@@ -135,7 +138,7 @@ impl MermaidRenderer {
         Self {
             diagram: crate::mermaid::MermaidDiagram::new(instructions),
             scale: 2,
-            transparent_background: false,
+            background: Background::Theme,
         }
     }
 
@@ -156,7 +159,7 @@ impl MermaidRenderer {
             diagram: crate::mermaid::MermaidDiagram::new(instructions)
                 .with_theme(terminal_theme()),
             scale: 2,
-            transparent_background: true,
+            background: Background::Transparent,
         }
     }
 
@@ -202,7 +205,17 @@ impl MermaidRenderer {
     ///     .with_transparent_background(true);
     /// ```
     pub fn with_transparent_background(mut self, transparent: bool) -> Self {
-        self.transparent_background = transparent;
+        self.background = if transparent {
+            Background::Transparent
+        } else {
+            Background::Theme
+        };
+        self
+    }
+
+    /// Sets what paints behind the diagram.
+    pub fn with_background(mut self, background: Background) -> Self {
+        self.background = background;
         self
     }
 
@@ -290,11 +303,11 @@ impl MermaidRenderer {
     ///
     /// Returns error if diagram rendering or file I/O fails.
     pub fn render_to_svg(&self) -> Result<String, MermaidRenderError> {
-        let request = crate::artifact::RenderRequest {
-            format: crate::artifact::OutputFormat::Svg,
+        let request = RenderRequest {
+            format: OutputFormat::Svg,
             scale: self.scale,
-            target_width: None,
-            transparent_background: self.transparent_background,
+            background: self.background,
+            ..RenderRequest::default()
         };
         let artifact = self.diagram.render(&request)?;
         std::fs::read_to_string(&artifact.path)
@@ -334,9 +347,9 @@ impl MermaidRenderer {
 
     /// Renders the diagram to a cached PNG at the specified target pixel width.
     ///
-    /// Height is derived from the SVG's aspect ratio. The rasterizer renders
-    /// the SVG fresh at `target_width` pixels — no oversampling, no
-    /// downstream downscaling.
+    /// Height is derived from the SVG's aspect ratio, then padded to whole
+    /// rows `row_height` pixels tall. The rasterizer renders the SVG fresh at
+    /// `target_width` pixels — no oversampling, no downstream downscaling.
     ///
     /// ## Errors
     ///
@@ -345,12 +358,14 @@ impl MermaidRenderer {
     pub fn render_to_cached_png_at_width(
         &self,
         target_width: u32,
+        row_height: u32,
     ) -> Result<(PathBuf, bool), MermaidRenderError> {
-        let request = crate::artifact::RenderRequest {
-            format: crate::artifact::OutputFormat::Png,
+        let request = RenderRequest {
+            format: OutputFormat::Png,
             scale: self.scale,
             target_width: Some(target_width),
-            transparent_background: self.transparent_background,
+            row_height: Some(row_height),
+            background: self.background,
         };
 
         let artifact = self.diagram.render(&request)?;
@@ -385,8 +400,10 @@ impl From<&str> for MermaidRenderer {
 /// lists, or any other container component.
 ///
 /// The render pipeline is:
-/// 1. Render Mermaid instructions to a cached PNG via `MermaidRenderer`
-/// 2. Load the PNG into a [`TerminalImage`]
+/// 1. Render Mermaid instructions to a cached PNG via `MermaidRenderer`, at
+///    the display size: as many pixels wide as the resolved columns, padded
+///    to whole cell rows
+/// 2. Hand those PNG bytes to a [`TerminalImage`] unchanged
 /// 3. Render the image inline using the terminal's image protocol
 ///
 /// When image rendering is unavailable (no terminal support, render
@@ -430,7 +447,7 @@ impl From<&str> for MermaidRenderer {
 /// | `Layout::padding` | **N/A** | The rendered image has no padding box. |
 /// | `Layout::word_wrap` | **N/A** | A rasterized diagram cannot wrap. |
 /// | `Style::color` / `emphasis` | **N/A** | The diagram is rasterized pixels, not text the SGR can recolor. Theme selection happens via `MermaidTheme`. |
-/// | `Style::background` | **N/A** | A block background would have to paint cells *around* the protocol bytes; the protocol owns the cells it covers. Use `with_transparent_background(false)` to control the rasterizer's own background. |
+/// | `Style::background` | **N/A** | A block background would have to paint cells *around* the protocol bytes; the protocol owns the cells it covers. Use `with_background` to control the rasterizer's own background. |
 /// | `Style::border` | **N/A** | Box-drawing glyphs cannot frame an image-protocol escape without corrupting the protocol's cell coverage. |
 ///
 /// Parity for the honored subset is pinned in `mermaid_parity.rs`.
@@ -486,9 +503,16 @@ impl MermaidDiagram {
         self
     }
 
-    /// Enables or disables transparent background.
+    /// Enables or disables transparent background; disabled means the
+    /// theme's background.
     pub fn with_transparent_background(mut self, transparent: bool) -> Self {
         self.renderer = self.renderer.with_transparent_background(transparent);
+        self
+    }
+
+    /// Sets what paints behind the diagram.
+    pub fn with_background(mut self, background: Background) -> Self {
+        self.renderer = self.renderer.with_background(background);
         self
     }
 
@@ -620,35 +644,26 @@ impl MermaidDiagram {
         &self,
         term: &biscuit_terminal::terminal::Terminal,
     ) -> Result<(String, PathBuf, bool, u32), MermaidRenderError> {
-        // Translate the configured display width (cells) into pixels using the
-        // terminal's detected cell size, and have the rasterizer render the
-        // SVG once at that exact pixel width. No oversampling, no downstream
-        // downscaling — text glyphs are rasterised at the display resolution.
         let cell = term.cell_size();
         let dims = self.resolve_dimensions(term.width(), cell)?;
-        let cell_pixel_width = cell.map_or(CellSize::FALLBACK.width, |cs| cs.width.max(1));
-        let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
+        let (target_width_px, row_height_px) = display_pixels(dims.image_width, cell);
 
         let (png_path, cache_hit) = self
             .renderer
-            .render_to_cached_png_at_width(target_width_px)?;
+            .render_to_cached_png_at_width(target_width_px, row_height_px)?;
 
-        // The raster's pixel width is not the SVG's natural width, so a scale
-        // must not be re-resolved against the PNG: pin the columns instead.
-        let display_width = match self.width {
-            ImageWidth::Scale(_) => ImageWidth::Characters(dims.image_width),
-            ref other => other.clone(),
-        };
-        let term_image = biscuit_terminal::components::terminal_image::TerminalImage::new(&png_path)
-            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
-            .with_width(display_width);
+        let term_image = display_image(&png_path, dims.image_width)
+            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?;
 
         let width_cells = dims.image_width;
 
-        let output = term_image.render(term);
-        if output.is_empty() {
-            return Err(MermaidRenderError::NoImageSupport);
-        }
+        let output = match term_image
+            .render_with_route(term)
+            .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
+        {
+            ImageOutput::Pixels(output) => output,
+            ImageOutput::Fallback { .. } => return Err(MermaidRenderError::NoImageSupport),
+        };
 
         Ok((output, png_path, cache_hit, width_cells))
     }
@@ -736,6 +751,7 @@ impl From<&str> for MermaidDiagram {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
 
     #[test]
     fn test_mermaid_renderer_new() {

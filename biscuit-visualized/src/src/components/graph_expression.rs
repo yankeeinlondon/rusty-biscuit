@@ -28,9 +28,12 @@ use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::tree::{RenderNode, TreeRenderable};
 
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
-use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
+use biscuit_terminal::components::terminal_image::{ImageOutput, ImageWidth, TerminalImage};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
+
+use super::display::{display_image, display_pixels};
+use crate::artifact::{Background, OutputFormat, RenderRequest};
 
 // Re-export types from biscuit-visualized
 pub use crate::graph::{GraphColorTheme, GraphInputSyntax, GraphOrientation};
@@ -112,8 +115,7 @@ pub struct GraphExpression {
     diagram: crate::graph::GraphDiagram,
     /// Scale factor for output resolution (default: 2)
     scale: u32,
-    /// Use transparent background
-    transparent_background: bool,
+    background: Background,
     /// Image width specification for terminal display
     width: ImageWidth,
     /// Layout configuration (margins, alignment)
@@ -124,7 +126,7 @@ impl std::fmt::Debug for GraphExpression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GraphExpression")
             .field("scale", &self.scale)
-            .field("transparent_background", &self.transparent_background)
+            .field("background", &self.background)
             .field("width", &self.width)
             .finish()
     }
@@ -147,7 +149,7 @@ impl GraphExpression {
         Ok(Self {
             diagram,
             scale: 2,
-            transparent_background: false,
+            background: Background::Theme,
             width: ImageWidth::Percent(0.5),
             layout: Layout::default(),
         })
@@ -203,9 +205,20 @@ impl GraphExpression {
         self
     }
 
-    /// Enables transparent background for better terminal integration.
+    /// Enables transparent background for better terminal integration;
+    /// `false` restores the theme background.
     pub fn with_transparent_background(mut self, transparent: bool) -> Self {
-        self.transparent_background = transparent;
+        self.background = if transparent {
+            Background::Transparent
+        } else {
+            Background::Theme
+        };
+        self
+    }
+
+    /// Sets what paints behind the graph.
+    pub fn with_background(mut self, background: Background) -> Self {
+        self.background = background;
         self
     }
 
@@ -234,7 +247,7 @@ impl GraphExpression {
             GraphColorTheme::dark()
         };
         self.diagram = self.diagram.with_color_theme(theme);
-        self.transparent_background = false;
+        self.background = Background::Theme;
         self
     }
 
@@ -268,11 +281,11 @@ impl GraphExpression {
     /// Returns error if diagram rendering or file I/O fails.
     #[tracing::instrument(skip(self))]
     pub fn render_to_cached_png(&self) -> Result<(PathBuf, bool), GraphRenderError> {
-        let request = crate::artifact::RenderRequest {
-            format: crate::artifact::OutputFormat::Png,
+        let request = RenderRequest {
+            format: OutputFormat::Png,
             scale: self.scale,
-            target_width: None,
-            transparent_background: self.transparent_background,
+            background: self.background,
+            ..RenderRequest::default()
         };
 
         let artifact = self.diagram.render(&request)?;
@@ -303,11 +316,22 @@ impl GraphExpression {
         &self,
         target_width: u32,
     ) -> Result<(PathBuf, bool), GraphRenderError> {
-        let request = crate::artifact::RenderRequest {
-            format: crate::artifact::OutputFormat::Png,
+        self.render_png(target_width, None)
+    }
+
+    /// Renders a PNG `target_width` pixels wide, its height padded to whole
+    /// rows `row_height` pixels tall when given.
+    fn render_png(
+        &self,
+        target_width: u32,
+        row_height: Option<u32>,
+    ) -> Result<(PathBuf, bool), GraphRenderError> {
+        let request = RenderRequest {
+            format: OutputFormat::Png,
             scale: self.scale,
             target_width: Some(target_width),
-            transparent_background: self.transparent_background,
+            row_height,
+            background: self.background,
         };
 
         let artifact = self.diagram.render(&request)?;
@@ -327,7 +351,7 @@ impl GraphExpression {
         use biscuit_terminal::discovery::detection::ImageSupport;
 
         let term = Terminal::new();
-        !matches!(term.image_support, ImageSupport::None)
+        !matches!(term.image_support(), ImageSupport::None)
     }
 
     /// Returns a fallback code block string for the diagram.
@@ -339,25 +363,20 @@ impl GraphExpression {
         &self,
         term: &Terminal,
     ) -> Result<(String, PathBuf, bool), GraphRenderError> {
-        // Compute the terminal cell area we'll display the image into, then
-        // translate that to pixels using the terminal's detected cell size.
-        // The resulting `target_width_px` is fed to the rasterizer so the PNG
-        // is rendered once at exactly the display resolution — no oversampling,
-        // no downscaling, text rasterised fresh at the terminal's pixel density.
         let dims = TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
-        let cell_pixel_width = term.cell_size().map(|cs| cs.width.max(1)).unwrap_or(8u32);
-        let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
+        let (target_width_px, row_height_px) = display_pixels(dims.image_width, term.cell_size());
+        let (png_path, cache_hit) = self.render_png(target_width_px, Some(row_height_px))?;
 
-        let (png_path, cache_hit) = self.render_to_cached_png_at_width(target_width_px)?;
+        let term_image = display_image(&png_path, dims.image_width)
+            .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?;
 
-        let term_image = TerminalImage::new(&png_path)
+        let output = match term_image
+            .render_with_route(term)
             .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?
-            .with_width(self.width.clone());
-
-        let output = term_image.render(term);
-        if output.is_empty() {
-            return Err(GraphRenderError::NoImageSupport);
-        }
+        {
+            ImageOutput::Pixels(output) => output,
+            ImageOutput::Fallback { .. } => return Err(GraphRenderError::NoImageSupport),
+        };
 
         Ok((output, png_path, cache_hit))
     }
@@ -399,7 +418,11 @@ impl GraphExpression {
         Ok(Self {
             diagram,
             scale: 2,
-            transparent_background: !inverse,
+            background: if inverse {
+                Background::Theme
+            } else {
+                Background::Transparent
+            },
             width: ImageWidth::Percent(0.5),
             layout: Layout::default(),
         })
@@ -481,13 +504,13 @@ impl GraphExpression {
     /// `<pre><code class="language-dot">…</code></pre>` so the source is
     /// still visible to the reader.
     fn render_browser_svg(&self) -> String {
-        let request = crate::artifact::RenderRequest {
-            format: crate::artifact::OutputFormat::Svg,
+        // SVG is vector — there's no rasterization step that would benefit
+        // from a pixel target. Leave `target_width` unset.
+        let request = RenderRequest {
+            format: OutputFormat::Svg,
             scale: self.scale,
-            // SVG is vector — there's no rasterization step that would benefit
-            // from a pixel target. Leave `target_width` unset.
-            target_width: None,
-            transparent_background: self.transparent_background,
+            background: self.background,
+            ..RenderRequest::default()
         };
 
         match self.diagram.render(&request) {
@@ -555,7 +578,6 @@ pub struct GraphRenderResult {
 mod tests {
     use super::*;
 
-    use crate::artifact::{OutputFormat, RenderRequest};
 
     #[test]
     fn test_parse() {
@@ -641,15 +663,15 @@ mod tests {
         let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto)
             .unwrap()
             .inverted(true);
-        assert!(!graph.transparent_background);
+        assert_eq!(graph.background, Background::Theme);
 
         let artifact = graph
             .diagram
             .render(&RenderRequest {
                 format: OutputFormat::Svg,
                 scale: 1,
-                target_width: None,
-                transparent_background: graph.transparent_background,
+                background: graph.background,
+                ..RenderRequest::default()
             })
             .unwrap();
         let svg = std::fs::read_to_string(artifact.path).unwrap();
@@ -663,15 +685,15 @@ mod tests {
         let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto)
             .unwrap()
             .inverted(false);
-        assert!(!graph.transparent_background);
+        assert_eq!(graph.background, Background::Theme);
 
         let artifact = graph
             .diagram
             .render(&RenderRequest {
                 format: OutputFormat::Svg,
                 scale: 1,
-                target_width: None,
-                transparent_background: graph.transparent_background,
+                background: graph.background,
+                ..RenderRequest::default()
             })
             .unwrap();
         let svg = std::fs::read_to_string(artifact.path).unwrap();

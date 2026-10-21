@@ -248,7 +248,7 @@ mod tests {
         use biscuit_terminal::discovery::detection::{ColorDepth, ImageSupport};
 
         let term = test_terminal(80);
-        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.image_support(), ImageSupport::Kitty);
         assert_eq!(term.color_depth, ColorDepth::TrueColor);
         assert!(term.supports_italic);
         assert!(term.osc_link_support);

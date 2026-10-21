@@ -11,7 +11,7 @@ path = "src/lib.rs"
 [features]
 clap = ["dep:clap"]
 # Enables SVG rasterization and Mermaid diagram rendering (both require resvg).
-image = ["dep:resvg", "dep:mermaid-rs-renderer"]
+image = ["dep:resvg", "dep:png", "dep:mermaid-rs-renderer"]
 # The diagram components (`components::{MermaidDiagram, GraphExpression,
 # GitGraph}`) and the render-tree diagram hook. This crate depends on
 # `biscuit-terminal`, never the reverse, so no feature here may make
@@ -24,6 +24,9 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 thiserror = "2.0"
 tempfile = "3"
 resvg = { version = "0.45", optional = true }
+# The PNG encoder resvg's tiny-skia already uses, configured for smaller output
+# (see `raster::png::encode_png`); keep it on tiny-skia's major version.
+png = { version = "0.17", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
@@ -35,6 +38,7 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib", optional = true }
 renderable = { path = "../../renderable", optional = true }
 
 [dev-dependencies]
+base64 = "0.22"
 serial_test = "3.0"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 image = "0.25"

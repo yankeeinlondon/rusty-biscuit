@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, Connection, DEFAULT_TAB_WIDTH, ImageSupport, TerminalApp,
-    UnderlineSupport, color_depth, color_mode, detect_connection, get_terminal_app, image_support,
-    is_tty, italics_support, osc8_link_support, tab_width, terminal_height, terminal_width,
+    ColorDepth, ColorMode, Connection, DEFAULT_TAB_WIDTH, GraphicsRoute, ImageSupport,
+    TerminalApp, UnderlineSupport, color_depth, color_mode, detect_connection, get_terminal_app,
+    graphics_route, is_tty, italics_support, osc8_link_support, tab_width, terminal_height, terminal_width,
     underline_support,
 };
 use crate::discovery::fonts::{
@@ -43,7 +43,7 @@ fn new_terminal() -> Terminal {
     let terminal = Terminal {
         app,
         supports_italic: italics_support(),
-        image_support: image_support(),
+        graphics_route: graphics_route(),
         underline_support: underline_support(),
         osc_link_support: osc8_link_support(),
         is_tty: is_tty(),
@@ -80,7 +80,7 @@ fn new_terminal() -> Terminal {
 
     tracing::debug!(
         app = ?terminal.app,
-        image_support = ?terminal.image_support,
+        graphics_route = ?terminal.graphics_route.format,
         color_depth = ?terminal.color_depth,
         tab_width = terminal.tab_width,
         is_tty = terminal.is_tty,
@@ -119,7 +119,7 @@ fn new_terminal() -> Terminal {
 /// let term = Terminal::new();
 ///
 /// // Only send image data to terminals that support it
-/// if matches!(term.image_support, ImageSupport::Kitty) {
+/// if matches!(term.image_support(), ImageSupport::Kitty) {
 ///     // Render using Kitty protocol
 /// }
 ///
@@ -149,10 +149,11 @@ fn new_terminal() -> Terminal {
 ///     println!("Italics are supported!");
 /// }
 ///
-/// match term.image_support {
+/// match term.image_support() {
 ///     ImageSupport::Kitty => println!("Using Kitty graphics protocol"),
 ///     ImageSupport::ITerm => println!("Using iTerm2 protocol"),
-///     ImageSupport::None => println!("No image support"),
+///     ImageSupport::Sixel => println!("Using Sixel"),
+///     ImageSupport::None => println!("No image support: {}", term.graphics_route.reason),
 /// }
 /// ```
 ///
@@ -166,7 +167,7 @@ fn new_terminal() -> Terminal {
 ///
 /// // Creates a terminal with all modern features enabled
 /// let term = Terminal::new_optimistic(80);
-/// assert!(term.image_support == ImageSupport::Kitty);
+/// assert!(term.image_support() == ImageSupport::Kitty);
 /// assert!(term.color_depth == ColorDepth::TrueColor);
 /// ```
 #[derive(Debug, Clone)]
@@ -176,8 +177,10 @@ pub struct Terminal {
 
     /// Whether the terminal supports italicizing text
     pub supports_italic: bool,
-    /// The type of image support (if any) the terminal provides
-    pub image_support: ImageSupport,
+    /// How images reach this terminal, or why they cannot. Authoritative for
+    /// every image rendered with this terminal;
+    /// [`image_support`](Self::image_support) is its projection.
+    pub graphics_route: GraphicsRoute,
     /// The kind of **underlining** support the terminal provides
     pub underline_support: UnderlineSupport,
     /// Whether the terminal supports OSC8 Links
@@ -281,7 +284,7 @@ impl From<&Terminal> for Terminal {
         Terminal {
             app: value.app.clone(),
             supports_italic: value.supports_italic,
-            image_support: value.image_support.clone(),
+            graphics_route: value.graphics_route.clone(),
             underline_support: value.underline_support,
             osc_link_support: value.osc_link_support,
             is_tty: value.is_tty,
@@ -411,7 +414,7 @@ impl Terminal {
     ///
     /// let term = Terminal::new_optimistic(80);
     /// assert_eq!(term.width(), 80);
-    /// assert_eq!(term.image_support, ImageSupport::Kitty);
+    /// assert_eq!(term.image_support(), ImageSupport::Kitty);
     /// assert_eq!(term.color_depth, ColorDepth::TrueColor);
     /// assert!(term.supports_italic);
     /// assert!(term.osc_link_support);
@@ -420,7 +423,7 @@ impl Terminal {
         Terminal {
             app: TerminalApp::Other("Optimistic".to_string()),
             supports_italic: true,
-            image_support: ImageSupport::Kitty,
+            graphics_route: GraphicsRoute::from(ImageSupport::Kitty),
             underline_support: UnderlineSupport {
                 straight: true,
                 double: true,
@@ -456,6 +459,13 @@ impl Terminal {
             cell_size: None,
             supports_unicode: true,
         }
+    }
+
+    /// The pixel format this terminal's [`graphics_route`](Self::graphics_route)
+    /// uses.
+    #[must_use]
+    pub fn image_support(&self) -> ImageSupport {
+        self.graphics_route.image_support()
     }
 
     /// Get the terminal width in columns.
@@ -569,7 +579,7 @@ impl Terminal {
     ///     .build();
     ///
     /// assert!(term.is_tty);
-    /// assert_eq!(term.image_support, ImageSupport::Kitty);
+    /// assert_eq!(term.image_support(), ImageSupport::Kitty);
     /// ```
     pub fn builder() -> TerminalBuilder {
         TerminalBuilder::default()
@@ -597,7 +607,7 @@ impl Terminal {
 pub struct TerminalBuilder {
     app: Option<TerminalApp>,
     supports_italic: Option<bool>,
-    image_support: Option<ImageSupport>,
+    graphics_route: Option<GraphicsRoute>,
     underline_support: Option<UnderlineSupport>,
     osc_link_support: Option<bool>,
     is_tty: Option<bool>,
@@ -625,9 +635,16 @@ impl TerminalBuilder {
         self
     }
 
-    /// Set the image support level.
+    /// Set the image support level, as a caller-supplied direct route (see
+    /// [`GraphicsRoute`]'s `From<ImageSupport>`).
     pub fn image_support(mut self, value: ImageSupport) -> Self {
-        self.image_support = Some(value);
+        self.graphics_route = Some(GraphicsRoute::from(value));
+        self
+    }
+
+    /// Set the graphics route.
+    pub fn graphics_route(mut self, value: GraphicsRoute) -> Self {
+        self.graphics_route = Some(value);
         self
     }
 
@@ -734,7 +751,7 @@ impl TerminalBuilder {
         Terminal {
             app: self.app.unwrap_or(detected.app),
             supports_italic: self.supports_italic.unwrap_or(detected.supports_italic),
-            image_support: self.image_support.unwrap_or(detected.image_support),
+            graphics_route: self.graphics_route.unwrap_or(detected.graphics_route),
             underline_support: self.underline_support.unwrap_or(detected.underline_support),
             osc_link_support: self.osc_link_support.unwrap_or(detected.osc_link_support),
             is_tty: self.is_tty.unwrap_or(detected.is_tty),
@@ -878,12 +895,12 @@ mod tests {
         let term = Terminal::builder()
             .image_support(ImageSupport::Kitty)
             .build();
-        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.image_support(), ImageSupport::Kitty);
 
         let term = Terminal::builder()
             .image_support(ImageSupport::None)
             .build();
-        assert_eq!(term.image_support, ImageSupport::None);
+        assert_eq!(term.image_support(), ImageSupport::None);
     }
 
     #[test]
@@ -910,7 +927,7 @@ mod tests {
             .build();
 
         assert!(term.is_tty);
-        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.image_support(), ImageSupport::Kitty);
         assert_eq!(term.color_depth, ColorDepth::TrueColor);
         assert!(!term.is_ci);
     }
@@ -954,7 +971,7 @@ mod tests {
     #[test]
     fn test_terminal_new_optimistic_has_full_capabilities() {
         let term = Terminal::new_optimistic(80);
-        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.image_support(), ImageSupport::Kitty);
         assert_eq!(term.color_depth, ColorDepth::TrueColor);
         // All underline styles enabled
         assert!(term.underline_support.straight);

@@ -168,15 +168,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ansi_colours"
-version = "1.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14eec43e0298190790f41679fe69ef7a829d2a2ddd78c8c00339e84710e435fe"
-dependencies = [
- "rgb",
-]
-
-[[package]]
 name = "ansi_term"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1431,7 +1422,7 @@ dependencies = [
  "unic-langid",
  "unicode-width 0.2.2",
  "url",
- "viuer",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1519,6 +1510,7 @@ dependencies = [
 name = "biscuit-visualized"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "biscuit-hash",
  "biscuit-terminal",
  "biscuit-test-harness",
@@ -1527,6 +1519,7 @@ dependencies = [
  "insta",
  "layout-rs",
  "mermaid-rs-renderer",
+ "png 0.17.16",
  "renderable",
  "resvg",
  "serde",
@@ -15576,21 +15569,6 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
-]
-
-[[package]]
-name = "viuer"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da3a696d8afebb0cae4b263ff8cae3286b20ea88df0a82187b13ee6fe8398dce"
-dependencies = [
- "ansi_colours",
- "base64 0.22.1",
- "console",
- "crossterm 0.29.0",
- "image",
- "tempfile",
- "termcolor",
 ]
 
 [[package]]
