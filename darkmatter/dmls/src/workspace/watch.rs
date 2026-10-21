@@ -107,30 +107,51 @@ pub fn is_config_file(path: &Path) -> bool {
 /// The registration id DMLS uses for its schema-location watchers.
 pub const SCHEMA_WATCH_REGISTRATION_ID: &str = "dmls-watch-schema-inputs";
 
+/// A folder a schema-location watch covers.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WatchedFolder {
+    /// The folder whose entries are watched.
+    pub folder: PathBuf,
+    /// The folder's nearest existing ancestor when the folder was absent at
+    /// preparation; `None` when it existed (or is not known to be absent).
+    /// Recorded during preparation, so building a registration reads nothing,
+    /// and a folder that appears changes this value and so the registration.
+    pub absent_base: Option<PathBuf>,
+}
+
+impl WatchedFolder {
+    /// A folder watched as existing.
+    pub fn present(folder: PathBuf) -> Self {
+        Self { folder, absent_base: None }
+    }
+}
+
 /// Builds the watcher registration rooted at the folders trigger registries
-/// read: schema-root folders (present or absent) and the folders holding
-/// payload, import, and example files, wherever they live (one watch per
-/// folder, not per file).
+/// read: schema-root folders (present or absent), the folders holding
+/// payload, import, and example files, and the folders of every candidate
+/// location resolution searched, wherever they live (one watch per folder,
+/// not per file).
 ///
-/// Each watch is rooted at the folder's parent with the pattern
-/// `<folder>/*`, so a root folder that does not exist yet is still watched
-/// for the files whose creation adds it. Requires the client's
-/// `relativePatternSupport`.
+/// An existing folder is watched from its parent with the pattern
+/// `<folder>/*`. An absent folder is watched from its nearest existing
+/// ancestor with both `<relative>` and `<relative>/*`, so its creation is
+/// seen whether the client reports the folder or only the file created in
+/// it. Requires the client's `relativePatternSupport`.
 ///
 /// ## Returns
 ///
 /// `None` when there is no folder to watch.
-pub fn schema_watch_registration<'a>(folders: impl IntoIterator<Item = &'a Path>) -> Option<Registration> {
+pub fn schema_watch_registration<'a>(
+    folders: impl IntoIterator<Item = &'a WatchedFolder>,
+) -> Option<Registration> {
     let watchers: Vec<FileSystemWatcher> = folders
         .into_iter()
-        .filter_map(|folder| {
-            let parent = folder.parent()?;
-            let name = folder.file_name()?.to_str()?;
-            let base_uri = crate::workspace::file_path_to_uri(parent)?;
-            Some(FileSystemWatcher {
+        .filter_map(folder_patterns)
+        .flat_map(|(base_uri, patterns)| {
+            patterns.into_iter().map(move |pattern| FileSystemWatcher {
                 glob_pattern: GlobPattern::Relative(RelativePattern {
-                    base_uri: OneOf::Right(base_uri),
-                    pattern: format!("{}/*", escape_glob(name)),
+                    base_uri: OneOf::Right(base_uri.clone()),
+                    pattern,
                 }),
                 kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
             })
@@ -145,6 +166,29 @@ pub fn schema_watch_registration<'a>(folders: impl IntoIterator<Item = &'a Path>
         method: "workspace/didChangeWatchedFiles".to_string(),
         register_options: Some(serde_json::to_value(options).ok()?),
     })
+}
+
+/// The base URI and patterns watching one folder (see
+/// [`schema_watch_registration`]).
+fn folder_patterns(watched: &WatchedFolder) -> Option<(lsp_types::Uri, Vec<String>)> {
+    let absent = watched
+        .absent_base
+        .as_deref()
+        .and_then(|base| Some((base, watched.folder.strip_prefix(base).ok()?)))
+        .filter(|(_, relative)| relative.components().next().is_some());
+    if let Some((base, relative)) = absent {
+        let segments: Option<Vec<String>> = relative
+            .components()
+            .map(|component| component.as_os_str().to_str().map(escape_glob))
+            .collect();
+        let relative = segments?.join("/");
+        let base_uri = crate::workspace::file_path_to_uri(base)?;
+        return Some((base_uri, vec![relative.clone(), format!("{relative}/*")]));
+    }
+    let parent = watched.folder.parent()?;
+    let name = watched.folder.file_name()?.to_str()?;
+    let base_uri = crate::workspace::file_path_to_uri(parent)?;
+    Some((base_uri, vec![format!("{}/*", escape_glob(name))]))
 }
 
 /// Escapes LSP glob metacharacters in a literal path segment.
@@ -342,12 +386,51 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let schemas = temp.path().join("schemas");
         let payloads = temp.path().join("odd[name]");
-        let registration =
-            schema_watch_registration([schemas.as_path(), payloads.as_path()]).unwrap();
+        let folders = [WatchedFolder::present(schemas), WatchedFolder::present(payloads)];
+        let registration = schema_watch_registration(&folders).unwrap();
         assert_eq!(registration.id, SCHEMA_WATCH_REGISTRATION_ID);
         let options: DidChangeWatchedFilesRegistrationOptions =
             serde_json::from_value(registration.register_options.unwrap()).unwrap();
-        let patterns: Vec<(String, String)> = options
+        let base = crate::workspace::file_path_to_uri(temp.path()).unwrap().as_str().to_string();
+        assert_eq!(
+            relative_patterns(&options),
+            vec![(base.clone(), "schemas/*".to_string()), (base, "odd[[]name[]]/*".to_string())]
+        );
+        assert!(schema_watch_registration(std::iter::empty()).is_none());
+    }
+
+    #[test]
+    fn test_an_absent_folder_is_watched_from_its_nearest_existing_ancestor() {
+        let temp = tempfile::tempdir().unwrap();
+        let schemas = temp.path().join("schemas");
+        std::fs::create_dir_all(&schemas).unwrap();
+        // `schemas/shared/deep/` is absent; `schemas/` is its nearest
+        // existing ancestor. Both the folder itself (a client may report only
+        // the directory) and its entries are watched.
+        let folders = [WatchedFolder {
+            folder: schemas.join("shared").join("de*p"),
+            absent_base: Some(schemas.clone()),
+        }];
+        let registration = schema_watch_registration(&folders).unwrap();
+        let options: DidChangeWatchedFilesRegistrationOptions =
+            serde_json::from_value(registration.register_options.unwrap()).unwrap();
+        let base = crate::workspace::file_path_to_uri(&schemas).unwrap().as_str().to_string();
+        assert_eq!(
+            relative_patterns(&options),
+            vec![(base.clone(), "shared/de[*]p".to_string()), (base.clone(), "shared/de[*]p/*".to_string())]
+        );
+
+        // Once present, the folder is watched from its parent like any other.
+        let present = [WatchedFolder::present(schemas.join("shared"))];
+        let options: DidChangeWatchedFilesRegistrationOptions = serde_json::from_value(
+            schema_watch_registration(&present).unwrap().register_options.unwrap(),
+        )
+        .unwrap();
+        assert_eq!(relative_patterns(&options), vec![(base, "shared/*".to_string())]);
+    }
+
+    fn relative_patterns(options: &DidChangeWatchedFilesRegistrationOptions) -> Vec<(String, String)> {
+        options
             .watchers
             .iter()
             .map(|watcher| match &watcher.glob_pattern {
@@ -357,13 +440,7 @@ mod tests {
                 },
                 GlobPattern::String(glob) => (String::new(), glob.clone()),
             })
-            .collect();
-        let base = crate::workspace::file_path_to_uri(temp.path()).unwrap().as_str().to_string();
-        assert_eq!(
-            patterns,
-            vec![(base.clone(), "schemas/*".to_string()), (base, "odd[[]name[]]/*".to_string())]
-        );
-        assert!(schema_watch_registration(std::iter::empty()).is_none());
+            .collect()
     }
 
     #[test]

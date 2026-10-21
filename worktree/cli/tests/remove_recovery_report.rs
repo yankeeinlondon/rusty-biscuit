@@ -2,10 +2,11 @@
 //! moved, refuses before it, or matches a pending removal and another
 //! worktree, rendered from library values: the spec's example, a branch
 //! failure after the checkout was removed, untrusted text, the listing
-//! limits, the limits of each process check, and the exit code each refusal
-//! maps to.
+//! limits, the limits of each process check, why watching stopped, a slow
+//! watch startup, and the exit code each refusal maps to.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
@@ -13,7 +14,11 @@ use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use serde_json::json;
 use sniff::filesystem::query::{FileIdentity, NativeString, PathUsageReport};
-use worktree::remove::lifecycle::{Candidate, Finished, Inspection, Presence, Refusal, Resolution};
+use worktree::remove::lifecycle::{Candidate, ExitClass, Finished, Inspection, Presence, Refusal, Resolution};
+use worktree::remove::observation::{
+    CoverageLost, FsEventsLossFlag, ObservationBackend, ObservationDiagnostics, ObservationError, ObservationLoss,
+    ObservationStage, Root,
+};
 use worktree::remove::outcome::{
     ActivityKind, ActivityLocation, BranchOutcome, BranchState, BranchTarget, DiscoveryPurpose, DiscoveryResult,
     DiscoveryRun, EarlierAttempt, EntryCounts, ObservedActivity, OperationReport, OriginalState, QuarantineReport,
@@ -27,7 +32,9 @@ use worktree::remove::recovery::record::{
 use worktree::remove::recovery::store::StoreError;
 use worktree::remove::usage::CoverageSummary;
 use worktree::worktree::WorktreeEntry;
-use worktree_cli::commands::remove::recovery::{ambiguous_markup, inspection_markup, refusal_error, stopped_markup};
+use worktree_cli::commands::remove::recovery::{
+    ambiguous_markup, inspection_markup, refusal_error, slow_startup_markup, stopped_markup,
+};
 use worktree_cli::commands::remove::usage::coverage_note;
 use worktree_cli::exit::exit_code;
 
@@ -186,7 +193,7 @@ fn refusals_say_nothing_was_removed_and_keep_their_exit_codes() {
     let rendered: Vec<String> = [(&changed, 3), (&busy, 4), (&failed, 1)]
         .into_iter()
         .map(|(refusal, code)| {
-            let error = refusal_error(refusal, "fix-path-spelling", "fix/path-spelling");
+            let error = refusal_error(refusal, "fix-path-spelling", "fix/path-spelling", false);
             assert_eq!(exit_code(&error), code, "{refusal:?}");
             render(&error.to_string())
         })
@@ -336,6 +343,7 @@ fn a_stop_tells_its_checks_apart() {
         activity_omitted: 0,
         branches: Vec::new(),
         errors: Vec::new(),
+        observation: None,
     });
 
     let markup = stopped_markup_of(retry);
@@ -417,4 +425,164 @@ fn a_pending_removal_names_the_limits_of_its_saved_check() {
     let markup = inspection_markup(&inspection(complete(ORIGINAL)), "fix/path-spelling");
 
     assert!(!markup.contains("Discovery"), "{markup}");
+}
+
+const FSEVENTSD: &str = "fseventsd";
+const NOTHING_LOST: &str = "Nothing is known to have been lost";
+
+fn diagnostics(backend: ObservationBackend, stage: ObservationStage, reason: CoverageLost) -> ObservationDiagnostics {
+    ObservationDiagnostics {
+        backend,
+        startup_ms: Some(240),
+        last_round_trip_ms: Some(90),
+        longest_round_trip_ms: Some(2400),
+        loss: Some(ObservationLoss { stage, reason, entries_since_drain: None }),
+    }
+}
+
+/// [`moved`] with nothing deleted yet, stopped by `observation`'s loss.
+fn lost(observation: ObservationDiagnostics) -> Finished {
+    let mut report = moved(RemovalOutcome::StateUnverified, 9);
+    report.observation = Some(observation);
+    finished(report)
+}
+
+/// macOS dropped events mid-deletion: every flag and the raw mask are named
+/// with the entries deleted since the previous check, and since this is a
+/// real drop, not a delay, no fseventsd advice is given. The locations,
+/// retry, and report lines stay.
+#[test]
+fn a_stop_names_the_fsevents_flags_that_dropped_changes() {
+    let mut observation = diagnostics(
+        ObservationBackend::FsEvents,
+        ObservationStage::Deletion,
+        CoverageLost::FsEventsDropped {
+            raw: 0x0000_000c,
+            flags: vec![FsEventsLossFlag::KernelDropped, FsEventsLossFlag::UserDropped],
+        },
+    );
+    observation.loss.as_mut().unwrap().entries_since_drain = Some(512);
+    let finished = lost(observation);
+
+    let rendered = stopped(&finished, Some("fix/path-spelling"));
+
+    assert!(rendered.contains("Watching stopped during deletion, 512 entries after the previous check: macOS could not report every change (KernelDropped, UserDropped; flags 0xc)."), "{rendered}");
+    assert!(rendered.contains(&format!("Moved to: {QUARANTINE}")), "{rendered}");
+    assert!(rendered.contains("Retry: "), "{rendered}");
+    assert!(rendered.contains("Full report: /repo/.git/wt-removal/"), "{rendered}");
+    assert!(!rendered.contains(FSEVENTSD) && !rendered.contains(NOTHING_LOST), "{rendered}");
+    assert_eq!(finished.report.journal.deleted.total(), 0);
+    assert_eq!(finished.exit_class(), ExitClass::Failure, "a stop exits 1 even with nothing deleted");
+    insta::assert_snapshot!(rendered);
+}
+
+/// A macOS stall after the move is a delay, not a known loss: the report
+/// says so, points at fseventsd, and gives the longest confirmed check.
+#[test]
+fn a_macos_stall_after_the_move_points_at_fseventsd() {
+    let finished = lost(diagnostics(
+        ObservationBackend::FsEvents,
+        ObservationStage::PostMove,
+        CoverageLost::DeliveryStalled { waited: Duration::from_millis(30_400), watch: None },
+    ));
+
+    let rendered = stopped(&finished, None);
+
+    assert!(rendered.contains("Watching stopped after the move: delivery of earlier changes could not be confirmed: nothing arrived for 30 s."), "{rendered}");
+    assert!(rendered.contains(NOTHING_LOST), "{rendered}");
+    assert!(rendered.contains("macOS's file-change service, fseventsd, may be delayed."), "{rendered}");
+    assert!(rendered.contains("Confirmed checks took up to 2.4 s before this."), "{rendered}");
+    insta::assert_snapshot!(rendered);
+}
+
+/// A Windows ceiling on the parent's watch names the folder that holds the
+/// checkout, with no macOS remedy.
+#[test]
+fn a_windows_ceiling_names_the_watched_folder() {
+    let finished = lost(diagnostics(
+        ObservationBackend::ReadDirectoryChanges,
+        ObservationStage::PreMove,
+        CoverageLost::DrainCeiling { waited: Duration::from_millis(4500), watch: Some(Root::Parent) },
+    ));
+
+    let rendered = stopped(&finished, None);
+
+    assert!(rendered.contains("Watching stopped before the move: delivery of earlier changes on the folder holding the checkout at /work could not be confirmed within 4.5 s."), "{rendered}");
+    assert!(rendered.contains(NOTHING_LOST), "{rendered}");
+    assert!(!rendered.contains(FSEVENTSD), "{rendered}");
+    insta::assert_snapshot!(rendered);
+}
+
+/// A report from before diagnostics existed, or a stop with no loss, adds
+/// no line.
+#[test]
+fn a_stop_without_a_loss_adds_no_watching_line() {
+    let without = finished(moved(RemovalOutcome::StateUnverified, 9));
+    let mut no_loss = diagnostics(ObservationBackend::FsEvents, ObservationStage::Deletion, CoverageLost::Overflow);
+    no_loss.loss = None;
+
+    for finished in [without, lost(no_loss)] {
+        let rendered = stopped(&finished, None);
+
+        assert!(!rendered.contains("Watching stopped"), "{rendered}");
+    }
+}
+
+fn not_delivering(backend: ObservationBackend, reason: CoverageLost) -> Refusal {
+    Refusal::Observation(ObservationError::NotDelivering(Box::new(diagnostics(backend, ObservationStage::Startup, reason))))
+}
+
+/// A watch that never confirmed delivery refuses as an environment limit
+/// (exit 4). A stall says nothing changed and, on macOS, points at
+/// fseventsd; a real drop keeps the advice to remove the checkout another
+/// way.
+#[test]
+fn a_watch_that_never_delivered_refuses_with_its_reason() {
+    let stalled = not_delivering(
+        ObservationBackend::FsEvents,
+        CoverageLost::DeliveryStalled { waited: Duration::from_millis(5000), watch: Some(Root::Tree) },
+    );
+    let overflowed = not_delivering(ObservationBackend::ReadDirectoryChanges, CoverageLost::Overflow);
+
+    let rendered: Vec<String> = [&stalled, &overflowed]
+        .into_iter()
+        .map(|refusal| {
+            let error = refusal_error(refusal, "fix-path-spelling", "fix/path-spelling", false);
+            assert_eq!(exit_code(&error), 4, "{refusal:?}");
+            render(&error.to_string())
+        })
+        .collect();
+
+    let [stalled, overflowed] = rendered.as_slice() else { unreachable!() };
+    assert!(stalled.contains("the watch did not start delivering changes: delivery of earlier changes on the checkout could not be confirmed: nothing arrived for 5.0 s."), "{stalled}");
+    assert!(stalled.contains("again; nothing was changed."), "{stalled}");
+    assert!(stalled.contains(FSEVENTSD), "{stalled}");
+    assert!(overflowed.contains("the watch did not start delivering changes: the system dropped change notifications (its queue overflowed)."), "{overflowed}");
+    assert!(overflowed.contains("removes a checkout only while it can watch it for changes"), "{overflowed}");
+    assert!(!overflowed.contains(FSEVENTSD), "{overflowed}");
+    insta::assert_snapshot!(rendered.join("\n---\n"));
+}
+
+/// A resumed attempt's checkout was already moved, so its refusal says it
+/// stopped before deleting more, not before moving.
+#[test]
+fn a_resumed_refusal_says_it_stopped_before_deleting_more() {
+    let refusal = Refusal::Changed("the branch moved after it was checked".into());
+
+    let rendered = render(&refusal_error(&refusal, "fix-path-spelling", "fix/path-spelling", true).to_string());
+
+    assert!(rendered.contains("Nothing was removed."), "{rendered}");
+    assert!(rendered.contains("stopped before deleting more of worktree fix-path-spelling"), "{rendered}");
+    assert!(!rendered.contains("before moving"), "{rendered}");
+}
+
+/// The slow-startup warning gives the startup to one decimal.
+#[test]
+fn a_slow_startup_warns_with_its_duration() {
+    let rendered: Vec<String> =
+        [1600, 12_300].into_iter().map(|millis| render(&slow_startup_markup(Duration::from_millis(millis)))).collect();
+
+    assert!(rendered[0].contains("took 1.6 s."), "{}", rendered[0]);
+    assert!(rendered[1].contains("took 12.3 s."), "{}", rendered[1]);
+    insta::assert_snapshot!(rendered.join("\n---\n"));
 }

@@ -10,8 +10,15 @@
 //! - A drain is a marker: a hidden file created in each watched directory and
 //!   deleted when its handle closes, so a crash leaves nothing behind. Delivery
 //!   is in order per handle, so once a handle has reported its marker, every
-//!   earlier change in that directory has been delivered. A marker not
-//!   confirmed within [`DRAIN_TIMEOUT`] is coverage loss.
+//!   earlier change in that directory has been delivered.
+//! - Each handle awaited by a drain has its own stall clock under the
+//!   session's [`WaitPolicy`]: its marker or an in-scope event from it is
+//!   its progress, and a busy parent never hides a silent admin handle, or
+//!   the reverse. Silence for the stall limit is `DeliveryStalled` naming
+//!   that watch; the ceiling is shared by the drain (`DrainCeiling`). A
+//!   handle whose watch ended is not awaited. Startup and the waits before
+//!   the move is labeled and before the admin handle is released are drains
+//!   of the same kind.
 //! - A zero-byte completion (the system's buffer overflowed) and
 //!   `ERROR_NOTIFY_ENUM_DIR` are `Overflow`. Any other completion error is the
 //!   watch ending, `WatchLost`; the session's own cancel happens only when
@@ -39,9 +46,9 @@ use std::os::windows::ffi::OsStringExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 use sniff::filesystem::query::{EvidenceKind, FileIdentity};
 use windows_sys::Win32::Foundation::{
@@ -61,12 +68,12 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Threading::{CreateEventW, INFINITE, ResetEvent, SetEvent, WaitForMultipleObjects};
 
-use super::{Backend, CoverageLost, EventKind, EventQueue, ObservationError, ObserverOptions, RawEvent, Root, Sink, Targets};
+use super::diagnostics::RoundTrips;
+use super::wait::{Delivery, Outcome, Source, WaitPolicy, WaitState, await_marker};
+use super::{
+    Backend, CoverageLost, EventKind, EventQueue, ObservationBackend, ObservationError, ObserverOptions, RawEvent, Root, Sink, Targets, Waited,
+};
 use crate::remove::quarantine::rename::identity;
-
-/// How long a drain waits for its markers. S2 measured 40-80 ms behind a
-/// 2,000-file burst.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The parent's buffer. The system keeps a buffer of the same size between
 /// reads, so a larger one absorbs a burst (a sibling's build) while the
@@ -238,20 +245,6 @@ fn kind(action: u32) -> EventKind {
     }
 }
 
-/// The highest marker each handle has delivered; `u64::MAX` once its watch
-/// ended or was released, so no drain waits for it.
-#[derive(Debug, Default)]
-struct Delivered {
-    parent: u64,
-    admin: u64,
-}
-
-impl Delivered {
-    fn of(&mut self, root: Root) -> &mut u64 {
-        if root == Root::Admin { &mut self.admin } else { &mut self.parent }
-    }
-}
-
 /// What the delivery thread and the session share.
 struct Shared {
     queue: EventQueue,
@@ -260,22 +253,23 @@ struct Shared {
     /// Names `<prefix><number>` are this session's markers.
     marker_prefix: OsString,
     moved: AtomicBool,
-    delivered: Mutex<Delivered>,
-    progress: Condvar,
+    /// Per handle ([`Root::Parent`] or [`Root::Admin`]): its highest marker
+    /// (`u64::MAX` once its watch ended or was released, so no drain waits
+    /// for it) and its in-scope events.
+    delivery: Delivery<Root>,
     /// Held by a test to keep the thread from reading, so the system's
     /// buffer fills.
     #[cfg(test)]
-    gate: Mutex<()>,
+    gate: std::sync::Mutex<()>,
+    /// Set by a test, from the start if it asks, to hold every completion,
+    /// as a stalled watch would.
+    #[cfg(test)]
+    held: AtomicBool,
 }
 
 impl Shared {
-    fn delivered(&self) -> std::sync::MutexGuard<'_, Delivered> {
-        self.delivered.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
     fn ended(&self, root: Root) {
-        *self.delivered().of(root) = u64::MAX;
-        self.progress.notify_all();
+        self.delivery.end(root);
     }
 
     /// The marker number `name` carries, if it is one of this session's.
@@ -322,11 +316,7 @@ impl Shared {
     fn deliver(&self, root: Root, action: u32, attributes: Option<u32>, name: &OsStr, received: SystemTime) {
         if let Some(number) = self.marker(name) {
             if action == FILE_ACTION_ADDED {
-                let mut delivered = self.delivered();
-                let seen = delivered.of(root);
-                *seen = (*seen).max(number);
-                drop(delivered);
-                self.progress.notify_all();
+                self.delivery.acknowledge(root, number);
             }
             return;
         }
@@ -338,7 +328,9 @@ impl Shared {
             EventKind::Removed | EventKind::MovedFrom => None,
             _ => attributes.map(|attributes| attributes & FILE_ATTRIBUTE_DIRECTORY != 0),
         };
-        self.queue.push(RawEvent { root: located, path: relative, kind, directory, received });
+        if self.queue.push(RawEvent { root: located, path: relative, kind, directory, received }) {
+            self.delivery.event(root);
+        }
     }
 }
 
@@ -439,6 +431,10 @@ impl Watch {
     fn complete(&mut self, shared: &Shared) -> bool {
         #[cfg(test)]
         let _gate = shared.gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        #[cfg(test)]
+        while shared.held.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         let mut bytes = 0;
         // SAFETY: the read was issued on this handle with this `OVERLAPPED`,
         // and its event is signaled, so it is no longer pending.
@@ -512,6 +508,8 @@ pub(super) struct ReadDirectoryChanges {
     admin_identity: FileIdentity,
     /// The last marker written.
     marker: u64,
+    policy: WaitPolicy,
+    round_trips: RoundTrips,
     /// Dropped by the delivery thread as it ends.
     #[cfg(test)]
     thread_alive: Arc<()>,
@@ -520,11 +518,20 @@ pub(super) struct ReadDirectoryChanges {
 impl ReadDirectoryChanges {
     /// `moved` says the tree is already at the quarantine (a resumed
     /// removal).
-    pub fn start(targets: &Targets, options: ObserverOptions, moved: bool) -> Result<Self, ObservationError> {
-        Self::start_with_buffer(targets, options, LARGE_BUFFER_BYTES, moved)
+    pub fn start(targets: &Targets, options: ObserverOptions, moved: bool, interrupted: &dyn Fn() -> bool) -> Result<Self, ObservationError> {
+        Self::start_with_buffer(targets, options, LARGE_BUFFER_BYTES, moved, interrupted, false)
     }
 
-    fn start_with_buffer(targets: &Targets, options: ObserverOptions, parent_buffer: usize, moved: bool) -> Result<Self, ObservationError> {
+    /// `held` (tests only) holds every completion from the start, so the
+    /// startup wait sees no delivery.
+    fn start_with_buffer(
+        targets: &Targets,
+        options: ObserverOptions,
+        parent_buffer: usize,
+        moved: bool,
+        interrupted: &dyn Fn() -> bool,
+        #[cfg_attr(not(test), expect(unused_variables, reason = "only a test holds delivery"))] held: bool,
+    ) -> Result<Self, ObservationError> {
         require_directory(if moved { targets.quarantine() } else { targets.original() })?;
         let parent = Watch::open(Root::Parent, targets.parent(), true, parent_buffer)?;
         let admin = Watch::open(Root::Admin, targets.admin(), false, NETWORK_BUFFER_BYTES)?;
@@ -538,10 +545,11 @@ impl ReadDirectoryChanges {
             quarantine_name: targets.quarantine_name().to_os_string(),
             marker_prefix: format!(".wt-observe-{:016x}-", u64::from_ne_bytes(random)).into(),
             moved: AtomicBool::new(moved),
-            delivered: Mutex::new(Delivered::default()),
-            progress: Condvar::new(),
+            delivery: Delivery::new([Root::Parent, Root::Admin]),
             #[cfg(test)]
-            gate: Mutex::new(()),
+            gate: std::sync::Mutex::new(()),
+            #[cfg(test)]
+            held: AtomicBool::new(held),
         });
         let control = Arc::new(Control {
             stop: event(true).map_err(setup(targets.original()))?,
@@ -587,21 +595,25 @@ impl ReadDirectoryChanges {
             parent_identity,
             admin_identity,
             marker: 0,
+            policy: options.wait,
+            round_trips: RoundTrips::default(),
             #[cfg(test)]
             thread_alive,
         };
         // Confirms that this volume delivers notifications at all (a network
         // share may accept the call and never complete it).
-        adapter.barrier();
+        if adapter.barrier(interrupted) == Waited::Interrupted {
+            return Err(ObservationError::Interrupted);
+        }
         if let Some(loss) = adapter.shared.queue.take_loss() {
-            return Err(setup(targets.parent())(io::Error::other(format!("the watch did not deliver: {loss}"))));
+            return Err(ObservationError::not_delivering(ObservationBackend::ReadDirectoryChanges, loss, adapter.round_trips));
         }
         Ok(adapter)
     }
 
     /// Delivers every change made in a watched directory before the call into
     /// the queue, or records why that cannot be confirmed.
-    fn barrier(&mut self) {
+    fn barrier(&mut self, interrupted: &dyn Fn() -> bool) -> Waited {
         self.marker += 1;
         let number = self.marker;
         let name = {
@@ -616,7 +628,7 @@ impl ReadDirectoryChanges {
         let mut markers = Vec::new();
         let mut awaited = Vec::new();
         for (root, directory) in directories {
-            if *self.shared.delivered().of(root) == u64::MAX {
+            if self.shared.delivery.delivered(root).marker == u64::MAX {
                 continue;
             }
             let created = std::fs::OpenOptions::new()
@@ -633,19 +645,27 @@ impl ReadDirectoryChanges {
                 Err(error) => self.shared.queue.lose(CoverageLost::ReadFailed { message: format!("writing the drain marker failed: {error}") }),
             }
         }
-        let deadline = Instant::now() + DRAIN_TIMEOUT;
-        let mut delivered = self.shared.delivered();
-        while !awaited.iter().all(|root| *delivered.of(*root) >= number) {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                self.shared.queue.lose(CoverageLost::DrainTimedOut { waited: DRAIN_TIMEOUT });
-                break;
-            }
-            delivered = self.shared.progress.wait_timeout(delivered, left).unwrap_or_else(std::sync::PoisonError::into_inner).0;
-        }
-        drop(delivered);
+        let mut wait = WaitState::new(self.policy, Instant::now(), awaited);
+        let queue = &self.shared.queue;
+        let outcome = await_marker(&self.shared.delivery, &mut wait, number, &|| queue.has_loss(), interrupted);
         // Closing deletes them.
         drop(markers);
+        match outcome {
+            Outcome::Confirmed { round_trip } => {
+                self.round_trips.record(round_trip);
+                Waited::Done
+            }
+            Outcome::Lost => Waited::Done,
+            Outcome::Interrupted => Waited::Interrupted,
+            Outcome::Stalled { waited, key } => {
+                queue.lose(CoverageLost::DeliveryStalled { waited, watch: Some(key) });
+                Waited::Done
+            }
+            Outcome::Ceiling { waited, key } => {
+                queue.lose(CoverageLost::DrainCeiling { waited, watch: key });
+                Waited::Done
+            }
+        }
     }
 
     /// The parent and (until released) the admin directory must still be the
@@ -718,39 +738,60 @@ fn run(
 }
 
 impl Backend for ReadDirectoryChanges {
-    fn drain(&mut self, sink: &mut Sink<'_>) {
+    fn drain(&mut self, sink: &mut Sink<'_>, interrupted: &dyn Fn() -> bool) -> Waited {
         self.check_identities();
-        self.barrier();
+        // Lost coverage stays lost: there is nothing left to confirm.
+        let waited = if sink.lost.is_some() { Waited::Done } else { self.barrier(interrupted) };
         self.shared.queue.take_into(sink);
+        waited
     }
 
     /// Delivers first, so a change made before the move is still labeled with
     /// the tree; from here on, the quarantine's entry is the tree.
-    fn moved_to_quarantine(&mut self) {
-        self.barrier();
+    fn moved_to_quarantine(&mut self, interrupted: &dyn Fn() -> bool) -> Waited {
+        let waited = self.barrier(interrupted);
         self.shared.moved.store(true, Ordering::SeqCst);
+        waited
     }
 
     /// Delivers first, then closes the admin handle before returning, so the
-    /// operation's own Git step can delete the directory.
-    fn release_admin(&mut self) {
+    /// operation's own Git step can delete the directory. An interrupted wait
+    /// keeps the handle open.
+    fn release_admin(&mut self, interrupted: &dyn Fn() -> bool) -> Waited {
         if self.admin_released {
-            return;
+            return Waited::Done;
         }
-        self.barrier();
+        if self.barrier(interrupted) == Waited::Interrupted {
+            return Waited::Interrupted;
+        }
         self.admin_released = true;
         // SAFETY: the event stays open while the session exists.
         unsafe { SetEvent(self.control.release.0) };
         let _ = self.released.recv();
+        Waited::Done
+    }
+
+    fn queued_loss(&self) -> Option<CoverageLost> {
+        self.shared.queue.loss()
     }
 
     fn handles(&self) -> Vec<(EvidenceKind, u64)> {
         Vec::new()
     }
+
+    fn backend(&self) -> ObservationBackend {
+        ObservationBackend::ReadDirectoryChanges
+    }
+
+    fn round_trips(&self) -> RoundTrips {
+        self.round_trips
+    }
 }
 
 impl Drop for ReadDirectoryChanges {
     fn drop(&mut self) {
+        #[cfg(test)]
+        self.shared.held.store(false, Ordering::SeqCst);
         // SAFETY: the event stays open until `control` is dropped, after the
         // join.
         unsafe { SetEvent(self.control.stop.0) };

@@ -9,8 +9,9 @@
 //!   activity, and a busy sibling (a build) is enough to make FSEvents drop
 //!   events. Only these three subtrees reach the stream.
 //! - A drain is a series of marker rounds. A round creates a file in a
-//!   private marker directory the stream also watches and calls
-//!   `FSEventStreamFlushSync` until that file's event arrives. A flush alone
+//!   private marker directory the stream also watches, and waits for that
+//!   file's event, asking the stream to flush (`FSEventStreamFlushAsync`,
+//!   which does not block) every millisecond until it arrives. A flush alone
 //!   delivers only what fseventsd has already processed (measured: 1 of 50
 //!   write-then-flush rounds missed its write), and one confirmed marker is
 //!   not enough either: fseventsd does not keep the order changes were made
@@ -26,9 +27,19 @@
 //!   comparison of each entry with its record before unlinking it, and
 //!   unregistration's reread of the index, HEAD, and both paths. The marker
 //!   directory is in the per-user temporary directory, outside the checkout
-//!   and Git's admin directory. Rounds that cannot be confirmed within
-//!   [`DRAIN_TIMEOUT`] in total are coverage loss.
-//! - `MustScanSubDirs` and either dropped flag are coverage loss.
+//!   and Git's admin directory.
+//! - A drain's rounds share one [`WaitState`] under the session's
+//!   [`WaitPolicy`]: a newly acknowledged marker or an in-scope event is
+//!   progress (a sibling's, an unreported admin file's, or a marker's own
+//!   cleanup event is not). Silence for the stall limit is
+//!   `DeliveryStalled`; the ceiling spans every round, so events that keep
+//!   arriving cannot extend a drain past it (`DrainCeiling`). A late event
+//!   is progress but does not make a round quiet. Startup and the waits
+//!   before the move is labeled and before the admin directory is released
+//!   are drains of the same kind.
+//! - `MustScanSubDirs` and either dropped flag are coverage loss, reported as
+//!   `FsEventsDropped` with the event's whole flag mask and every loss flag
+//!   it carries.
 //! - A moved or deleted parent or admin directory produces no event under the
 //!   watched paths, so each drain compares their identity (device and inode)
 //!   with what it was at start.
@@ -51,7 +62,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::os::unix::ffi::OsStringExt;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
@@ -60,20 +71,36 @@ use fsevent_sys::core_foundation as cf;
 use fsevent_sys as fs_events;
 use sniff::filesystem::query::EvidenceKind;
 
-use super::{Backend, CoverageLost, EventKind, EventQueue, ObservationError, ObserverOptions, RawEvent, Root, Sink, Targets};
+use super::diagnostics::RoundTrips;
+use super::wait::{Delivery, Outcome, Source, WaitPolicy, WaitState, await_marker};
+use super::{
+    Backend, CoverageLost, EventKind, EventQueue, FsEventsLossFlag, ObservationBackend, ObservationError, ObserverOptions, RawEvent, Root, Sink,
+    Targets, Waited,
+};
 
 /// How long FSEvents may hold events before delivering them unasked. A drain
 /// flushes regardless; a zero latency with `NoDefer` dropped events on bursts
 /// (S2), so the stream batches instead.
 const LATENCY_SECONDS: f64 = 0.1;
 
-/// How long a drain's marker rounds may take in total. FSEvents lagged
-/// 100-600 ms under load in S2.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often a waiting round asks for a flush. Each flush delivers only what
+/// fseventsd has processed by then; without one, the stream holds a marker
+/// for its latency, which made every round about 100 ms slower.
+const FLUSH_INTERVAL: Duration = Duration::from_millis(1);
 
-const LOST_FLAGS: u32 = fs_events::kFSEventStreamEventFlagMustScanSubDirs
-    | fs_events::kFSEventStreamEventFlagUserDropped
-    | fs_events::kFSEventStreamEventFlagKernelDropped;
+/// Each loss flag, in [`FsEventsLossFlag`] declaration order.
+const LOSS_FLAGS: [(u32, FsEventsLossFlag); 3] = [
+    (fs_events::kFSEventStreamEventFlagKernelDropped, FsEventsLossFlag::KernelDropped),
+    (fs_events::kFSEventStreamEventFlagUserDropped, FsEventsLossFlag::UserDropped),
+    (fs_events::kFSEventStreamEventFlagMustScanSubDirs, FsEventsLossFlag::MustScanSubDirs),
+];
+
+/// The loss `flags` reports, if any: every named loss flag it carries, and
+/// the mask itself.
+fn loss(flags: u32) -> Option<CoverageLost> {
+    let named: Vec<FsEventsLossFlag> = LOSS_FLAGS.iter().filter(|(bit, _)| flags & bit != 0).map(|(_, flag)| *flag).collect();
+    (!named.is_empty()).then_some(CoverageLost::FsEventsDropped { raw: flags, flags: named })
+}
 
 const METADATA_FLAGS: u32 = fs_events::kFSEventStreamEventFlagItemInodeMetaMod
     | fs_events::kFSEventStreamEventFlagItemFinderInfoMod
@@ -158,11 +185,13 @@ struct Shared {
     paths: Paths,
     moved: AtomicBool,
     admin_released: AtomicBool,
-    /// The highest marker the stream has delivered.
-    marker_seen: AtomicU64,
-    /// Watched-path events delivered so far, markers excluded. A barrier
-    /// round that leaves it unchanged was quiet.
-    delivered: AtomicU64,
+    /// The highest marker the stream has delivered, and the in-scope events
+    /// delivered so far (markers excluded); a round that leaves the count
+    /// unchanged was quiet.
+    delivery: Delivery<()>,
+    /// Set by a test to hold the callback, as a delayed fseventsd would.
+    #[cfg(test)]
+    held: AtomicBool,
 }
 
 impl Shared {
@@ -192,20 +221,19 @@ impl Shared {
 
     /// Turns one FSEvents event into raw events or a loss.
     fn deliver(&self, path: &Path, flags: u32, received: SystemTime) {
-        if flags & LOST_FLAGS != 0 {
-            self.queue.lose(CoverageLost::Overflow);
+        if let Some(loss) = loss(flags) {
+            self.queue.lose(loss);
             return;
         }
         if let Ok(marker) = path.strip_prefix(&self.paths.markers) {
             if let Some(number) = marker.to_str().and_then(|name| name.parse().ok()) {
-                self.marker_seen.fetch_max(number, Ordering::SeqCst);
+                self.delivery.acknowledge((), number);
             }
             return;
         }
         let Some((root, relative)) = self.locate(path) else {
             return;
         };
-        self.delivered.fetch_add(1, Ordering::SeqCst);
         if flags & (fs_events::kFSEventStreamEventFlagMount | fs_events::kFSEventStreamEventFlagUnmount) != 0 {
             // A volume appearing or leaving under a watched path changes
             // content no item event describes.
@@ -226,10 +254,14 @@ impl Shared {
             (fs_events::kFSEventStreamEventFlagItemRenamed, renamed),
             (fs_events::kFSEventStreamEventFlagItemRemoved, EventKind::Removed),
         ];
+        let mut in_scope = false;
         for (bits, kind) in kinds {
             if flags & bits != 0 {
-                self.queue.push(RawEvent { root, path: relative.clone(), kind, directory, received });
+                in_scope |= self.queue.push(RawEvent { root, path: relative.clone(), kind, directory, received });
             }
+        }
+        if in_scope {
+            self.delivery.event(());
         }
     }
 }
@@ -252,6 +284,10 @@ extern "C" fn callback(
             std::slice::from_raw_parts(flags, count),
         )
     };
+    #[cfg(test)]
+    while shared.held.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let received = SystemTime::now();
     for (path, flags) in paths.iter().zip(flags) {
         // SAFETY: each entry is a NUL-terminated path FSEvents owns for the
@@ -265,8 +301,8 @@ extern "C" fn callback(
 struct Handle(*mut c_void);
 
 // SAFETY: run loops and streams may be referenced from any thread;
-// `CFRunLoopStop` and `FSEventStreamFlushSync` are documented for use from
-// another thread than the one running the loop.
+// `CFRunLoopStop` and the stream's flush requests are made from another
+// thread than the one running the loop.
 unsafe impl Send for Handle {}
 
 pub(super) struct FsEvents {
@@ -281,13 +317,27 @@ pub(super) struct FsEvents {
     _markers: MarkerDirectory,
     /// The last marker written.
     marker: u64,
+    policy: WaitPolicy,
+    round_trips: RoundTrips,
     /// Dropped by the run-loop thread as it ends.
     #[cfg(test)]
     thread_alive: Arc<()>,
 }
 
 impl FsEvents {
-    pub fn start(targets: &Targets, options: ObserverOptions, moved: bool) -> Result<Self, ObservationError> {
+    pub fn start(targets: &Targets, options: ObserverOptions, moved: bool, interrupted: &dyn Fn() -> bool) -> Result<Self, ObservationError> {
+        Self::start_held(targets, options, moved, interrupted, false)
+    }
+
+    /// [`start`](Self::start); `held` (tests only) holds the callback from
+    /// the start, so the startup wait sees no delivery.
+    fn start_held(
+        targets: &Targets,
+        options: ObserverOptions,
+        moved: bool,
+        interrupted: &dyn Fn() -> bool,
+        #[cfg_attr(not(test), expect(unused_variables, reason = "only a test holds delivery"))] held: bool,
+    ) -> Result<Self, ObservationError> {
         let markers = MarkerDirectory::create().map_err(|source| ObservationError::Setup { path: PathBuf::from("<per-user temporary directory>"), source })?;
         let paths = Paths::resolve(targets, &markers.0, moved)?;
         let parent = identity(&paths.parent).map_err(setup(targets.parent()))?;
@@ -298,8 +348,9 @@ impl FsEvents {
             paths,
             moved: AtomicBool::new(moved),
             admin_released: AtomicBool::new(false),
-            marker_seen: AtomicU64::new(0),
-            delivered: AtomicU64::new(0),
+            delivery: Delivery::new([()]),
+            #[cfg(test)]
+            held: AtomicBool::new(held),
         });
         let stream = create_stream(&shared, &watched)?;
         #[cfg(test)]
@@ -335,59 +386,70 @@ impl FsEvents {
             admin,
             _markers: markers,
             marker: 0,
+            policy: options.wait,
+            round_trips: RoundTrips::default(),
             #[cfg(test)]
             thread_alive,
         };
         // `FSEventStreamStart` returns before fseventsd routes events to the
         // stream; a change made right after it was missed. Once a marker
         // written after the start has arrived, every later change is covered.
-        adapter.barrier();
+        if adapter.barrier(interrupted) == Waited::Interrupted {
+            return Err(ObservationError::Interrupted);
+        }
         if let Some(loss) = adapter.shared.queue.take_loss() {
-            return Err(setup(targets.original())(io::Error::other(format!("the stream did not start delivering: {loss}"))));
+            return Err(ObservationError::not_delivering(ObservationBackend::FsEvents, loss, adapter.round_trips));
         }
         Ok(adapter)
     }
 
-    /// Runs marker rounds until one delivers no watched-path event, or
-    /// records why that could not be confirmed. See the module docs for why
-    /// one round is not enough.
-    fn barrier(&mut self) {
-        let started = Instant::now();
+    /// Runs marker rounds until one delivers no in-scope event, or records
+    /// why that could not be confirmed. See the module docs for why one
+    /// round is not enough.
+    fn barrier(&mut self, interrupted: &dyn Fn() -> bool) -> Waited {
+        let mut wait = WaitState::new(self.policy, Instant::now(), [()]);
         loop {
-            let before = self.shared.delivered.load(Ordering::SeqCst);
-            if !self.marker_round(started) {
-                return;
+            let before = self.shared.delivery.delivered(()).events;
+            match self.marker_round(&mut wait, interrupted) {
+                Round::Confirmed => {}
+                Round::Ended(waited) => return waited,
             }
-            if self.shared.delivered.load(Ordering::SeqCst) == before {
-                return;
+            if self.shared.delivery.delivered(()).events == before {
+                return Waited::Done;
             }
+            wait.expect((), Instant::now());
         }
     }
 
-    /// Writes the next marker and flushes until the stream delivers it.
-    /// `false` when that could not be confirmed, which is recorded as loss.
-    fn marker_round(&mut self, started: Instant) -> bool {
+    /// Writes the next marker, asks for a flush, and waits for the stream to
+    /// deliver the marker; a stall or the ceiling is recorded as loss.
+    fn marker_round(&mut self, wait: &mut WaitState<()>, interrupted: &dyn Fn() -> bool) -> Round {
         self.marker += 1;
         let marker = self.shared.paths.markers.join(self.marker.to_string());
         if let Err(error) = std::fs::File::create(&marker) {
             self.shared.queue.lose(CoverageLost::ReadFailed { message: format!("writing the drain marker failed: {error}") });
-            return false;
+            return Round::Ended(Waited::Done);
         }
-        let confirmed = loop {
-            // SAFETY: the stream is started and is released only after the
-            // run-loop thread is joined, in `drop`.
-            unsafe { fs_events::FSEventStreamFlushSync(self.stream.0) };
-            if self.shared.marker_seen.load(Ordering::SeqCst) >= self.marker {
-                break true;
-            }
-            if started.elapsed() >= DRAIN_TIMEOUT {
-                self.shared.queue.lose(CoverageLost::DrainTimedOut { waited: DRAIN_TIMEOUT });
-                break false;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        };
+        let queue = &self.shared.queue;
+        let source = Flushing { delivery: &self.shared.delivery, stream: &self.stream };
+        let outcome = await_marker(&source, wait, self.marker, &|| queue.has_loss(), interrupted);
         let _ = std::fs::remove_file(&marker);
-        confirmed
+        match outcome {
+            Outcome::Confirmed { round_trip } => {
+                self.round_trips.record(round_trip);
+                Round::Confirmed
+            }
+            Outcome::Lost => Round::Ended(Waited::Done),
+            Outcome::Interrupted => Round::Ended(Waited::Interrupted),
+            Outcome::Stalled { waited, .. } => {
+                queue.lose(CoverageLost::DeliveryStalled { waited, watch: None });
+                Round::Ended(Waited::Done)
+            }
+            Outcome::Ceiling { waited, .. } => {
+                queue.lose(CoverageLost::DrainCeiling { waited, watch: None });
+                Round::Ended(Waited::Done)
+            }
+        }
     }
 
     /// The parent and (until released) the admin directory must still be the
@@ -402,6 +464,40 @@ impl FsEvents {
             self.shared.queue.lose(CoverageLost::WatchLost { root: Root::Admin });
         }
     }
+}
+
+/// The stream's deliveries, flushed whenever a round would block.
+struct Flushing<'a> {
+    delivery: &'a Delivery<()>,
+    stream: &'a Handle,
+}
+
+impl Source<()> for Flushing<'_> {
+    fn now(&self) -> Instant {
+        self.delivery.now()
+    }
+
+    fn generation(&self) -> u64 {
+        self.delivery.generation()
+    }
+
+    fn delivered(&self, key: ()) -> super::wait::Delivered {
+        self.delivery.delivered(key)
+    }
+
+    fn park(&self, seen: u64, timeout: Duration) {
+        // SAFETY: the stream is started and is released only after the
+        // run-loop thread is joined, in `drop`.
+        unsafe { fs_events::FSEventStreamFlushAsync(self.stream.0) };
+        self.delivery.park(seen, timeout.min(FLUSH_INTERVAL));
+    }
+}
+
+/// How one marker round ended.
+enum Round {
+    Confirmed,
+    /// The barrier ends here: a loss was recorded, or the wait interrupted.
+    Ended(Waited),
 }
 
 /// A directory only this session writes, in the per-user temporary directory
@@ -484,7 +580,7 @@ fn create_stream(shared: &Arc<Shared>, watched: &[PathBuf]) -> Result<Handle, Ob
 /// invalidates, and releases the stream.
 fn run(stream: Handle, started: &mpsc::SyncSender<Option<Handle>>) {
     // SAFETY: the stream is valid and used by this thread alone until it is
-    // started; afterwards only `FSEventStreamFlushSync` is called elsewhere,
+    // started; afterwards only `FSEventStreamFlushAsync` is called elsewhere,
     // and never after `drop` has stopped this loop.
     unsafe {
         let run_loop = cf::CFRunLoopGetCurrent();
@@ -504,26 +600,44 @@ fn run(stream: Handle, started: &mpsc::SyncSender<Option<Handle>>) {
 }
 
 impl Backend for FsEvents {
-    fn drain(&mut self, sink: &mut Sink<'_>) {
-        self.barrier();
+    fn drain(&mut self, sink: &mut Sink<'_>, interrupted: &dyn Fn() -> bool) -> Waited {
+        // Lost coverage stays lost: there is nothing left to confirm.
+        let waited = if sink.lost.is_some() { Waited::Done } else { self.barrier(interrupted) };
         self.check_identities();
         self.shared.queue.take_into(sink);
+        waited
     }
 
     /// Delivers first, so a change made before the move is still labeled with
     /// the tree; from here on, the quarantine path is the tree.
-    fn moved_to_quarantine(&mut self) {
-        self.barrier();
+    fn moved_to_quarantine(&mut self, interrupted: &dyn Fn() -> bool) -> Waited {
+        let waited = self.barrier(interrupted);
         self.shared.moved.store(true, Ordering::SeqCst);
+        waited
     }
 
-    fn release_admin(&mut self) {
-        self.barrier();
-        self.shared.admin_released.store(true, Ordering::SeqCst);
+    fn release_admin(&mut self, interrupted: &dyn Fn() -> bool) -> Waited {
+        let waited = self.barrier(interrupted);
+        if waited == Waited::Done {
+            self.shared.admin_released.store(true, Ordering::SeqCst);
+        }
+        waited
+    }
+
+    fn queued_loss(&self) -> Option<CoverageLost> {
+        self.shared.queue.loss()
     }
 
     fn handles(&self) -> Vec<(EvidenceKind, u64)> {
         Vec::new()
+    }
+
+    fn backend(&self) -> ObservationBackend {
+        ObservationBackend::FsEvents
+    }
+
+    fn round_trips(&self) -> RoundTrips {
+        self.round_trips
     }
 }
 
@@ -532,6 +646,8 @@ impl Drop for FsEvents {
         let Some(thread) = self.thread.take() else {
             return;
         };
+        #[cfg(test)]
+        self.shared.held.store(false, Ordering::SeqCst);
         // A stop sent before the loop is running is lost, so repeat it until
         // the thread ends. The queue never makes the callback wait, so the
         // loop always comes back to its stop check.

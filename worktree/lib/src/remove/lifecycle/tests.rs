@@ -22,8 +22,8 @@ use sniff::filesystem::query::{
 use super::*;
 use crate::git::recorder;
 use crate::remove::missing::inspect_missing;
-use crate::remove::observation::injected::Injector;
-use crate::remove::observation::{EventKind, Root};
+use crate::remove::observation::injected::{Injector, Scripted};
+use crate::remove::observation::{CoverageLost, EventKind, ObservationStage, Root};
 use crate::remove::outcome::{BranchState, EntryCounts, MAX_REPORTED_DELETED};
 use crate::remove::recovery::journal::EntryState;
 use crate::remove::recovery::store::fault::{self as store_fault, Fault};
@@ -89,6 +89,13 @@ impl Fixture {
 
     fn approval(&self) -> Approval {
         self.approval_at(&self.gone)
+    }
+
+    /// What the user approves from a retry's report of pending operation
+    /// `id`.
+    fn resume_approval(&self, id: &OperationId) -> Approval {
+        let ResumeConsent { inventory, fingerprint, .. } = resume_consent(&self.base(), id).unwrap();
+        Approval { inventory, fingerprint, tip: self.repo.sha(&format!("refs/heads/{BRANCH}")), discard_files: true }
     }
 
     fn delete_branch(&self) -> BranchActions {
@@ -268,20 +275,32 @@ fn search_holder(path: &Path) -> ProcessRecord {
 }
 
 /// Injected observers; the last one started is reachable through
-/// [`Observers::injector`].
+/// [`Observers::injector`]. With `confirming`, each (a fresh tree only) waits
+/// for delivery on a virtual clock, delivering that script.
 #[derive(Default)]
 struct Observers {
     last: Mutex<Option<Injector>>,
     started: AtomicUsize,
+    confirming: Option<Vec<(Duration, Scripted)>>,
 }
 
 impl Observers {
+    fn confirming(script: Vec<(Duration, Scripted)>) -> Self {
+        Self { confirming: Some(script), ..Self::default() }
+    }
+
     fn start(&self, targets: Targets, moved: bool) -> Result<Observation, ObservationError> {
         self.started.fetch_add(1, Ordering::SeqCst);
-        let (observation, injector) = if moved {
-            Observation::injected_at_quarantine(targets, ObserverOptions::default())
-        } else {
-            Observation::injected(targets, ObserverOptions::default())
+        let (observation, injector) = match (&self.confirming, moved) {
+            (Some(script), false) => {
+                let (observation, injector) = Observation::injected_confirming(targets, ObserverOptions::default());
+                for (at, delivery) in script {
+                    injector.at(*at, delivery.clone());
+                }
+                (observation, injector)
+            }
+            (_, true) => Observation::injected_at_quarantine(targets, ObserverOptions::default()),
+            (None, false) => Observation::injected(targets, ObserverOptions::default()),
         };
         *self.last.lock().unwrap() = Some(injector);
         Ok(observation)
@@ -290,13 +309,18 @@ impl Observers {
     fn injector(&self) -> Injector {
         self.last.lock().unwrap().clone().expect("an observer started")
     }
+
+    /// Whether the last observer started delivered its scripted interrupt.
+    fn interrupted(&self) -> bool {
+        self.last.lock().unwrap().as_ref().is_some_and(Injector::interrupted)
+    }
 }
 
 /// Runs `body` with an environment over `usage`, injected observers, and
 /// `interrupted`.
 fn with_env<R>(usage: &Usage, observers: &Observers, interrupted: &dyn Fn() -> bool, body: impl FnOnce(&Environment<'_>) -> R) -> R {
-    let observe = |targets, moved| observers.start(targets, moved);
-    body(&Environment { usage, interrupted, observe: &observe })
+    let observe = |targets, moved, _interrupted: &dyn Fn() -> bool| observers.start(targets, moved);
+    body(&Environment { usage, interrupted, observe: &observe, slow_startup: &|_| {} })
 }
 
 fn run(fixture: &Fixture, approval: &Approval, branches: &BranchActions, usage: &Usage, observers: &Observers, hook: &mut Hook<'_>) -> Result<Removal, Crashed> {
@@ -390,7 +414,7 @@ fn native_a_removal_runs_end_to_end_and_closes_its_record() {
     let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
 
     recorder::start_recording();
-    let removal = remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation });
+    let removal = remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} });
     let calls = recorder::finish_recording();
 
     let finished = finished(removal);
@@ -624,7 +648,7 @@ fn a_retry_rechecks_a_windows_search_hold_of_the_quarantine() {
     let observers = Observers::default();
     let id = crash_at(&fixture, &observers, Boundary::Moved);
     let quarantine = fixture.quarantine_of(&id);
-    let fresh = fixture.approval_at(&quarantine);
+    let fresh = fixture.resume_approval(&id);
     let usage = Usage::search_first(vec![search_holder(&quarantine)], Vec::new());
     let base = fixture.base();
     let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
@@ -679,11 +703,11 @@ fn a_tip_moved_after_approval_refuses() {
 fn unavailable_observation_is_an_environment_limit() {
     let fixture = fixture();
     let usage = Usage::clear();
-    let observe = |_: Targets, _: bool| Err(ObservationError::Unsupported { reason: "injected" });
+    let observe = |_: Targets, _: bool, _: &dyn Fn() -> bool| Err(ObservationError::Unsupported { reason: "injected" });
     let entry = fixture.entry();
     let (approval, branches) = (fixture.approval(), BranchActions::default());
     let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &observe }));
+    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &observe, slow_startup: &|_| {} }));
     assert!(matches!(refusal, Refusal::Observation(_)), "{refusal:?}");
     assert_eq!(refusal.exit_class(), ExitClass::Blocked);
     assert_eq!(usage.queries.load(Ordering::SeqCst), 0, "no discovery without observation");
@@ -739,6 +763,75 @@ fn an_interrupt_before_the_move_refuses_and_discards_the_record() {
     assert_eq!(refusal.exit_class(), ExitClass::Failure);
     assert!(fixture.untouched());
     assert!(fixture.no_pending());
+}
+
+/// An interrupt that ends observation's startup wait is an interrupt (exit
+/// 1), not an environment limit, and nothing is queried or moved.
+#[test]
+fn an_interrupt_while_observation_starts_refuses_as_an_interrupt() {
+    let fixture = fixture();
+    let usage = Usage::clear();
+    let observe = |_: Targets, _: bool, _: &dyn Fn() -> bool| Err(ObservationError::Interrupted);
+    let entry = fixture.entry();
+    let (approval, branches) = (fixture.approval(), BranchActions::default());
+    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
+
+    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| true, observe: &observe, slow_startup: &|_| {} }));
+
+    assert!(matches!(refusal, Refusal::Interrupted), "{refusal:?}");
+    assert_eq!(refusal.exit_class(), ExitClass::Failure);
+    assert_eq!(usage.queries.load(Ordering::SeqCst), 0);
+    assert!(fixture.untouched());
+    assert!(fixture.no_pending());
+}
+
+/// The first wait for delivery polls the interrupt: one that arrives while
+/// it waits refuses at once, before any record exists, instead of waiting
+/// out the stall limit (which would refuse as lost coverage, exit 4).
+#[test]
+fn an_interrupt_during_a_wait_before_the_move_refuses_at_once() {
+    let fixture = fixture();
+    let observers = Observers::confirming(vec![(Duration::from_secs(2), Scripted::Interrupt)]);
+    let entry = fixture.entry();
+    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
+    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
+
+    let refusal = refused(with_env(&Usage::clear(), &observers, &|| observers.interrupted(), |env| remove_checkout(&request, env)));
+
+    assert!(matches!(refusal, Refusal::Interrupted), "{refusal:?}");
+    assert_eq!(refusal.exit_class(), ExitClass::Failure);
+    assert!(observers.injector().elapsed() < Duration::from_secs(3), "{:?}", observers.injector().elapsed());
+    assert!(fixture.untouched());
+    assert!(fixture.no_pending());
+}
+
+/// After the move, an interrupt that ends the wait for the move's own events
+/// stops the removal as any interrupt there does: exit 1, nothing deleted,
+/// and a pending record a retry continues.
+#[test]
+fn an_interrupt_during_a_wait_after_the_move_stops_with_a_pending_record() {
+    let fixture = fixture();
+    // The two checks before the move and the move's labeling are confirmed;
+    // the drain of the move's own events is not.
+    let observers = Observers::confirming(vec![
+        (Duration::from_secs(1), Scripted::Acknowledge),
+        (Duration::from_secs(2), Scripted::Acknowledge),
+        (Duration::from_secs(3), Scripted::Acknowledge),
+        (Duration::from_secs(4), Scripted::Interrupt),
+    ]);
+    let entry = fixture.entry();
+    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
+    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
+
+    let stopped = finished(with_env(&Usage::clear(), &observers, &|| observers.interrupted(), |env| remove_checkout(&request, env)));
+
+    assert_eq!(stopped.report.outcome, RemovalOutcome::CleanupFailed);
+    assert_eq!(stopped.exit_class(), ExitClass::Failure);
+    assert_eq!(stopped.report.journal.deleted.total(), 0, "{:?}", stopped.report.journal);
+    assert!(observers.injector().elapsed() < Duration::from_secs(5), "{:?}", observers.injector().elapsed());
+    let id = fixture.pending();
+    assert!(fixture.quarantine_of(&id).join("README.md").is_file(), "the checkout waits at the quarantine");
+    assert!(fixture.branch_exists());
 }
 
 /// An admin event other than the move's own `gitdir` rewrite stops the
@@ -811,7 +904,7 @@ fn a_write_into_the_quarantine_during_deletion_stops_with_an_honest_report() {
 
     // A retry that deletes the rest keeps the activity that stopped this one.
     let id = fixture.pending();
-    let fresh = fixture.approval_at(&quarantine);
+    let fresh = fixture.resume_approval(&id);
     let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
     assert_removed(&fixture, &resumed);
     let report = &resumed.report;
@@ -867,9 +960,47 @@ fn lost_coverage_after_the_move_stops_and_a_failed_diagnostic_is_recorded() {
     assert_eq!(finished.report.outcome, RemovalOutcome::StateUnverified);
     assert_eq!(finished.exit_class(), ExitClass::Failure);
     assert_eq!(finished.report.activity.last().unwrap().kind, ActivityKind::CoverageLost);
+    let loss = finished.report.observation.as_ref().and_then(|observation| observation.loss.clone()).expect("recorded");
+    assert_eq!((loss.stage, loss.reason, loss.entries_since_drain), (ObservationStage::PostMove, CoverageLost::Overflow, None));
     let diagnostic = finished.report.discovery.iter().find(|run| run.purpose == DiscoveryPurpose::Diagnostic).expect("a diagnostic query");
     assert!(matches!(&diagnostic.result, DiscoveryResult::Failed { kind, .. } if kind == "root_identity"), "{diagnostic:?}");
     assert!(fixture.branch_exists());
+}
+
+/// Lost coverage during deletion is saved with the attempt's observation
+/// diagnostics: the deletion stage and the entries processed since the
+/// previous drain. A retry carries them as the earlier attempt's and records
+/// its own.
+#[test]
+fn a_loss_during_deletion_is_reported_with_its_stage_and_carried_by_the_retry() {
+    let fixture = fixture();
+    let observers = Observers::default();
+    let mut hook = |boundary: Boundary| {
+        if boundary == Boundary::DeletionBatch(2) {
+            observers.injector().overflow();
+        }
+        false
+    };
+    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
+    assert_eq!(finished.report.outcome, RemovalOutcome::StateUnverified);
+    let observation = finished.report.observation.clone().expect("the attempt observed");
+    let loss = observation.loss.as_ref().expect("the overflow");
+    assert_eq!((loss.stage, &loss.reason), (ObservationStage::Deletion, &CoverageLost::Overflow));
+    // Received by the drain that ends batch 2's level, after at least that
+    // batch.
+    assert!(loss.entries_since_drain.is_some_and(|entries| entries >= 1), "{loss:?}");
+    let id = fixture.pending();
+    let saved = fixture.store().read_report(&id).unwrap().expect("saved");
+    assert_eq!(saved.report_version, crate::remove::outcome::REPORT_VERSION);
+    assert_eq!(saved.observation, Some(observation.clone()), "persisted as returned");
+
+    let fresh = fixture.resume_approval(&id);
+    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
+    assert_removed(&fixture, &resumed);
+    let [earlier] = resumed.report.earlier_attempts.as_slice() else { panic!("{:?}", resumed.report.earlier_attempts) };
+    assert_eq!(earlier.observation, Some(observation));
+    let own = resumed.report.observation.as_ref().expect("the retry observed");
+    assert_eq!(own.loss, None, "the retry lost nothing");
 }
 
 /// An interrupt stops at the next entry boundary; the operation stays
@@ -904,8 +1035,7 @@ fn an_interrupted_removal_is_resumed() {
     assert!(deleted_first >= 2 && deleted_first < FIXTURE_ENTRIES.total(), "{:?}", first.journal);
 
     let id = fixture.pending();
-    let quarantine = fixture.quarantine_of(&id);
-    let fresh = fixture.approval_at(&quarantine);
+    let fresh = fixture.resume_approval(&id);
     let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &observers);
     assert_removed(&fixture, &resumed);
     assert!(!fixture.branch_exists());
@@ -1050,7 +1180,7 @@ fn a_crash_after_the_move_is_resumed_by_the_original_name() {
     }
     // The original approval is bound to the original path; the retry must
     // be approved again from the quarantine.
-    let fresh = fixture.approval_at(&quarantine);
+    let fresh = fixture.resume_approval(&id);
     let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &observers);
     assert_removed(&fixture, &resumed);
     assert!(!fixture.branch_exists());
@@ -1064,7 +1194,7 @@ fn new_content_in_the_quarantine_needs_fresh_consent() {
     let observers = Observers::default();
     let id = crash_at(&fixture, &observers, Boundary::Moved);
     let quarantine = fixture.quarantine_of(&id);
-    let before = fixture.approval_at(&quarantine);
+    let before = fixture.resume_approval(&id);
     fs::write(quarantine.join("new-work.txt"), "written after the crash").unwrap();
 
     let base = fixture.base();
@@ -1074,7 +1204,7 @@ fn new_content_in_the_quarantine_needs_fresh_consent() {
     assert_eq!(fs::read_to_string(quarantine.join("new-work.txt")).unwrap(), "written after the crash");
     assert_eq!(fixture.pending(), id);
 
-    let without_consent = Approval { discard_files: false, ..fixture.approval_at(&quarantine) };
+    let without_consent = Approval { discard_files: false, ..fixture.resume_approval(&id) };
     let request = ResumeRequest { approval: Some(&without_consent), ..request };
     assert!(matches!(refused(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env))), Refusal::ConsentRequired));
     assert!(quarantine.join("new-work.txt").is_file());
@@ -1087,7 +1217,7 @@ fn usage_of_the_quarantine_refuses_the_retry() {
     let observers = Observers::default();
     let id = crash_at(&fixture, &observers, Boundary::Moved);
     let quarantine = fixture.quarantine_of(&id);
-    let fresh = fixture.approval_at(&quarantine);
+    let fresh = fixture.resume_approval(&id);
     let usage = Usage { processes: vec![holder(&quarantine)], ..Usage::clear() };
     let base = fixture.base();
     let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
@@ -1264,7 +1394,7 @@ fn a_quarantine_retry_stopped_while_replacing_the_journal_stays_recoverable() {
     let quarantine = fixture.quarantine_of(&id);
     assert!(inspect(&fixture.base(), &id).unwrap().journal.unwrap().deleted.total() >= 1);
 
-    let fresh = fixture.approval_at(&quarantine);
+    let fresh = fixture.resume_approval(&id);
     let base = fixture.base();
     let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &branches };
     each_stopped_reopen(
@@ -1464,7 +1594,7 @@ fn lifecycle_child_blocks_mid_deletion() {
     let branches = BranchActions { local: Some(LocalBranchDeletion { name: BRANCH.into(), expected_tip: tip }), remote: None };
     let request = RemovalRequest { base: &base, entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
     let usage = Usage::clear();
-    let env = Environment { usage: &usage, interrupted: &|| false, observe: &native_observation };
+    let env = Environment { usage: &usage, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} };
     let _ = run_with(&request, &env, &mut |boundary| {
         if boundary == Boundary::DeletionBatch(2) {
             println!("{CHILD_READY}");
@@ -1516,14 +1646,16 @@ fn native_a_killed_removal_is_found_and_resumed_by_its_original_name() {
     assert!(summary.deleted.total() >= 1 && summary.uncertain.total() == 0, "{summary:?}");
     assert!(fixture.branch_exists());
 
-    let quarantine = inspection.record.quarantine.as_path().to_path_buf();
-    let fresh = fixture.approval_at(&quarantine);
+    let fresh = fixture.resume_approval(&id);
     let request = ResumeRequest { base: &fixture.base(), id: &id, approval: Some(&fresh), record: None, branches: &fixture.delete_branch() };
     let usage = Usage::clear();
-    let resumed = finished(resume(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation }));
+    let resumed = finished(resume(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation, slow_startup: &|_| {} }));
     assert_removed(&fixture, &resumed);
     assert!(!fixture.branch_exists());
     let archived = fixture.store().operation_dir(&id).join("journal-1.jsonl");
     assert!(!archived.exists(), "completion deletes the earlier journal too");
     assert!(fixture.store().operation_dir(&id).join(REPORT_FILE).is_file());
 }
+
+mod resume_consent;
+mod startup_warning;

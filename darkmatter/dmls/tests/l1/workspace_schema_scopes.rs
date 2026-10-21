@@ -298,11 +298,44 @@ fn a_configuration_change_prepares_a_new_package() {
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(watched_params(&[repo]));
 
-    // No manifest event: the configuration change drops every context.
+    // No manifest event: the configuration change drops every context and
+    // queues a workspace pass.
+    declare_packages(repo, &["area/pkg"]);
+    fixture.notify(
+        "workspace/didChangeConfiguration",
+        json!({ "settings": { "dmls": { "formatting": { "markdown": { "unwrap": true } } } } }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(&broken);
+    assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    fixture.shutdown();
+}
+
+/// An unchanged configuration notification queues no workspace pass, but it
+/// still drops every context: an open document whose context rebuilds
+/// differently (its package was declared with no manifest event) is
+/// prepared again, and only it.
+#[test]
+fn an_unchanged_configuration_prepares_an_open_document_whose_context_changed() {
+    let workspace = LspWorkspace::new();
+    let repo = workspace.path();
+    let broken = undeclared_package(repo);
+    let note = repo.join("area/pkg/docs/note.md");
+    let text = "---\ntitle: Note\n---\n# Note\n";
+    write(&note, text);
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(&[repo]));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": uri(&note), "languageId": "markdown", "version": 1, "text": text } }),
+    );
+    fixture.flush_server();
+    assert!(fixture.take_buffered_diagnostics(&broken).is_none(), "the undeclared package is not a scope yet");
+
     declare_packages(repo, &["area/pkg"]);
     fixture.notify("workspace/didChangeConfiguration", json!({ "settings": {} }));
     let diagnostics = fixture.wait_for_diagnostics(&broken);
     assert!(has_prepare_error(&diagnostics), "{diagnostics:#?}");
+    assert_eq!(fixture.registry_jobs_until_idle(), vec![dmls::RegistryJobKind::Document], "no workspace pass");
     fixture.shutdown();
 }
 
