@@ -99,6 +99,110 @@ packages:
     - "worktree-cli"
     - "biscuit-icon-cli"
     - "biscuit-tui"
+    - "biscuit-icon"
+source_files_during_phase_2:
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/src/components/image_options.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/iterm.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-visualized/src/Cargo.toml"
+    - "biscuit-visualized/src/src/artifact.rs"
+    - "biscuit-visualized/src/src/cache/file_cache.rs"
+    - "biscuit-visualized/src/src/raster/png.rs"
+    - "biscuit-visualized/src/src/graph/render.rs"
+    - "biscuit-visualized/src/src/mermaid/render.rs"
+    - "biscuit-visualized/src/src/components/mod.rs"
+    - "biscuit-visualized/src/src/components/display.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-visualized/src/src/components/render_hook.rs"
+    - "biscuit-visualized/src/src/tests/artifact_tests.rs"
+    - "biscuit-visualized/src/src/tests/cache_tests.rs"
+    - "biscuit-visualized/src/src/tests/graph_tests.rs"
+    - "biscuit-visualized/src/src/tests/mermaid_tests.rs"
+    - "biscuit-visualized/src/src/tests/raster_tests.rs"
+    - "biscuit-visualized/src/tests/l1/main.rs"
+    - "biscuit-visualized/src/tests/l1/display_size.rs"
+docs_updated_during_phase_2:
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-visualized/README.md"
+    - "biscuit-visualized/docs/components/graph_expression.md"
+    - "biscuit-visualized/docs/components/mermaid_diagram.md"
+    - "biscuit-visualized/docs/dependencies.md"
+    - "biscuit-visualized/docs/dot-graph.md"
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - ".claude/skills/biscuit-terminal/diagrams.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-visualized/SKILL.md"
+    - ".claude/skills/biscuit-visualized/artifacts-caching.md"
+    - ".claude/skills/biscuit-visualized/diagram-components.md"
+    - ".claude/skills/biscuit-visualized/graph-rendering.md"
+    - ".claude/skills/biscuit-visualized/mermaid-rendering.md"
+    - ".claude/skills/biscuit-visualized/rasterization.md"
+    - ".claude/skills/os/windows.md"
+source_files_during_phase_3:
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/Cargo.toml"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route/tests.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/versions.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/image.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
+    - "biscuit-terminal/lib/src/terminal.rs"
+    - "biscuit-terminal/lib/src/render_tree/options.rs"
+    - "biscuit-terminal/lib/src/render_tree/render.rs"
+    - "biscuit-terminal/lib/src/components/horizontal_rule/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/examples/terminal_info.rs"
+    - "biscuit-terminal/lib/tests/l1/main.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/parity_helpers.rs"
+    - "biscuit-terminal/lib/tests/l1/integration.rs"
+    - "biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs"
+    - "biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs"
+    - "biscuit-terminal/cli/src/hints.rs"
+    - "biscuit-terminal/cli/src/main.rs"
+    - "biscuit-terminal/cli/src/output.rs"
+    - "biscuit-terminal/cli/src/commands/image.rs"
+    - "biscuit-terminal/cli/src/commands/mermaid.rs"
+    - "biscuit-terminal/cli/src/commands/graph.rs"
+    - "biscuit-terminal/cli/tests/l1/main.rs"
+    - "biscuit-terminal/cli/tests/l1/graphics_route.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "darkmatter/lib/src/markdown/output/terminal.rs"
+    - "darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs"
+    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/images.rs"
+    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs"
+    - "darkmatter/lib/tests/level3-terminal/level3_image_painting.rs"
+    - "biscuit-icon/lib/src/icon.rs"
+    - "biscuit-icon/cli/src/commands.rs"
+    - "worktree/cli/src/commands/list.rs"
+docs_updated_during_phase_3:
+    - "biscuit-terminal/README.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/dependencies.md"
+    - "docs/dependencies.md"
+docs_created_during_phase_3:
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+skills_files_updated_during_phase_3:
+    - ".claude/skills/biscuit-terminal/cli.md"
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-terminal/render-tree.md"
+    - ".claude/skills/biscuit-terminal/terminal-struct.md"
+    - ".claude/skills/os/SKILL.md"
+    - ".claude/skills/os/windows-console.md"
 ---
 
 # Plan: Graphics Where Possible
@@ -391,7 +495,7 @@ bytes pass through unchanged (§7, §9 PNG item). *Depends on phase 1.*
 
 ### Wave 1 (parallel, disjoint packages)
 
-- [ ] **Background enum** (`biscuit-visualized`)
+- [x] **Background enum** (`biscuit-visualized`)
     - Replace `RenderRequest::transparent_background: bool` with an explicit
       enum: theme background (default, preserves today's exports) / transparent /
       solid RGB. Apply consistently to SVG and PNG
@@ -402,13 +506,13 @@ bytes pass through unchanged (§7, §9 PNG item). *Depends on phase 1.*
       and PNG encoding options in the `biscuit-hash` key; bump the cache
       schema/version so old artifacts invalidate. Tests: same source with
       different background or geometry ⇒ different keys.
-- [ ] **PNG encoder settings**
+- [x] **PNG encoder settings**
     - `biscuit-visualized/src/src/raster/png.rs` and `TerminalImage`'s
       `encode_as_png`: use `PngEncoder::new_with_quality(CompressionType::Default,
       FilterType::Adaptive)`.
     - Acceptance: the 400x400 iTerm2 app icon from scoping encodes smaller than
       before, measured once on one host; record numbers in the implementation log.
-- [ ] **Encoded-PNG input path** (`biscuit-terminal`)
+- [x] **Encoded-PNG input path** (`biscuit-terminal`)
     - Add a `TerminalImage` input that takes already-encoded PNG bytes with
       pixel dimensions and cell footprint carried alongside. Existing
       path-based validation and image access policy stay in force for
@@ -421,7 +525,7 @@ bytes pass through unchanged (§7, §9 PNG item). *Depends on phase 1.*
 
 ### Wave 2 (sequential; prerequisite: Wave 1)
 
-- [ ] **Display-size rendering in the components**
+- [x] **Display-size rendering in the components**
     - In `biscuit-visualized::components`, compute width via the existing
       `terminal_image/width.rs` resolver (`ImageWidth` precedence; no
       `Layout::width`/`max_width`), honoring parent available width and
@@ -435,10 +539,10 @@ bytes pass through unchanged (§7, §9 PNG item). *Depends on phase 1.*
 
 ### Wave 3 (validation checkpoint)
 
-- [ ] L1: PNG bytes reach the encoder unchanged when sizes match; aspect ratio
+- [x] L1: PNG bytes reach the encoder unchanged when sizes match; aspect ratio
       and padding; background cache separation; inline/standalone dispatch
       parity; existing SVG image and graphical-rule behavior unchanged.
-- [ ] `just test`, `just test-l2`, `just lint` for both packages and consumers.
+- [x] `just test`, `just test-l2`, `just lint` for both packages and consumers.
 
 ---
 
@@ -456,20 +560,20 @@ reply parser is covered in phase 4's L1 list; it is not file/config input).
 the accepted values, no query written, nothing emitted. **Exceptions:** absent
 and `auto` → detection; `none` → deliberate disabling (not an error).
 
-- [ ] **One shared validator** parses both variables (they differ only in
+- [x] **One shared validator** parses both variables (they differ only in
       accepted set). Test shapes once at that validator, through the public
       route result: absent, empty (invalid, ruling 1), uppercase (`KITTY`,
       invalid), unknown word, whitespace-padded, non-UTF-8 (unix), and the
       control case (each valid value).
-- [ ] Per-variable wiring: each variable gets the control case plus one
+- [x] Per-variable wiring: each variable gets the control case plus one
       invalid shape proving it uses the validator.
-- [ ] Code-smell grep before closing: `#[serde(default)]` on load-bearing
+- [x] Code-smell grep before closing: `#[serde(default)]` on load-bearing
       fields, `unwrap_or_default()`, `.ok()` on the env parse, `filter_map(.. as_str())`.
       An invalid value must never be coerced to `auto`.
 
 ### Wave 1 (sequential core)
 
-- [ ] **Route type**
+- [x] **Route type**
     - New module in `discovery/detection/` (e.g. `route.rs`): format
       (`Kitty|Iterm2|Sixel|None`), transport (`Direct|Tmux`), placement
       (`Ordinary|Placeholders`), confidence (`Forced|Verified|Known|Unknown`),
@@ -483,7 +587,7 @@ and `auto` → detection; `none` → deliberate disabling (not an error).
     - Route is authoritative: update the public capability field and
       render-tree terminal snapshot together, including caller-supplied
       snapshots; never re-resolve per image. `TerminalImage` consumes the route.
-- [ ] **Resolution function** implementing the §1 flowchart for environment-only
+- [x] **Resolution function** implementing the §1 flowchart for environment-only
       inputs: non-tty → none; override; Windows+`SSH_CONNECTION` rule; multiplexer
       branch (Zellij interim rule; tmux interim per ruling 3); known terminals
       from env and `LC_TERMINAL`; "unknown" leaves the probe slot for phase 4.
@@ -494,7 +598,7 @@ and `auto` → detection; `none` → deliberate disabling (not an error).
     - Conflict rule: current client information beats inherited hints; generic
       `xterm-256color`, remote-inherited `WT_SESSION`, and a mux server's old
       env do not establish identity.
-- [ ] **Policy ceilings** — `GraphicsMode` (`Off` / `Vector` / `Rich`),
+- [x] **Policy ceilings** — `GraphicsMode` (`Off` / `Vector` / `Rich`),
       `TerminalMermaidMode`, `BISCUIT_GRAPHICS=none` (disables pixels and
       half-blocks), `force_graphics` (works only when env is `auto`; cannot
       override `none`, lower ceiling, non-tty, blocked transport). Pipes never
@@ -502,16 +606,16 @@ and `auto` → detection; `none` → deliberate disabling (not an error).
 
 ### Wave 2 (parallel; prerequisite: Wave 1)
 
-- [ ] **Windows Terminal version signal** (`cfg(windows)`): parent-chain walk to
+- [x] **Windows Terminal version signal** (`cfg(windows)`): parent-chain walk to
       `WindowsTerminal.exe`, file version >= 1.22 ⇒ Sixel (rulings 7). Unit-test
       the version-comparison logic on all OSes; the file read on Windows only.
-- [ ] **Zellij gating**: `zellij --version` under 500 ms deadline, no shell
+- [x] **Zellij gating**: `zellij --version` under 500 ms deadline, no shell
       interpolation. 0.45+ with a known Kitty-family inherited identity ⇒ Kitty,
       ordinary placement, confidence `Known` (interim, until phase 4). Earlier,
       unknown version, or Kitty disabled ⇒ fallback with reason (Sixel needs
       phase 4's DA1). Never tmux wrapping, placeholders, or iTerm2 format.
       Enabled/disabled state is independent of version in the L1 matrix.
-- [ ] **Capability report and hints**
+- [x] **Capability report and hints**
     - `bt` (no args, `--json`): show route + reason; keep the existing
       image-support field and add route fields.
     - Hint: one stderr line, only if stderr is a terminal, at most once per
@@ -523,7 +627,7 @@ and `auto` → detection; `none` → deliberate disabling (not an error).
       (text path until phase 8) with reason; invalid paths, policy violations,
       corrupt images stay errors. Resolve/load/encode **before** reserving rows.
       Partial write ⇒ return I/O failure, no second format appended.
-- [ ] **Housekeeping**
+- [x] **Housekeeping**
     - Correct the `protocol.rs:49-50` comment (reason: iTerm2 ignores `q=2`,
       replies `Gi=…;OK`, and width-only `c=` places nothing).
     - Remove `viuer` from `biscuit-terminal/lib/Cargo.toml`; leave
@@ -532,21 +636,21 @@ and `auto` → detection; `none` → deliberate disabling (not an error).
 
 ### Wave 3 (parallel docs/tests; prerequisite: Wave 2)
 
-- [ ] **L1 env matrix**: one test per Goals-table row the environment decides
+- [x] **L1 env matrix**: one test per Goals-table row the environment decides
       (direct, Zellij enabled/disabled/old/unknown, tmux interim, SSH no hints,
       Windows SSH ± iTerm2-list outer, mintty, WT, Terminal.app/conhost,
       overrides, invalid overrides, forced format vs blocked transport,
       policy precedence). Each with a control row.
-- [ ] **Docs**: create `docs/discovery/graphics-routes.md` (developer-first:
+- [x] **Docs**: create `docs/discovery/graphics-routes.md` (developer-first:
       route table, both env vars, hints; unbuilt items marked **planned**);
       update `docs/components/terminal_image.md`; README overview touch-ups.
-- [ ] **`os` skill**: add the Windows OpenSSH/system-conhost finding
+- [x] **`os` skill**: add the Windows OpenSSH/system-conhost finding
       (APC/DCS stripped, OSC passes, WezTerm ships its own ConPTY) to
       `windows-console.md`.
 
 ### Checkpoint
 
-- [ ] `just test`, `just lint` on `biscuit-terminal` + consumers that consume
+- [x] `just test`, `just lint` on `biscuit-terminal` + consumers that consume
       `ImageSupport`; `just cross-check biscuit-terminal --os windows`.
 
 ---
