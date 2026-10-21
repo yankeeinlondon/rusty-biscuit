@@ -37,6 +37,7 @@ next_spec: "schematic/features/2026-10-15-schematic-definition-vocabulary/spec.m
 next_plan: "schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md"
 log: "/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/implementation-log.md"
 implemented_by: claude/opus
+next: "2026-10-14-schematic-definition-api/review-2.md"
 ---
 
 # Review 1: author decision before implementation review
