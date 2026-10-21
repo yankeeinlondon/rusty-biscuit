@@ -5,6 +5,11 @@
 //! ([`inspection_markup`]), and a name that matches a pending removal and
 //! another worktree ([`ambiguous_markup`]).
 //!
+//! A stop names why watching for changes stopped, where in the removal, and
+//! what is known about the delay ([`ObservationLoss`]); a refusal because the
+//! watch never started delivering says the same. A watch that was slow to
+//! start is a warning, not a refusal ([`slow_startup_markup`]).
+//!
 //! The stopped and pending reports also say what each process check could
 //! not see ([`coverage_note`]), since a removal goes ahead despite limited
 //! discovery; a check that saw everything adds nothing.
@@ -15,10 +20,14 @@
 //! `report.json`; these reports stay compact and always name it.
 
 use std::path::Path;
+use std::time::Duration;
 
 use sniff::filesystem::query::NativeString;
 use worktree::WorktreeError;
 use worktree::remove::lifecycle::{Candidate, ExitClass, Finished, Inspection, Presence, Refusal, Resolution};
+use worktree::remove::observation::{
+    CoverageLost, ObservationBackend, ObservationDiagnostics, ObservationError, ObservationLoss, ObservationStage, Root,
+};
 use worktree::remove::outcome::{
     ActivityKind, ActivityLocation, BranchState, BranchTarget, DiscoveryPurpose, DiscoveryResult, DiscoveryRun,
     EntryCounts, OperationReport, OriginalState, QuarantineState, RegistrationState, RemovalOutcome, ReportNote,
@@ -35,17 +44,34 @@ pub const ACTIVITY_LIMIT: usize = 3;
 /// Errors listed before the rest are counted.
 pub const ERROR_LIMIT: usize = 3;
 
+/// Where a stop or a startup refusal points a macOS user whose delivery
+/// confirmation stalled.
+const FSEVENTSD: &str = "macOS's file-change service, fseventsd, may be delayed. <i>wt</i> does not restart it; \
+    see the troubleshooting section of the <i>wt remove</i> documentation.";
+
+/// The warning for a watch that took `startup` to confirm, longer than
+/// [`SLOW_STARTUP`](worktree::remove::lifecycle::SLOW_STARTUP); the removal
+/// goes on.
+pub fn slow_startup_markup(startup: Duration) -> String {
+    format!(
+        "<yellow>Warning:</yellow> Confirming that the checkout is being watched for changes took {:.1} s. \
+        The removal may take longer, and it stops if that confirmation stalls.",
+        startup.as_secs_f64()
+    )
+}
+
 /// `refusal` as the error `wt remove` exits with: 3 or 4 for a refusal, 1 for
 /// an operational failure. Nothing was moved or deleted in any of them.
-/// `display_name` names the checkout; `name` is what the user typed.
-pub fn refusal_error(refusal: &Refusal, display_name: &str, name: &str) -> WorktreeError {
+/// `display_name` names the checkout; `name` is what the user typed;
+/// `resumed` says the checkout was already moved by an earlier attempt.
+pub fn refusal_error(refusal: &Refusal, display_name: &str, name: &str, resumed: bool) -> WorktreeError {
     if let Refusal::Usage(usage) = refusal {
         return usage_refusal(usage, display_name, name);
     }
     if let Refusal::Recovery(inspection) = refusal {
         return WorktreeError::RefusedToLoseWork(inspection_markup(inspection, name));
     }
-    let markup = refusal_markup(refusal, display_name, name);
+    let markup = refusal_markup(refusal, display_name, name, resumed);
     match refusal.exit_class() {
         ExitClass::Blocked => WorktreeError::BlockedByEnvironment(markup),
         ExitClass::Failure => WorktreeError::RemovalFailed(markup),
@@ -54,29 +80,44 @@ pub fn refusal_error(refusal: &Refusal, display_name: &str, name: &str) -> Workt
 }
 
 /// The markup for a refusal other than usage or recovery: what stopped the
-/// removal and what to do about it.
-pub fn refusal_markup(refusal: &Refusal, display_name: &str, name: &str) -> String {
+/// removal and what to do about it. `resumed` says the checkout was already
+/// moved by an earlier attempt, so this one stopped before deleting more.
+pub fn refusal_markup(refusal: &Refusal, display_name: &str, name: &str, resumed: bool) -> String {
     let rerun = rerun(name);
-    let remedy = match refusal {
-        Refusal::Observation(_) => "<i>wt</i> removes a checkout only while it can watch it for changes. Remove it \
+    let startup_loss = match refusal {
+        Refusal::Observation(ObservationError::NotDelivering(diagnostics)) => {
+            diagnostics.loss.as_ref().map(|loss| (diagnostics.backend, &loss.reason))
+        }
+        _ => None,
+    };
+    let remedy = match (refusal, startup_loss) {
+        (_, Some((backend, reason))) if is_delay(reason) => {
+            let remedy = format!("Run {rerun} again; nothing was changed.");
+            if backend == ObservationBackend::FsEvents { format!("{remedy} {FSEVENTSD}") } else { remedy }
+        }
+        (Refusal::Observation(_), _) => "<i>wt</i> removes a checkout only while it can watch it for changes. Remove it \
             from another system, or with <i>git worktree remove</i> once nothing uses it."
             .to_string(),
-        Refusal::Move(error) if error.class() == MoveErrorClass::BlockedByEnvironment => {
+        (Refusal::Move(error), _) if error.class() == MoveErrorClass::BlockedByEnvironment => {
             "Close any program using the checkout, then run it again; on a filesystem that cannot move a folder \
             without risking replacing another (such as WSL's <i>/mnt/&lt;drive&gt;</i>), remove it from Windows \
             or with <i>git worktree remove</i> instead."
                 .to_string()
         }
-        Refusal::Inventory(_) | Refusal::Ineligible(_) => {
+        (Refusal::Inventory(_) | Refusal::Ineligible(_), _) => {
             format!("Nothing was moved. Fix what is named above, then run {rerun} again.")
         }
         _ => format!("Run {rerun} again."),
     };
+    let reason = match startup_loss {
+        Some((_, reason)) => format!("the watch did not start delivering changes: {}", loss_reason(reason, None)),
+        None => visible(&refusal.to_string()),
+    };
+    let stopped = if resumed { "stopped before deleting more of" } else { "stopped before moving" };
     format!(
-        "<red><b>Nothing was removed.</b></red> <i>wt</i> stopped before moving worktree <blue>{}</blue>: {}.\n  \
+        "<red><b>Nothing was removed.</b></red> <i>wt</i> {stopped} worktree <blue>{}</blue>: {reason}.\n  \
         <dim>{remedy}</dim>",
-        visible(display_name),
-        visible(&refusal.to_string())
+        visible(display_name)
     )
 }
 
@@ -101,6 +142,9 @@ pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branc
         lines.push(String::new());
         lines.extend(location_lines(report));
         lines.push(format!("Git registration: {}", registration(report.registration)));
+        if let Some(observation) = &report.observation {
+            lines.extend(loss_lines(observation, report));
+        }
     }
     lines.extend(branch_lines(report, branch));
     for error in report.errors.iter().take(ERROR_LIMIT) {
@@ -134,6 +178,91 @@ pub fn stopped_markup(finished: &Finished, display_name: &str, name: &str, branc
         lines.push(format!("<yellow>Warning:</yellow> {}", visible(warning)));
     }
     lines.join("\n")
+}
+
+/// Why watching stopped and where, and for a delay what it means, the
+/// macOS remedy, and how long confirmed checks took before it.
+fn loss_lines(observation: &ObservationDiagnostics, report: &OperationReport) -> Vec<String> {
+    let Some(ObservationLoss { stage, reason, entries_since_drain }) = &observation.loss else {
+        return Vec::new();
+    };
+    let stage = match stage {
+        ObservationStage::Startup => "while the watch was starting".to_string(),
+        ObservationStage::PreMove => "before the move".to_string(),
+        ObservationStage::PostMove => "after the move".to_string(),
+        ObservationStage::Deletion => match entries_since_drain {
+            Some(1) => "during deletion, 1 entry after the previous check".to_string(),
+            Some(count) => format!("during deletion, {count} entries after the previous check"),
+            None => "during deletion".to_string(),
+        },
+        ObservationStage::Unregistration => "while removing Git's record of the worktree".to_string(),
+    };
+    let mut lines = vec![format!("Watching stopped {stage}: {}.", loss_reason(reason, Some(report)))];
+    if is_delay(reason) {
+        lines.push(
+            "  <dim>Nothing is known to have been lost; <i>wt</i> stops because it cannot confirm that every \
+            change arrived.</dim>"
+                .to_string(),
+        );
+        if observation.backend == ObservationBackend::FsEvents {
+            lines.push(format!("  <dim>{FSEVENTSD}</dim>"));
+        }
+        if let Some(longest) = observation.longest_round_trip_ms {
+            lines.push(format!("  <dim>Confirmed checks took up to {} s before this.</dim>", seconds(Duration::from_millis(longest))));
+        }
+    }
+    lines
+}
+
+/// A stall or an expired ceiling: delivery could not be confirmed, which
+/// does not show that anything was dropped.
+fn is_delay(reason: &CoverageLost) -> bool {
+    matches!(reason, CoverageLost::DeliveryStalled { .. } | CoverageLost::DrainCeiling { .. })
+}
+
+/// Why coverage was lost, in the user's terms. With `report`, a watched
+/// place is named by its path; a startup refusal has none yet.
+fn loss_reason(reason: &CoverageLost, report: Option<&OperationReport>) -> String {
+    let on = |watch: &Option<Root>| watch.map(|root| format!(" on {}", place(root, report))).unwrap_or_default();
+    match reason {
+        CoverageLost::Overflow => "the system dropped change notifications (its queue overflowed)".to_string(),
+        CoverageLost::FsEventsDropped { raw, flags } => {
+            let names: Vec<String> = flags.iter().map(ToString::to_string).collect();
+            format!("macOS could not report every change ({}; flags {raw:#x})", names.join(", "))
+        }
+        CoverageLost::QueueFull { capacity } => format!("more than {capacity} changes arrived between two checks"),
+        CoverageLost::WatchLost { root } => format!("the watch on {} stopped", place(*root, report)),
+        CoverageLost::ReadFailed { message } => format!("reading changes failed ({})", first_line(message)),
+        CoverageLost::DeliveryStalled { waited, watch } => {
+            format!("delivery of earlier changes{} could not be confirmed: nothing arrived for {} s", on(watch), seconds(*waited))
+        }
+        CoverageLost::DrainCeiling { waited, watch } => {
+            format!("delivery of earlier changes{} could not be confirmed within {} s", on(watch), seconds(*waited))
+        }
+    }
+}
+
+/// The watched place `root`: the checkout where it is now, the folder that
+/// holds it, or Git's record.
+fn place(root: Root, report: Option<&OperationReport>) -> String {
+    match (root, report) {
+        (Root::Tree, Some(report)) => {
+            let path = report.quarantine.as_ref().map_or(&report.original, |quarantine| &quarantine.path);
+            format!("the checkout at {}", native(path))
+        }
+        (Root::Tree, None) => "the checkout".to_string(),
+        (Root::Parent, report) => match report.and_then(|report| report.original.as_path().parent().map(Path::to_path_buf)) {
+            Some(parent) => format!("the folder holding the checkout at {}", visible(&parent.display().to_string())),
+            None => "the folder holding the checkout".to_string(),
+        },
+        (Root::Admin, _) => "Git's record of the worktree".to_string(),
+    }
+}
+
+/// Whole seconds from 10 s up, else one decimal.
+fn seconds(duration: Duration) -> String {
+    let seconds = duration.as_secs_f64();
+    if seconds >= 10.0 { format!("{seconds:.0}") } else { format!("{seconds:.1}") }
 }
 
 /// Both locations, what was deleted, what is left, and what was observed.

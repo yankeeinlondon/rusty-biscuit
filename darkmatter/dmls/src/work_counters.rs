@@ -16,7 +16,9 @@
 //! in-memory cache key.
 //!
 //! [`registry_scan_threads`] also names every thread a registry scan ran on,
-//! so a test can show that none ran on the server's dispatch thread.
+//! so a test can show that none ran on the server's dispatch thread, and
+//! [`peak_concurrent_registry_scans`] is the most scans ever in progress at
+//! once, so a test can show that no two overlapped.
 
 use std::io;
 use std::path::Path;
@@ -31,6 +33,8 @@ static ENUMERATIONS: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCANS: AtomicUsize = AtomicUsize::new(0);
 /// Distinct threads, so the set stays as small as the thread count.
 static REGISTRY_SCAN_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
+static REGISTRY_SCANS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+static REGISTRY_SCANS_PEAK: AtomicUsize = AtomicUsize::new(0);
 
 /// A snapshot of the process's work counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -99,14 +103,34 @@ pub(crate) fn record_enumeration() {
     ENUMERATIONS.fetch_add(1, Ordering::SeqCst);
 }
 
-/// Counts one trigger-registry scan, and the thread it ran on.
-pub(crate) fn record_registry_scan() {
+/// A trigger-registry scan in progress, counted as in flight until dropped.
+pub(crate) struct RegistryScan(());
+
+impl Drop for RegistryScan {
+    fn drop(&mut self) {
+        REGISTRY_SCANS_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Counts one trigger-registry scan and the thread it runs on. The scan is
+/// in flight until the returned guard is dropped.
+pub(crate) fn record_registry_scan() -> RegistryScan {
     let thread = std::thread::current().id();
-    let mut threads = REGISTRY_SCAN_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if !threads.contains(&thread) {
-        threads.push(thread);
+    {
+        let mut threads = REGISTRY_SCAN_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !threads.contains(&thread) {
+            threads.push(thread);
+        }
     }
     REGISTRY_SCANS.fetch_add(1, Ordering::SeqCst);
+    let in_flight = REGISTRY_SCANS_IN_FLIGHT.fetch_add(1, Ordering::SeqCst) + 1;
+    REGISTRY_SCANS_PEAK.fetch_max(in_flight, Ordering::SeqCst);
+    RegistryScan(())
+}
+
+/// The most trigger-registry scans ever in progress at once.
+pub fn peak_concurrent_registry_scans() -> usize {
+    REGISTRY_SCANS_PEAK.load(Ordering::SeqCst)
 }
 
 /// Every thread a trigger-registry scan has run on, in first-scan order.
@@ -129,7 +153,7 @@ mod tests {
         assert_eq!(hash_bytes(&bytes), biscuit_hash::xx_hash_bytes(b"# A\n"));
         record_parse();
         record_enumeration();
-        record_registry_scan();
+        drop(record_registry_scan());
         assert_eq!(
             work_counts().since(before),
             WorkCounts { reads: 2, hashes: 1, parses: 1, enumerations: 1, registry_scans: 1 }

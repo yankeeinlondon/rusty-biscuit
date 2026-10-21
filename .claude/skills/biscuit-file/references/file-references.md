@@ -185,6 +185,9 @@ failures are `Err`.
 - post-interpolation `effective_kind()`;
 - `cwd()`, `source_path()`, and `repository_root()`;
 - attempted `candidates()` as ordered `ProbedCandidate` values;
+- `probed_paths()`: those attempts as absolute, lexically normalized paths
+  (no canonicalization; recursive search roots omitted), for recording
+  absent nearer candidates a cache must re-check;
 - `outcome()`, `error()`, and `matched_path()`.
 
 `DetailedOutcome` is `Matched(PathBuf)` or `Failed(ResolutionFailure)`. The

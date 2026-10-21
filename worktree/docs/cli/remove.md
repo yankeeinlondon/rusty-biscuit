@@ -157,7 +157,9 @@ mentions the usage check.
 
 `Retry` runs the same command again. It finds the stopped removal by the name
 you typed, shows what is left, and asks again about anything that needs
-consent. While something new is at the original path, the retry refuses with
+consent, except tracked files the stopped removal itself deleted (see
+[What a retry asks again](#what-a-retry-asks-again)). While something new is
+at the original path, the retry refuses with
 exit 3 and changes nothing, so move or save that content first. When the
 checkout was removed but a branch step failed, the report says so, tells
 "kept" from "already deleted" for each branch, and the retry only asks about
@@ -226,8 +228,9 @@ checkout's own name and the hidden name, so busy sibling worktrees never stop a
 removal), every directory in the checkout, and the files in Git's record of the
 worktree that hold its identity and staged changes (`HEAD`, `gitdir`,
 `locked`, `index`, `index.lock`, and split-index `sharedindex.*` files). If
-the system drops change notifications, or a watch ends unexpectedly, coverage
-is lost and removal stops; it never continues on partial watching. On Linux,
+the system drops change notifications, a watch ends unexpectedly, or `wt`
+cannot confirm that changes are being reported, coverage is lost and removal
+stops; it never continues on partial watching. On Linux,
 each directory in the checkout uses one inotify watch, so a checkout with more
 directories than `fs.inotify.max_user_watches` allows, or a user already at
 `fs.inotify.max_user_instances`, cannot be watched and exits 4.
@@ -235,12 +238,21 @@ directories than `fs.inotify.max_user_watches` allows, or a user already at
 On macOS, watching uses FSEvents, which watches paths rather than folders: it
 watches the checkout's path and the hidden path (each with everything below
 it) instead of the folder holding them, with the same effect. Each check for
-new activity first writes a marker file into a private folder in your
-per-user temporary directory (`wt-observe-<random>`, removed when the
-removal ends) and waits until the system reports it, because only then has
-every earlier change been reported. A check that is not confirmed within 5
-seconds counts as lost coverage, and so does the folder holding the checkout,
-or Git's record of the worktree, being moved or deleted while watching runs.
+new activity writes a marker file into a private folder in your per-user
+temporary directory (`wt-observe-<random>`, removed when the removal ends)
+and waits until the system reports it. macOS does not report changes in the
+order they were made, so one reported marker does not prove that every
+earlier change has arrived: the check writes markers until one round brings
+no new activity at the checkout's locations, and a change that arrives even
+later is reported by a later check. The checks therefore never decide on
+their own what is safe to delete. `wt` compares every entry with its list
+immediately before deleting it, and rereads Git's index and `HEAD` before
+removing the worktree's record (see [Checked deletion](#checked-deletion));
+those direct checks are what protect a write the system reported late. The
+folder holding the checkout, or Git's record of the worktree, being moved or
+deleted while watching runs also counts as lost coverage, and so does the
+system flagging that it dropped changes or that a folder must be rescanned
+(see [When watching stops](#when-watching-stops)).
 macOS can report a folder's removal or rename in place of changes inside it
 that happened just before, so `wt` checks for activity after deleting a
 folder's contents and before removing the folder itself.
@@ -251,15 +263,143 @@ Changes in sibling worktrees still reach `wt` there, which ignores them. Each
 check for new activity creates a hidden marker file
 (`.wt-observe-<random>-<number>`) in each of those two folders and waits until
 Windows reports it, because Windows reports each folder's changes in order. The
-marker deletes itself when `wt` closes it, even if `wt` crashes. As on macOS,
-a check that is not confirmed within 5 seconds counts as lost coverage, and
-so does either folder being moved or deleted. So does Windows reporting that
-it dropped changes because too many arrived at once. `wt` stops watching
+marker deletes itself when `wt` closes it, even if `wt` crashes. Checks wait
+as described in [Waiting for changes to be reported](#waiting-for-changes-to-be-reported),
+with the 30 seconds counted separately for each of the two watches. Either
+folder being moved or deleted counts as lost coverage, and so does Windows
+reporting that it dropped changes because too many arrived at once. `wt` stops watching
 Git's record before the step that removes it, so that step is never blocked.
 Windows reports a change to a file's attributes the same way as a change to its
 content. On a ReFS volume (such as a Dev Drive), a folder deleted by some
 tools is not reported at all. `wt` therefore checks every entry again
 before deleting it.
+
+### Waiting for changes to be reported
+
+On macOS and Windows, a check for new activity waits for its marker. It
+waits as long as the system keeps making progress, meaning the marker
+arrives or a change at the checkout's locations is reported. It gives up in
+only two cases:
+
+| Limit | What happened | `reason.kind` in the report |
+|---|---|---|
+| 30 seconds with no progress | the system went quiet before confirming the marker | `delivery_stalled` |
+| 5 minutes for one check | progress kept arriving, but the check never finished | `drain_ceiling` |
+
+When both run out at the same moment, the 5-minute limit is reported. Changes
+in sibling worktrees, the cleanup of `wt`'s own markers, and a marker that was
+already reported do not count as progress, so they cannot keep a check
+waiting. On Windows each of the two watches has its own 30 seconds, so
+activity in the folder holding the checkout never hides a silent watch on
+Git's record. On Linux a check reads every pending notification and writes no
+marker, so it never waits.
+
+```mermaid
+flowchart TD
+    S[Write a marker; both clocks start] --> E{What happens next?}
+    E -->|The marker, or a change at the checkout| G[Progress: the 30 s clock restarts]
+    G --> D{Marker reported, and on macOS<br/>a round with no new activity?}
+    D -->|Yes| OK[Check done]
+    D -->|No| E
+    E -->|30 s with no progress| ST[Stalled: coverage lost]
+    E -->|5 min since the check began| CE[Ceiling: coverage lost]
+    E -->|Dropped changes or a lost watch| L[Coverage lost at once]
+    E -->|Ctrl-C| I[Interrupted]
+```
+
+The same waiting applies while watching starts, after the move, at every
+check during deletion, and before Git's record is removed. A check that gives
+up means `wt` could not confirm that every change was reported, not that a
+change was lost. `wt` still cannot continue without that confirmation, so it
+counts as lost coverage, as described in [When watching stops](#when-watching-stops).
+Ctrl-C ends a wait at once: before the move the removal stops with nothing
+changed, and after it the removal stops as at any other
+[interrupt](#interrupting-a-removal), leaving a pending removal that a retry
+continues.
+
+If confirming that a new watch works takes more than a second, `wt` warns
+once, before it moves anything (on a retry, before it deletes anything
+more). The warning gives the time taken, says the removal may take longer,
+and says it stops if that confirmation stalls. A slow start alone never
+refuses a removal.
+
+### When watching stops
+
+Lost coverage is final for the run: no later check can prove that nothing
+happened in between, and no flag lets `wt` continue past it. What you see
+depends on when it happens:
+
+- **While watching starts**, nothing has moved. `wt` exits 4 and names the
+  reason; after a stall or the 5-minute limit it says to run the command
+  again (on macOS, with the fseventsd note below).
+- **In the checks before the move**, nothing has moved either, and `wt`
+  refuses with exit 4.
+- **After the move**, `wt` deletes nothing more and exits 1 with the usual
+  stop report (both locations, what was deleted and what is left, `Retry:`
+  and `Full report:`), even if nothing was deleted yet. The report adds a
+  `Watching stopped` line that says at which step watching stopped and why.
+- **During a retry**, before it deletes anything more, the retry refuses and
+  says it stopped before deleting more of the worktree; the removal stays
+  pending, and running the command again continues it.
+
+The reason names exactly what the system reported:
+
+| `reason.kind` | Where | What the message names |
+|---|---|---|
+| `fs_events_dropped` | macOS | every loss flag the system set (`KernelDropped`, `UserDropped`, `MustScanSubDirs`) and the whole flag mask in hex |
+| `overflow` | Linux, Windows | the system's change queue overflowed |
+| `queue_full` | all | more changes arrived between two checks than `wt` holds |
+| `watch_lost` | all | the watch that ended |
+| `read_failed` | all | the error reading changes |
+| `delivery_stalled`, `drain_ceiling` | macOS, Windows | the seconds waited, and on Windows the silent watch (the folder holding the checkout, or Git's record of the worktree); nothing is known to have been lost |
+
+`MustScanSubDirs` alone also stops the removal: it means the system could
+not report each change below a folder, so complete coverage is unavailable
+even though nothing says "dropped". On macOS, a stall or the 5-minute limit
+also says that the system's file-change service, fseventsd, may be delayed,
+that `wt` does not restart it, and points to
+[When fseventsd is slow](#when-fseventsd-is-slow-macos). The same details are
+saved in the report's [`observation`](#recovery-records-and-retry) field.
+
+### When fseventsd is slow (macOS)
+
+Every program's file-change notifications on macOS pass through one system
+service, fseventsd. When it falls behind, `wt remove` waits, and a check can
+stall. Two cases have been seen:
+
+- **A stuck fseventsd.** After 26 days of uptime, fseventsd spent one full
+  CPU core matching paths while very few files were changing anywhere.
+  Notifications took more than 10 seconds to arrive, and quitting the
+  programs that watch files made no difference. Overall CPU use looked low,
+  because the busy thread ran on a single efficiency core, so nothing pointed
+  at fseventsd.
+- **A fast burst of deletions.** A healthy fseventsd can still drop
+  notifications when about 6,600 to 7,000 entries are deleted a second, which
+  ends as `fs_events_dropped`. Drops are intermittent: in a later comparison
+  on the same Mac, deleting at up to 11,000 entries a second dropped nothing,
+  and checking for activity more often than every 2,048 entries made
+  deletion about twice as slow without a measurable benefit. No checking
+  interval can rule out a drop, since fseventsd is shared with every other
+  program. A stopped removal continues where it left off when you run the
+  same `wt remove <name>` again.
+
+To see whether fseventsd is busy:
+
+```bash
+ps -o %cpu,etime -p "$(pgrep fseventsd)"   # CPU use, and how long it has run
+top -o cpu                                 # or Activity Monitor, sorted by CPU
+sudo sample fseventsd 5                    # optional: where its threads spend their time
+```
+
+`ps` shows an average over the process's life, so read `top` for its current
+use. High CPU alone does not show that fseventsd is the cause. If it is
+pinned and notifications are slow, an administrator can restart it with
+`sudo killall fseventsd`; launchd starts it again at once. **This affects
+the whole system:** every program that uses FSEvents, such as Spotlight, Time
+Machine, editors, file watchers, and build tools, may miss changes made
+around the restart or rescan its folders. `wt` never restarts fseventsd
+itself; it is a manual troubleshooting step. Afterwards, run the same
+`wt remove <name>` to continue the stopped removal.
 
 ### Checked deletion
 
@@ -295,12 +435,15 @@ flowchart TD
   to be the folder in the list. A folder replaced by a link is never entered,
   so nothing outside the checkout is deleted. A link in the checkout is
   deleted itself; its target is untouched.
-- Reported changes are checked after each level (and after every 2,048
-  entries): a change at a path `wt` deleted must still be a deletion, a
-  change to an entry not yet reached must leave it matching the list, and
-  anything else at either location, or in Git's record of the worktree, stops
-  removal. A folder whose contents are gone but which cannot be removed (a new
-  file appeared in it) also stops removal.
+- Reported changes are checked after each level, and within a level after
+  every 2,048 entries: a change at a path `wt`
+  deleted must still be a deletion, a change to an entry not yet reached must
+  leave it matching the list, and anything else at either location, or in
+  Git's record of the worktree, stops removal. A folder whose contents are
+  gone but which cannot be removed (a new file appeared in it) also stops
+  removal. The count is checked after each batch (below), so a check can come
+  up to 255 entries late. On macOS each check also waits for the system to
+  catch up (see [When fseventsd is slow](#when-fseventsd-is-slow-macos)).
 - Each batch of up to 256 entries from one folder is written to the
   recovery record before it is deleted, and its results after. A crash between
   the two leaves those entries marked uncertain, not deleted.
@@ -329,8 +472,12 @@ while `wt remove` is checking usage, moving, or deleting does not kill it.
 deleted are kept.` and then:
 
 - **Before the move**, it moves nothing, discards the removal's record, and
-  exits 1 with `Nothing was removed.` Run the command again when you are
-  ready.
+  exits 1 with `Nothing was removed.`, saying the removal was interrupted
+  before it changed anything. Run the command again when you are ready.
+- **During a retry, while watching starts**, it deletes nothing, keeps the
+  pending removal, and exits 1 saying it stopped before deleting more of the
+  worktree; running the command again continues it. Later in a retry, it
+  stops as after the move.
 - **After the move**, it finishes the entry it is deleting, deletes nothing
   more, and exits 1 with the same report as any other stop: both locations,
   what was deleted and what is left, Git's registration, each branch (kept),
@@ -382,7 +529,9 @@ These checkouts are refused before anything changes:
 - A checkout on a filesystem that cannot move a directory without risking
   replacement exits 4. One example is a WSL checkout under `/mnt/<drive>`;
   remove it from Windows instead. The same applies when change watching
-  cannot be started, or the recovery record cannot be written.
+  cannot be started or confirmed, or coverage is lost before the move (see
+  [When watching stops](#when-watching-stops)), or the recovery record cannot
+  be written.
 - On Windows, a move blocked by a file open anywhere in the checkout exits 4.
 
 Exits 3 and 4 always mean "nothing removed". A stop after the checkout
@@ -414,9 +563,35 @@ read, the journals are kept and `wt remove` warns.
   each location after a stop), and `windows_search_hold` (a first check that
   found only Windows Search; the `preflight` after it is the one recheck that
   decided).
+- `observation` describes the run's change watching: the `backend`
+  (`fs_events`, `inotify`, or `read_directory_changes`), how long watching
+  took to start (`startup_ms`), and the latest and longest time a check's
+  marker took to be reported (`last_round_trip_ms`, `longest_round_trip_ms`;
+  `null` until one is, and always on Linux, which uses no markers). If
+  coverage was lost, `loss` says where (`stage`: `startup`, `pre_move`,
+  `post_move`, `deletion`, or `unregistration`), why (`reason`, tagged by
+  `kind` as in [When watching stops](#when-watching-stops)), and, during
+  deletion, how many entries `wt` had processed since its previous check
+  (`entries_since_drain`; `null` at other stages). A loss while `wt` stops
+  watching Git's admin directory, just before it removes the worktree's
+  record, is recorded at `unregistration` but does not stop the removal:
+  the final check rereads the index and HEAD directly. On macOS a
+  dropped-notification `reason` keeps the system's whole flag mask (`raw`)
+  and names every loss flag in it (`kernel_dropped`, `user_dropped`,
+  `must_scan_sub_dirs`). A stall or the 5-minute limit records the time
+  waited (`waited_ms`) and the silent `watch` (`parent` or `admin` on
+  Windows, `null` on macOS). The round trips time markers only, not how long
+  each change took to arrive. On macOS a round trip is either about 10 ms or
+  about 1 s, never in between: a marker fseventsd has not processed when
+  `wt` asks for it arrives about a second later. A `longest_round_trip_ms`
+  near 1,000 there means a check missed the fast path, not how far behind
+  the system was, and the deletion count is context, not proof
+  that `wt` caused a drop. A report from before `report_version` 5 has no
+  `observation`, which reads as unknown.
 - `earlier_attempts` keeps what each earlier run reported when it stopped:
   its outcome, both locations, timeline, process checks, observed activity,
-  branch results, and errors. The top-level fields describe the last run.
+  change-watching `observation`, branch results, and errors. The top-level
+  fields describe the last run.
 
 For example, a removal interrupted after deleting 4 files, then retried to
 completion, ends with a report like this (abridged):
@@ -432,6 +607,29 @@ completion, ends with a report like this (abridged):
   "earlier_attempts": [{ "outcome": "cleanup_failed", "errors": ["the removal was interrupted"], "...": "..." }]
 }
 ```
+
+A macOS run that stopped because the system dropped notifications during
+deletion records its watching like this:
+
+```json
+{
+  "observation": {
+    "backend": "fs_events",
+    "startup_ms": 14,
+    "last_round_trip_ms": 9,
+    "longest_round_trip_ms": 31,
+    "loss": {
+      "stage": "deletion",
+      "reason": { "kind": "fs_events_dropped", "raw": 6, "flags": ["kernel_dropped", "user_dropped"] },
+      "entries_since_drain": 2048
+    }
+  }
+}
+```
+
+A Windows run whose watch on Git's record went silent records
+`"reason": { "kind": "delivery_stalled", "waited_ms": 30000, "watch": "admin" }`
+instead.
 
 A retry keeps the earlier journal as `journal-<n>.jsonl` and starts a new
 `journal.jsonl`. The new journal is written in full under a hidden name and
@@ -472,7 +670,8 @@ flowchart TD
 - A retry approves everything again: it lists what is left, asks about
   changed and untracked files (a file written after the stop is new work and
   needs your answer), checks usage, and reassesses branch safety and the
-  remote branch. No earlier answer is reused.
+  remote branch. No earlier answer is reused; see
+  [What a retry asks again](#what-a-retry-asks-again).
 - Something new at the original path is never deleted or entered, and the
   moved checkout is left as it is until you have moved or saved that content.
 - If the hidden folder is no longer the moved checkout, or what is left of it
@@ -482,6 +681,40 @@ flowchart TD
   saved check before the move could not see, as
   `Saved from before the move: Discovery is partial; …`, and names the
   recovery record's folder.
+
+### What a retry asks again
+
+A stopped removal has already deleted some tracked files, and Git lists each
+of them as an unstaged deletion in what is left. Asking about those again
+would ask you to approve the removal's own work, so a retry leaves a file out
+of its questions only when all of these hold:
+
+- Git's status for the file is exactly an unstaged deletion (` D`), with
+  nothing staged for it;
+- this removal's journal, from any of its attempts, records that `wt` itself
+  deleted that exact path;
+- the path is still empty, checked without following a link.
+
+The retry then says how many files it left out, for example
+`3 tracked files this removal already deleted are not asked about again.`
+
+Everything else is asked about as usual: a staged deletion or any other
+staged change, a file staged as added whose copy is gone, a modified or
+untracked file, a protected included file, and a file that vanished for
+another reason or that the journal marks as uncertain. A deleted folder does
+not cover the files that were in it; each file needs its own record. If a
+journal cannot be read or does not match the removal, the retry refuses
+instead of leaving anything out.
+
+For example, a removal stopped after deleting `src/main.rs` and `README.md`.
+You then edit `notes.txt` and recreate `README.md`. The retry asks about
+`notes.txt` and `README.md`, and not about `src/main.rs`.
+
+Your answers cover what the retry showed. Immediately before it deletes
+anything more, `wt` repeats the same check; if a file was recreated, or a
+change staged, after the retry's report, it refuses and asks you to run it
+again. The left-out files stay in the journal counts and the report as
+deletions of the attempt that made them.
 
 ## Worktrees Git can't read
 

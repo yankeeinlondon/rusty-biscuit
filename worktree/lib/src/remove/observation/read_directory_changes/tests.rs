@@ -1,8 +1,8 @@
 //! Windows-only facts of the `ReadDirectoryChangesW` adapter that the shared
 //! contract tests cannot provoke on demand: a system buffer overflow (which
 //! `notify` hid in S2), completion codes, the notification buffer format,
-//! labels, the delivery thread's end, the admin handle's release, and what
-//! Sniff sees of the session.
+//! labels, the delivery thread's end, the admin handle's release, what
+//! Sniff sees of the session, and the wait policy against held handles.
 
 use std::fs;
 use std::path::PathBuf;
@@ -33,13 +33,13 @@ fn new_fixture() -> Fixture {
 }
 
 fn start(fixture: &Fixture) -> ReadDirectoryChanges {
-    ReadDirectoryChanges::start(&fixture.targets, ObserverOptions::default(), false).unwrap()
+    ReadDirectoryChanges::start(&fixture.targets, ObserverOptions::default(), false, &|| false).unwrap()
 }
 
 fn drain(adapter: &mut ReadDirectoryChanges, targets: &Targets) -> Drain {
     let mut sink = Sink { targets, capacity: usize::MAX, events: Vec::new(), lost: None };
-    adapter.drain(&mut sink);
-    Drain { events: sink.events, lost: sink.lost }
+    adapter.drain(&mut sink, &|| false);
+    Drain { events: sink.events, lost: sink.lost, interrupted: false }
 }
 
 fn summary(drain: &Drain) -> Vec<(Scope, EventKind, Option<bool>)> {
@@ -162,7 +162,7 @@ fn markers_are_never_reported_and_leave_nothing_behind() {
 #[test]
 fn a_system_buffer_overflow_is_coverage_loss() {
     let fixture = new_fixture();
-    let mut adapter = ReadDirectoryChanges::start_with_buffer(&fixture.targets, ObserverOptions::default(), 4096, false).unwrap();
+    let mut adapter = ReadDirectoryChanges::start_with_buffer(&fixture.targets, ObserverOptions::default(), 4096, false, &|| false, false).unwrap();
     let gate = adapter.shared.gate.lock().unwrap();
     for index in 0..500 {
         fs::write(fixture.checkout.join(format!("burst-file-{index:04}.txt")), b"x").unwrap();
@@ -212,7 +212,7 @@ fn a_watched_directory_deleted_before_release_and_one_released_first() {
 
     let fixture = new_fixture();
     let mut adapter = start(&fixture);
-    adapter.release_admin();
+    adapter.release_admin(&|| false);
     fs::remove_dir(&fixture.admin).unwrap();
     assert!(fs::symlink_metadata(&fixture.admin).is_err(), "no handle keeps a released directory's name");
     fs::create_dir(&fixture.admin).expect("the name is free again");
@@ -249,7 +249,7 @@ fn the_watch_does_not_block_the_move_or_the_deletion() {
     let mut adapter = start(&fixture);
     fs::write(fixture.checkout.join("sub").join("x"), b"x").unwrap();
     crate::remove::quarantine::rename::rename_no_replace(&fixture.checkout, &fixture.quarantine).unwrap();
-    adapter.moved_to_quarantine();
+    adapter.moved_to_quarantine(&|| false);
     fs::remove_dir_all(&fixture.quarantine).unwrap();
     assert!(fs::symlink_metadata(&fixture.quarantine).is_err());
     let drain = drain(&mut adapter, &fixture.targets);
@@ -260,9 +260,9 @@ fn the_watch_does_not_block_the_move_or_the_deletion() {
 #[test]
 fn sniff_sees_nothing_of_the_session() {
     let fixture = new_fixture();
-    let mut observation = Observation::start(fixture.targets.clone(), ObserverOptions::default()).unwrap();
+    let mut observation = Observation::start(fixture.targets.clone(), ObserverOptions::default(), &|| false).unwrap();
     fs::write(fixture.checkout.join("sub").join("x"), b"x").unwrap();
-    let _ = observation.drain();
+    let _ = observation.drain(&|| false);
     let mut own = OwnedHandles::default();
     observation.register_handles(&mut own);
     let clearance = check_usage(&SniffUsage, &fixture.checkout, &own).expect("the parent and admin handles are outside the checkout");
@@ -273,20 +273,20 @@ fn sniff_sees_nothing_of_the_session() {
 fn a_link_or_a_missing_directory_is_a_setup_failure() {
     let fixture = new_fixture();
     let missing = Targets::new(&fixture.checkout, &fixture.quarantine, &fixture.parent.join("no-admin")).unwrap();
-    let error = ReadDirectoryChanges::start(&missing, ObserverOptions::default(), false).err().expect("no admin directory");
+    let error = ReadDirectoryChanges::start(&missing, ObserverOptions::default(), false, &|| false).err().expect("no admin directory");
     assert!(matches!(&error, ObservationError::Setup { path, .. } if path.ends_with("no-admin")), "{error:?}");
 
     let file = fixture.parent.join("file");
     fs::write(&file, b"x").unwrap();
     let not_a_directory = Targets::new(&file, &fixture.quarantine, &fixture.admin).unwrap();
-    let error = ReadDirectoryChanges::start(&not_a_directory, ObserverOptions::default(), false).err().expect("a file");
+    let error = ReadDirectoryChanges::start(&not_a_directory, ObserverOptions::default(), false, &|| false).err().expect("a file");
     assert!(matches!(&error, ObservationError::Setup { path, .. } if path == &file), "{error:?}");
 
     let link = fixture.parent.join("link");
     match std::os::windows::fs::symlink_dir(&fixture.checkout, &link) {
         Ok(()) => {
             let through_link = Targets::new(&link, &fixture.quarantine, &fixture.admin).unwrap();
-            let error = ReadDirectoryChanges::start(&through_link, ObserverOptions::default(), false).err().expect("a link");
+            let error = ReadDirectoryChanges::start(&through_link, ObserverOptions::default(), false, &|| false).err().expect("a link");
             assert!(matches!(&error, ObservationError::Setup { path, .. } if path == &link), "{error:?}");
         }
         Err(error) => eprintln!("creating a directory link failed ({error}); the link case was not exercised"),
@@ -330,7 +330,7 @@ fn on_refs_a_directory_removed_with_posix_semantics_is_not_reported() {
     let admin = root.path().join("admin");
     fs::create_dir(&admin).unwrap();
     let targets = Targets::new(&checkout, &checkout.with_file_name(".q"), &admin).unwrap();
-    let mut adapter = ReadDirectoryChanges::start(&targets, ObserverOptions::default(), false).unwrap();
+    let mut adapter = ReadDirectoryChanges::start(&targets, ObserverOptions::default(), false, &|| false).unwrap();
     let removed = |drain: &Drain, path: &str| drain.events.iter().any(|event| event.scope == Scope::Tree(path.into()) && event.kind == EventKind::Removed);
 
     fs::remove_dir(checkout.join("plain")).unwrap();
@@ -344,4 +344,87 @@ fn on_refs_a_directory_removed_with_posix_semantics_is_not_reported() {
     let full = drain(&mut adapter, &targets);
     assert!(removed(&full, r"posix-full\f") && !removed(&full, "posix-full"), "{:?}", summary(&full));
     assert_eq!(full.lost, None);
+}
+
+// ---- the wait policy against real handles; `held` keeps the delivery thread
+// from handling completions, as a stalled watch would ----
+
+fn take_after(adapter: &mut ReadDirectoryChanges, targets: &Targets, interrupted: &dyn Fn() -> bool) -> (Waited, Drain) {
+    let mut sink = Sink { targets, capacity: usize::MAX, events: Vec::new(), lost: None };
+    let waited = adapter.drain(&mut sink, interrupted);
+    (waited, Drain { events: sink.events, lost: sink.lost, interrupted: waited == Waited::Interrupted })
+}
+
+/// No delivery on a handle for the stall limit is `DeliveryStalled` naming
+/// that handle's watch.
+#[test]
+fn a_held_watch_stalls_the_drain_and_names_the_watch() {
+    let fixture = new_fixture();
+    let mut adapter = start(&fixture);
+    let stall = std::time::Duration::from_millis(300);
+    adapter.policy = WaitPolicy { stall, ceiling: std::time::Duration::from_secs(60) };
+    adapter.shared.held.store(true, Ordering::SeqCst);
+
+    let (waited, drain) = take_after(&mut adapter, &fixture.targets, &|| false);
+
+    assert_eq!(waited, Waited::Done);
+    match drain.lost {
+        Some(CoverageLost::DeliveryStalled { waited, watch: Some(Root::Parent | Root::Admin) }) => assert!(waited >= stall, "{waited:?}"),
+        other => panic!("expected a stall on a named watch, got {other:?}"),
+    }
+}
+
+/// The interrupt ends a wait at once and records no loss; an interrupted
+/// release keeps the admin handle open, and a later one closes it.
+#[test]
+fn an_interrupt_ends_a_held_wait_without_loss() {
+    let fixture = new_fixture();
+    let mut adapter = start(&fixture);
+    adapter.shared.held.store(true, Ordering::SeqCst);
+    let started = Instant::now();
+    let soon = || started.elapsed() >= std::time::Duration::from_millis(100);
+
+    let (waited, drain) = take_after(&mut adapter, &fixture.targets, &soon);
+
+    assert_eq!((waited, drain.lost), (Waited::Interrupted, None));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}: far below the 30 s stall", started.elapsed());
+    assert_eq!(adapter.release_admin(&|| true), Waited::Interrupted);
+    assert!(!adapter.admin_released, "an interrupted release keeps the handle");
+
+    adapter.shared.held.store(false, Ordering::SeqCst);
+    assert_eq!(adapter.release_admin(&|| false), Waited::Done);
+    assert!(adapter.admin_released);
+}
+
+/// Startup waits under the same policy: a watch that never delivers its first
+/// marker fails with startup diagnostics naming the stalled watch, and an
+/// interrupt during that wait is `Interrupted`, not an environment limit.
+#[test]
+fn startup_waits_under_the_policy_and_stops_for_an_interrupt() {
+    let fixture = new_fixture();
+    let policy = WaitPolicy { stall: std::time::Duration::from_millis(300), ceiling: std::time::Duration::from_secs(60) };
+    let options = ObserverOptions { wait: policy, ..ObserverOptions::default() };
+    match ReadDirectoryChanges::start_with_buffer(&fixture.targets, options, LARGE_BUFFER_BYTES, false, &|| false, true) {
+        Err(error @ ObservationError::NotDelivering(_)) => {
+            assert!(error.to_string().contains("could not confirm delivery of earlier changes on the"), "{error}");
+            let diagnostics = error.diagnostics().expect("carried");
+            assert_eq!(diagnostics.backend, ObservationBackend::ReadDirectoryChanges);
+            let loss = diagnostics.loss.as_ref().expect("the stall");
+            assert_eq!(loss.stage, crate::remove::observation::ObservationStage::Startup);
+            assert!(matches!(loss.reason, CoverageLost::DeliveryStalled { watch: Some(_), .. }), "{:?}", loss.reason);
+        }
+        Err(other) => panic!("expected a startup loss, got {other}"),
+        Ok(_) => panic!("started without a delivered marker"),
+    }
+    let started = Instant::now();
+    match ReadDirectoryChanges::start_with_buffer(&fixture.targets, ObserverOptions::default(), LARGE_BUFFER_BYTES, false, &|| true, true) {
+        Err(ObservationError::Interrupted) => {}
+        Err(other) => panic!("expected an interrupt, got {other}"),
+        Ok(_) => panic!("started without a delivered marker"),
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    let leftovers = |directory: &Path| {
+        fs::read_dir(directory).unwrap().map(|entry| entry.unwrap().file_name()).filter(|name| name.to_string_lossy().starts_with(".wt-observe-")).count()
+    };
+    assert_eq!((leftovers(&fixture.parent), leftovers(&fixture.admin)), (0, 0), "no marker is left behind");
 }

@@ -388,6 +388,20 @@ impl DetailedResolution {
         &self.candidates
     }
 
+    /// The location of every candidate probed as a file, in probe order, up to
+    /// and including the one that matched or stopped the search.
+    ///
+    /// Each path is absolute and normalized by the same lexical rule as
+    /// [`matched_path`](Self::matched_path), never canonicalized, so a missing
+    /// candidate still has a stable spelling. Recursive search roots
+    /// ([`ProbeDisposition::SearchRoot`]) are not file probes and are omitted.
+    pub fn probed_paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.candidates
+            .iter()
+            .filter(|probed| probed.disposition != ProbeDisposition::SearchRoot)
+            .map(|probed| resolve::normalize_absolute(probed.candidate.path(), &self.cwd))
+    }
+
     /// The terminal outcome.
     pub fn outcome(&self) -> &DetailedOutcome {
         &self.outcome

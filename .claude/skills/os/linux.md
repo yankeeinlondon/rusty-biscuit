@@ -79,6 +79,9 @@ glyph. WSL2 follows these Linux code paths; its archive-mode traps are in
   `just cross-check <package> --os linux --build-jobs 2`. The flag must
   follow the package name; before it the script exits 2 with
   `unknown flag --build-jobs`.
+- `--build-jobs 2` is not always enough: on 2026-10-18 `worktree-cli` (about
+  25 test binaries) was killed at 2 jobs and linked only at
+  `--build-jobs 1`, which then took a few minutes longer.
 
 ## inotify: watches follow inodes, new directories are not watched
 

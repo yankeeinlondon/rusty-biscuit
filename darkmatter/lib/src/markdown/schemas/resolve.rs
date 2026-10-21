@@ -72,15 +72,14 @@ pub struct ResolvedSchema {
 
     /// Resolved paths of files pulled in by `Name@file` named-type imports
     /// (Feature B), in sorted order. Empty for schemas that use no imports.
-    /// These are the dependency edges the base-schema LRU cache and DMLS live
-    /// index consume to invalidate a schema when an imported file changes; the
-    /// downstream invalidation wiring itself is deferred.
+    /// These are dependency edges: a change to an imported file's content
+    /// invalidates a cached effective schema or resolved trigger payload.
     pub imports: Vec<PathBuf>,
 
     /// Resolved paths of `example(...)` artifact files (Feature A), in sorted
     /// order. Empty for schemas with no `example()` constraints. Like
-    /// [`ResolvedSchema::imports`], these are dependency edges for warm-cache /
-    /// DMLS invalidation; the invalidation wiring itself is deferred.
+    /// [`ResolvedSchema::imports`], these are dependency edges for cache and
+    /// DMLS invalidation.
     pub examples: Vec<PathBuf>,
 
     /// Resolved paths of the schema FILES this `$schema` references directly:
@@ -89,6 +88,19 @@ pub struct ResolvedSchema {
     /// `$schema` mappings. These are dependency edges: a change to the schema
     /// file's own content must invalidate a cached effective schema.
     pub referenced_files: Vec<PathBuf>,
+
+    /// Every location probed while selecting a schema file, named-type import,
+    /// or example file, up to and including the selected one: an implicit
+    /// path's authoring-folder candidate before its repository-root fallback,
+    /// and each schema root a bare name tried. Sorted, deduplicated, and
+    /// lexical (absent locations have no canonical form), so it overlaps the
+    /// canonical dependency lists above without sharing their spelling.
+    ///
+    /// Unlike [`ResolvedSchema::imports`], [`ResolvedSchema::examples`], and
+    /// [`ResolvedSchema::referenced_files`], entries may not exist; a nearer
+    /// candidate appearing here changes what resolution selects. A recursive
+    /// (`%`) reference contributes nothing: its search roots are not probes.
+    pub searched: Vec<PathBuf>,
 
     /// Non-fatal findings discovered while resolving referenced schema files,
     /// sorted and deduplicated by semantic kind and canonical path.
@@ -175,6 +187,7 @@ pub fn resolve_yaml_schema_with_roots(
             // (Feature B) before conversion — `to_json_schema` rejects a
             // surviving import. This is the top-level document, so `@this`
             // resolves against the inline root (`NamespaceKey::Root`).
+            let mut searched = BTreeSet::new();
             let (schema, imports) = expand_document_imports(
                 schema,
                 base_dir,
@@ -182,12 +195,20 @@ pub fn resolve_yaml_schema_with_roots(
                 &SchemaSourcePath::root(),
                 schema_roots,
                 request_context,
+                &mut searched,
             )?;
             let mut json = to_json_schema(&schema)?;
             // Inline `$schema` mappings have no on-disk path, so `this` example
             // references have no target here (the acceptance driver references
             // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
-            let examples = resolve_document_examples(&mut json, base_dir, None, schema_roots, request_context)?;
+            let examples = resolve_document_examples(
+                &mut json,
+                base_dir,
+                None,
+                schema_roots,
+                request_context,
+                &mut searched,
+            )?;
             Ok(ResolvedSchema {
                 simplified: Some(schema),
                 json_schema: json,
@@ -195,6 +216,7 @@ pub fn resolve_yaml_schema_with_roots(
                 imports,
                 examples,
                 referenced_files: Vec::new(),
+                searched: searched.into_iter().collect(),
                 advisories: Vec::new(),
             })
         }
@@ -232,7 +254,7 @@ pub fn named_type_reference_path(
     if reference.trim() == "this" {
         return Ok(None);
     }
-    named_type_file_path(reference, base_dir, schema_roots, request_context)
+    named_type_file_path(reference, base_dir, schema_roots, request_context, &mut BTreeSet::new())
         .map(|path| Some(canonical_path(&path)))
 }
 
@@ -272,6 +294,7 @@ pub fn expand_named_types(
             &SchemaSourcePath::root(),
             schema_roots,
             request_context,
+            &mut BTreeSet::new(),
         ),
         SimplifiedSchema::Union(arms) => {
             let mut imports = BTreeSet::new();
@@ -288,6 +311,7 @@ pub fn expand_named_types(
                     &SchemaSourcePath::root().union_arm(index),
                     schema_roots,
                     request_context,
+                    &mut BTreeSet::new(),
                 )?;
                 imports.extend(found);
                 let SimplifiedSchema::Single(shape) = schema else {
@@ -317,6 +341,7 @@ fn resolve_root_union(
     let mut imports: BTreeSet<PathBuf> = BTreeSet::new();
     let mut examples: BTreeSet<PathBuf> = BTreeSet::new();
     let mut referenced_files: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut searched: BTreeSet<PathBuf> = BTreeSet::new();
     let mut advisories: BTreeSet<SchemaAdvisory> = BTreeSet::new();
     for (index, item) in items.iter().enumerate() {
         match item {
@@ -331,6 +356,7 @@ fn resolve_root_union(
                         &SchemaSourcePath::root().union_arm(index),
                         schema_roots,
                         request_context,
+                        &mut searched,
                     )?;
                 imports.extend(arm_imports);
                 let mut arm_json = to_json_schema(&arm_schema)?;
@@ -340,6 +366,7 @@ fn resolve_root_union(
                     None,
                     schema_roots,
                     request_context,
+                    &mut searched,
                 )?);
                 if let SimplifiedSchema::Single(shape) = &arm_schema {
                     super::simplified::convert::attach_root_union_match(&mut arm_json, shape);
@@ -364,6 +391,7 @@ fn resolve_root_union(
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
+                searched.extend(resolved.searched.iter().cloned());
                 advisories.extend(resolved.advisories.iter().cloned());
                 // If this arm itself came from a SimplifiedSchema file, preserve
                 // it in the simplified projection only when it is a single
@@ -406,6 +434,7 @@ fn resolve_root_union(
         imports: imports.into_iter().collect(),
         examples: examples.into_iter().collect(),
         referenced_files: referenced_files.into_iter().collect(),
+        searched: searched.into_iter().collect(),
         advisories: advisories.into_iter().collect(),
     })
 }
@@ -435,7 +464,8 @@ fn is_bare_name(file_ref: &FileReference) -> bool {
 
 /// Tries a bare name against each schema root, nearest first. Returns the
 /// resolved path of the first root that contains a file matching `name`, or
-/// `None` when no root has it.
+/// `None` when no root has it. Each root's location is added to `searched` as
+/// it is tried.
 ///
 /// Each root is tried with the name spelled as an explicit `./name`, resolved
 /// in the request context derived onto that root. An explicit relative
@@ -448,6 +478,7 @@ fn try_bare_name_in_roots(
     file_ref: &FileReference,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<Option<PathBuf>, SchemaError> {
     let unresolved = |source| SchemaError::Unresolved {
         reference: file_ref.raw().to_string(),
@@ -455,8 +486,9 @@ fn try_bare_name_in_roots(
     };
     let explicit = FileReference::new(&format!("./{}", file_ref.raw())).map_err(unresolved)?;
     for root in schema_roots {
-        let root_context = request_context.for_trusted_external_cwd(root);
-        if let Some(path) = explicit.resolve_in_context(&root_context).map_err(unresolved)? {
+        let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
+        searched.extend(detailed.probed_paths());
+        if let Some(path) = detailed.into_convenience().map_err(unresolved)? {
             return Ok(Some(path));
         }
     }
@@ -520,6 +552,13 @@ fn accumulate_referenced_file(nested: Vec<PathBuf>, canonical: PathBuf) -> Vec<P
     edges.into_iter().collect()
 }
 
+/// Adds the locations this delegation hop probed to those the nested schema
+/// resolution recorded.
+fn accumulate_searched(resolved: &mut ResolvedSchema, mut searched: BTreeSet<PathBuf>) {
+    searched.extend(std::mem::take(&mut resolved.searched));
+    resolved.searched = searched.into_iter().collect();
+}
+
 /// Attributes diagnostics to the file that actually authored the schema.
 fn attribute_origin(resolved: &mut ResolvedSchema, path: &Path) {
     if resolved.origin.kind != SchemaOriginKind::ReferencedFile {
@@ -545,12 +584,13 @@ fn resolve_reference_in_context(
         });
     }
 
+    let mut searched = BTreeSet::new();
     // Bare-name resolution against schema roots (Phase 3). When schema roots
     // are provided and the reference has no path component, resolve against
     // the roots nearest-first instead of the document directory.
     if !schema_roots.is_empty() && is_bare_name(&file_ref) {
         if let Some(path) =
-            try_bare_name_in_roots(&file_ref, schema_roots, request_context)?
+            try_bare_name_in_roots(&file_ref, schema_roots, request_context, &mut searched)?
         {
             let mut resolved = load_guarded_in_context(
                 &path,
@@ -563,6 +603,7 @@ fn resolve_reference_in_context(
                 resolved.referenced_files,
                 canonical_path(&path),
             );
+            accumulate_searched(&mut resolved, searched);
             return Ok(resolved);
         }
         // Bare name not found in any schema root. Check if a document-sibling
@@ -586,7 +627,7 @@ fn resolve_reference_in_context(
     // explicit `./`/`../` from the document directory only, implicit path
     // references from the document directory first, then the repository root — the same
     // order the `file`-typed value references use. No ambient CWD is read.
-    let path = resolve_file_reference_in_context(&file_ref, base_dir, request_context)
+    let path = resolve_file_reference_in_context(&file_ref, base_dir, request_context, &mut searched)
         .map_err(|source| SchemaError::Unresolved {
             reference: trimmed.to_string(),
             source,
@@ -609,6 +650,7 @@ fn resolve_reference_in_context(
     // `schema.yaml`'s type must invalidate a cached effective schema.
     resolved.referenced_files =
         accumulate_referenced_file(resolved.referenced_files, canonical_path(&path));
+    accumulate_searched(&mut resolved, searched);
     Ok(resolved)
 }
 
@@ -644,12 +686,18 @@ fn load_guarded_in_context(
     loaded
 }
 
+/// Resolves `file_ref` from `base_dir`, adding every location it probed to
+/// `searched`. This and [`try_bare_name_in_roots`] are the only places schema
+/// resolution probes a file reference, so `searched` sees every candidate.
 fn resolve_file_reference_in_context(
     file_ref: &FileReference,
     base_dir: &Path,
     request_context: &biscuit_file::FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
-    file_ref.resolve_in_context(&request_context.for_cwd(base_dir))
+    let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
+    searched.extend(detailed.probed_paths());
+    detailed.into_convenience()
 }
 
 fn load_schema_from_path_in_context(
@@ -725,6 +773,7 @@ fn parse_yaml_referenced_file(
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+        searched: Vec::new(),
         advisories,
     })
 }
@@ -834,6 +883,7 @@ fn resolve_standalone_schema(
     let key = NamespaceKey::File(canonical_path(path));
     match schema {
         SimplifiedSchema::Single(_) => {
+            let mut searched = BTreeSet::new();
             let (schema, imports) = expand_document_imports(
                 schema,
                 file_dir,
@@ -841,6 +891,7 @@ fn resolve_standalone_schema(
                 &SchemaSourcePath::root(),
                 schema_roots,
                 request_context,
+                &mut searched,
             )?;
             let mut json_schema = to_json_schema(&schema)?;
             let examples = resolve_document_examples(
@@ -849,6 +900,7 @@ fn resolve_standalone_schema(
                 Some(path),
                 schema_roots,
                 request_context,
+                &mut searched,
             )?;
             Ok(ResolvedSchema {
                 simplified: Some(schema),
@@ -857,6 +909,7 @@ fn resolve_standalone_schema(
                 imports,
                 examples,
                 referenced_files: Vec::new(),
+                searched: searched.into_iter().collect(),
                 advisories: Vec::new(),
             })
         }
@@ -963,6 +1016,8 @@ fn lower_embedded_schema(
         NamespaceKey::Embedded(path.to_string()),
         &SchemaSourcePath::root(),
         NamespaceSource::Embedded { documents, bundle },
+        // Embedded imports resolve lexically in the table and probe no disk.
+        &mut BTreeSet::new(),
     )?;
     let json_schema = to_json_schema(&schema)?;
     if contains_example_annotation(&json_schema) {
@@ -979,6 +1034,7 @@ fn lower_embedded_schema(
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+        searched: Vec::new(),
         advisories: Vec::new(),
     };
     Ok((resolved, reads))
@@ -1009,6 +1065,7 @@ fn resolve_standalone_root_union(
     let mut imports = BTreeSet::new();
     let mut examples = BTreeSet::new();
     let mut referenced_files = BTreeSet::new();
+    let mut searched = BTreeSet::new();
     let mut advisories = BTreeSet::new();
 
     for (index, arm) in arms.into_iter().enumerate() {
@@ -1022,6 +1079,7 @@ fn resolve_standalone_root_union(
                     &SchemaSourcePath::root().union_arm(index),
                     schema_roots,
                     request_context,
+                    &mut searched,
                 )?;
                 imports.extend(arm_imports);
                 let SimplifiedSchema::Single(shape) = schema else {
@@ -1034,6 +1092,7 @@ fn resolve_standalone_root_union(
                     Some(path),
                     schema_roots,
                     request_context,
+                    &mut searched,
                 )?);
                 super::simplified::convert::attach_root_union_match(&mut arm_json, &shape);
                 simplified_arms.push(SchemaArm::Inline(shape));
@@ -1050,6 +1109,7 @@ fn resolve_standalone_root_union(
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
+                searched.extend(resolved.searched.iter().cloned());
                 advisories.extend(resolved.advisories.iter().cloned());
                 let mut arm_json = resolved.json_schema;
                 if let Some(SimplifiedSchema::Single(shape)) = resolved.simplified {
@@ -1076,6 +1136,7 @@ fn resolve_standalone_root_union(
         imports: imports.into_iter().collect(),
         examples: examples.into_iter().collect(),
         referenced_files: referenced_files.into_iter().collect(),
+        searched: searched.into_iter().collect(),
         advisories: advisories.into_iter().collect(),
     })
 }
@@ -1097,6 +1158,7 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+        searched: Vec::new(),
         advisories: Vec::new(),
     })
 }
@@ -1176,6 +1238,11 @@ struct ImportEngine<'a> {
     /// Resolved import file paths, deduplicated — the dependency edges a warm
     /// cache / DMLS index consumes to invalidate on imported-file change.
     dependencies: BTreeSet<PathBuf>,
+    /// Locations probed while selecting import targets and rehoming their
+    /// examples (see [`ResolvedSchema::searched`]). Every import site resolves
+    /// its reference before `namespace_cache` is consulted, so a cached
+    /// namespace still records the probes of each site that names it.
+    searched: BTreeSet<PathBuf>,
     /// Where the namespaces that imports name are read from.
     source: NamespaceSource<'a>,
     /// Parsed named-type namespaces keyed by canonical file path.
@@ -1383,8 +1450,10 @@ fn pattern_key_source_name(key: &PatternKey) -> String {
 /// `schema_roots` provides bare-name resolution context for import targets
 /// that have no path component.
 ///
-/// Returns the import-free schema plus the sorted dependency edges. Schemas
-/// with no imports are returned untouched (byte-equivalent to legacy output).
+/// Returns the import-free schema plus the sorted dependency edges, and adds
+/// every location probed for an import target or a rehomed example to
+/// `searched`. Schemas with no imports are returned untouched
+/// (byte-equivalent to legacy output).
 fn expand_document_imports(
     schema: SimplifiedSchema,
     base_dir: &Path,
@@ -1392,12 +1461,13 @@ fn expand_document_imports(
     root: &SchemaSourcePath,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     let source = NamespaceSource::Files {
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
-    expand_imports(schema, base_dir, key, root, source)
+    expand_imports(schema, base_dir, key, root, source, searched)
 }
 
 /// [`expand_document_imports`] over an explicit namespace source.
@@ -1407,6 +1477,7 @@ fn expand_imports(
     key: NamespaceKey,
     root: &SchemaSourcePath,
     source: NamespaceSource<'_>,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
@@ -1425,11 +1496,13 @@ fn expand_imports(
     let mut engine = ImportEngine {
         stack: Vec::new(),
         dependencies: BTreeSet::new(),
+        searched: BTreeSet::new(),
         source,
         namespace_cache: HashMap::new(),
         embedded_cache: HashMap::new(),
     };
     let expanded = engine.expand_schema(schema, &current, root)?;
+    searched.extend(engine.searched);
     Ok((expanded, engine.dependencies.into_iter().collect()))
 }
 
@@ -1709,13 +1782,14 @@ impl ImportEngine<'_> {
     /// and replaced by the resolved absolute path, which resolves to itself
     /// from any directory. A missing example fails here with the error the
     /// later pass would have raised.
-    fn rehome_examples(&self, base: ExpandedDef, file: &Path) -> Result<ExpandedDef, SchemaError> {
+    fn rehome_examples(&mut self, base: ExpandedDef, file: &Path) -> Result<ExpandedDef, SchemaError> {
         let NamespaceSource::Files { schema_roots, context } = &self.source else {
             unreachable!("a file namespace is only loaded from the file source")
         };
+        let searched = &mut self.searched;
         let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
-        let rehome = |atom: &mut PropertyAtom| {
-            rehome_atom_examples(atom, base_dir, file, schema_roots, context)
+        let mut rehome = |atom: &mut PropertyAtom| {
+            rehome_atom_examples(atom, base_dir, file, schema_roots, context, searched)
         };
         Ok(match base {
             ExpandedDef::Single(mut atom, provenance) => {
@@ -1751,7 +1825,13 @@ impl ImportEngine<'_> {
         }
         let path = match &self.source {
             NamespaceSource::Files { schema_roots, context } => {
-                named_type_file_path(reference, &current.base_dir, schema_roots, context)?
+                named_type_file_path(
+                    reference,
+                    &current.base_dir,
+                    schema_roots,
+                    context,
+                    &mut self.searched,
+                )?
             }
             NamespaceSource::Embedded { documents, bundle } => {
                 let (documents, bundle) = (*documents, *bundle);
@@ -1852,6 +1932,7 @@ fn named_type_file_path(
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<PathBuf, SchemaError> {
     let trimmed = reference.trim();
     let file_ref =
@@ -1871,6 +1952,7 @@ fn named_type_file_path(
             &file_ref,
             schema_roots,
             request_context,
+            searched,
         )? {
             p
         } else {
@@ -1892,6 +1974,7 @@ fn named_type_file_path(
             &file_ref,
             base_dir,
             request_context,
+            searched,
         )
             .map_err(|source| SchemaError::Unresolved {
                 reference: trimmed.to_string(),
@@ -1915,6 +1998,7 @@ fn rehome_atom_examples(
     this_file: &Path,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SchemaError> {
     for constraint in atom
         .constraints
@@ -1929,6 +2013,7 @@ fn rehome_atom_examples(
                     Some(this_file),
                     schema_roots,
                     request_context,
+                    searched,
                 )?;
                 if let Some(resolved) = path.to_str() {
                     *reference = resolved.to_string();
@@ -1940,7 +2025,7 @@ fn rehome_atom_examples(
         // An arm inlined from another file was already rehomed there; its
         // absolute paths resolve to themselves.
         for arm in arms {
-            rehome_atom_examples(arm, base_dir, this_file, schema_roots, request_context)?;
+            rehome_atom_examples(arm, base_dir, this_file, schema_roots, request_context, searched)?;
         }
     }
     if let TypeExpr::InlineObject(shape) = &mut atom.ty {
@@ -1951,7 +2036,14 @@ fn rehome_atom_examples(
         for def in defs {
             match def {
                 PropertyDef::Single(inner) => {
-                    rehome_atom_examples(inner, base_dir, this_file, schema_roots, request_context)?;
+                    rehome_atom_examples(
+                        inner,
+                        base_dir,
+                        this_file,
+                        schema_roots,
+                        request_context,
+                        searched,
+                    )?;
                 }
                 PropertyDef::Union(arms) => {
                     for inner in arms {
@@ -1961,6 +2053,7 @@ fn rehome_atom_examples(
                             this_file,
                             schema_roots,
                             request_context,
+                            searched,
                         )?;
                     }
                 }
@@ -2923,7 +3016,8 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
 
 /// Resolves every `x-darkmatter-example` reference-string array in `json` into
 /// validated example objects. Returns the sorted, deduplicated set of resolved
-/// example file paths (dependency edges).
+/// example file paths (dependency edges), and adds every location probed for
+/// an example file to `searched`.
 ///
 /// Fast path: a schema with no `x-darkmatter-example` annotation returns an
 /// empty `Vec` and leaves `json` byte-equivalent.
@@ -2933,6 +3027,7 @@ fn resolve_document_examples(
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<Vec<PathBuf>, SchemaError> {
     let mut deps: BTreeSet<PathBuf> = BTreeSet::new();
     let mut reads: HashMap<PathBuf, Vec<u8>> = HashMap::new();
@@ -2944,10 +3039,12 @@ fn resolve_document_examples(
         request_context,
         &mut deps,
         &mut reads,
+        searched,
     )?;
     Ok(deps.into_iter().collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_examples_in_json(
     value: &mut Value,
     base_dir: &Path,
@@ -2956,6 +3053,7 @@ fn resolve_examples_in_json(
     request_context: &biscuit_file::FileResolutionContext,
     deps: &mut BTreeSet<PathBuf>,
     reads: &mut HashMap<PathBuf, Vec<u8>>,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<(), SchemaError> {
     match value {
         Value::Object(map) => {
@@ -2983,6 +3081,7 @@ fn resolve_examples_in_json(
                         request_context,
                         deps,
                         reads,
+                        searched,
                     )?);
                 }
                 map.insert("x-darkmatter-example".into(), Value::Array(resolved));
@@ -3002,6 +3101,7 @@ fn resolve_examples_in_json(
                     request_context,
                     deps,
                     reads,
+                    searched,
                 )?;
             }
         }
@@ -3015,6 +3115,7 @@ fn resolve_examples_in_json(
                     request_context,
                     deps,
                     reads,
+                    searched,
                 )?;
             }
         }
@@ -3032,6 +3133,7 @@ fn resolve_example_path(
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<PathBuf, SchemaError> {
     let trimmed = reference.trim();
     Ok(if trimmed == "this" {
@@ -3056,7 +3158,7 @@ fn resolve_example_path(
         // Bare-name resolution against schema roots (Phase 3).
         if !schema_roots.is_empty() && is_bare_name(&file_ref) {
             if let Some(p) =
-                try_bare_name_in_roots(&file_ref, schema_roots, request_context)?
+                try_bare_name_in_roots(&file_ref, schema_roots, request_context, searched)?
             {
                 p
             } else {
@@ -3073,7 +3175,7 @@ fn resolve_example_path(
                 });
             }
         } else {
-            resolve_file_reference_in_context(&file_ref, base_dir, request_context)
+            resolve_file_reference_in_context(&file_ref, base_dir, request_context, searched)
                 .map_err(|source| SchemaError::Unresolved {
                     reference: trimmed.to_string(),
                     source,
@@ -3104,8 +3206,10 @@ fn resolve_one_example(
     request_context: &biscuit_file::FileResolutionContext,
     deps: &mut BTreeSet<PathBuf>,
     reads: &mut HashMap<PathBuf, Vec<u8>>,
+    searched: &mut BTreeSet<PathBuf>,
 ) -> Result<Value, SchemaError> {
-    let path = resolve_example_path(reference, base_dir, this_file, schema_roots, request_context)?;
+    let path =
+        resolve_example_path(reference, base_dir, this_file, schema_roots, request_context, searched)?;
     let canonical = canonical_path(&path);
     // Reuse the bytes when another `example(...)` site already read this file
     // during the same resolution run.
@@ -4323,6 +4427,7 @@ mod schema_plus_phase1 {
             Some(&path),
             &[],
             &FileResolutionContext::new(dir.path()),
+            &mut BTreeSet::new(),
         )
             .expect("`this` example must resolve");
         assert_eq!(
@@ -5122,6 +5227,7 @@ mod shared_type_tables {
         ImportEngine {
             stack: Vec::new(),
             dependencies: BTreeSet::new(),
+            searched: BTreeSet::new(),
             source: NamespaceSource::Files {
                 schema_roots: Vec::new(),
                 context: Box::new(FileResolutionContext::new(dir)),
@@ -5378,3 +5484,6 @@ mod shared_type_tables {
         ));
     }
 }
+
+#[cfg(test)]
+mod searched_tests;

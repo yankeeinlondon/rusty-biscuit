@@ -11,7 +11,8 @@
 //! before the move, and removes exactly this registration as
 //! [`remove_missing_record`](crate::remove::missing::remove_missing_record)
 //! does: plain `git worktree remove`, never `--force`, never `prune` or
-//! `repair`.
+//! `repair`. An interrupt that ends either wait for delivery keeps the
+//! registration.
 
 use std::io;
 use std::path::Path;
@@ -24,7 +25,7 @@ use crate::availability::{self, Availability};
 use crate::remove::admin_entry::AdminEntry;
 use crate::remove::missing::{IndexBinding, MissingRefusal, remove_listed_record};
 use crate::remove::observation::deletion::{DeletionOptions, own_move};
-use crate::remove::observation::{CoverageLost, EventKind, Observation, Scope};
+use crate::remove::observation::{CoverageLost, EventKind, Observation, ObservationStage, Scope};
 use crate::remove::outcome::{ActivityKind, ActivityLocation, ObservedActivity, RemovalOutcome};
 use crate::worktree::parse_worktree_list;
 
@@ -44,6 +45,9 @@ pub enum UnregisterError {
     Registration(String),
     #[error(transparent)]
     Refused(MissingRefusal),
+    /// The interrupt ended a wait for change delivery before Git's step.
+    #[error("the removal was interrupted")]
+    Interrupted,
 }
 
 impl UnregisterError {
@@ -52,13 +56,14 @@ impl UnregisterError {
         match self {
             Self::Activity(_) | Self::IndexChanged => RemovalOutcome::ActivityDetected,
             Self::CoverageLost(_) => RemovalOutcome::StateUnverified,
-            Self::Registration(_) | Self::Refused(_) => RemovalOutcome::CleanupFailed,
+            Self::Registration(_) | Self::Refused(_) | Self::Interrupted => RemovalOutcome::CleanupFailed,
         }
     }
 }
 
 /// Unregisters the worktree whose quarantine `observation` watched, from the
 /// base checkout `base`, if its index and HEAD still match `approved`.
+/// `interrupted` is polled by the observer's waits.
 ///
 /// ## Returns
 ///
@@ -73,11 +78,16 @@ pub fn unregister_quarantine(
     base: &Path,
     observation: &mut Observation,
     approved: &IndexBinding,
+    interrupted: &dyn Fn() -> bool,
 ) -> Result<Option<String>, UnregisterError> {
     let targets = observation.targets().clone();
-    let drain = observation.drain();
+    observation.enter_stage(ObservationStage::Unregistration);
+    let drain = observation.drain(interrupted);
     if let Some(lost) = drain.lost {
         return Err(UnregisterError::CoverageLost(lost));
+    }
+    if drain.interrupted {
+        return Err(UnregisterError::Interrupted);
     }
     let original_kinds: Vec<EventKind> =
         drain.events.iter().filter(|event| event.scope == Scope::Original(Default::default())).map(|event| event.kind).collect();
@@ -120,7 +130,7 @@ pub fn unregister_quarantine(
     // Before Git deletes the admin directory. The index and HEAD are checked
     // after this, once, against the approval; a write to the index in
     // between changes its bytes, so it still refuses.
-    observation.release_admin();
+    observation.release_admin(interrupted).map_err(|_| UnregisterError::Interrupted)?;
     let admin = AdminEntry { dir: targets.admin().to_path_buf() };
     remove_listed_record(base, entry, entry, &admin, approved).map_err(|refusal| match refusal {
         MissingRefusal::IndexChanged(_) | MissingRefusal::HeadChanged { .. } => UnregisterError::IndexChanged,
