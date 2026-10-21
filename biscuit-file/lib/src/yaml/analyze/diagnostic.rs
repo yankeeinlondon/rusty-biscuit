@@ -75,6 +75,10 @@ pub enum YamlDiagnosticCode {
     /// A line's indentation contains a tab, which YAML forbids.
     #[serde(rename = "yaml.tab-indentation")]
     TabIndentation,
+    /// The root mapping is indented as a whole; its keys can move to
+    /// column 0 without changing the parsed value.
+    #[serde(rename = "yaml.root-indentation")]
+    RootIndentation,
     /// A mapping key is defined more than once.
     #[serde(rename = "yaml.duplicate-key")]
     DuplicateKey,
@@ -128,7 +132,7 @@ pub enum YamlDiagnosticCode {
 
 impl YamlDiagnosticCode {
     /// All diagnostic codes, in declaration order.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Parse,
         Self::Bom,
         Self::LineEnding,
@@ -137,6 +141,7 @@ impl YamlDiagnosticCode {
         Self::Whitespace,
         Self::ReservedIndicator,
         Self::TabIndentation,
+        Self::RootIndentation,
         Self::DuplicateKey,
         Self::AnchorUndeclared,
         Self::AnchorForward,
@@ -167,6 +172,7 @@ impl YamlDiagnosticCode {
             Self::Whitespace => "yaml.whitespace",
             Self::ReservedIndicator => "yaml.reserved-indicator",
             Self::TabIndentation => "yaml.tab-indentation",
+            Self::RootIndentation => "yaml.root-indentation",
             Self::DuplicateKey => "yaml.duplicate-key",
             Self::AnchorUndeclared => "yaml.anchor-undeclared",
             Self::AnchorForward => "yaml.anchor-forward",
