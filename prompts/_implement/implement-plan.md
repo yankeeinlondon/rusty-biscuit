@@ -89,8 +89,28 @@ failure:
     message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
     effect: sad-trombone
 loop:
-    until: "phase >= total_phases || frontmatter(log, 'human_review') == true"
+    until: "phase >= total_phases"
     action: "increment(phase)"
+    # A phase that asks for human review pauses the plan. The non-zero code
+    # stops a chained `&& just fix`, which would otherwise only report that
+    # the spec is not implemented.
+    gate:
+        - when: "frontmatter(log, 'human_review') == true"
+          then:
+              - warn: |-
+                    implementation of `{{parent_dir(plan)}}` **paused after phase {{phase}}** (_of {{total_phases}}_): the agent needs a human decision before the next phase can start. Review items:
+
+                    {{ as_ordered_list(frontmatter(log, 'human_review_items') || []) }}
+
+                    Record your decisions in {{link(log)}}, set its `human_review` to `false`, and run the implement prompt again.
+              - message: |-
+                    🤷  implementation of `{{parent_dir(plan)}}` paused after phase **{{phase}}** (_of {{total_phases}}_) for human review ({{area}}, {{ctx.agent}}/{{ctx.model}}):
+
+                    {{ as_ordered_list(frontmatter(log, 'human_review_items') || []) }}
+              - say: "The plan in the {{area}} {{ctx.area_description}} paused after phase {{phase}} and needs your review"
+              - break:
+                    reason: "phase {{phase}} of {{total_phases}} requires human review before the plan can continue"
+                    code: 2
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
