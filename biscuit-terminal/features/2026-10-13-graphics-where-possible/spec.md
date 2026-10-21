@@ -155,9 +155,11 @@ below; this keeps images attached to the pane.
 | tmux built with Sixel, Sixel-capable outside | Sixel handled by tmux itself |
 | tmux, passthrough off | Native Sixel when positively supported; otherwise fallback plus a hint naming `set -g allow-passthrough on` |
 | SSH from a capable terminal, no forwarded hints | Graphics when a safe probe verifies a usable format; otherwise fallback with an unknown-route reason |
+| SSH from inside a local tmux (remote side sees `TERM=tmux-*`/`screen-*`, no `TMUX`) | Kitty through passthrough, ordinary placement, when a wrapped probe confirms it; otherwise fallback with a hint naming `BISCUIT_GRAPHICS_TRANSPORT=tmux` |
 | SSH into a Windows server (system conhost) | iTerm2 format when the outer terminal is on the iTerm2 list; otherwise fallback. Never Kitty or Sixel. |
 | mintty | iTerm2 format |
-| Windows Terminal with Sixel support established | Sixel; `WT_SESSION` alone does not establish version support |
+| Windows Terminal with Sixel support established | Sixel, established by the native Windows probe's DA1 reply; `WT_SESSION` alone does not establish version support |
+| Native Windows, any terminal answering color queries | Measured background and foreground colors, so diagrams get the right light/dark theme and Sixel the right opaque background |
 | Terminals without a supported pixel format, including Terminal.app and system conhost | Diagram source or the plain-image text fallback; no graphics probe to known incompatible terminals |
 | Any setup, valid `BISCUIT_GRAPHICS` set | Selected format or disabled graphics, subject to output policy and a usable transport; never silently substitute another pixel format |
 
@@ -268,7 +270,7 @@ reliably, not everything it advertises.
 | --- | --- |
 | Kitty, Ghostty, WezTerm, Warp, Konsole, wast | Kitty |
 | iTerm2, mintty, cterm | iTerm2 format |
-| Windows Terminal (`WT_SESSION`) | Sixel only with a verified capability or a known supporting version |
+| Windows Terminal (`WT_SESSION`) | Sixel only when the probe's DA1 reply confirms it (process version as a contingency, see section 2) |
 | Terminal.app | none |
 
 The **iTerm2 list** used by the Windows SSH rule and tmux is: iTerm2,
@@ -286,6 +288,13 @@ wins over inherited hints; if it remains ambiguous, use a safe probe or fallback
 `none` (lowercase). Unset and `auto` use detection. An invalid value selects no
 pixel route and records the accepted values in the reason; `bt` reports a
 configuration error instead of silently selecting a different format.
+
+`BISCUIT_GRAPHICS_TRANSPORT` accepts exactly `auto`, `direct`, or `tmux`
+(lowercase), independently of the format. It supplies the one fact a remote
+program cannot observe: a tmux layer on the far side of SSH. A forced `tmux`
+transport wraps output for passthrough, is reported as unverified, and uses
+ordinary placement unless the outer terminal is identified. Invalid values are
+handled like an invalid `BISCUIT_GRAPHICS`.
 
 A forced format skips format probing and terminal-identity preferences, but
 still uses detected tmux wrapping and format-appropriate placement. It does
@@ -328,18 +337,32 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 - Parse DA1 structurally: Sixel is parameter `4` in a primary device-attributes
   reply, not the digit `4` anywhere in the input. Prefer a correlated Kitty
   success over Sixel when both are usable, subject to the tmux rule below.
+- **When it runs: in the existing color round trip.** `Terminal::new()`
+  already makes one live OSC 10/11 exchange per process on Unix (cached in
+  `osc_queries`). The Kitty query joins that same exchange, and the DA1 reply
+  that already ends it answers the Sixel question. No new probing moment and
+  no extra round trip; graphics inherit the input exposure colors already
+  have. Under tmux, a second, wrapped exchange happens at the same moment,
+  because tmux answers color queries itself while the Kitty query must reach
+  the outer terminal.
+- **Escape hatch for TUIs.** A caller can supply a resolved route, or turn
+  construction-time probing off, so an application with its own input loop
+  never races the probe. Because results are cached, only the first
+  construction can probe; it should happen before any input loop starts.
+  Never probe from a running TUI event loop or inside a synchronized output
+  block (mode 2026).
 - Use the terminal package's existing
   [query transport](../../lib/src/discovery/tty_query.rs) for locking, raw-mode
   restoration, bounded reads, deadlines, and silence budgets. Write queries
-  through the controlling terminal, never through captured stdout. Query only
-  when that terminal is the output endpoint and the caller owns input; never
-  from rendering a component, a running TUI event loop, or a synchronized
-  output block (mode 2026). A TUI supplies a previously resolved route.
-- The existing engine is Unix-only, discards typeahead, strips the DA1 reply
-  before returning, and appends an unwrapped DA1. It cannot be reused unchanged:
-  graphics discovery needs structured query and DA1 results and a caller-chosen
-  transport for **both** requests. Preserve existing color/cursor behavior;
-  extending graphics probing does not enable every other probe inside a mux.
+  through the controlling terminal, never through captured stdout.
+- The existing engine strips the DA1 reply before returning and appends an
+  unwrapped DA1. It needs extending: graphics discovery needs structured query
+  and DA1 results and a caller-chosen transport for **both** requests.
+  Preserve existing color/cursor behavior; extending graphics probing does not
+  enable every other probe inside a mux.
+- **A long-term input broker** (one dispatcher for every query and application
+  reader, preserving typeahead centrally) is the eventual fix for colors and
+  graphics alike, and is separate work.
 - Through tmux, send the query and its ordering sentinel through the same
   passthrough route. A DA1 answered by tmux can establish tmux-native Sixel;
   it cannot order an outer Kitty response. Keep native and outer results
@@ -352,16 +375,37 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 - **Never automatically selects Kitty for iTerm2.** Reliable iTerm2 hints
   select its native format before probing. Ordinary Kitty transfers use quiet
   mode and nonzero IDs; probing owns and consumes its correlated replies.
-- Native Windows currently has no live-query backend. It uses verified version
-  information or known terminal hints, then text fallback when insufficient;
-  `WT_SESSION` alone is insufficient. A native Windows probe is an author
-  decision in Open questions, not an implicit Unix API port.
+- **Hidden tmux across SSH.** `TERM=tmux-*` or `screen-*` with no `TMUX`
+  marks a likely tmux layer the program cannot see. The exchange then also
+  sends a *wrapped* Kitty query: only a tmux with passthrough on can deliver
+  it to the outer terminal, so a correlated `OK` confirms tmux transport. With
+  no tmux in the path, the outer terminal receives an unknown DCS, which the
+  targeted terminals ignore. Placement is ordinary (the outer terminal is not
+  identified), except that a forwarded `LC_TERMINAL=iTerm2` selects the
+  iTerm2 format through passthrough. When the hint is present but nothing
+  confirms it, the `bt` hint names `BISCUIT_GRAPHICS_TRANSPORT=tmux`. Whether
+  wrapped replies reliably return through tmux is a phase 0 item; if they do
+  not, the automatic part is dropped and the override and hint remain.
+- **Native Windows backend.** The query engine gains a Windows
+  implementation under the same contract: request plus DA1, deadline and
+  silence budget, console modes restored afterwards. It serves both colors
+  and graphics through the shared round trip above, so Windows gets measured
+  background/foreground colors (today it gets none) and Sixel detection from
+  Windows Terminal's own DA1 reply. Never probed: Windows SSH server sessions
+  (the measured system conhost strips the query) and legacy conhost with no
+  modern terminal attached (known not to answer). Typeahead read by the probe
+  may be returned with `WriteConsoleInput`, which Unix cannot do; this is
+  attempted, not promised, until phase 0 confirms it. **Contingency:** if
+  phase 0 shows the DA1 reply under ConPTY does not come from the terminal,
+  Windows Terminal's Sixel support is read instead from the
+  `WindowsTerminal.exe` file version (1.22 or later) found by walking the
+  parent process chain.
 
 > **Reader's note:** this intentionally broadens the current environment-only
 > graphics detection contract, which avoids probes because of visible query
-> leakage and replies reaching the shell. The new path must remain bounded and
-> input-owned. Safe handling of unrelated input is unresolved below; the new
-> automatic probe must not be enabled until that decision is implemented.
+> leakage and replies reaching the shell. It does so by joining the color
+> round trip that `Terminal::new()` already makes, rather than adding a new
+> probing moment; see Decisions.
 
 ### 3. tmux
 
@@ -374,7 +418,8 @@ graphics, and Windows SSH paths known to strip the query are never probed.
   client or assume the server's startup environment is current. If clients
   disagree, use a format all relevant clients can handle or fallback.
   Without socket access, use a safe probe only when the transport is known;
-  absent `TMUX` across SSH does not establish that the path is direct.
+  absent `TMUX` across SSH does not establish that the path is direct (see
+  "Hidden tmux across SSH" in section 2).
   Run read-only tmux commands without shell interpolation, with a deadline.
   A missing executable, inaccessible socket, unsupported option, or command
   failure produces unknown, not passthrough-off.
@@ -419,7 +464,7 @@ graphics, and Windows SSH paths known to strip the query are never probed.
   not enablement: query the pane endpoint to establish active Kitty support.
   Never infer it from an inherited outer `TERM_PROGRAM` alone; never use tmux
   wrapping, placeholders, or the iTerm2 format.
-- **Until the probe is enabled** (see the input-ownership open question),
+- **Until the probe ships** (phase 4),
   Zellij 0.45+ under an inherited Kitty-family identity keeps today's
   behavior: Kitty, ordinary placement, confidence "known terminal". Zellij
   enables its Kitty support by querying a Kitty-capable host, so that identity
@@ -438,9 +483,10 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 ### 5. Sixel
 
 - Encoder: `icy_sixel`, no cargo feature flag.
-- Detection: parameter `4` in a DA1 reply from the relevant renderer, or
-  verified version support for Windows Terminal. `WT_SESSION` identifies the
-  application, not the Sixel capability of every installed version.
+- Detection: parameter `4` in a DA1 reply from the relevant renderer,
+  including Windows Terminal through the native Windows backend (process
+  version as the contingency). `WT_SESSION` identifies the application, not
+  the Sixel capability of every installed version.
 - Sized by the rule in section 7. Sixel has no partial transparency:
   diagrams are rendered opaque on the terminal's background by
   `biscuit-visualized`; plain images are composited against that background
@@ -571,11 +617,11 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 
 | Phase | Content | Depends on |
 | --- | --- | --- |
-| 0. Evidence | Visual confirmation of the Windows SSH rule; whether conhost answers DA1 itself and claims Sixel; Ghostty placeholder support; cell pixel size inside tmux and Zellij; what Kitty and Ghostty do with an ordinary placement when tmux switches windows; verification of the native-Sixel preference and tmux message limits | — |
+| 0. Evidence | Visual confirmation of the Windows SSH rule; whether conhost answers DA1 itself and claims Sixel; Ghostty placeholder support; cell pixel size inside tmux and Zellij; what Kitty and Ghostty do with an ordinary placement when tmux switches windows; verification of the native-Sixel preference and tmux message limits; whether a wrapped Kitty reply returns through tmux to a remote program; under ConPTY, whether Windows Terminal or the console host answers an application's DA1 and OSC 11; which Windows Terminal version first answers OSC 10/11; whether `WriteConsoleInput` can return probe-read typeahead | — |
 | 1. Component move | Section 8: diagram components to `biscuit-visualized`, dependency flip, render-tree hook, consumer imports. No behavior change. | — |
 | 2. Sizing and double encoding | Section 7: render at display size, PNG pass-through fix, background color in `RenderRequest` | 1 |
-| 3. Route model | Route type, resolution order, `BISCUIT_GRAPHICS`, Windows SSH rule, mintty, Windows Terminal identity, Zellij gating, capability report, stderr hints, housekeeping | 1 |
-| 4. Probe | Kitty query plus DA1 through the query engine | 3 |
+| 3. Route model | Route type, resolution order, `BISCUIT_GRAPHICS` and `BISCUIT_GRAPHICS_TRANSPORT`, Windows SSH rule, mintty, Windows Terminal identity, Zellij gating, capability report, stderr hints, housekeeping | 1 |
+| 4. Probe | Kitty query and structured DA1 in the shared color round trip, TUI escape hatch, wrapped probe for hidden tmux, native Windows query backend (colors and graphics) | 3 |
 | 5. tmux transport | Passthrough detection, outer-terminal identification, wrapping, ordinary placement, iTerm2 format through tmux | 3, 4 |
 | 6. Placeholders | Unicode placeholder encoder and its use under tmux for Kitty and Ghostty | 2, 5 |
 | 7. Sixel | Encoder, detection, tmux's own Sixel handling | 2, 3, 4 |
@@ -587,7 +633,8 @@ migration. Phase 2 preserves aspect
 ratio and intended footprint; padding, terminal backgrounds, and removing
 resampling can visibly improve pixels. Phase 3 preserves the working direct
 routes, while fixing Windows SSH blank rows and correcting blocked multiplexer
-routes. Probe enablement waits for the input-safety decision below.
+routes. Phase 4 adds no new probing moment on Unix; on native Windows it adds
+live queries where there were none, which changes theme selection there.
 
 ## Verification
 
@@ -610,9 +657,15 @@ routes. Probe enablement waits for the input-safety decision below.
   artifact-only `biscuit-visualized` does not pull in `biscuit-terminal`, and
   that enabling terminal support introduces no cycle.
 - **L2:** tmux through the shared test harness, with passthrough on and off;
-  Zellij where available; WezTerm.
+  Zellij where available; WezTerm. The native Windows query backend through a
+  windowless ConPTY (`xpty`, see the `os` skill), which answers the startup
+  DA1 itself and never takes focus.
+- **Native Windows before pushing:** run the Windows backend and route tests
+  on `$BUILD_WIN` (`build-win-native`) with `just cross-check <pkg> --os
+  windows`, so Windows failures surface locally rather than in the nightly.
 - **Manual, recorded:** iTerm2 (iTerm2 format and no reply leak), Windows SSH
-  server from WezTerm (iTerm2 format renders), Windows Terminal (Sixel),
+  server from WezTerm (iTerm2 format renders), Windows Terminal (Sixel and
+  measured background color), SSH from inside a local tmux (wrapped probe),
   mintty (iTerm2 format), Ghostty under tmux (placeholders survive resize and
   window switch). Results are kept as dated evidence with terminal and
   multiplexer versions. These are behavioral checks, not performance spikes.
@@ -626,7 +679,8 @@ routes. Probe enablement waits for the input-safety decision below.
 ## Documentation
 
 - A new `docs/` topic page on how `biscuit-terminal` chooses a graphics route,
-  the route table, `BISCUIT_GRAPHICS`, what each hint means, and the known
+  the route table, `BISCUIT_GRAPHICS` and `BISCUIT_GRAPHICS_TRANSPORT`, the
+  TUI escape hatch, what each hint means, and the known
   limits under tmux. Written for a developer new to the repository; it links
   to the research, not to this spec.
 - `docs/components/terminal_image.md` updated for the route model and the
@@ -664,72 +718,53 @@ routes. Probe enablement waits for the input-safety decision below.
   debug trace records Mermaid promotion requested without a hook; a terminal
   capability report cannot know which hooks an application installed.
 
-## Open questions
+## Decisions
 
-### Who owns input while graphics discovery runs?
+The review left three questions open. The author decided them on 2026-10-21.
 
-The existing query engine consumes unrelated input, and a mutex between queries
-does not coordinate with an application's event reader. Automatically invoking
-it from terminal construction could lose keystrokes or leave a late response at
-the shell. Choose this contract before enabling the new automatic probe.
+### Input ownership while probing: join the existing color round trip
 
-1. **Explicit startup discovery with an input owner (recommended).** CLI entry
-   points run discovery before reading input; TUIs provide their own resolved
-   route or perform discovery through their event reader. Return unrelated
-   bytes to the input owner rather than dropping them. Pros: input ownership is
-   visible, works with existing TUI readers, and keeps rendering free of I/O
-   discovery. Cons: participating entry points need a startup call, and generic
-   terminal construction remains environment-only. Recommended because it
-   offers automatic behavior in the shipped CLIs without assuming control of
-   every library consumer's keyboard input.
-2. **A shared terminal-input broker.** Every query and application reader uses
-   one dispatcher. Pros: routes late replies and preserves typeahead centrally.
-   Cons: requires migration of readers beyond these packages and adds a larger
-   lifecycle/API change than graphics routing itself.
-3. **Keep unknown terminals environment-only.** Pros: no new input consumption
-   or query leakage. Cons: unknown SSH endpoints continue to need an explicit
-   format, so the automatic-discovery goal is reduced.
+The graphics query joins the once-per-process OSC 10/11 exchange that
+`Terminal::new()` already makes, rather than adding an explicit startup
+discovery call. TUIs get an escape hatch: supply a resolved route, or turn
+construction-time probing off.
 
-### How should remote programs declare a hidden tmux layer?
+- **Why:** the input risks the review raised (typeahead loss, late replies, a
+  second reader) already exist for the color query and were accepted there.
+  Holding graphics to a stricter contract would block the SSH goal without
+  making anything safer, while explicit startup discovery would give
+  automatic graphics only to CLIs that opt in, not to library consumers.
+- **Rejected:** explicit startup discovery with an input owner (the review's
+  recommendation); a shared input broker (correct long term, recorded as
+  separate work); no probe.
 
-A program reached over SSH may have no `TMUX` or socket access even though the
-client is inside tmux. A format override alone cannot express the needed wrapper.
-No reliable local inference can reconstruct that missing path information.
+### Hidden tmux across SSH: infer, confirm, and keep an override
 
-1. **An independent transport override (recommended), such as
-   `BISCUIT_GRAPHICS_TRANSPORT=auto|direct|tmux`.** Pros: describes the missing
-   fact without overloading format choice; can be forwarded explicitly over SSH.
-   Cons: another setting and no automatic proof that passthrough is enabled.
-   Recommend it because it keeps format and transport independent. Treat a
-   forced tmux route as unverified, require ordinary placement unless outer
-   identity is established, and report blocked/unknown honestly.
-2. **Combined format values such as `kitty-tmux`.** Pros: one variable.
-   Cons: duplicates combinations, complicates parsing, and conflates placement
-   and transport with pixel format.
-3. **Document hidden tmux as unsupported.** Pros: smallest implementation.
-   Cons: the opening SSH guarantee must explicitly exclude this topology.
+`TERM=tmux-*` or `screen-*` with no `TMUX` marks a likely hidden tmux; a
+wrapped Kitty query confirms it. `BISCUIT_GRAPHICS_TRANSPORT=auto|direct|tmux`
+is the escape hatch, and the `bt` hint names it when the hint is present but
+unconfirmed.
 
-### Should native Windows gain live graphics queries in this feature?
+- **Why:** SSH forwards `TERM`, and only a tmux with passthrough on can answer
+  a wrapped query, so the common case can work automatically. An override
+  alone is correct but undiscoverable; the hint closes that gap.
+- **Rejected:** override only (the review's recommendation); combined format
+  values such as `kitty-tmux`; documenting the setup as unsupported.
+- **Contingent on phase 0:** if wrapped replies do not reliably return
+  through tmux, the automatic part is dropped and the override and hint
+  remain.
 
-The current query transport uses Unix file descriptors and `/dev/tty`.
-Windows Terminal identification alone cannot establish whether an older build
-supports Sixel. The measured system-conhost SSH route must still avoid APC/DCS.
+### Native Windows: add a live query backend in this feature
 
-1. **Keep native Windows detection conservative for now (recommended).** Use
-   known supporting version evidence when available, explicit overrides, and
-   useful fallback otherwise. Version evidence does not need a live query:
-   on native Windows (not over SSH), the terminal's executable can be found
-   by walking the parent process chain to `WindowsTerminal.exe` and reading
-   its file version (1.22 or later supports Sixel). Without this, Windows
-   Terminal, the main reason Sixel joined this spec, would get Sixel only
-   through `BISCUIT_GRAPHICS`. Pros: bounded scope and preserves the existing
-   no-live-query contract. Cons: an unidentified capable Windows terminal may
-   need an override. Recommended because the motivating Windows SSH route uses
-   terminal identity and cannot safely rely on the stripped queries anyway.
-2. **Add a native Windows query backend now.** Pros: supports automatic
-   discovery in more local Windows sessions. Cons: needs console-handle input
-   ownership, mode restoration, and behavior tests distinct from Unix; it is a
-   substantive expansion of this feature.
-3. **Assume Sixel whenever `WT_SESSION` exists.** Pros: trivial detection.
-   Cons: misclassifies older versions and inherited environments, recreating
-   blank-row failures. Not recommended.
+The query engine gains a native Windows implementation that serves colors and
+graphics through the shared round trip.
+
+- **Why:** without a background color query, Windows cannot choose the right
+  light/dark theme for diagrams, and Sixel on Windows Terminal (its main
+  target) cannot be rendered opaque on the real background. The backend also
+  detects Sixel from Windows Terminal's own DA1 reply instead of guessing from
+  `WT_SESSION`. Local runs on `build-win-native` keep the Windows feedback
+  loop short.
+- **Rejected:** conservative detection with a process-version check (kept
+  only as a contingency, section 2); assuming Sixel whenever `WT_SESSION`
+  exists.
