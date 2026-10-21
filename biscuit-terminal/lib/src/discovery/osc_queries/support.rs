@@ -26,7 +26,7 @@ pub(super) fn answers_color_queries(app: &TerminalApp) -> bool {
             | TerminalApp::Ghostty
             | TerminalApp::Foot
             | TerminalApp::Contour
-    )
+    ) || (cfg!(windows) && matches!(app, TerminalApp::WindowsTerminal))
 }
 
 /// Internal function to check if OSC queries are supported based on heuristics.

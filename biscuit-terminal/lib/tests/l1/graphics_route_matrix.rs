@@ -4,8 +4,9 @@
 //! `RouteInputs`, never by mutating the process environment.
 
 use biscuit_terminal::discovery::detection::{
-    GraphicsFormat, GraphicsPlacement, GraphicsRoute, GraphicsTransport, ImageSupport,
-    RouteConfidence, RouteInputs, RouteReasonKind, ToolVersion, resolve_graphics_route,
+    Da1Reply, GraphicsFormat, GraphicsPlacement, GraphicsRoute, GraphicsTransport, ImageSupport,
+    KittyReply, ProbeReply, ProbeResult, RouteConfidence, RouteInputs, RouteReasonKind,
+    ToolVersion, resolve_graphics_route,
 };
 
 const SSH: &str = "10.0.0.1 50000 10.0.0.2 22";
@@ -31,10 +32,21 @@ fn windows_terminal(version: Option<ToolVersion>) -> RouteInputs {
     inputs
 }
 
+/// A Zellij pane. `kitty_enabled` is the pane's answer to the graphics
+/// probe: `Some(true)` an `OK`, `Some(false)` a DA1 reply without one (and
+/// without Sixel), `None` no probe result.
 fn zellij(version: Option<ToolVersion>, kitty_enabled: Option<bool>) -> RouteInputs {
     let mut inputs = tty().with_var("ZELLIJ", "0");
     inputs.zellij_version = version;
-    inputs.zellij_kitty_enabled = kitty_enabled;
+    inputs.probe.direct = kitty_enabled.map(|enabled| {
+        ProbeResult::Replied(ProbeReply {
+            kitty: if enabled { KittyReply::Accepted } else { KittyReply::NoReply },
+            da1: Some(Da1Reply {
+                class: 62,
+                attributes: vec![22],
+            }),
+        })
+    });
     inputs
 }
 
@@ -229,14 +241,17 @@ route_rows! {
 // Zellij.
 route_rows! {
     zellij_unknown_version: zellij(None, None).with_var("TERM_PROGRAM", "WezTerm")
-        => None, Unknown, Unknown, fix: None, msg: ["Zellij version unreadable"];
+        => None, Unknown, Unknown, fix: None, msg: ["version unreadable", "not run"];
     zellij_0_44_predates_kitty: zellij(v(0, 44, 1), None).with_var("TERM_PROGRAM", "kitty")
         => None, Known, NoSupport, fix: Some("upgrade Zellij"), msg: ["predates Kitty graphics"];
-    zellij_0_45_inside_wezterm: zellij(v(0, 45, 0), None).with_var("TERM_PROGRAM", "WezTerm")
-        => Kitty, Known, Supported, fix: None, msg: ["Zellij 0.45.0", "WezTerm"];
+    // The pane query replaced the inherited-identity rule: without an answer
+    // a Kitty-family host is not enough.
+    zellij_0_45_inside_wezterm_without_a_probe_is_unknown:
+        zellij(v(0, 45, 0), None).with_var("TERM_PROGRAM", "WezTerm")
+        => None, Unknown, Unknown, fix: None, msg: ["Zellij 0.45.0", "not run"];
     zellij_0_45_inside_iterm_never_iterm2:
         zellij(v(0, 45, 0), None).with_var("TERM_PROGRAM", "iTerm.app")
-        => None, Unknown, Unknown, fix: None, msg: ["not known to render Kitty graphics"];
+        => None, Unknown, Unknown, fix: None, msg: ["Zellij 0.45.0"];
     zellij_enabled_true_verified: zellij(v(0, 45, 0), Some(true))
         => Kitty, Verified, Supported, fix: None, msg: ["answered a Kitty graphics query"];
     zellij_enabled_false_verified: zellij(v(0, 45, 0), Some(false))
@@ -244,7 +259,7 @@ route_rows! {
     zellij_enabled_true_below_version_floor: zellij(v(0, 44, 0), Some(true))
         => None, Known, NoSupport, fix: Some("upgrade Zellij"), msg: ["predates Kitty graphics"];
     zellij_enabled_false_unknown_version: zellij(None, Some(false))
-        => None, Unknown, Unknown, fix: None, msg: ["Zellij version unreadable"];
+        => None, Verified, NoSupport, fix: None, msg: ["version unreadable", "Kitty graphics disabled"];
     zellij_forced_iterm2_is_blocked:
         zellij(v(0, 45, 0), None).with_var("BISCUIT_GRAPHICS", "iterm2")
         => None, Forced, BlockedTransport, fix: None, msg: ["BISCUIT_GRAPHICS=iterm2", "Zellij"];
@@ -252,17 +267,8 @@ route_rows! {
         => Kitty, Forced, Supported, fix: None, msg: ["BISCUIT_GRAPHICS=kitty"];
 }
 
-// tmux, interim: the passthrough transport is planned.
+// tmux: the visible-tmux rows live in `graphics_tmux_matrix.rs`.
 route_rows! {
-    tmux_detected_is_planned:
-        tty().with_var("TMUX", "/tmp/tmux-501/default,1,0").with_var("TERM_PROGRAM", "tmux")
-        => None, Unknown, Unknown, fix: None, msg: ["tmux", "planned"];
-    tmux_forced_kitty_is_planned:
-        tty().with_var("TMUX", "/tmp/tmux-501/default,1,0").with_var("BISCUIT_GRAPHICS", "kitty")
-        => None, Unknown, Unknown, fix: None, msg: ["BISCUIT_GRAPHICS=kitty", "planned"];
-    tmux_declared_transport_is_planned:
-        tty().with_var("BISCUIT_GRAPHICS_TRANSPORT", "tmux").with_var("TERM_PROGRAM", "WezTerm")
-        => None, Unknown, Unknown, fix: None, msg: ["planned"];
     direct_transport_overrides_detected_tmux:
         tty()
             .with_var("BISCUIT_GRAPHICS_TRANSPORT", "direct")

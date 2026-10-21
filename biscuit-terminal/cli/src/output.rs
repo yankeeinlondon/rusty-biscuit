@@ -726,6 +726,7 @@ mod tests {
                 message: "Kitty identified by TERM".to_string(),
                 fix: None,
             },
+            needs_measured_cells: false,
         }
     }
 

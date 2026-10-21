@@ -1,6 +1,7 @@
 //! Kitty graphics-protocol rendering paths for [`TerminalImage`].
 
-use crate::discovery::detection::TerminalApp;
+use crate::discovery::detection::probe::next_kitty_id;
+use crate::discovery::detection::{GraphicsTransport, TerminalApp};
 use crate::discovery::fonts::CellSize;
 
 use super::{TerminalImage, TerminalImageError};
@@ -36,8 +37,12 @@ impl TerminalImage {
         );
 
         // WezTerm needs explicit row sizing for correct geometry. Kitty-family
-        // peers render correctly with width-only sizing.
-        let image_seq = if matches!(term.app, TerminalApp::Wezterm) {
+        // peers render correctly with width-only sizing. Through tmux the
+        // outer terminal is not `term.app`, so rows are always explicit, and
+        // the upload carries its own ID.
+        let image_seq = if term.graphics_route.transport == GraphicsTransport::Tmux {
+            self.render_kitty_with_id(&png_data, target_cells, height_cells, next_kitty_id())
+        } else if matches!(term.app, TerminalApp::Wezterm) {
             self.render_kitty_cells(&png_data, target_cells, height_cells)
         } else {
             self.render_kitty_width_only(&png_data, target_cells)
@@ -142,34 +147,10 @@ impl TerminalImage {
         width_cells: u32,
         height_cells: u32,
     ) -> String {
-        let base64_data = self.encode_as_base64(png_data);
-        let chunk_size = 4096;
-        let mut result = String::new();
-
-        // Split into chunks and emit escape sequences
-        let chunks: Vec<&str> = base64_data
-            .as_bytes()
-            .chunks(chunk_size)
-            .map(|c| std::str::from_utf8(c).unwrap_or(""))
-            .collect();
-
-        for (i, chunk) in chunks.iter().enumerate() {
-            let is_last = i == chunks.len() - 1;
-            let more = if is_last { 0 } else { 1 };
-
-            if i == 0 {
-                // First chunk includes all parameters; use cell-based sizing
-                result.push_str(&format!(
-                    "\x1b_Gq=2,f=100,a=T,t=d,c={},r={},m={};{}\x1b\\",
-                    width_cells, height_cells, more, chunk
-                ));
-            } else {
-                // Subsequent chunks only include m parameter
-                result.push_str(&format!("\x1b_Gm={};{}\x1b\\", more, chunk));
-            }
-        }
-
-        result
+        self.kitty_chunks(
+            png_data,
+            &format!("q=2,f=100,a=T,t=d,c={width_cells},r={height_cells}"),
+        )
     }
 
     /// Backwards-compatible helper accepting cell dimensions.
@@ -190,32 +171,43 @@ impl TerminalImage {
     /// * `png_data` - PNG-encoded image bytes
     /// * `width_cells` - Display width in terminal columns
     pub fn render_kitty_width_only(&self, png_data: &[u8], width_cells: u32) -> String {
-        let base64_data = self.encode_as_base64(png_data);
-        let chunk_size = 4096;
-        let mut result = String::new();
+        // Only `c=` (columns): Kitty computes the rows from the aspect ratio.
+        self.kitty_chunks(png_data, &format!("q=2,f=100,a=T,t=d,c={width_cells}"))
+    }
 
+    /// [`render_kitty_cells`](Self::render_kitty_cells) with image ID `id`
+    /// (`i=`) on the upload. Quiet mode still suppresses every reply.
+    pub(super) fn render_kitty_with_id(
+        &self,
+        png_data: &[u8],
+        width_cells: u32,
+        height_cells: u32,
+        id: u32,
+    ) -> String {
+        self.kitty_chunks(
+            png_data,
+            &format!("q=2,i={id},f=100,a=T,t=d,c={width_cells},r={height_cells}"),
+        )
+    }
+
+    /// `png_data` as base64 Kitty chunks of at most 4096 bytes: the first
+    /// carries `params`, every chunk carries `m=` (1 while more follow).
+    fn kitty_chunks(&self, png_data: &[u8], params: &str) -> String {
+        let base64_data = self.encode_as_base64(png_data);
         let chunks: Vec<&str> = base64_data
             .as_bytes()
-            .chunks(chunk_size)
+            .chunks(4096)
             .map(|c| std::str::from_utf8(c).unwrap_or(""))
             .collect();
-
+        let mut result = String::new();
         for (i, chunk) in chunks.iter().enumerate() {
-            let is_last = i == chunks.len() - 1;
-            let more = if is_last { 0 } else { 1 };
-
+            let more = u8::from(i + 1 < chunks.len());
             if i == 0 {
-                // First chunk: specify only c= (columns), omit r= (rows)
-                // Kitty will automatically calculate rows to preserve aspect ratio
-                result.push_str(&format!(
-                    "\x1b_Gq=2,f=100,a=T,t=d,c={},m={};{}\x1b\\",
-                    width_cells, more, chunk
-                ));
+                result.push_str(&format!("\x1b_G{params},m={more};{chunk}\x1b\\"));
             } else {
-                result.push_str(&format!("\x1b_Gm={};{}\x1b\\", more, chunk));
+                result.push_str(&format!("\x1b_Gm={more};{chunk}\x1b\\"));
             }
         }
-
         result
     }
 }

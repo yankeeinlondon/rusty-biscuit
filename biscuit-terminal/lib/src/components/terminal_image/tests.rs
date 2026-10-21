@@ -1484,6 +1484,186 @@ mod route_dispatch {
         assert_eq!(encoder_for(&term), Encoder::Kitty);
     }
 
+    /// A Kitty route through a declared tmux (`BISCUIT_GRAPHICS_TRANSPORT=tmux`).
+    fn tmux_terminal(format: &str) -> Terminal {
+        let route = route_for(&[
+            ("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22"),
+            ("BISCUIT_GRAPHICS_TRANSPORT", "tmux"),
+            ("BISCUIT_GRAPHICS", format),
+        ]);
+        assert_eq!(route.transport, crate::discovery::detection::GraphicsTransport::Tmux);
+        terminal_with_route(TerminalApp::Other("tmux".into()), route)
+    }
+
+    /// Every APC in `text`, each of which must sit in its own tmux envelope.
+    fn wrapped_kitty_chunks(text: &str) -> Vec<&str> {
+        text.split("\x1bPtmux;").skip(1).collect()
+    }
+
+    #[test]
+    fn a_tmux_kitty_route_wraps_each_chunk_with_an_id_and_explicit_rows() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let term = tmux_terminal("kitty");
+        assert_eq!(encoder_for(&term), Encoder::Kitty);
+
+        let (sequence, rows) = image.render_inline(&term).unwrap();
+
+        assert!(sequence.starts_with("\x1b[s"), "cursor save stays unwrapped: {sequence:?}");
+        assert!(sequence.ends_with("\x1b[u"), "cursor restore stays unwrapped: {sequence:?}");
+        let chunks = wrapped_kitty_chunks(&sequence);
+        assert!(!chunks.is_empty(), "{sequence:?}");
+        for chunk in &chunks {
+            assert!(chunk.starts_with("\x1b\x1b_G"), "ESC doubled once: {chunk:?}");
+            assert!(chunk.contains("\x1b\x1b\\\x1b\\"), "inner ST doubled, then the envelope's: {chunk:?}");
+        }
+        let first = chunks[0];
+        assert!(first.contains("q=2,"), "quiet mode: {first:?}");
+        let id: u32 = first
+            .split("i=")
+            .nth(1)
+            .and_then(|rest| rest.split(',').next())
+            .and_then(|id| id.parse().ok())
+            .expect("the upload carries an image ID");
+        assert_ne!(id, 0);
+        assert!(first.contains(&format!(",c=10,r={rows},")), "{first:?}");
+
+        let (again, _) = image.render_inline(&term).unwrap();
+        assert!(!again.contains(&format!("i={id},")), "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn a_direct_kitty_route_is_not_wrapped() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let term = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+        let (sequence, _) = image.render_inline(&term).unwrap();
+        assert!(!sequence.contains("tmux;"), "{sequence:?}");
+        assert!(!sequence.contains("i="), "direct uploads keep their unnumbered form");
+    }
+
+    #[test]
+    fn a_tmux_iterm2_route_wraps_the_file_message_once() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let term = tmux_terminal("iterm2");
+        assert_eq!(encoder_for(&term), Encoder::Iterm2);
+
+        let (sequence, _) = image.render_inline(&term).unwrap();
+
+        assert_eq!(sequence.matches("\x1bPtmux;").count(), 1, "{sequence:?}");
+        assert!(sequence.contains("\x1bPtmux;\x1b\x1b]1337;File="), "{sequence:?}");
+        assert!(sequence.contains("\x07\x1b\\\x1b[u"), "BEL ends the OSC, then the envelope: {sequence:?}");
+    }
+
+    /// An iTerm2 message whose tmux envelope is exactly `wrapped` bytes.
+    fn iterm2_message_wrapping_to(wrapped: usize) -> String {
+        let head = "\x1b]1337;File=inline=1:";
+        // The closing BEL, the head's ESC doubled (the message's only ESC),
+        // and the 9-byte envelope.
+        let overhead = head.len() + 1 + 1 + 9;
+        format!("{head}{}\x07", "A".repeat(wrapped - overhead))
+    }
+
+    #[test]
+    fn the_tmux_message_budget_holds_at_its_boundary() {
+        use super::tmux::TMUX_MESSAGE_BUDGET;
+        let term = tmux_terminal("iterm2");
+        for (size, fits) in [
+            (TMUX_MESSAGE_BUDGET - 1, true),
+            (TMUX_MESSAGE_BUDGET, true),
+            (TMUX_MESSAGE_BUDGET + 1, false),
+        ] {
+            let message = iterm2_message_wrapping_to(size);
+            match super::protocol::for_transport(&term, "iterm2", message) {
+                Ok(wrapped) => {
+                    assert!(fits, "{size} bytes must be refused");
+                    assert_eq!(wrapped.len(), size, "the envelope is exactly {size} bytes");
+                }
+                Err(reason) => {
+                    assert!(!fits, "{size} bytes must fit: {reason:?}");
+                    assert_eq!(reason.kind, RouteReasonKind::BlockedTransport);
+                    assert!(reason.message.contains(&size.to_string()), "{}", reason.message);
+                    assert!(reason.message.contains("1048576-byte"), "{}", reason.message);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_budget_only_applies_through_tmux() {
+        use super::tmux::TMUX_MESSAGE_BUDGET;
+        let direct = terminal_with_route(TerminalApp::ITerm2, ImageSupport::ITerm.into());
+        let message = iterm2_message_wrapping_to(TMUX_MESSAGE_BUDGET + 1);
+        assert_eq!(
+            super::protocol::for_transport(&direct, "iterm2", message.clone()),
+            Ok(message)
+        );
+    }
+
+    /// A PNG of noise, which does not compress, so its base64 iTerm2 message
+    /// is over tmux's 1 MiB limit.
+    fn create_oversized_test_image() -> (tempfile::TempDir, std::path::PathBuf) {
+        use image::{ImageBuffer, Rgb};
+        let mut state: u32 = 0x1234_5678;
+        let img = ImageBuffer::from_fn(640, 640, |_, _| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let [r, g, b, _] = state.to_le_bytes();
+            Rgb([r, g, b])
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("noise.png");
+        img.save(&path).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn an_oversized_tmux_iterm2_image_falls_back_before_reserving_rows() {
+        let (_dir, file_path) = create_oversized_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let term = tmux_terminal("iterm2");
+
+        let ImageOutput::Fallback { text, reason } = image.render_with_route(&term).unwrap() else {
+            panic!("an image over the tmux limit must fall back");
+        };
+        assert_eq!(text, "[Image: noise.png]", "alt text only: no escapes, no reserved rows");
+        assert_eq!(reason.kind, RouteReasonKind::BlockedTransport);
+        assert!(reason.message.contains("tmux passthrough"), "{}", reason.message);
+        assert!(matches!(
+            image.render_inline(&term),
+            Err(TerminalImageError::UnsupportedTerminal)
+        ));
+    }
+
+    /// A Zellij pane that answered the probe, without (then with) a measured
+    /// cell size.
+    #[test]
+    fn a_route_needing_measured_cells_falls_back_without_a_cell_size() {
+        use crate::discovery::detection::{KittyReply, ProbeReply, ProbeResult};
+        let mut inputs = RouteInputs::new(true).with_var("ZELLIJ", "0");
+        inputs.zellij_version = Some(crate::discovery::detection::ToolVersion::new(0, 45, 0));
+        inputs.probe.direct = Some(ProbeResult::Replied(ProbeReply {
+            kitty: KittyReply::Accepted,
+            da1: None,
+        }));
+        let route = resolve_graphics_route(&inputs);
+        assert!(route.needs_measured_cells, "{route:?}");
+
+        let reason = super::protocol::unmeasured_cells_reason(&route, None)
+            .expect("no measured cell size means no pixels");
+        assert!(reason.message.contains("cell size"), "{}", reason.message);
+        let cell = CellSize {
+            width: 8,
+            height: 16,
+        };
+        assert_eq!(super::protocol::unmeasured_cells_reason(&route, Some(cell)), None);
+        let unaffected: GraphicsRoute = ImageSupport::Kitty.into();
+        assert_eq!(super::protocol::unmeasured_cells_reason(&unaffected, None), None);
+
+        let measured = terminal_with_route(TerminalApp::Other("zellij".into()), route);
+        assert_eq!(encoder_for(&measured), Encoder::Kitty);
+    }
+
     #[test]
     fn an_iterm2_route_uses_the_iterm2_format_on_any_app() {
         let route = route_for(&[("TERM_PROGRAM", "mintty")]);

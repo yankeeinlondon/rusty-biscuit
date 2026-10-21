@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, Connection, DEFAULT_TAB_WIDTH, GraphicsRoute, ImageSupport,
+    ColorDepth, ColorMode, Connection, DEFAULT_TAB_WIDTH, GraphicsRoute, ImageSupport, ProbeMode,
     TerminalApp, UnderlineSupport, color_depth, color_mode, detect_connection, get_terminal_app,
-    graphics_route, is_tty, italics_support, osc8_link_support, tab_width, terminal_height, terminal_width,
+    is_tty, italics_support, osc8_link_support, tab_width, terminal_height, terminal_width,
     underline_support,
 };
 use crate::discovery::fonts::{
@@ -14,6 +14,8 @@ use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
     LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
 };
+use crate::discovery::detection::color::color_mode_for_background;
+use crate::discovery::osc_queries::query::heuristic_color;
 use crate::discovery::osc_queries::{RgbValue, bg_color, text_color};
 
 /// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
@@ -33,24 +35,44 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
-#[tracing::instrument(name = "Terminal::new")]
 fn new_terminal() -> Terminal {
+    detect_terminal(ProbeMode::Auto, None)
+}
+
+/// Detects the terminal. With [`ProbeMode::Off`] nothing is written to the
+/// terminal: colors come from the environment's fallbacks and the graphics
+/// route from the environment alone. A supplied `route` is never re-resolved
+/// and never probed for.
+#[tracing::instrument(name = "Terminal::new", skip(route))]
+fn detect_terminal(probe_mode: ProbeMode, route: Option<GraphicsRoute>) -> Terminal {
     let app = get_terminal_app();
     let config_file = get_terminal_config_path(&app);
     let repo_root = find_git_root(Path::new("."));
     let in_repo = repo_root.is_some();
+    // The route first: when it needs the graphics probe, the color queries
+    // ride in the same exchange. Reading colors first would send them alone,
+    // consuming waiting input the probe's busy-input check exists to protect.
+    let graphics_route = route
+        .unwrap_or_else(|| crate::discovery::detection::route::graphics_route_with(probe_mode));
+    let (color_mode, text_color, background_color) = match probe_mode {
+        ProbeMode::Auto => (color_mode(), text_color(), bg_color()),
+        ProbeMode::Off => {
+            let background = heuristic_color(11);
+            (color_mode_for_background(background), heuristic_color(10), background)
+        }
+    };
 
     let terminal = Terminal {
         app,
         supports_italic: italics_support(),
-        graphics_route: graphics_route(),
+        graphics_route,
         underline_support: underline_support(),
         osc_link_support: osc8_link_support(),
         is_tty: is_tty(),
         color_depth: color_depth(),
-        color_mode: color_mode(),
-        text_color: text_color(),
-        background_color: bg_color(),
+        color_mode,
+        text_color,
+        background_color,
         os: detect_os_type(),
         distro: detect_linux_distro(),
         config_file,
@@ -620,9 +642,21 @@ pub struct TerminalBuilder {
     tab_width: Option<usize>,
     cell_size: Option<CellSize>,
     supports_unicode: Option<bool>,
+    probe_mode: ProbeMode,
 }
 
 impl TerminalBuilder {
+    /// Set whether construction may query the terminal (colors and the
+    /// graphics probe). An application with its own input loop passes
+    /// [`ProbeMode::Off`], or supplies a [`graphics_route`](Self::graphics_route),
+    /// so no reply races its reader. Probe results are cached per process,
+    /// so only the first construction can probe: build before any input loop
+    /// starts.
+    pub fn probe(mut self, value: ProbeMode) -> Self {
+        self.probe_mode = value;
+        self
+    }
+
     /// Set the terminal application.
     pub fn app(mut self, value: TerminalApp) -> Self {
         self.app = Some(value);
@@ -642,7 +676,8 @@ impl TerminalBuilder {
         self
     }
 
-    /// Set the graphics route.
+    /// Set the graphics route. A supplied route is authoritative: it is
+    /// never re-resolved, and construction sends no graphics probe.
     pub fn graphics_route(mut self, value: GraphicsRoute) -> Self {
         self.graphics_route = Some(value);
         self
@@ -747,7 +782,7 @@ impl TerminalBuilder {
 
     /// Build the Terminal, using auto-detected values for unset fields.
     pub fn build(self) -> Terminal {
-        let detected = new_terminal();
+        let detected = detect_terminal(self.probe_mode, self.graphics_route.clone());
         Terminal {
             app: self.app.unwrap_or(detected.app),
             supports_italic: self.supports_italic.unwrap_or(detected.supports_italic),

@@ -96,6 +96,41 @@ pub fn anti_hang_env() -> Vec<(&'static str, &'static str)> {
 ///
 /// Panics if the binary cannot be found or the PTY spawn fails.
 pub fn spawn_with_env(envs: &[(&str, &str)]) -> OsSession {
+    spawn_removing(envs, &[])
+}
+
+/// Variables that identify a terminal, multiplexer, or graphics policy to
+/// the library, beyond the ones [`spawn_with_env`] always removes.
+///
+/// A test of an *unidentified* terminal has to drop the host terminal's own
+/// identity too, or a run from iTerm2 (`LC_TERMINAL`), WezTerm
+/// (`TERM_PROGRAM`), or tmux (`TMUX`) resolves the route from the
+/// environment and never probes.
+pub const IDENTITY_VARS: &[&str] = &[
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "LC_TERMINAL",
+    "LC_TERMINAL_VERSION",
+    "TMUX",
+    "TMUX_PANE",
+    "STY",
+    "ZELLIJ",
+    "ZELLIJ_SESSION_NAME",
+    "MSYSTEM",
+    "COLORFGBG",
+    "BISCUIT_GRAPHICS",
+    "BISCUIT_GRAPHICS_TRANSPORT",
+    "BISCUIT_TERMINAL_PROBE",
+];
+
+/// Like [`spawn_with_env`], but the child also loses every variable in
+/// [`IDENTITY_VARS`], so only `envs` (and `PROBE_TERM`/`PROBE_TERM_PROGRAM`
+/// overrides) say what terminal it runs in.
+pub fn spawn_unidentified_with_env(envs: &[(&str, &str)]) -> OsSession {
+    spawn_removing(envs, IDENTITY_VARS)
+}
+
+fn spawn_removing(envs: &[(&str, &str)], extra_removals: &[&str]) -> OsSession {
     let bin = discovery_probe_path();
     if !bin.exists() {
         panic!(
@@ -142,6 +177,9 @@ pub fn spawn_with_env(envs: &[(&str, &str)]) -> OsSession {
         "TRAVIS",
         "CIRCLECI",
     ] {
+        cmd.env_remove(var);
+    }
+    for var in extra_removals {
         cmd.env_remove(var);
     }
 
@@ -213,6 +251,14 @@ pub struct ProbeAnswer {
     pub reply: &'static [u8],
     answered: usize,
     repeat: bool,
+    kitty: Option<KittyAnswer>,
+}
+
+/// A Kitty graphics reply whose image ID is read off the query it answers.
+#[derive(Clone, Copy)]
+struct KittyAnswer {
+    wrapped: bool,
+    message: &'static str,
 }
 
 impl ProbeAnswer {
@@ -222,6 +268,38 @@ impl ProbeAnswer {
             reply,
             answered: 0,
             repeat: false,
+            kitty: None,
+        }
+    }
+
+    /// Answer every plain Kitty graphics query with
+    /// `ESC _ G i=<id> ; <message> ESC \`, echoing the query's own ID.
+    ///
+    /// The library picks a fresh ID per query, so the reply cannot be a
+    /// constant. A tmux-wrapped query is not answered; see
+    /// [`ProbeAnswer::kitty_wrapped`].
+    pub fn kitty(message: &'static str) -> Self {
+        Self {
+            repeat: true,
+            kitty: Some(KittyAnswer {
+                wrapped: false,
+                message,
+            }),
+            ..Self::new(b"", b"")
+        }
+    }
+
+    /// Answer every tmux-wrapped Kitty graphics query the way a tmux with
+    /// passthrough on delivers the terminal's answer: unwrapped,
+    /// `ESC _ G i=<id> ; <message> ESC \`.
+    pub fn kitty_wrapped(message: &'static str) -> Self {
+        Self {
+            repeat: true,
+            kitty: Some(KittyAnswer {
+                wrapped: true,
+                message,
+            }),
+            ..Self::new(b"", b"")
         }
     }
 
@@ -271,6 +349,17 @@ pub fn drive_probe(
         }
 
         for answer in answers.iter_mut() {
+            if let Some(kitty) = answer.kitty {
+                let ids = kitty_query_ids(&collected, kitty.wrapped);
+                while answer.answered < ids.len() {
+                    let id = ids[answer.answered];
+                    let reply = format!("\x1b_Gi={id};{}\x1b\\", kitty.message);
+                    let _ = session.write_all(reply.as_bytes());
+                    let _ = session.flush();
+                    answer.answered += 1;
+                }
+                continue;
+            }
             let seen = count_occurrences(&collected, answer.query);
             let owed = if answer.repeat { seen } else { seen.min(1) };
             while answer.answered < owed {
@@ -294,6 +383,58 @@ pub fn drive_probe(
     }
 
     collected
+}
+
+/// The tail every Kitty graphics query the library sends carries after its
+/// image ID: one RGB pixel, queried (`a=q`), never displayed.
+const KITTY_QUERY_TAIL: &[u8] = b",s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\";
+
+/// The tail of a tmux-wrapped Kitty query: every ESC inside the envelope is
+/// doubled once, then the envelope's own `ESC \` closes it.
+const KITTY_WRAPPED_TAIL: &[u8] = b",s=1,v=1,a=q,t=d,f=24;AAAA\x1b\x1b\\\x1b\\";
+
+/// The image IDs of every complete Kitty graphics query in `bytes`, in order.
+///
+/// With `wrapped`, only tmux-wrapped queries
+/// (`ESC P tmux; ESC ESC _ G i=<id>,… ESC ESC \ ESC \`) count; without it,
+/// only plain ones. A wrapped query contains the plain introducer one byte
+/// in, so the two are told apart by the byte before `ESC _ G`.
+pub fn kitty_query_ids(bytes: &[u8], wrapped: bool) -> Vec<u32> {
+    const INTRO: &[u8] = b"\x1b_Gi=";
+    const ENVELOPE: &[u8] = b"\x1bPtmux;\x1b";
+    let tail = if wrapped {
+        KITTY_WRAPPED_TAIL
+    } else {
+        KITTY_QUERY_TAIL
+    };
+    let mut ids = Vec::new();
+    let mut i = 0;
+    while i + INTRO.len() <= bytes.len() {
+        if &bytes[i..i + INTRO.len()] != INTRO {
+            i += 1;
+            continue;
+        }
+        let in_envelope = i >= ENVELOPE.len() && &bytes[i - ENVELOPE.len()..i] == ENVELOPE;
+        let escaped = i > 0 && bytes[i - 1] == 0x1b;
+        let start = i + INTRO.len();
+        let digits = bytes[start..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        let after = start + digits;
+        let complete = digits > 0 && bytes[after..].starts_with(tail);
+        let kind_matches = if wrapped { in_envelope } else { !escaped };
+        if complete && kind_matches {
+            let id = std::str::from_utf8(&bytes[start..after])
+                .ok()
+                .and_then(|text| text.parse().ok());
+            if let Some(id) = id {
+                ids.push(id);
+            }
+        }
+        i = start;
+    }
+    ids
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> bool {

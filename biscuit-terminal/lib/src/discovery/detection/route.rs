@@ -18,25 +18,33 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::image::ImageSupport;
+use super::probe::{Da1Reply, GraphicsProbe, KittyReply, ProbePlan, ProbeReply, ProbeResult, ProbeSkip};
+use super::tmux::{Passthrough, TmuxClient, TmuxFacts};
 
 /// Environment variable that forces or disables a graphics format.
 pub const GRAPHICS_ENV: &str = "BISCUIT_GRAPHICS";
 /// Environment variable that declares the transport between this program and
 /// the terminal.
 pub const GRAPHICS_TRANSPORT_ENV: &str = "BISCUIT_GRAPHICS_TRANSPORT";
+/// Environment variable that turns construction-time terminal queries off.
+pub const PROBE_ENV: &str = "BISCUIT_TERMINAL_PROBE";
 
 const GRAPHICS_VALUES: &[&str] = &["auto", "kitty", "iterm2", "sixel", "none"];
 const TRANSPORT_VALUES: &[&str] = &["auto", "direct", "tmux"];
+const PROBE_VALUES: &[&str] = &["auto", "off"];
 
 /// The first Zellij release that renders Kitty graphics.
 const ZELLIJ_KITTY_MIN: ToolVersion = ToolVersion::new(0, 45, 0);
 /// The first Windows Terminal release that renders Sixel.
 const WINDOWS_TERMINAL_SIXEL_MIN: ToolVersion = ToolVersion::new(1, 22, 0);
+/// The first tmux release with `allow-passthrough`.
+const TMUX_PASSTHROUGH_MIN: ToolVersion = ToolVersion::new(3, 3, 0);
 
 /// Every environment variable resolution reads.
 const ROUTE_ENV_VARS: &[&str] = &[
     GRAPHICS_ENV,
     GRAPHICS_TRANSPORT_ENV,
+    PROBE_ENV,
     "TERM_PROGRAM",
     "TERM",
     "LC_TERMINAL",
@@ -48,6 +56,8 @@ const ROUTE_ENV_VARS: &[&str] = &[
     "SSH_CLIENT",
     "SSH_TTY",
     "TMUX",
+    "TMUX_PANE",
+    "STY",
     "ZELLIJ",
 ];
 
@@ -146,6 +156,10 @@ pub struct GraphicsRoute {
     pub placement: GraphicsPlacement,
     pub confidence: RouteConfidence,
     pub reason: RouteReason,
+    /// The image must be sized from a measured cell size, never the
+    /// estimated fallback. Set for Zellij, which measures its host itself: a
+    /// query success there says nothing about whether it knows the cell size.
+    pub needs_measured_cells: bool,
 }
 
 impl GraphicsRoute {
@@ -164,6 +178,7 @@ impl GraphicsRoute {
                 message: message.into(),
                 fix: None,
             },
+            needs_measured_cells: false,
         }
     }
 
@@ -184,7 +199,18 @@ impl GraphicsRoute {
                 message: message.into(),
                 fix: None,
             },
+            needs_measured_cells: false,
         }
+    }
+
+    fn through_tmux(mut self) -> Self {
+        self.transport = GraphicsTransport::Tmux;
+        self
+    }
+
+    fn needing_measured_cells(mut self) -> Self {
+        self.needs_measured_cells = true;
+        self
     }
 
     fn with_fix(mut self, fix: impl Into<String>) -> Self {
@@ -305,14 +331,35 @@ pub struct RouteInputs {
     pub is_windows: bool,
     /// `zellij --version`, read only inside Zellij; `None` when unreadable.
     pub zellij_version: Option<ToolVersion>,
-    /// Whether Zellij's pane answered a Kitty query. Filled by the graphics
-    /// probe (**planned**); `None` means not asked.
-    pub zellij_kitty_enabled: Option<bool>,
     /// The file version of the `WindowsTerminal.exe` hosting this process,
     /// found by walking the parent process chain on native Windows; `None`
     /// when unreadable.
     pub windows_terminal_version: Option<ToolVersion>,
+    /// Whether this process runs in CI, where nothing is probed.
+    pub is_ci: bool,
+    /// Whether the caller allows construction-time probing.
+    pub probe_mode: ProbeMode,
+    /// The graphics probe's results; empty until a probe runs.
+    pub probe: GraphicsProbe,
+    /// What the visible tmux reports; read only when `TMUX` is set.
+    pub tmux: TmuxFacts,
     vars: BTreeMap<String, OsString>,
+}
+
+/// Whether construction-time terminal queries may run.
+///
+/// An application with its own input loop (a TUI) turns probing off, or
+/// supplies a resolved route, so no query races its reader. Only the first
+/// [`Terminal`](crate::terminal::Terminal) construction in a process probes;
+/// make it before the input loop starts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ProbeMode {
+    /// Probe when the environment cannot decide.
+    #[default]
+    Auto,
+    /// Never query the terminal while constructing; colors and graphics use
+    /// only the environment.
+    Off,
 }
 
 impl RouteInputs {
@@ -326,12 +373,13 @@ impl RouteInputs {
     }
 
     /// Reads the process: stdout's TTY state, the OS, the environment
-    /// variables resolution consults, and the Zellij and Windows Terminal
-    /// versions where they matter.
+    /// variables resolution consults, the Zellij and Windows Terminal
+    /// versions, and the tmux facts where they matter.
     #[must_use]
     pub fn from_process() -> Self {
         let mut inputs = Self::new(super::dimensions::is_tty());
         inputs.is_windows = cfg!(windows);
+        inputs.is_ci = crate::discovery::os_detection::is_ci();
         for &name in ROUTE_ENV_VARS {
             if let Some(value) = std::env::var_os(name) {
                 inputs.vars.insert(name.to_string(), value);
@@ -342,6 +390,10 @@ impl RouteInputs {
         }
         if inputs.is_windows && inputs.var_is_set("WT_SESSION") {
             inputs.windows_terminal_version = super::versions::windows_terminal_version();
+        }
+        if inputs.var_is_set("TMUX") {
+            let facts = super::tmux::read_facts(inputs.var("TMUX_PANE"));
+            inputs.tmux = facts;
         }
         inputs
     }
@@ -555,9 +607,11 @@ fn known_terminal_route(terminal: KnownTerminal, source: &str) -> GraphicsRoute 
 /// Resolves the graphics route for `inputs`.
 ///
 /// Resolution order: nonterminal output, then `BISCUIT_GRAPHICS` /
-/// `BISCUIT_GRAPHICS_TRANSPORT`, then the Windows SSH server rule, then the
-/// multiplexer (Zellij, tmux), then the terminal's identity. What the
-/// environment cannot decide resolves to [`RouteConfidence::Unknown`].
+/// `BISCUIT_GRAPHICS_TRANSPORT` / `BISCUIT_TERMINAL_PROBE`, then the Windows
+/// SSH server rule, then the multiplexer (Zellij, tmux, a likely tmux hidden
+/// behind SSH), then the terminal's identity, then the graphics probe's
+/// results in [`RouteInputs::probe`]. What none of them decides resolves to
+/// [`RouteConfidence::Unknown`].
 ///
 /// ## Examples
 ///
@@ -574,44 +628,102 @@ fn known_terminal_route(terminal: KnownTerminal, source: &str) -> GraphicsRoute 
 /// ```
 #[must_use]
 pub fn resolve_graphics_route(inputs: &RouteInputs) -> GraphicsRoute {
+    decide(inputs).0
+}
+
+/// Which graphics probe exchanges would let [`resolve_graphics_route`] decide
+/// what the environment cannot.
+///
+/// Empty for nonterminal output, CI, invalid or disabling overrides, a
+/// forced format, probing turned off, the Windows SSH server, a legacy
+/// Windows console, a visible tmux whose `allow-passthrough` could be read,
+/// and every terminal whose identity already decides the route.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::{RouteInputs, probe_plan};
+///
+/// let known = RouteInputs::new(true).with_var("TERM_PROGRAM", "WezTerm");
+/// assert!(!probe_plan(&known).any());
+///
+/// let unknown_ssh = RouteInputs::new(true).with_var("SSH_CONNECTION", "a 1 b 22");
+/// assert!(probe_plan(&unknown_ssh).direct);
+/// ```
+#[must_use]
+pub fn probe_plan(inputs: &RouteInputs) -> ProbePlan {
+    decide(inputs).1
+}
+
+/// The route plus the probe exchanges that would refine it, gated by
+/// whether probing is allowed at all.
+fn decide(inputs: &RouteInputs) -> (GraphicsRoute, ProbePlan) {
     if !inputs.output_is_tty {
-        return GraphicsRoute::unavailable(
+        let route = GraphicsRoute::unavailable(
             RouteReasonKind::NotATerminal,
             RouteConfidence::Known,
             "output is not a terminal (piped or redirected)",
         );
+        return (route, ProbePlan::NONE);
     }
 
-    let format_choice = match parse_choice(GRAPHICS_ENV, inputs.var_os(GRAPHICS_ENV), GRAPHICS_VALUES) {
-        Ok(choice) => choice,
-        Err(route) => return route,
-    };
-    let transport_choice = match parse_choice(
-        GRAPHICS_TRANSPORT_ENV,
-        inputs.var_os(GRAPHICS_TRANSPORT_ENV),
-        TRANSPORT_VALUES,
-    ) {
-        Ok(choice) => choice,
-        Err(route) => return route,
+    let choices = (
+        parse_choice(GRAPHICS_ENV, inputs.var_os(GRAPHICS_ENV), GRAPHICS_VALUES),
+        parse_choice(
+            GRAPHICS_TRANSPORT_ENV,
+            inputs.var_os(GRAPHICS_TRANSPORT_ENV),
+            TRANSPORT_VALUES,
+        ),
+        parse_choice(PROBE_ENV, inputs.var_os(PROBE_ENV), PROBE_VALUES),
+    );
+    let (format_choice, transport_choice, probe_choice) = match choices {
+        (Ok(format), Ok(transport), Ok(probe)) => (format, transport, probe),
+        (Err(route), _, _) | (_, Err(route), _) | (_, _, Err(route)) => {
+            return (route, ProbePlan::NONE);
+        }
     };
 
-    match format_choice {
-        Choice::Value("none") => GraphicsRoute::unavailable(
-            RouteReasonKind::UserDisabled,
-            RouteConfidence::Forced,
-            "graphics disabled by BISCUIT_GRAPHICS=none",
+    let probing = if inputs.is_ci {
+        Probing::Blocked("not probed in CI")
+    } else if probe_choice == Choice::Value("off") {
+        Probing::Blocked("not probed: BISCUIT_TERMINAL_PROBE=off")
+    } else if inputs.probe_mode == ProbeMode::Off {
+        Probing::Blocked("not probed: the caller turned probing off")
+    } else {
+        Probing::Allowed
+    };
+
+    let (route, plan) = match format_choice {
+        Choice::Value("none") => (
+            GraphicsRoute::unavailable(
+                RouteReasonKind::UserDisabled,
+                RouteConfidence::Forced,
+                "graphics disabled by BISCUIT_GRAPHICS=none",
+            ),
+            ProbePlan::NONE,
         ),
         Choice::Value(value) => {
             let format = format_from_choice(value)
                 .expect("the accepted values other than auto and none name formats");
-            resolve_forced(inputs, format, transport_choice)
+            (resolve_forced(inputs, format, transport_choice), ProbePlan::NONE)
         }
-        Choice::Auto => resolve_detected(inputs, transport_choice),
+        Choice::Auto => resolve_detected(inputs, transport_choice, probing),
+    };
+    match probing {
+        Probing::Allowed => (route, plan),
+        Probing::Blocked(_) => (route, ProbePlan::NONE),
     }
 }
 
-/// Whether the path to the terminal goes through tmux, as far as the
-/// environment shows.
+/// Whether a probe may be sent, and if not, the phrase saying why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probing {
+    Allowed,
+    Blocked(&'static str),
+}
+
+/// Whether the path to the terminal goes through a tmux this process can
+/// see (`TMUX` is set) or was told about.
 fn tmux_in_path(inputs: &RouteInputs, transport: Choice) -> bool {
     match transport {
         Choice::Value("tmux") => true,
@@ -620,24 +732,40 @@ fn tmux_in_path(inputs: &RouteInputs, transport: Choice) -> bool {
     }
 }
 
+/// `TERM=tmux-*` or `screen-*` with neither `TMUX` nor `STY`: a tmux on the
+/// far side of SSH that this process cannot see.
+fn hidden_tmux_hint(inputs: &RouteInputs) -> Option<String> {
+    if inputs.var_is_set("TMUX") || inputs.var_is_set("STY") {
+        return None;
+    }
+    let term = inputs.var("TERM")?;
+    let hinted = ["tmux", "screen"]
+        .iter()
+        .any(|name| term == *name || term.starts_with(&format!("{name}-")));
+    hinted.then(|| format!("TERM={term}"))
+}
+
 fn windows_ssh_server(inputs: &RouteInputs) -> bool {
     inputs.is_windows && inputs.var_is_set("SSH_CONNECTION")
 }
 
-fn tmux_planned(requested: &str) -> GraphicsRoute {
-    GraphicsRoute::unavailable(
-        RouteReasonKind::Unknown,
-        RouteConfidence::Unknown,
-        format!("{requested}: graphics through tmux passthrough are not implemented yet (planned)"),
-    )
+/// A native Windows console with no modern terminal attached: no
+/// `WT_SESSION`, no `TERM_PROGRAM`, no MSYS shell (mintty), and not an SSH
+/// session. It answers no queries and renders no pixel format.
+fn legacy_windows_console(inputs: &RouteInputs) -> bool {
+    inputs.is_windows
+        && !inputs.in_ssh_session()
+        && !inputs.var_is_set("WT_SESSION")
+        && !inputs.var_is_set("TERM_PROGRAM")
+        && !inputs.var_is_set("MSYSTEM")
 }
 
 /// A `BISCUIT_GRAPHICS` format: no probing and no identity preferences, but
 /// transports known to remove the format still rule it out.
 fn resolve_forced(inputs: &RouteInputs, format: GraphicsFormat, transport: Choice) -> GraphicsRoute {
     let requested = format!("BISCUIT_GRAPHICS={}", format_name(format).to_ascii_lowercase());
-    if tmux_in_path(inputs, transport) {
-        return tmux_planned(&requested);
+    if inputs.var_is_set("TMUX") && tmux_in_path(inputs, transport) {
+        return resolve_visible_tmux(inputs, Some((format, &requested)), Probing::Blocked("not probed: a forced format")).0;
     }
     if windows_ssh_server(inputs) && format != GraphicsFormat::Iterm2 {
         return GraphicsRoute::unavailable(
@@ -656,42 +784,150 @@ fn resolve_forced(inputs: &RouteInputs, format: GraphicsFormat, transport: Choic
             format!("{requested}: Zellij drops the iTerm2 image format"),
         );
     }
-    GraphicsRoute::pixels(format, RouteConfidence::Forced, format!("forced by {requested}"))
+    let route = GraphicsRoute::pixels(format, RouteConfidence::Forced, format!("forced by {requested}"));
+    if tmux_in_path(inputs, transport) {
+        // `BISCUIT_GRAPHICS_TRANSPORT=tmux` with no `TMUX`: a tmux beyond SSH.
+        return route.through_tmux();
+    }
+    route
 }
 
-/// Automatic detection from the environment.
-fn resolve_detected(inputs: &RouteInputs, transport: Choice) -> GraphicsRoute {
+/// Automatic detection from the environment and, where it cannot decide,
+/// the probe.
+fn resolve_detected(inputs: &RouteInputs, transport: Choice, probing: Probing) -> (GraphicsRoute, ProbePlan) {
     if windows_ssh_server(inputs) {
-        return resolve_windows_ssh(inputs);
+        return (resolve_windows_ssh(inputs), ProbePlan::NONE);
     }
     if inputs.var_is_set("ZELLIJ") {
-        return resolve_zellij(inputs);
+        return (resolve_zellij(inputs, probing), ProbePlan::DIRECT);
     }
     if tmux_in_path(inputs, transport) {
-        return tmux_planned("tmux");
+        if inputs.var_is_set("TMUX") {
+            return resolve_visible_tmux(inputs, None, probing);
+        }
+        return resolve_declared_tmux(inputs, probing);
+    }
+    if transport == Choice::Auto
+        && let Some(hint) = hidden_tmux_hint(inputs)
+    {
+        let plan = ProbePlan {
+            direct: true,
+            tunneled: true,
+        };
+        return (resolve_hidden_tmux(inputs, &hint, probing), plan);
     }
 
     if let Some((terminal, source)) = identify_terminal(inputs) {
-        return known_terminal_route(terminal, &source);
+        return (known_terminal_route(terminal, &source), ProbePlan::NONE);
     }
     if !inputs.in_ssh_session() {
         if inputs.var_is_set("WT_SESSION") {
-            return resolve_windows_terminal(inputs);
+            return resolve_windows_terminal(inputs, probing);
         }
         if inputs.var_is_set("MSYSTEM") && !inputs.var_is_set("TERM_PROGRAM") {
-            return known_terminal_route(KnownTerminal::Iterm2Family("mintty"), "MSYSTEM");
+            let route = known_terminal_route(KnownTerminal::Iterm2Family("mintty"), "MSYSTEM");
+            return (route, ProbePlan::NONE);
         }
         if let Some((terminal, source)) = identify_local_hints(inputs) {
-            return known_terminal_route(terminal, &source);
+            return (known_terminal_route(terminal, &source), ProbePlan::NONE);
         }
     }
+    if legacy_windows_console(inputs) {
+        let route = GraphicsRoute::unavailable(
+            RouteReasonKind::NoSupport,
+            RouteConfidence::Known,
+            "Windows console without a modern terminal (no WT_SESSION or TERM_PROGRAM) has no pixel format",
+        );
+        return (route, ProbePlan::NONE);
+    }
 
-    let message = if inputs.in_ssh_session() {
-        "SSH session without forwarded terminal hints; the graphics probe is planned"
+    let subject = if inputs.in_ssh_session() {
+        "SSH session without forwarded terminal hints"
     } else {
-        "terminal not identified from the environment; the graphics probe is planned"
+        "terminal not identified from the environment"
     };
-    GraphicsRoute::unavailable(RouteReasonKind::Unknown, RouteConfidence::Unknown, message)
+    (resolve_probed(subject, inputs.probe.direct.as_ref(), probing), ProbePlan::DIRECT)
+}
+
+/// What the direct probe says about an endpoint the environment could not
+/// identify. A correlated Kitty `OK` beats Sixel.
+fn resolve_probed(subject: &str, result: Option<&ProbeResult>, probing: Probing) -> GraphicsRoute {
+    let reply = match probe_reply(subject, result, probing) {
+        Ok(reply) => reply,
+        Err(route) => return route,
+    };
+    if reply.kitty == KittyReply::Accepted {
+        return GraphicsRoute::pixels(
+            GraphicsFormat::Kitty,
+            RouteConfidence::Verified,
+            format!("{subject}; the terminal answered the Kitty graphics query"),
+        );
+    }
+    if reply.da1.as_ref().is_some_and(Da1Reply::has_sixel) {
+        return GraphicsRoute::pixels(
+            GraphicsFormat::Sixel,
+            RouteConfidence::Verified,
+            format!("{subject}; the terminal reports Sixel (DA1 attribute 4)"),
+        );
+    }
+    no_pixels_from_reply(subject, reply)
+}
+
+/// The reply to read, or the route for a probe that produced none.
+fn probe_reply<'a>(
+    subject: &str,
+    result: Option<&'a ProbeResult>,
+    probing: Probing,
+) -> Result<&'a ProbeReply, GraphicsRoute> {
+    let unknown = |detail: String| {
+        Err(GraphicsRoute::unavailable(
+            RouteReasonKind::Unknown,
+            RouteConfidence::Unknown,
+            format!("{subject}; {detail}"),
+        ))
+    };
+    match (result, probing) {
+        (_, Probing::Blocked(why)) => unknown(why.to_string()),
+        (None, Probing::Allowed) => unknown("the graphics probe was not run".to_string()),
+        (Some(ProbeResult::Skipped(ProbeSkip::BusyInput)), _) => {
+            unknown("the graphics probe was skipped because input was waiting".to_string())
+        }
+        (Some(ProbeResult::Skipped(ProbeSkip::Unavailable(error))), _) => {
+            unknown(format!("the graphics probe could not run ({error})"))
+        }
+        (Some(ProbeResult::Replied(reply)), _) => Ok(reply),
+    }
+}
+
+/// The route for a reply that offered neither a Kitty `OK` nor Sixel.
+fn no_pixels_from_reply(subject: &str, reply: &ProbeReply) -> GraphicsRoute {
+    match (&reply.kitty, &reply.da1) {
+        (KittyReply::Rejected(error), _) => GraphicsRoute::unavailable(
+            RouteReasonKind::NoSupport,
+            RouteConfidence::Verified,
+            format!("{subject}; the terminal rejected the Kitty graphics query ({error:?}) and reports no Sixel"),
+        ),
+        (KittyReply::NoReply, Some(_)) => GraphicsRoute::unavailable(
+            RouteReasonKind::NoSupport,
+            RouteConfidence::Verified,
+            format!("{subject}; the terminal answered without Kitty graphics or Sixel"),
+        ),
+        (KittyReply::Conflicting, _) => GraphicsRoute::unavailable(
+            RouteReasonKind::Unknown,
+            RouteConfidence::Unknown,
+            format!("{subject}; the Kitty graphics query got conflicting replies"),
+        ),
+        (KittyReply::Accepted, _) => GraphicsRoute::unavailable(
+            RouteReasonKind::Unknown,
+            RouteConfidence::Unknown,
+            format!("{subject}; the terminal answered the Kitty graphics query, which this route cannot use"),
+        ),
+        (KittyReply::NoReply, None) => GraphicsRoute::unavailable(
+            RouteReasonKind::Unknown,
+            RouteConfidence::Unknown,
+            format!("{subject}; the graphics probe got no reply before its deadline"),
+        ),
+    }
 }
 
 /// The measured Windows OpenSSH server path: its system console host removes
@@ -739,63 +975,83 @@ fn windows_ssh_iterm2_outer(value: &str) -> Option<&'static str> {
         .map(|&(_, name)| name)
 }
 
-/// Zellij renders Kitty graphics from 0.45, when its host supports them.
-/// Until the pane probe ships, a Kitty-family identity inherited from the
-/// host stands in for the pane's answer.
-fn resolve_zellij(inputs: &RouteInputs) -> GraphicsRoute {
-    let Some(version) = inputs.zellij_version else {
-        return GraphicsRoute::unavailable(
-            RouteReasonKind::Unknown,
-            RouteConfidence::Unknown,
-            "Zellij version unreadable (`zellij --version` failed or timed out)",
-        );
+/// Zellij renders Kitty graphics from 0.45, when its host supports them;
+/// only a query to the pane shows whether it is enabled. A pane that does
+/// not answer Kitty may still answer Sixel.
+fn resolve_zellij(inputs: &RouteInputs, probing: Probing) -> GraphicsRoute {
+    let version = inputs.zellij_version;
+    let subject = match version {
+        Some(version) => format!("Zellij {version}"),
+        None => "Zellij (version unreadable)".to_string(),
     };
-    if version < ZELLIJ_KITTY_MIN {
+    let too_old = version.is_some_and(|v| v < ZELLIJ_KITTY_MIN);
+    let reply = probe_reply(&subject, inputs.probe.direct.as_ref(), probing);
+
+    if let Ok(reply) = reply {
+        if reply.kitty == KittyReply::Accepted && !too_old {
+            return GraphicsRoute::pixels(
+                GraphicsFormat::Kitty,
+                RouteConfidence::Verified,
+                format!("{subject} answered a Kitty graphics query from the pane"),
+            )
+            .needing_measured_cells();
+        }
+        if reply.da1.as_ref().is_some_and(Da1Reply::has_sixel) {
+            return GraphicsRoute::pixels(
+                GraphicsFormat::Sixel,
+                RouteConfidence::Verified,
+                format!("{subject} reports Sixel (DA1 attribute 4)"),
+            )
+            .needing_measured_cells();
+        }
+    }
+    if too_old {
         return GraphicsRoute::unavailable(
             RouteReasonKind::NoSupport,
             RouteConfidence::Known,
-            format!("Zellij {version} predates Kitty graphics (0.45); Sixel detection needs the pane probe (planned)"),
+            format!("{subject} predates Kitty graphics (0.45) and reported no Sixel"),
         )
         .with_fix(format!("upgrade Zellij to {ZELLIJ_KITTY_MIN} or later"));
     }
-    match inputs.zellij_kitty_enabled {
-        Some(true) => GraphicsRoute::pixels(
-            GraphicsFormat::Kitty,
-            RouteConfidence::Verified,
-            format!("Zellij {version} answered a Kitty graphics query"),
-        ),
-        Some(false) => GraphicsRoute::unavailable(
-            RouteReasonKind::NoSupport,
-            RouteConfidence::Verified,
-            format!("Zellij {version} has Kitty graphics disabled"),
-        ),
-        None => match identify_terminal(inputs) {
-            Some((KnownTerminal::KittyFamily(name), source)) => GraphicsRoute::pixels(
-                GraphicsFormat::Kitty,
-                RouteConfidence::Known,
-                format!("Zellij {version} inside {name} ({source}) renders Kitty graphics"),
-            ),
-            _ => GraphicsRoute::unavailable(
-                RouteReasonKind::Unknown,
-                RouteConfidence::Unknown,
-                format!(
-                    "Zellij {version} inside a terminal not known to render Kitty graphics; the pane probe is planned"
-                ),
-            ),
-        },
+    match reply {
+        Err(not_answered) => not_answered,
+        Ok(reply) if reply.da1.is_some() && reply.kitty != KittyReply::Conflicting => {
+            GraphicsRoute::unavailable(
+                RouteReasonKind::NoSupport,
+                RouteConfidence::Verified,
+                format!("{subject} has Kitty graphics disabled for this pane and reports no Sixel"),
+            )
+        }
+        Ok(reply) => no_pixels_from_reply(&subject, reply),
     }
 }
 
-/// Windows Terminal renders Sixel from 1.22. The version comes from the
-/// `WindowsTerminal.exe` hosting this process; the DA1 signal arrives with
-/// the probe (planned).
-fn resolve_windows_terminal(inputs: &RouteInputs) -> GraphicsRoute {
-    match inputs.windows_terminal_version {
-        Some(version) if version >= WINDOWS_TERMINAL_SIXEL_MIN => GraphicsRoute::pixels(
+/// Windows Terminal renders Sixel from 1.22. Either positive signal
+/// suffices: the `WindowsTerminal.exe` hosting this process is 1.22 or later,
+/// or the probe's DA1 reply reports Sixel.
+fn resolve_windows_terminal(inputs: &RouteInputs, probing: Probing) -> (GraphicsRoute, ProbePlan) {
+    if let Some(version) = inputs.windows_terminal_version
+        && version >= WINDOWS_TERMINAL_SIXEL_MIN
+    {
+        let route = GraphicsRoute::pixels(
             GraphicsFormat::Sixel,
             RouteConfidence::Known,
             format!("Windows Terminal {version} renders Sixel"),
-        ),
+        );
+        return (route, ProbePlan::NONE);
+    }
+    if let Some(ProbeResult::Replied(reply)) = &inputs.probe.direct
+        && probing == Probing::Allowed
+        && reply.da1.as_ref().is_some_and(Da1Reply::has_sixel)
+    {
+        let route = GraphicsRoute::pixels(
+            GraphicsFormat::Sixel,
+            RouteConfidence::Verified,
+            "Windows Terminal reports Sixel (DA1 attribute 4)",
+        );
+        return (route, ProbePlan::DIRECT);
+    }
+    let route = match inputs.windows_terminal_version {
         Some(version) => GraphicsRoute::unavailable(
             RouteReasonKind::NoSupport,
             RouteConfidence::Known,
@@ -807,20 +1063,342 @@ fn resolve_windows_terminal(inputs: &RouteInputs) -> GraphicsRoute {
         None => GraphicsRoute::unavailable(
             RouteReasonKind::Unknown,
             RouteConfidence::Unknown,
-            "Windows Terminal (WT_SESSION) whose version could not be read",
+            "Windows Terminal (WT_SESSION) whose version could not be read and whose DA1 reply reports no Sixel",
         )
         .with_fix("set BISCUIT_GRAPHICS=sixel if this Windows Terminal is 1.22 or later"),
+    };
+    (route, ProbePlan::DIRECT)
+}
+
+/// A tmux this process can see (`TMUX` is set). Passthrough needs tmux 3.3
+/// or later with `allow-passthrough` on for the pane; the format comes from
+/// the terminals of the clients attached to the pane's session. Only when
+/// `allow-passthrough` could not be read does the wrapped probe run: its
+/// reply proves passthrough works. A `forced` format keeps the version and
+/// passthrough checks but skips identification.
+fn resolve_visible_tmux(
+    inputs: &RouteInputs,
+    forced: Option<(GraphicsFormat, &str)>,
+    probing: Probing,
+) -> (GraphicsRoute, ProbePlan) {
+    let facts = &inputs.tmux;
+    let lead = forced.map_or(String::new(), |(_, requested)| format!("{requested}: "));
+    let version = match facts.version {
+        None => {
+            let route = GraphicsRoute::unavailable(
+                RouteReasonKind::Unknown,
+                RouteConfidence::Unknown,
+                format!(
+                    "{lead}the tmux version could not be read (tmux -V); graphics through passthrough need tmux {TMUX_PASSTHROUGH_MIN} or later"
+                ),
+            );
+            return (route, ProbePlan::NONE);
+        }
+        Some(version) if version < TMUX_PASSTHROUGH_MIN => {
+            let route = GraphicsRoute::unavailable(
+                RouteReasonKind::BlockedTransport,
+                RouteConfidence::Known,
+                format!("{lead}tmux {version} predates allow-passthrough ({TMUX_PASSTHROUGH_MIN})"),
+            )
+            .with_fix(format!("upgrade tmux to {TMUX_PASSTHROUGH_MIN} or later"));
+            return (route, ProbePlan::NONE);
+        }
+        Some(version) => version,
+    };
+    let subject = format!("tmux {version}");
+    if facts.passthrough == Passthrough::Off {
+        let route = GraphicsRoute::unavailable(
+            RouteReasonKind::BlockedTransport,
+            RouteConfidence::Known,
+            format!("{lead}{subject} has allow-passthrough off for this pane"),
+        )
+        .with_fix("set -g allow-passthrough on");
+        return (route, ProbePlan::NONE);
+    }
+    if let Some((format, requested)) = forced {
+        let route = GraphicsRoute::pixels(
+            format,
+            RouteConfidence::Forced,
+            format!("forced by {requested}, through {subject} passthrough"),
+        )
+        .through_tmux();
+        return (route, ProbePlan::NONE);
+    }
+    let outer = outer_terminal(facts.clients.as_deref());
+    if facts.passthrough == Passthrough::On {
+        return (passthrough_route(&subject, &outer, None), ProbePlan::NONE);
+    }
+
+    let plan = ProbePlan {
+        direct: false,
+        tunneled: true,
+    };
+    let unread = format!("{subject}: allow-passthrough could not be read");
+    let route = match probe_reply(&unread, inputs.probe.tunneled.as_ref(), probing) {
+        Ok(reply) if reply.kitty != KittyReply::Conflicting
+            && (reply.kitty != KittyReply::NoReply || reply.da1.is_some()) =>
+        {
+            passthrough_route(&subject, &outer, Some(reply))
+        }
+        Ok(reply) => no_pixels_from_reply(&format!("{unread}, and the wrapped probe"), reply),
+        Err(not_answered) => not_answered,
+    };
+    (route, plan)
+}
+
+/// The route through a tmux whose passthrough is on, or was shown to work
+/// by a `reply` to the wrapped probe.
+fn passthrough_route(subject: &str, outer: &OuterTerminal, reply: Option<&ProbeReply>) -> GraphicsRoute {
+    let (how, confidence) = match reply {
+        Some(_) => ("delivered the wrapped probe", RouteConfidence::Verified),
+        None => ("has allow-passthrough on", RouteConfidence::Known),
+    };
+    match (outer, reply) {
+        (OuterTerminal::Identified { format, names }, _) => GraphicsRoute::pixels(
+            *format,
+            confidence,
+            format!("{subject} {how}, to {names}"),
+        )
+        .through_tmux(),
+        (OuterTerminal::Disagree(names), _) => GraphicsRoute::unavailable(
+            RouteReasonKind::NoSupport,
+            RouteConfidence::Known,
+            format!("{subject}: the attached clients' terminals ({names}) share no pixel format"),
+        ),
+        (OuterTerminal::Unidentified, None) => GraphicsRoute::pixels(
+            GraphicsFormat::Kitty,
+            RouteConfidence::Unknown,
+            format!("{subject} {how}; the outer terminal is not identified, so Kitty is sent unverified"),
+        )
+        .through_tmux(),
+        (OuterTerminal::Unidentified, Some(reply)) if reply.kitty == KittyReply::Accepted => {
+            GraphicsRoute::pixels(
+                GraphicsFormat::Kitty,
+                RouteConfidence::Verified,
+                format!("{subject} {how}, and the outer terminal answered the Kitty graphics query"),
+            )
+            .through_tmux()
+        }
+        (OuterTerminal::Unidentified, Some(reply)) => {
+            no_pixels_from_reply(&format!("{subject} {how}"), reply)
+        }
     }
 }
 
-/// Resolves the route for this process: stdout and the process environment.
+/// The outer terminal behind a visible tmux, from its attached clients.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OuterTerminal {
+    /// No client is attached, the list could not be read, or no client's
+    /// terminal is recognized.
+    Unidentified,
+    /// Every client renders `format`; `names` lists the terminals.
+    Identified { format: GraphicsFormat, names: String },
+    /// The clients' terminals have no format in common.
+    Disagree(String),
+}
+
+/// The pixel formats a client's terminal renders through passthrough.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ClientFormats {
+    kitty: bool,
+    iterm2: bool,
+}
+
+/// A client's terminal and its formats. `client_termtype` (the terminal's
+/// own answer to tmux) is read first, then `client_termname`; a generic
+/// `TERM` such as `xterm-256color` identifies nothing.
+fn client_terminal(client: &TmuxClient) -> Option<(&'static str, ClientFormats)> {
+    const KITTY: ClientFormats = ClientFormats {
+        kitty: true,
+        iterm2: false,
+    };
+    const BOTH: ClientFormats = ClientFormats {
+        kitty: true,
+        iterm2: true,
+    };
+    const ITERM2: ClientFormats = ClientFormats {
+        kitty: false,
+        iterm2: true,
+    };
+    let termtype = client.termtype.to_ascii_lowercase();
+    let by_type = [
+        ("kitty", "kitty", KITTY),
+        ("ghostty", "Ghostty", KITTY),
+        ("wezterm", "WezTerm", BOTH),
+        ("konsole", "Konsole", BOTH),
+        ("iterm2", "iTerm2", ITERM2),
+    ];
+    if let Some(&(_, name, formats)) = by_type.iter().find(|(prefix, ..)| termtype.starts_with(prefix)) {
+        return Some((name, formats));
+    }
+    let termname = client.termname.to_ascii_lowercase();
+    let by_name = [
+        ("kitty", "kitty", KITTY),
+        ("ghostty", "Ghostty", KITTY),
+        ("wezterm", "WezTerm", BOTH),
+    ];
+    by_name
+        .iter()
+        .find(|(part, ..)| termname.contains(part))
+        .map(|&(_, name, formats)| (name, formats))
+}
+
+/// The format every attached client can render, preferring Kitty. A client
+/// whose terminal is not recognized counts as Kitty-only, the same default
+/// a lone unidentified client gets.
+fn outer_terminal(clients: Option<&[TmuxClient]>) -> OuterTerminal {
+    let clients = clients.unwrap_or_default();
+    let identified: Vec<_> = clients.iter().map(client_terminal).collect();
+    if identified.iter().all(Option::is_none) {
+        return OuterTerminal::Unidentified;
+    }
+    let mut names: Vec<&str> = Vec::new();
+    let mut common = ClientFormats {
+        kitty: true,
+        iterm2: true,
+    };
+    for terminal in &identified {
+        let (name, formats) = terminal.unwrap_or((
+            "an unidentified terminal",
+            ClientFormats {
+                kitty: true,
+                iterm2: false,
+            },
+        ));
+        if !names.contains(&name) {
+            names.push(name);
+        }
+        common.kitty &= formats.kitty;
+        common.iterm2 &= formats.iterm2;
+    }
+    let names = names.join(", ");
+    if common.kitty {
+        OuterTerminal::Identified {
+            format: GraphicsFormat::Kitty,
+            names,
+        }
+    } else if common.iterm2 {
+        OuterTerminal::Identified {
+            format: GraphicsFormat::Iterm2,
+            names,
+        }
+    } else {
+        OuterTerminal::Disagree(names)
+    }
+}
+
+/// A likely tmux beyond SSH (see [`hidden_tmux_hint`]). Only a tmux with
+/// passthrough on delivers the wrapped query to the outer terminal, so a
+/// correlated `OK` to it confirms the tmux transport; an `OK` to the
+/// unwrapped query means there was no tmux after all.
+fn resolve_hidden_tmux(inputs: &RouteInputs, hint: &str, probing: Probing) -> GraphicsRoute {
+    let accepted = |result: &Option<ProbeResult>| {
+        matches!(result, Some(ProbeResult::Replied(reply)) if reply.kitty == KittyReply::Accepted)
+    };
+    if probing == Probing::Allowed {
+        if accepted(&inputs.probe.tunneled) {
+            return tunneled_route(inputs, RouteConfidence::Verified, &format!(
+                "{hint} without TMUX: a tmux with passthrough on delivered the wrapped Kitty graphics query"
+            ));
+        }
+        if accepted(&inputs.probe.direct) {
+            let mut route = tunneled_route(
+                inputs,
+                RouteConfidence::Verified,
+                &format!("{hint}, but the terminal itself answered the Kitty graphics query"),
+            );
+            route.transport = GraphicsTransport::Direct;
+            return route;
+        }
+    }
+    let detail = match probing {
+        Probing::Blocked(why) => why.to_string(),
+        Probing::Allowed => "neither the wrapped nor the plain Kitty graphics query was answered".to_string(),
+    };
+    GraphicsRoute::unavailable(
+        RouteReasonKind::Unknown,
+        RouteConfidence::Unknown,
+        format!("{hint} without TMUX suggests a tmux beyond SSH; {detail}"),
+    )
+    .with_fix(format!(
+        "set {GRAPHICS_TRANSPORT_ENV}=tmux if a tmux with allow-passthrough on runs between this program and the terminal"
+    ))
+}
+
+/// `BISCUIT_GRAPHICS_TRANSPORT=tmux` with no `TMUX`: the user says a tmux
+/// runs beyond SSH. The format comes from the forwarded outer-terminal
+/// identity or the wrapped probe; the transport itself stays unverified.
+fn resolve_declared_tmux(inputs: &RouteInputs, probing: Probing) -> (GraphicsRoute, ProbePlan) {
+    let declared = format!("{GRAPHICS_TRANSPORT_ENV}=tmux");
+    let plan = ProbePlan {
+        direct: false,
+        tunneled: true,
+    };
+    if let Some((terminal, source)) = identify_terminal(inputs) {
+        let route = match terminal {
+            KnownTerminal::AppleTerminal => known_terminal_route(terminal, &source),
+            KnownTerminal::KittyFamily(name) | KnownTerminal::Iterm2Family(name) => {
+                let format = match terminal {
+                    KnownTerminal::KittyFamily(_) => GraphicsFormat::Kitty,
+                    _ => GraphicsFormat::Iterm2,
+                };
+                GraphicsRoute::pixels(
+                    format,
+                    RouteConfidence::Forced,
+                    format!("{declared} (unverified) to {name} ({source})"),
+                )
+                .through_tmux()
+            }
+        };
+        return (route, ProbePlan::NONE);
+    }
+    if probing == Probing::Allowed
+        && matches!(&inputs.probe.tunneled, Some(ProbeResult::Replied(reply)) if reply.kitty == KittyReply::Accepted)
+    {
+        let route = tunneled_route(
+            inputs,
+            RouteConfidence::Verified,
+            &format!("{declared}: the terminal beyond tmux answered the wrapped Kitty graphics query"),
+        );
+        return (route, plan);
+    }
+    let route = GraphicsRoute::unavailable(
+        RouteReasonKind::Unknown,
+        RouteConfidence::Unknown,
+        format!("{declared}: the terminal beyond tmux is not identified and did not answer the wrapped Kitty graphics query"),
+    )
+    .with_fix(format!("set {GRAPHICS_ENV} to the outer terminal's format (kitty, iterm2, or sixel)"));
+    (route, plan)
+}
+
+/// A route confirmed by a Kitty `OK` under a tmux hint, wrapped for tmux
+/// passthrough: Kitty with ordinary placement, or the iTerm2 format when the
+/// client forwarded `LC_TERMINAL=iTerm2` (iTerm2 answers Kitty queries but is
+/// never sent Kitty automatically).
+fn tunneled_route(inputs: &RouteInputs, confidence: RouteConfidence, message: &str) -> GraphicsRoute {
+    let format = match inputs.var("LC_TERMINAL").and_then(terminal_from_lc_terminal) {
+        Some(KnownTerminal::Iterm2Family(_)) => GraphicsFormat::Iterm2,
+        _ => GraphicsFormat::Kitty,
+    };
+    GraphicsRoute::pixels(format, confidence, message).through_tmux()
+}
+
+/// Resolves the route for this process: stdout, the process environment,
+/// and, when they cannot decide, the graphics probe.
 ///
 /// [`Terminal::new`](crate::terminal::Terminal::new) calls this once and
 /// keeps the result; prefer reading
 /// [`Terminal::graphics_route`](crate::terminal::Terminal::graphics_route).
 #[must_use]
 pub fn graphics_route() -> GraphicsRoute {
-    let route = resolve_graphics_route(&RouteInputs::from_process());
+    graphics_route_with(ProbeMode::Auto)
+}
+
+/// [`graphics_route`] with the caller's probing choice.
+pub(crate) fn graphics_route_with(probe_mode: ProbeMode) -> GraphicsRoute {
+    let mut inputs = RouteInputs::from_process();
+    inputs.probe_mode = probe_mode;
+    let route = resolve_graphics_route(&inputs.probed());
     tracing::debug!(
         format = ?route.format,
         confidence = ?route.confidence,
@@ -828,6 +1406,23 @@ pub fn graphics_route() -> GraphicsRoute {
         "Resolved graphics route"
     );
     route
+}
+
+impl RouteInputs {
+    /// Runs the probe exchanges [`probe_plan`] asks for and records their
+    /// results. Exchanges are shared with the color query and cached per
+    /// process, so only the first call writes to the terminal.
+    #[must_use]
+    pub fn probed(mut self) -> Self {
+        let plan = probe_plan(&self);
+        if plan.direct {
+            self.probe.direct = Some(crate::discovery::startup_exchange::direct_probe());
+        }
+        if plan.tunneled {
+            self.probe.tunneled = Some(crate::discovery::startup_exchange::tunneled_probe());
+        }
+        self
+    }
 }
 
 #[cfg(test)]

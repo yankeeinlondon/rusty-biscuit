@@ -11,6 +11,7 @@
 //! - [`iterm`] — iTerm2 protocol render paths.
 //! - [`cursor`] — cursor row computation and scroll compensation helpers.
 //! - [`protocol`] — protocol dispatch (`render_to_terminal`, `render_inline`).
+//! - [`tmux`] — tmux passthrough wrapping and its message budget.
 //!
 //! ## Width Specification
 //!
@@ -41,6 +42,7 @@ mod encoded_png;
 mod iterm;
 mod kitty;
 mod protocol;
+mod tmux;
 mod width;
 
 pub use self::encoded_png::EncodedPng;

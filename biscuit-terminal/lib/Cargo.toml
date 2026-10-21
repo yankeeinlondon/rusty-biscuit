@@ -78,10 +78,13 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 # The Windows Terminal version read: the parent-process walk (Toolhelp32
 # snapshot, `QueryFullProcessImageNameW`) and the executable's version
-# resource (`GetFileVersionInfoW`, `VerQueryValueW`).
+# resource (`GetFileVersionInfoW`, `VerQueryValueW`). The terminal query
+# engine's console port: console modes and input records
+# (`Win32_System_Console`), waited on with `WaitForSingleObject`.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
+    "Win32_System_Console",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Threading",
 ] }
@@ -110,6 +113,12 @@ tracing-test = "0.2"
 # exists under `terminal-tests`.
 test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
+
+# A windowless Windows console (ConPTY) whose console host can be chosen, for
+# the console query port's Level 2 test; already built for worktree-cli and
+# claudine-cli.
+[target.'cfg(windows)'.dev-dependencies]
+xpty = "0.3.6"
 
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a
