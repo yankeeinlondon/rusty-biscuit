@@ -10,6 +10,11 @@ This spec began because a WezTerm session into a Windows host showed no
 graphics. Reconfiguring to WezTerm's multiplexer fixed that one setup; this
 spec makes the general case work out of the box.
 
+It also corrects the division of work between the two packages:
+`biscuit-terminal` owns terminal detection and getting bytes onto the screen,
+and `biscuit-visualized` owns diagrams for every target. Both changes land
+here, in one spec, by the author's choice.
+
 Research this spec builds on:
 
 - [Kitty graphics](../../docs/research/graphics/kitty.md)
@@ -47,6 +52,20 @@ As of 2026-10-20:
   `TerminalImage` print nothing. Neither says why.
 - `viuer` is a declared dependency of the library, but no `viuer::` call
   was found in its code.
+- **Diagram components live in the terminal crate.** `MermaidDiagram`,
+  `GraphExpression`, and `GitGraph` are in `biscuit-terminal/lib/src/components/`
+  and implement terminal, tree, and (for the latter two) browser rendering.
+  `biscuit-terminal` depends on `biscuit-visualized` through its `image`
+  feature; `biscuit-visualized` has no other dependent. About 20 packages
+  depend on `biscuit-terminal`; four of them (worktree-cli, sniff-cli,
+  darkmatter, the `bt` CLI) enable `image` and compile the Mermaid renderer.
+- **The render-tree renderer calls `MermaidDiagram` directly**
+  (`render_tree/render.rs`) to turn a Mermaid code fence into a diagram when
+  `TerminalMermaidMode::Image` is set.
+- **Diagram PNGs are encoded twice (bug).** `biscuit-visualized` rasterizes a
+  PNG, and `biscuit-terminal` decodes, resizes, and encodes it again
+  (`encode_as_png`) even when the rendered width already matches the display
+  width.
 
 ## Evidence gathered while scoping
 
@@ -123,6 +142,40 @@ Each supported setup has one testable outcome:
   multiplexer itself.
 - iTerm2 multipart (`MultipartFile`/`FilePart`) until someone hits tmux's
   message-size limit; WezTerm and cterm do not parse it.
+- Switching the Mermaid renderer to Merman. Likely, but separate work; this
+  spec only leaves room for the Unicode text fallback Merman would enable.
+
+## Package boundaries
+
+**`biscuit-visualized` decides what to show; `biscuit-terminal` decides how it
+reaches the screen.**
+
+| | `biscuit-terminal` | `biscuit-visualized` |
+| --- | --- | --- |
+| Owns | Terminal detection and capabilities; the graphics route; displaying pixels (`TerminalImage`, the Kitty, iTerm2, Sixel, and half-block encoders, tmux wrapping, placement) | Diagrams for every target: the diagram components (`MermaidDiagram`, `GraphExpression`, `GitGraph`) and their terminal, browser, and tree rendering |
+| Terminal output | Turns pixels into escape sequences for the route | Asks `biscuit-terminal` for the route and cell geometry, chooses what to show (pixels, later a Unicode drawing, or the source), renders at the display size, and hands pixels to `TerminalImage` |
+| Browser output | — | SVG, as today |
+| Never | Knows about diagrams | Writes escape sequences or knows about formats and routes |
+
+`TerminalImage` stays in `biscuit-terminal` because plain images are displayed
+without any diagram involved (biscuit-icon, claudine, darkmatter), and because
+sending pixels depends on the route (the placeholder grid needs tmux's outer
+terminal; the Windows SSH rule changes the format).
+
+**The dependency direction flips:** `biscuit-visualized` depends on
+`biscuit-terminal`, and `biscuit-terminal` drops `biscuit-visualized` and
+`resvg`. Packages that depend on `biscuit-terminal` stop compiling the Mermaid
+renderer unless they use diagrams.
+
+```mermaid
+flowchart LR
+    subgraph before[Today]
+        T1[biscuit-terminal] --> V1[biscuit-visualized]
+    end
+    subgraph after[After this spec]
+        V2[biscuit-visualized] --> T2[biscuit-terminal]
+    end
+```
 
 ## Design
 
@@ -138,8 +191,9 @@ reach a renderer. A route records:
 - **reason**: a human-readable explanation, including the fix when one exists
 
 `ImageSupport` and `image_support()` remain as a projection of the route so
-existing callers keep working. Encoders (`TerminalImage`, Mermaid,
-graph components) consume the route; CLIs never make format decisions.
+existing callers keep working. `TerminalImage` consumes the route, and the
+diagram components read it to choose what to show; CLIs never make format
+decisions.
 
 Resolution order:
 
@@ -231,14 +285,18 @@ so the earlier Ghostty reply leak cannot return.
 
 - Encoder: `icy_sixel`, no cargo feature flag.
 - Detection: `4` in the DA1 reply; `WT_SESSION` for Windows Terminal.
-- Sizing to the pixel rectangle `columns × cell_width` by
-  `rows × cell_height`, with alpha composited against the detected
-  background.
+- Sized by the rule in section 7. Sixel has no partial transparency:
+  diagrams are rendered opaque on the terminal's background by
+  `biscuit-visualized`; plain images are composited against that background
+  by `TerminalImage`.
 - Never sent into a Windows SSH session.
 
 ### 6. Fallback and hints
 
-- **Diagrams** keep the source code block they produce today.
+- **Diagrams** keep the source code block they produce today. The choice
+  belongs to the diagram components in `biscuit-visualized`, so a Unicode
+  drawing (expected with Merman) can later slot in between graphics and the
+  source without touching `biscuit-terminal`.
 - **Plain images** (`bt image`, `TerminalImage`) render as half-blocks
   (`▀` with truecolor foreground and background), degrading to alt text (the
   file name) without truecolor.
@@ -248,10 +306,46 @@ so the earlier Ghostty reply leak cannot return.
 - The capability report (`bt` with no arguments, `--json`) shows the route
   and its reason, not just `Images: None`.
 
-### 7. Housekeeping
+### 7. Sizing and the double-encoding fix
+
+- **Render at the final display size.** The layout decides an image's width
+  (a percentage, a character count, natural width, margins; rarely the full
+  terminal width). Diagrams are rasterized at exactly that width in pixels
+  (`RenderRequest::target_width`), with the height rounded to whole rows,
+  rather than rendered at another size and resampled. Placeholders and Sixel
+  depend on the exact cell rectangle.
+- **Fix: send diagram PNGs without re-encoding.** When the rendered size
+  matches the display size, the PNG bytes from `biscuit-visualized` go to the
+  encoder unchanged. Decoding is reserved for formats that need pixels
+  (Sixel, half-blocks) or for an actual resize.
+- **Background instead of a bool.** `RenderRequest::transparent_background`
+  becomes an optional background color, so a diagram can be rendered opaque
+  on the terminal's actual background (Sixel, half-blocks) or transparent
+  (Kitty, iTerm2 format, browser).
+
+### 8. Moving the diagram components
+
+- `MermaidDiagram`, `GraphExpression`, and `GitGraph`, with their tests and
+  component docs, move from `biscuit-terminal` to `biscuit-visualized`.
+- `biscuit-visualized` gains a dependency on `biscuit-terminal`;
+  `biscuit-terminal` drops `biscuit-visualized`, `resvg`, and the diagram
+  half of its `image` feature.
+- **Render-tree hook.** The terminal render-tree renderer can no longer call
+  `MermaidDiagram`. It gains a diagram-rendering hook (a trait object on the
+  render options) that `biscuit-visualized` implements; with no hook
+  installed, a Mermaid fence stays a code block, as with
+  `TerminalMermaidMode::Code` today. Callers that want diagrams
+  (darkmatter, the `bt` CLI) install it.
+- Consumers update imports: the `bt` CLI diagram commands, darkmatter,
+  sniff-cli, worktree (lib and CLI).
+- Behavior is unchanged by the move itself; existing tests pass from their
+  new location.
+
+### 9. Housekeeping
 
 - Correct the `protocol.rs` comment on why iTerm2 uses its own format.
-- Review PNG encoding settings for transfer size.
+- Review PNG encoding settings for transfer size, in both `TerminalImage`
+  and the `biscuit-visualized` rasterizer.
 - Remove `viuer` if it is unused.
 
 ## Phases
@@ -259,14 +353,18 @@ so the earlier Ghostty reply leak cannot return.
 | Phase | Content | Depends on |
 | --- | --- | --- |
 | 0. Evidence | Visual confirmation of the Windows SSH rule; whether conhost answers DA1 itself and claims Sixel; Ghostty placeholder support; cell pixel size inside tmux and Zellij; what Kitty and Ghostty do with an ordinary placement when tmux switches windows; the tmux Sixel-versus-Kitty rule | — |
-| 1. Route model | Route type, resolution order, `BISCUIT_GRAPHICS`, Windows SSH rule, mintty, Windows Terminal identity, Zellij gating, capability report, stderr hints, housekeeping | — |
-| 2. Probe | Kitty query plus DA1 through the query engine | 1 |
-| 3. tmux transport | Passthrough detection, outer-terminal identification, wrapping, ordinary placement, iTerm2 format through tmux | 1, 2 |
-| 4. Placeholders | Unicode placeholder encoder and its use under tmux for Kitty and Ghostty | 3 |
-| 5. Sixel | Encoder, detection, sizing, tmux's own Sixel handling | 1, 2 |
-| 6. Half-blocks | Half-block fallback for plain images | 1 |
+| 1. Component move | Section 8: diagram components to `biscuit-visualized`, dependency flip, render-tree hook, consumer imports. No behavior change. | — |
+| 2. Sizing and double encoding | Section 7: render at display size, PNG pass-through fix, background color in `RenderRequest` | 1 |
+| 3. Route model | Route type, resolution order, `BISCUIT_GRAPHICS`, Windows SSH rule, mintty, Windows Terminal identity, Zellij gating, capability report, stderr hints, housekeeping | 1 |
+| 4. Probe | Kitty query plus DA1 through the query engine | 3 |
+| 5. tmux transport | Passthrough detection, outer-terminal identification, wrapping, ordinary placement, iTerm2 format through tmux | 3, 4 |
+| 6. Placeholders | Unicode placeholder encoder and its use under tmux for Kitty and Ghostty | 2, 5 |
+| 7. Sixel | Encoder, detection, tmux's own Sixel handling | 2, 3, 4 |
+| 8. Half-blocks | Half-block fallback for plain images | 3 |
 
-Phase 1 changes no bytes for setups that work today, except the Windows SSH
+The move comes first so that every later change to diagram behavior is
+written once, in its final package. Phases 1 and 2 change no visible output.
+Phase 3 changes no bytes for setups that work today, except the Windows SSH
 case, which today shows blank rows.
 
 ## Verification
@@ -275,7 +373,12 @@ case, which today shows blank rows.
   of the Goals table that environment alone decides); tmux wrapping
   including ESC doubling and nested terminators; placeholder grid encoding;
   Sixel output for fixed fixtures; half-block output; the probe's reply
-  parser over fragmented and out-of-order replies.
+  parser over fragmented and out-of-order replies; diagram PNG bytes reach
+  the encoder unchanged when sizes match; a render tree without the diagram
+  hook leaves Mermaid fences as code blocks.
+- **Move:** the moved components' existing tests pass unchanged in
+  `biscuit-visualized`, and `cargo tree -p biscuit-terminal` no longer
+  contains `biscuit-visualized` or `resvg`.
 - **L2:** tmux through the shared test harness, with passthrough on and off;
   Zellij where available; WezTerm.
 - **Manual, recorded:** iTerm2 (iTerm2 format and no reply leak), Windows SSH
@@ -292,10 +395,16 @@ case, which today shows blank rows.
   to the research, not to this spec.
 - `docs/components/terminal_image.md` updated for the route model and the
   half-block fallback.
-- `docs/dependencies.md` for `icy_sixel` (and `viuer` if removed).
+- The component docs for `MermaidDiagram`, `GraphExpression`, and `GitGraph`
+  move to `biscuit-visualized/docs/`, along with
+  `docs/data-visualization/` pages that describe them.
+- Both packages' `docs/dependencies.md` for the dependency flip, `icy_sixel`,
+  and `viuer` if removed; both READMEs where they describe what each package
+  does.
 - The `os` skill (`windows-console.md`): Windows OpenSSH's system conhost
   removes APC and DCS sequences and passes OSC; WezTerm ships its own ConPTY.
-- The `biscuit-terminal` skill for the route model.
+- The `biscuit-terminal` and `biscuit-visualized` skills for the route model
+  and the new package boundary.
 
 ## Risks
 
@@ -309,6 +418,12 @@ case, which today shows blank rows.
 - **Placeholder cells after a fresh tmux client** render blank because the
   image data is gone; documented, not fixed.
 - **Probe false positives** where an intermediary answers DA1 itself.
+- **The move touches several packages** (the `bt` CLI, darkmatter, sniff-cli,
+  worktree), which widens this spec's CI scope. Keeping phase 1 free of
+  behavior changes keeps its review mechanical.
+- **The render-tree hook is a new public seam.** A caller that forgets to
+  install it silently gets code blocks instead of diagrams; the capability
+  report or a debug trace should make that visible.
 
 ## Open questions
 
