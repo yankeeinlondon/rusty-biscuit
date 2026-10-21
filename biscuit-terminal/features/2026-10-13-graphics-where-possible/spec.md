@@ -19,6 +19,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the clarify.md prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
+status: finalized-spec
 reviewed: true
 reviewed_by: "codex/gpt-6.1-sol"
 reviewed_on: "2026-10-20"
@@ -270,7 +271,7 @@ reliably, not everything it advertises.
 | --- | --- |
 | Kitty, Ghostty, WezTerm, Warp, Konsole, wast | Kitty |
 | iTerm2, mintty, cterm | iTerm2 format |
-| Windows Terminal (`WT_SESSION`) | Sixel only when the probe's DA1 reply confirms it (process version as a contingency, see section 2) |
+| Windows Terminal (`WT_SESSION`) | Sixel when the probe's DA1 reply contains `4`, or when the `WindowsTerminal.exe` file version is 1.22 or later (section 2) |
 | Terminal.app | none |
 
 The **iTerm2 list** used by the Windows SSH rule and tmux is: iTerm2,
@@ -383,9 +384,9 @@ graphics, and Windows SSH paths known to strip the query are never probed.
   targeted terminals ignore. Placement is ordinary (the outer terminal is not
   identified), except that a forwarded `LC_TERMINAL=iTerm2` selects the
   iTerm2 format through passthrough. When the hint is present but nothing
-  confirms it, the `bt` hint names `BISCUIT_GRAPHICS_TRANSPORT=tmux`. Whether
-  wrapped replies reliably return through tmux is a phase 0 item; if they do
-  not, the automatic part is dropped and the override and hint remain.
+  confirms it, the `bt` hint names `BISCUIT_GRAPHICS_TRANSPORT=tmux`. The
+  wrapped probe is always implemented: if replies do not return through
+  tmux, it yields unknown and the fallback plus hint apply, so nothing breaks.
 - **Native Windows backend.** The query engine gains a Windows
   implementation under the same contract: request plus DA1, deadline and
   silence budget, console modes restored afterwards. It serves both colors
@@ -393,13 +394,22 @@ graphics, and Windows SSH paths known to strip the query are never probed.
   background/foreground colors (today it gets none) and Sixel detection from
   Windows Terminal's own DA1 reply. Never probed: Windows SSH server sessions
   (the measured system conhost strips the query) and legacy conhost with no
-  modern terminal attached (known not to answer). Typeahead read by the probe
-  may be returned with `WriteConsoleInput`, which Unix cannot do; this is
-  attempted, not promised, until phase 0 confirms it. **Contingency:** if
-  phase 0 shows the DA1 reply under ConPTY does not come from the terminal,
-  Windows Terminal's Sixel support is read instead from the
-  `WindowsTerminal.exe` file version (1.22 or later) found by walking the
-  parent process chain.
+  modern terminal attached (known not to answer).
+- **Windows Terminal Sixel: either positive signal suffices.** Sixel is
+  selected when the probe's DA1 reply contains parameter `4`, **or** when
+  `WT_SESSION` is set and the `WindowsTerminal.exe` found by walking the
+  parent process chain has a file version of 1.22 or later. Whether the DA1
+  reply under ConPTY comes from Windows Terminal or the console host is not
+  known, and either signal is positive evidence on its own, so this works for
+  both answers. If neither signal is available (no reply, version unreadable),
+  use the fallback, and the `bt` hint suggests `BISCUIT_GRAPHICS=sixel`.
+- **Returning typeahead on Windows.** The Windows input buffer holds key
+  events, and `WriteConsoleInput` can put events back. Key events the probe
+  reads that are not part of a reply are written back after the exchange. A
+  Level 2 test on `build-win-native` (windowless ConPTY) types keys during the
+  probe and checks they arrive afterwards. If that test cannot show the keys
+  being returned, ship without re-injection (discard, as on Unix), remove the
+  test, and record the outcome in the implementation log.
 
 > **Reader's note:** this intentionally broadens the current environment-only
 > graphics detection contract, which avoids probes because of visible query
@@ -411,6 +421,10 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 
 - **Detect** tmux from `TMUX`; read `allow-passthrough` for the pane
   (`tmux show-options -Apv -t "$TMUX_PANE" allow-passthrough`).
+- **Version floor.** Read the version with `tmux -V`. Passthrough routes
+  require tmux 3.3 or later, the release that introduced `allow-passthrough`.
+  An older or unreadable version gets the fallback with a reason naming the
+  version.
 - **Identify the outer terminal** from the attached client
   (`#{client_termname}`, `#{client_termtype}`) or `tmux show-environment`.
   Query the client associated with the target pane; a server can have clients
@@ -432,39 +446,44 @@ graphics, and Windows SSH paths known to strip the query are never probed.
       image ID in the foreground color, row/column combining marks) as
       ordinary text through tmux. Used only when the outer terminal is
       positively identified; Zellij rejects `U=1` and WezTerm ignores it.
+      Kitty and Ghostty are both treated as supporting placeholders.
       Require Unicode and the color fidelity needed to encode image IDs;
       otherwise use ordinary placement with its documented limits. Allocate
       distinct nonzero image IDs for live uploads, and reset placeholder colors
       after the grid so subsequent text is unaffected.
     - WezTerm or unidentified outside: ordinary placement through
-      passthrough. Known limits (drift on resize, window switch, copy mode)
-      are documented.
+      passthrough. The docs state the limits: the image can drift on resize
+      and in copy mode, and may stay visible over other windows after a
+      window switch.
     - iTerm2 outside: iTerm2 format through passthrough.
 - **Sixel handled by tmux itself:** when tmux was built with Sixel support
   and the outer terminal handles Sixel, prefer Sixel unwrapped, since tmux then
   redraws it with the pane. Prefer this native Sixel route over passthrough
-  when it is positively established for the pane and endpoint, even if Kitty
-  is also available. Otherwise prefer the reliable Kitty/iTerm2 route. A build
-  feature alone or a DA1 answer from the outer terminal is insufficient to
-  prove tmux's native Sixel path.
+  when it is established, even if Kitty is also available. Otherwise prefer
+  the reliable Kitty/iTerm2 route. **Established means all three:** tmux is
+  3.4 or later; tmux's own (unwrapped) DA1 reply contains parameter `4`; and
+  `#{client_termfeatures}` for the pane's client contains `sixel`. A build
+  feature alone or a DA1 answer from the outer terminal is insufficient.
 - Mode 2026 is never wrapped for passthrough; tmux handles it itself.
 - Passthrough off blocks tunneled graphics, not native Sixel. Use native
   Sixel if established; otherwise fallback and name the setting.
 - Before emitting an iTerm2 message, account for base64 expansion, metadata,
-  ESC doubling, and the tmux envelope against the known parser limit. Where
-  the installed tmux limit cannot be read, use the conservative 1 MiB limit
-  for supported modern tmux; unverified older parsers use fallback. An oversized
+  ESC doubling, and the tmux envelope against a fixed 1 MiB budget for the
+  whole wrapped message (tmux 3.3 and later; older versions are already
+  excluded by the version floor). An oversized
   image falls back with a size-limit reason before reserving rows. Never split
   a legacy `File=` message into arbitrary OSC messages. Multipart remains out
   of scope; see [iTerm2's framing and limits](https://iterm2.com/documentation-images.html).
 
 ### 4. Zellij
 
+- **Version.** Read it with `zellij --version` under a 500 ms deadline. An
+  unreadable version counts as unknown.
 - Kitty with ordinary placements only. Version 0.45+ establishes eligibility,
   not enablement: query the pane endpoint to establish active Kitty support.
   Never infer it from an inherited outer `TERM_PROGRAM` alone; never use tmux
   wrapping, placeholders, or the iTerm2 format.
-- **Until the probe ships** (phase 4),
+- **Until the probe ships** (phase 4), and only with a known version,
   Zellij 0.45+ under an inherited Kitty-family identity keeps today's
   behavior: Kitty, ordinary placement, confidence "known terminal". Zellij
   enables its Kitty support by querying a Kitty-capable host, so that identity
@@ -483,10 +502,10 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 ### 5. Sixel
 
 - Encoder: `icy_sixel`, no cargo feature flag.
-- Detection: parameter `4` in a DA1 reply from the relevant renderer,
-  including Windows Terminal through the native Windows backend (process
-  version as the contingency). `WT_SESSION` identifies the application, not
-  the Sixel capability of every installed version.
+- Detection: parameter `4` in a DA1 reply from the relevant renderer; for
+  Windows Terminal, the either-signal rule in section 2. `WT_SESSION` alone
+  identifies the application, not the Sixel capability of every installed
+  version.
 - Sized by the rule in section 7. Sixel has no partial transparency:
   diagrams are rendered opaque on the terminal's background by
   `biscuit-visualized`; plain images are composited against that background
@@ -596,7 +615,7 @@ graphics, and Windows SSH paths known to strip the query are never probed.
   imports, prelude re-exports, examples, doctests, and diagram-only font/raster
   helpers; migrate every caller rather than assuming this list is exhaustive.
   Keep the existing lower-level artifact API distinct from the moved component
-  names (for example expose the latter under `biscuit_visualized::components`),
+  names (expose the latter under `biscuit_visualized::components`),
   so two `MermaidDiagram` types do not collide. No terminal-crate re-export can
   remain, because that would restore the dependency cycle.
 - Behavior is unchanged by the move itself; existing tests pass from their
@@ -605,19 +624,23 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 ### 9. Housekeeping
 
 - Correct the `protocol.rs` comment on why iTerm2 uses its own format.
-- Review PNG encoding settings for transfer size in both packages. The existing
-  size figures justify inspection, not a conclusion that one codec is always
-  smaller. If a compression trade-off remains uncertain, use one host and a
-  quick sample; no performance matrix or statistical gate is required. The
-  measured +82 KB Sixel cost already answers the binary-size question, so do
-  not add a size spike.
-- Remove `viuer` if it is unused.
+- **PNG encoding.** `encode_as_png` uses the image crate's default
+  `write_to`, which in the scoping test produced a PNG larger than the raw
+  pixels. Encode with `PngEncoder::new_with_quality(CompressionType::Default,
+  FilterType::Adaptive)` in `TerminalImage`, and use the equivalent setting in
+  `biscuit-visualized`'s rasterizer (`raster/png.rs`), whose bytes now pass
+  straight through. Acceptance: the 400×400 iTerm2 app icon sample from the
+  scoping test encodes smaller than before, measured once on one host. No
+  performance matrix and no binary-size spike (the +82 KB Sixel cost is
+  already measured).
+- **Remove the `viuer` dependency.** It is never called; only the names
+  `DetectionMethod::Viuer` and the `TerminalImageError` viuer variant remain.
+  Leave those public variants unchanged.
 
 ## Phases
 
 | Phase | Content | Depends on |
 | --- | --- | --- |
-| 0. Evidence | Visual confirmation of the Windows SSH rule; whether conhost answers DA1 itself and claims Sixel; Ghostty placeholder support; cell pixel size inside tmux and Zellij; what Kitty and Ghostty do with an ordinary placement when tmux switches windows; verification of the native-Sixel preference and tmux message limits; whether a wrapped Kitty reply returns through tmux to a remote program; under ConPTY, whether Windows Terminal or the console host answers an application's DA1 and OSC 11; which Windows Terminal version first answers OSC 10/11; whether `WriteConsoleInput` can return probe-read typeahead | — |
 | 1. Component move | Section 8: diagram components to `biscuit-visualized`, dependency flip, render-tree hook, consumer imports. No behavior change. | — |
 | 2. Sizing and double encoding | Section 7: render at display size, PNG pass-through fix, background color in `RenderRequest` | 1 |
 | 3. Route model | Route type, resolution order, `BISCUIT_GRAPHICS` and `BISCUIT_GRAPHICS_TRANSPORT`, Windows SSH rule, mintty, Windows Terminal identity, Zellij gating, capability report, stderr hints, housekeeping | 1 |
@@ -626,6 +649,11 @@ graphics, and Windows SSH paths known to strip the query are never probed.
 | 6. Placeholders | Unicode placeholder encoder and its use under tmux for Kitty and Ghostty | 2, 5 |
 | 7. Sixel | Encoder, detection, tmux's own Sixel handling | 2, 3, 4 |
 | 8. Half-blocks | Half-block fallback for plain images | 3 |
+| 9. Human verification checklist | Write `verification.md` in this spec's folder from the "Human verification checklist" section below | 1–8 |
+
+Every phase runs without human interaction. Checks that need a person at a
+real terminal are collected in phase 9's checklist; they happen after the
+plan completes, are not completion criteria, and a failure is fixed forward.
 
 The move comes first so that every later change to diagram behavior is
 written once, in its final package. Phase 1 preserves behavior after consumer
@@ -657,18 +685,15 @@ live queries where there were none, which changes theme selection there.
   artifact-only `biscuit-visualized` does not pull in `biscuit-terminal`, and
   that enabling terminal support introduces no cycle.
 - **L2:** tmux through the shared test harness, with passthrough on and off;
-  Zellij where available; WezTerm. The native Windows query backend through a
+  Zellij when `zellij` 0.45 or later is installed on the host, otherwise the
+  test skips through the harness's normal backend-unavailable path; WezTerm. The native Windows query backend through a
   windowless ConPTY (`xpty`, see the `os` skill), which answers the startup
   DA1 itself and never takes focus.
 - **Native Windows before pushing:** run the Windows backend and route tests
   on `$BUILD_WIN` (`build-win-native`) with `just cross-check <pkg> --os
   windows`, so Windows failures surface locally rather than in the nightly.
-- **Manual, recorded:** iTerm2 (iTerm2 format and no reply leak), Windows SSH
-  server from WezTerm (iTerm2 format renders), Windows Terminal (Sixel and
-  measured background color), SSH from inside a local tmux (wrapped probe),
-  mintty (iTerm2 format), Ghostty under tmux (placeholders survive resize and
-  window switch). Results are kept as dated evidence with terminal and
-  multiplexer versions. These are behavioral checks, not performance spikes.
+- **Human checks** are not run by the plan; they are listed in the next
+  section and written to `verification.md` by phase 9.
 - Use the repository's nextest-backed `just test` / `just test-l2` recipes and
   shared Test Toolkit. Register moved tests in their new test targets and retain
   tier/feature gating. Level 2 terminal windows must never gain focus. Exercise
@@ -676,9 +701,29 @@ live queries where there were none, which changes theme selection there.
   and WSL2 through the normal test scope; distinguish compile evidence from
   live terminal behavior.
 
+## Human verification checklist
+
+Phase 9 writes these to `verification.md`, each with the exact command to
+run, what to look for, and a blank result line for the terminal and
+multiplexer versions. They are behavioral checks, not performance spikes.
+
+| Check | Setup | Pass when |
+| --- | --- | --- |
+| iTerm2 | Local iTerm2, `bt image` and a diagram | Image renders in iTerm2 format; no `Gi=…;OK` junk at the next prompt |
+| Windows SSH server | WezTerm on macOS, `ssh build-win-native`, `bt bar-chart --example` | Chart renders (iTerm2 format), no blank rows |
+| Windows Terminal | Native Windows Terminal, `bt bar-chart --example` | Sixel renders; diagram theme matches the terminal's light/dark background |
+| mintty | Git Bash, `bt image` | Image renders in iTerm2 format |
+| Ghostty under tmux | tmux 3.3+ inside Ghostty, `bt image`, then resize and switch windows | Image follows the pane (placeholders) |
+| Kitty under tmux | Same as above in Kitty | Image follows the pane (placeholders) |
+| WezTerm under tmux | tmux 3.3+ inside WezTerm, `bt image` | Image renders (ordinary placement); documented limits match what is seen |
+| SSH from inside a local tmux | tmux in WezTerm, `ssh build-linux`, `bt image` | Image renders after the wrapped probe, or the hint names `BISCUIT_GRAPHICS_TRANSPORT=tmux` |
+| Zellij 0.45+ | Zellij in WezTerm or Ghostty, `bt image` | Image renders (Kitty, ordinary placement) |
+| Terminal.app | `bt image` and a diagram | Half-blocks for the image, source block for the diagram, no escape garbage |
+
 ## Documentation
 
-- A new `docs/` topic page on how `biscuit-terminal` chooses a graphics route,
+- A new topic page, `biscuit-terminal/docs/discovery/graphics-routes.md`
+  (beside `terminal-queries.md`), on how `biscuit-terminal` chooses a graphics route,
   the route table, `BISCUIT_GRAPHICS` and `BISCUIT_GRAPHICS_TRANSPORT`, the
   TUI escape hatch, what each hint means, and the known
   limits under tmux. Written for a developer new to the repository; it links
@@ -691,7 +736,7 @@ live queries where there were none, which changes theme selection there.
   move to `biscuit-visualized/docs/`, along with
   `docs/data-visualization/` pages that describe them.
 - Both packages' `docs/dependencies.md` for the dependency flip, `icy_sixel`,
-  and `viuer` if removed; both READMEs where they describe what each package
+  and the `viuer` removal; both READMEs where they describe what each package
   does.
 - The `os` skill (`windows-console.md`): Windows OpenSSH's system conhost
   removes APC and DCS sequences and passes OSC; WezTerm ships its own ConPTY.
@@ -750,9 +795,9 @@ unconfirmed.
   alone is correct but undiscoverable; the hint closes that gap.
 - **Rejected:** override only (the review's recommendation); combined format
   values such as `kitty-tmux`; documenting the setup as unsupported.
-- **Contingent on phase 0:** if wrapped replies do not reliably return
-  through tmux, the automatic part is dropped and the override and hint
-  remain.
+- **No contingency needed:** if wrapped replies do not return through tmux,
+  the probe yields unknown and the fallback plus hint apply, so the wrapped
+  probe is always implemented.
 
 ### Native Windows: add a live query backend in this feature
 
@@ -765,6 +810,10 @@ graphics through the shared round trip.
   detects Sixel from Windows Terminal's own DA1 reply instead of guessing from
   `WT_SESSION`. Local runs on `build-win-native` keep the Windows feedback
   loop short.
-- **Rejected:** conservative detection with a process-version check (kept
-  only as a contingency, section 2); assuming Sixel whenever `WT_SESSION`
-  exists.
+- **Windows Terminal Sixel (decided 2026-10-21):** either the DA1 reply
+  containing `4` or a `WindowsTerminal.exe` version of 1.22 or later selects
+  Sixel. Each is positive evidence on its own, and together they work whether
+  the DA1 reply under ConPTY comes from Windows Terminal or the console host,
+  which could not be established without a person at the terminal.
+- **Rejected:** conservative detection without live queries; DA1 alone for
+  Windows Terminal Sixel; assuming Sixel whenever `WT_SESSION` exists.
