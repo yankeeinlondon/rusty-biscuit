@@ -145,6 +145,20 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      write plain scalars or indented block mappings and sequences.",
                 )
         }
+        CompositionError::InlineBaselineUnstampable { path, source } => {
+            let file_link = render_file_link(path);
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "inline baseline not editable"))
+                .body(vec![
+                    Prose::new(format!(
+                        "Inline composition of {file_link} did not start: the inline closure \
+                         could not edit its frontmatter, so it could not record the run's \
+                         result. The prompt was not composed and the file was not changed."
+                    )),
+                    rows(escape_prose_path(&source.to_string())),
+                ])
+                .hint("Fix the frontmatter as described above, then run inline-compose again.")
+        }
         CompositionError::CompletionSchemaFailed {
             source_path,
             problems,

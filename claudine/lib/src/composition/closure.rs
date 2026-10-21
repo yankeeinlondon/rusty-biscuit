@@ -13,7 +13,7 @@ use darkmatter::markdown::hash::{
     Change, FrontmatterDelta, FrontmatterDeltaEntry, MdHashKind, MdHashOptions,
     restore_properties_text,
 };
-use darkmatter::markdown::{Markdown, extract_frontmatter_block};
+use darkmatter::markdown::{Markdown, MarkdownError, extract_frontmatter_block};
 
 use crate::composition::error::CompositionError;
 use crate::composition::types::InlineClosurePlan;
@@ -192,6 +192,32 @@ pub fn reconcile_inline_artifact_with_evidence(
         frontmatter_delta,
         body_cleaned,
     })))
+}
+
+/// Rehearse, on the captured baseline alone, the frontmatter edits an
+/// accepted closure makes: restoring [`CLOSURE_OWNED_PROPERTIES`] from the
+/// baseline and stamping it with [`inline_hash_options`] and
+/// [`Change::Known`]. Every result is discarded; nothing is reconciled or
+/// written.
+///
+/// `Ok` means only that the baseline as captured is editable. It does not
+/// guarantee the closure will succeed: the agent's edits or an external change
+/// can still make the document uneditable, and the closure's own validation
+/// and rollback handle that.
+///
+/// ## Errors
+///
+/// Returns Darkmatter's refusal unchanged, typically
+/// [`MarkdownError::FrontmatterTextEdit`] (for example an indented root
+/// mapping) or [`MarkdownError::MalformedStoredHash`].
+pub(crate) fn rehearse_inline_baseline(
+    original: &str,
+    now: DateTime<Utc>,
+) -> Result<(), MarkdownError> {
+    let restored = restore_properties_text(original, original, CLOSURE_OWNED_PROPERTIES)?;
+    let md: Markdown = restored.text.as_str().into();
+    md.stamp_baseline(&restored.text, &inline_hash_options(), now, Change::Known)?;
+    Ok(())
 }
 
 /// Atomically restore the active document to its pre-run baseline.
