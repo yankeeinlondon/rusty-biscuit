@@ -25,5 +25,5 @@
 
 ### Backlog
 
-- O1 recorded in `claudine/fixes/_unscheduled/handle-indented-frontmatter-follow-ups/spec.md`
+- O1 recorded in `2026-10-21-handle-indented-frontmatter-follow-ups`
 - `review-1.md` frontmatter set: `implemented: true`, `implemented_by: claude/opus`

@@ -1,8 +1,8 @@
 ---
 area: claudine
-status: unscheduled
+status: draft-spec
 created: 2026-10-20
-origin: claudine/fixes/2026-10-20-handle-indented-frontmatter/review-1.md
+origin: 2026-10-20-handle-indented-frontmatter
 packages:
     - darkmatter
 ---
@@ -12,7 +12,7 @@ packages:
 Items still open after the follow-up pass on review 1 of
 `2026-10-20-handle-indented-frontmatter`. The review marked that fix
 production ready with no findings. See
-[review-1.md](../../2026-10-20-handle-indented-frontmatter/review-1.md) for
+[review-1.md](../2026-10-20-handle-indented-frontmatter/review-1.md) for
 the full context.
 
 ## O1: Existing formatting guide incorrectly excludes tab recovery
