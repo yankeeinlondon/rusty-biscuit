@@ -5,6 +5,15 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/plan.md
+docs_created_during_phase_1:
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/implementation-log.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/contracts.md
+  - schematic/features/2026-10-15-schematic-definition-vocabulary/inventory.md
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Schematic definition vocabulary implementation plan
@@ -33,13 +42,13 @@ Waves are numbered uniquely across the plan. Tasks within one wave may run concu
 
 ### Wave 1: Preparation
 
-- [ ] **Refresh contracts**
+- [x] **Refresh contracts**
   - Record each prerequisite outcome and actual symbol/file mapping in `implementation-log.md`; identify absent prerequisites and authorizations. Reconcile proposed names without rewriting the specification.
   - Record the credential-source ruling or its blocked status. Inventory supported output diagnostics and establish a requirement-to-evidence ledger for R1–R14.
   - Complete the input matrix for all load-bearing inherited `RestApi`, endpoint, parameter, auth/mapping, schema, and model-catalog fields reachable through the bundle. State absence/null/empty behavior individually; do not infer safety from serde derives.
   - Own the log and contract ledger. This task may run alongside the following read-only inventory, but mutation waits for the checkpoint.
 
-- [ ] **Capture baseline**
+- [x] **Capture baseline**
   - Regenerate Rust, OpenAPI, and Postman into isolated temporary directories using the landed generator and prove byte equality with committed outputs before modifying code. Record exact command forms, tree identity, registry/API counts, and results; resolve existing drift first.
   - Preserve 4a's original bare-definition snapshots. Prepare a narrow comparison normalization for newly defaulted fields, removed unused `env_username`, and equivalent Basic representations. Keep a deliberate description mutation that must fail the comparison. New bundle fixtures are separate artifacts.
   - Inventory every affected generated request and caller: constructors, literals, setters, enum assignments, `Default::default()`, and `..Default::default()`. Include pager ownership when identifying required fields and list repository call sites, not just totals.
