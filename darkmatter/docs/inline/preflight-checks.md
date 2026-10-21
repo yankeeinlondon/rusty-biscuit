@@ -513,7 +513,7 @@ side:
 | --- | --- |
 | no block | `MissingValue` |
 | `::block when="x"`, `when="x != null"`, `when="file_exists(x)"`, `when="is_string(x)"`, `when="a && x"` | waits for the command |
-| `::block when="!x"`, `when="is_null(x)"`, `when="x \|\| y"`, `when="x.a"` | `MissingValue` |
+| `::block when="!x"`, `when="is_null(x)"`, `when="x != ''"`, `when="x \|\| y"`, `when="x.a"` | `MissingValue` |
 
 A schema declaring the property required does not excuse a missing value, and
 `when="x"` does not excuse a missing `y` in `tool {{ x }} {{ y }}` or a read

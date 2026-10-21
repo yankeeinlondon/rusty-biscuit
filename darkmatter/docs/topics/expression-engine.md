@@ -18,3 +18,5 @@ Let's start with a few simple examples of how you might leverage the expression 
 ### Type Aware Parsing
 
 One important attribute of Darkmatter's expression engine is that it is _type aware_ and can not only know what type a variable was when it was first defined but also has the ability to understand when a union type has been "narrowed" because a guard such as `::block when="is_string(x)"` encloses the place it is read. See [What a Guard Proves](./darkmatter-expressions.md#what-a-guard-proves).
+
+Equality takes part in that narrowing. `==` and `!=` are strict: they compare evaluated values by runtime type and value, and a missing value is `null`, which equals only `null`. So `::block when="x != null"` proves `x` is present inside the block, `::block when="x == 'debug'"` narrows `x` to that string, and `::block when="x != ''"` proves nothing about presence, because a missing `x` is `null` and `null != ''` holds. The analysis reads the guard without running it, using the same comparison the evaluator uses. See [Equality and Inequality](./darkmatter-expressions.md#equality-and-inequality).

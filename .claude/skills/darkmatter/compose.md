@@ -733,7 +733,9 @@ Uses first truthy value, or the fallback.
 - `>=` - greater than or equal
 - `<` - less than
 
-Numeric strings auto-convert for comparisons.
+`==`/`!=` are strict (same runtime type and value; `5 == "5"` is false, a
+missing value equals only `null`). The ordering operators convert numeric
+strings to numbers.
 
 ### Helper Functions
 

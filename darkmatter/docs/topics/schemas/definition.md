@@ -2593,7 +2593,7 @@ outside the relation.
 | an always-text type: `string`, `date`, `datetime`, `time`, `file`, `enum(…)`, `url`, `email`, `yaml`, `json`, `expression`, `alphanumeric(…)`, `shell`, or a string `literal(…)` | `string` | yes |
 | a `literal(…)` | its own scalar family: `string`, `number`, or `boolean` | yes |
 | a string `literal(v)` | an `enum(…)` that has `v` as a member | yes |
-| a number or boolean `literal(…)` | any `enum(…)` | no, even when `==` would compare them equal |
+| a number or boolean `literal(…)` | any `enum(…)` | no |
 | `enum(X)` | `enum(Y)` | yes when X's members are a subset of Y's |
 | a union (not an array of one) | any type | yes when every arm is a subtype of it |
 | any type | a union (not an array of one) | yes when one arm covers it, whatever the arm order |

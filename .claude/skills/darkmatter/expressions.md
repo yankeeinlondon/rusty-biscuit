@@ -83,7 +83,8 @@ from `EffectiveSchema.simplified`, static frontmatter, and host roots or a
 `BindingView`) refined by guards. `TypeScope::assume(&Expr, Polarity)` is the
 only fact producer. It handles `!`, parentheses, `and`/`or`/`||` (lowered to
 `FunctionCall`/`Fallback`, matched through the registry), ternaries,
-`==`/`!=` by `scalar_string` text with the both-null rule, and the predicate
+`==`/`!=` by strict typed equality (`Shape::equal_to`/`differs_from`, and
+`finite_values` for subject-to-subject), and the predicate
 facts in `scope/facts.rs::PREDICATE_FACTS`, which a unit test keeps
 registry-backed. `invalidate(&WriteSet)` (`WriteSet::destination` for a
 `set` path) and `TypeScope::join` keep facts from leaking past writes or
@@ -104,8 +105,12 @@ same routing as `walk_static`); DMLS hover uses it. Never add another guard walk
 unlisted `TypeScope::unguarded` site, a stale allowlist entry, or a retired
 classifier; the site × guard-case matrix is `lib/tests/l1/scope_site_conformance.rs`
 over `lib/tests/common/type_scope_cases.rs`. Equality follows the evaluator:
-a missing operand compares as `''`, so `x == null` proves nothing and
-`x == ''`'s *false* side proves presence. User docs:
+both use `expression/equality.rs::values_equal` (same runtime type and value,
+exact numeric value across `i64`/`u64`/`f64`, recursive containers, a missing
+key differs from a `null` entry). A missing operand is `null`, which equals
+only `null`, so `x != null` proves presence and `x != ''` does not. Never
+compare `Value`s with `==` or through rendered text for an expression
+`==`/`!=`; ordering (`<`, `>=`, …) still coerces to numbers. User docs:
 [What a Guard Proves](../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
 
 Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding

@@ -177,11 +177,13 @@ warning. DMLS warns on statically nullable unguarded targets without executing
 the expression; unsupported expression or schema shapes remain unknown rather
 than being guessed nullable or safe. Any enclosing `when` that proves the
 target's property present on its true side counts as its guard (`log`,
-`log != null`, `log != ''`, `is_string(log)`, `!is_null(log)`,
+`log != null`, `log == 'main.md'`, `is_string(log)`, `!is_null(log)`,
 `file_exists(log)` and their aliases, or a conjunction holding one), by the
 same rules that excuse a missing shell placeholder (see
 [Guarded values](../inline/preflight-checks.md#guarded-values)); `!log`,
-`log || other`, and a guard on a member such as `log.path` do not.
+`log || other`, `log != ''`, and a guard on a member such as `log.path` do
+not. A missing `log` is `null`, and `null != ''` is true, so `log != ''` lets
+a missing value through.
 
 ## Operator Precedence
 
@@ -226,8 +228,9 @@ This makes `||` a true fallback operator: `a || b` evaluates to `a` when `a`
 is truthy, and `b` otherwise.
 
 Note that the string `"false"` is still truthy — it is a non-empty string.
-Prefer explicit comparisons (`flag == 'true'`) when working with stringly-typed
-flags.
+Equality is strict, so a boolean flag compares with `flag == true`; a
+stringly-typed flag needs `flag == 'true'`, and the two forms are not
+interchangeable (see [Equality and Inequality](#equality-and-inequality)).
 
 ## What a Guard Proves
 
@@ -283,18 +286,21 @@ false side (an `else`, a ternary's second branch, or `!` around it):
 | `is_null(x)` | `x` is missing | `x` is present |
 | `is_empty(x)` | nothing | `x` is present |
 | `file_exists(x)` | `x` is a present string | nothing |
-| `x == 'debug'` | `x` is present with that text; an enum narrows to that member | `x` is not that member |
-| `x != ''`, `x != null` | `x` is present | nothing |
-| `x == ''` | nothing (a missing `x` compares as `''`) | `x` is present |
-| `x == y` | `x` can only be one of `y`'s possible values, when `y`'s type lists them (an enum or literals) | nothing, unless `y` has a single possible value |
-| `<`, `>`, `<=`, `>=`, a comparison with `[]` or `{}`, any other function | nothing | nothing |
+| `x == null` | `x` is missing | `x` is present |
+| `x != null` | `x` is present | `x` is missing |
+| `x == 'debug'`, `x == 5`, `x == true` | `x` is present and equals that literal; an enum narrows to that member, and alternatives of another type are dropped | `x` is not that value (it may still be missing) |
+| `x != 'debug'`, `x != ''` | `x` is not that value (it may still be missing) | `x` is present and equals that literal |
+| `x == y` | `x` can only strictly equal one of `y`'s possible values, when `y`'s type lists them (an enum, literals, `boolean`, or `null`) | nothing, unless `y` has a single possible value |
+| `x == []`, `x == {…}` | `x` is present and is an array (or an object); its elements are not pinned | nothing |
+| `<`, `>`, `<=`, `>=`, `!=` against `[]` or `{}`, any other function | nothing | nothing |
 
 Predicate aliases (`isString`, `fileExists`) and case resolve to the same
-function and prove the same facts. Equality follows the evaluator exactly
-(see [Equality and Inequality](#equality-and-inequality)): both comparisons are
-false when both sides are missing, and a missing value compares as empty text.
-That is why `x == null` proves nothing useful and `is_null(x)` is the presence
-check.
+function and prove the same facts. Reversed operands (`'' != x`) prove the
+same facts as `x != ''`. Equality follows the evaluator exactly (see
+[Equality and Inequality](#equality-and-inequality)): a missing value is
+`null`, `null` equals only `null`, and a value of one type never equals a
+value of another. That is why `x != null` (or `!is_null(x)`) is the presence
+check and `x != ''` is not: a missing `x` is `null`, which differs from `''`.
 
 A fact is about one **stable subject**: a variable, or a path with constant
 members and indices (`x`, `fm.x`, `x.a`, `items[0]`). `x` and `fm.x` share a
@@ -572,7 +578,10 @@ All six comparisons are supported: `==`, `!=`, `>`, `>=`, `<`, `<=`.
 
 ### Equality and Inequality
 
-`==` and `!=` compare scalar string representations.
+`==` and `!=` are **strict**: two values are equal only when they have the
+same runtime type and the same value. The runtime types are null, boolean,
+number, string, array, and object; a schema type such as `email` or `date` is
+a string at runtime. `!=` is always the exact opposite of `==`.
 
 ```md
 ::block when="stage == 'draft'"
@@ -582,20 +591,65 @@ Draft-only content
 ::file ./public.md when="audience != 'internal'"
 ```
 
-Edge cases:
+| Expression | Result | Why |
+| --- | --- | --- |
+| `5 == "5"`, `true == "true"` | `false` | a number or boolean never equals a string |
+| `0 == false`, `[] == {}` | `false` | different runtime types |
+| `[] == '[]'` | `false` | a container never equals its JSON text |
+| `5 == 5.0` | `true` | one number type; integer and decimal spellings of the same value are equal |
+| `'A' == 'a'`, `' a ' == 'a'` | `false` | strings compare exactly: no case folding, trimming, or Unicode normalization |
+| `null == null` | `true` | `null` equals itself |
+| `null == ''`, `'' == null` | `false` | `null` equals nothing else |
+| `[1, null] == [1.0, null]` | `true` | arrays: same length, equal elements in order |
+| `[1, 2] == [2, 1]` | `false` | order matters in arrays |
+| `{a: 1, b: null} == {b: null, a: 1.0}` | `true` | objects: same keys and equal values; key order is ignored |
+| `{a: null} == {}` | `false` | a missing key is not a key holding `null` |
 
-- if both sides are missing, `a == b` is false
-- if both sides are missing, `a != b` is also false
-- if only one side is missing, it compares as empty text: `missing == ''` is
-  true, `missing == 'x'` is false, and `missing != 'x'` is true
-- `x == null` therefore holds only for a present `x` with empty text (such as
-  `""`), and `x != null` only for a present `x` with nonempty text; a missing
-  `x` makes both false. Use `is_null(x)` or `!is_null(x)` to ask about presence
-- arrays and objects compare by their JSON text, so `[] == '[]'` is true
+Rules:
+
+- **Missing values are `null`.** A property that is absent, or present with
+  `null`, compares as `null`: `missing == null` is true, and `missing == ''`
+  and `missing == 'x'` are false.
+- **Numbers compare by exact value**, with no tolerance. Large integers are
+  compared without rounding through floating point, so the distinct values
+  `9007199254740992` and `9007199254740993` stay unequal when supplied as
+  typed values, and `0 == -0` is true.
+- **Containers compare recursively** with these same rules.
+- **Schema coercion still applies first.** A value whose schema declares it a
+  `number` is coerced before any comparison runs, so a quoted `phase: "3"`
+  under `phase: number` equals `3`. An undeclared `"3"` stays a string and
+  does not.
+- **Errors are not inequality.** A failed operand (a malformed expression,
+  a failed function call, an unavailable host binding) fails the expression;
+  it never becomes `null` or an unequal comparison.
+
+Choose the check by what you mean:
+
+| Intended check | Expression |
+| --- | --- |
+| missing or `null` | `x == null`, `is_null(x)` |
+| present, including empty values | `x != null`, `!is_null(x)` |
+| exactly the empty string | `x == ''` |
+| missing or the empty string | `is_null(x) \|\| x == ''` |
+| present and not the empty string | `x != null && x != ''` |
+| `null`, or an empty string, array, or object | `is_empty(x)` |
+| none of those | `!is_empty(x)` |
+
+Convert explicitly when the types differ on purpose:
+
+```md
+{{ 5 == number("5") }}          ⇒ true    <!-- numeric comparison against text -->
+{{ ('' + x) == ('' + y) }}      ⇒ compares rendered text; null renders as ""
+```
+
+The rendered-text form makes `null` and `""` equal again for that site only;
+it does not make two missing values unequal.
 
 ### Numeric Comparisons
 
-For `>`, `>=`, `<`, and `<=`, both sides are coerced to numbers.
+For `>`, `>=`, `<`, and `<=`, both sides are coerced to numbers. Ordering is
+not strict the way equality is: `5 <= "5"` and `5 >= "5"` both hold, while
+`5 == "5"` is false.
 
 - numbers stay numbers
 - numeric strings are parsed

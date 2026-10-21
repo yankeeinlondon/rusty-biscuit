@@ -86,11 +86,12 @@ approval rather than disappearing and later revealing unapproved content.
         - `round(property, default = 0)`
             - rounds a number up or down to an integer value
             - non-numeric properties are converted to the "default" value
-    - any numeric comparison where one or both of the values _can not_ be converted into a numeric quantity resolve to a `false` outcome
-    - NOTE: if a string value of "6" is used in a numeric comparison we will automatically convert it to the number 6 for the comparison.
+    - `==` and `!=` are strict: values are equal only when they have the same type and value, so `5 == "5"` is false and a missing value equals only `null`
+    - the ordering operators (`>`, `>=`, `<`, `<=`) convert both sides to numbers, so a string value of "6" compares as the number 6 there; non-numeric values become `0`
+    - convert explicitly to compare a number with text by equality: `count == number(limit)`
 
       ```md
-      Bob's favorite color is {{ color || blue == "blue" ? blue (how original) : nice choice! }}
+      Bob's favorite color is {{ (color || "blue") == "blue" ? "blue (how original)" : "nice choice!" }}
       ```
 
 - **Context Variables**

@@ -42,7 +42,7 @@ The body is CommonMark + GFM augmented with Darkmatter directives. Every line th
 | Environment     | `{{ env.HOME }}`                   | Reads `std::env`.                                                                                                                                                                 |
 | Fallback chain  | `{{ a \|\| b \|\| "default" }}`        | First truthy value wins.                                                                                                                                                          |
 | Ternary         | `{{ active ? "on" : "off" }}`      | Uses condition truthiness rules.                                                                                                                                                  |
-| Comparison      | `{{ count > 0 ? "has" : "none" }}` | Operators `==`, `!=`, `>`, `>=`, `<`, `<=`. Numeric strings auto-coerce.                                                                                                          |
+| Comparison      | `{{ count > 0 ? "has" : "none" }}` | Operators `==`, `!=`, `>`, `>=`, `<`, `<=`. `==`/`!=` are strict (`5 == "5"` is false); ordering coerces numeric strings.                                                         |
 | Helpers         | `{{ length(items) }}`              | `length`, `number(x, default)`, `round(x, default)`.                                                                                                                              |
 
 Inline code spans (single backticks) are interpolated by default. Fenced/indented code blocks are skipped unless `interpolate_code_blocks: true`.
