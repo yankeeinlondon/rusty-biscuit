@@ -1,3 +1,30 @@
+---
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the clarify.md prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+reviewed: true
+reviewed_by: "codex/gpt-6.1-sol"
+reviewed_on: "2026-10-20"
+review_iterations: 0
+---
+
 # Graphics Where Possible
 
 People using `biscuit-terminal` and `biscuit-visualized` should see graphics
@@ -112,25 +139,27 @@ as Sixel, which suggests our PNG encoding uses fast, low-compression settings.
 
 ## Goals
 
-Each supported setup has one testable outcome:
+Each supported setup has one testable outcome. Under tmux, a positively
+established native Sixel path takes precedence over the passthrough cases
+below; this keeps images attached to the pane.
 
 | Setup | Outcome |
 | --- | --- |
 | Direct, local terminal | Unchanged from today |
-| Zellij 0.45+ | Kitty, ordinary placement; never the iTerm2 format |
+| Zellij 0.45+, graphics enabled and a working host path | Kitty after a successful pane query, ordinary placement; never the iTerm2 format |
 | Zellij before 0.45, or Kitty support disabled | Sixel if Zellij reports it, otherwise fallback |
 | WezTerm multiplexer domain | Unchanged from today (works) |
 | tmux, Kitty or Ghostty outside, passthrough on | Kitty with Unicode placeholders; images follow the pane |
 | tmux, WezTerm outside, passthrough on | Kitty through passthrough, ordinary placement |
 | tmux, iTerm2 outside, passthrough on | iTerm2 format through passthrough |
 | tmux built with Sixel, Sixel-capable outside | Sixel handled by tmux itself |
-| tmux, passthrough off | Fallback, plus a hint naming `set -g allow-passthrough on` |
-| SSH from a capable terminal, no forwarded hints | Graphics, via the probe |
+| tmux, passthrough off | Native Sixel when positively supported; otherwise fallback plus a hint naming `set -g allow-passthrough on` |
+| SSH from a capable terminal, no forwarded hints | Graphics when a safe probe verifies a usable format; otherwise fallback with an unknown-route reason |
 | SSH into a Windows server (system conhost) | iTerm2 format when the outer terminal is on the iTerm2 list; otherwise fallback. Never Kitty or Sixel. |
 | mintty | iTerm2 format |
-| Windows Terminal | Sixel |
-| Terminal.app, Alacritty, VTE terminals, conhost | Fallback |
-| Any setup, `BISCUIT_GRAPHICS` set | Exactly the forced format, or none |
+| Windows Terminal with Sixel support established | Sixel; `WT_SESSION` alone does not establish version support |
+| Terminals without a supported pixel format, including Terminal.app and system conhost | Diagram source or the plain-image text fallback; no graphics probe to known incompatible terminals |
+| Any setup, valid `BISCUIT_GRAPHICS` set | Selected format or disabled graphics, subject to output policy and a usable transport; never silently substitute another pixel format |
 
 ## Non-goals
 
@@ -162,10 +191,18 @@ without any diagram involved (biscuit-icon, claudine, darkmatter), and because
 sending pixels depends on the route (the placeholder grid needs tmux's outer
 terminal; the Windows SSH rule changes the format).
 
-**The dependency direction flips:** `biscuit-visualized` depends on
-`biscuit-terminal`, and `biscuit-terminal` drops `biscuit-visualized` and
-`resvg`. Packages that depend on `biscuit-terminal` stop compiling the Mermaid
-renderer unless they use diagrams.
+**The dependency direction flips:** `biscuit-visualized` optionally depends on
+`biscuit-terminal`, and `biscuit-terminal` drops `biscuit-visualized` but retains
+optional `resvg` for plain SVG images and graphical rules. Packages that depend
+on `biscuit-terminal` stop compiling the Mermaid renderer unless they use
+diagrams.
+
+> **Reader's note:** removing `resvg` as originally proposed would also remove
+> unrelated SVG behavior. The terminal package's
+> [SVG image loader](../../lib/src/components/terminal_image/mod.rs) and
+> [graphical rules](../../lib/src/components/horizontal_rule/mod.rs) use it
+> directly. Keeping that dependency preserves these public features while the
+> expensive diagram dependency moves to its actual consumers.
 
 ```mermaid
 flowchart LR
@@ -190,24 +227,34 @@ reach a renderer. A route records:
 - **confidence**: forced, verified by probe, known terminal, or unknown
 - **reason**: a human-readable explanation, including the fix when one exists
 
-`ImageSupport` and `image_support()` remain as a projection of the route so
-existing callers keep working. `TerminalImage` consumes the route, and the
-diagram components read it to choose what to show; CLIs never make format
+The terminal package's
+[`ImageSupport` and `image_support()`](../../lib/src/discovery/detection/image.rs),
+which expose supported pixel formats, become projections of the route. Add a
+`Sixel` variant and update exhaustive matches, serialization tests, and JSON
+consumers together. This is an intentional source-level API change; mapping
+Sixel to `None` would tell consumers to suppress a working image route.
+Half-blocks remain a text fallback and do not count as image-protocol support.
+The route is authoritative: update the public capability field and render-tree
+snapshot together, including caller-supplied terminal snapshots. Do not resolve
+from the environment again for every image. `TerminalImage` consumes the route,
+and diagram components read it to choose what to show; CLIs never make format
 decisions.
 
-Resolution order:
+Resolution order (the diagram shows automatic capability discovery; output
+policy and usable transport still constrain a forced format):
 
 ```mermaid
 flowchart TD
     A[stdout is a terminal?] -->|no| N[none]
     A -->|yes| O{BISCUIT_GRAPHICS set?}
     O -->|kitty, iterm2, sixel, none| F[forced route]
+    O -->|invalid| N
     O -->|unset or auto| W{Windows and SSH_CONNECTION?}
     W -->|yes| WI{outer terminal on iTerm2 list?}
     WI -->|yes| I2[iTerm2 format, direct]
     WI -->|no| N
     W -->|no| M{multiplexer}
-    M -->|Zellij| Z[Kitty if 0.45+, else Sixel probe, else none]
+    M -->|Zellij| Z[Pane query verifies Kitty or Sixel, else none]
     M -->|tmux| T[tmux route, section 3]
     M -->|none| K{known terminal from env or LC_TERMINAL?}
     K -->|yes| KT[known route]
@@ -221,31 +268,100 @@ reliably, not everything it advertises.
 | --- | --- |
 | Kitty, Ghostty, WezTerm, Warp, Konsole, wast | Kitty |
 | iTerm2, mintty, cterm | iTerm2 format |
-| Windows Terminal (`WT_SESSION`) | Sixel |
+| Windows Terminal (`WT_SESSION`) | Sixel only with a verified capability or a known supporting version |
 | Terminal.app | none |
 
 The **iTerm2 list** used by the Windows SSH rule and tmux is: iTerm2,
 WezTerm, Konsole, mintty, cterm. The iTerm2 format is chosen only by terminal
-identity, never by probe, because no reliable query exists for it.
+identity, never by a generic graphics probe, because no reliable query exists
+for it. These terminal names describe candidate formats; a blocked transport
+still rules them out. Generic `xterm-256color`, a local `WT_SESSION` inherited
+by a remote shell, and a multiplexer server's old environment do not prove the
+identity of the active outer terminal. On conflicts, current client information
+wins over inherited hints; if it remains ambiguous, use a safe probe or fallback.
+
+#### Overrides and existing graphics policy
+
+`BISCUIT_GRAPHICS` accepts exactly `auto`, `kitty`, `iterm2`, `sixel`, or
+`none` (lowercase). Unset and `auto` use detection. An invalid value selects no
+pixel route and records the accepted values in the reason; `bt` reports a
+configuration error instead of silently selecting a different format.
+
+A forced format skips format probing and terminal-identity preferences, but
+still uses detected tmux wrapping and format-appropriate placement. It does
+not enable tmux passthrough, lift a known message-size limit, or promise that
+an incompatible endpoint will render it. Known impossible transports return
+no pixel route with the requested format recorded in the reason. Thus forced
+Kitty can test a newer Windows console, once that transport is explicitly known
+to pass APC, without changing the default for the measured system conhost.
+
+Existing rendering policy remains a ceiling. In the shared `renderable`
+package, [`GraphicsMode`](../../../renderable/src/tree/mod.rs) controls whether
+raster output is allowed, and `TerminalMermaidMode` independently opts Mermaid
+fences into diagrams. `Off` permits text descriptions/source only; `Vector`
+does not permit Sixel, Kitty, iTerm2, or raster-derived half-blocks. `Rich`
+permits graphics but does not automatically promote Mermaid fences.
+`BISCUIT_GRAPHICS=none` disables pixel protocols and half-blocks, leaving alt
+text or source. The terminal renderer's existing
+[`force_graphics`](../../lib/src/render_tree/options.rs) capability override
+continues to work when the environment selection is `auto`; it cannot override
+an explicit `none`, a lower fidelity ceiling, nonterminal stdout, or a blocked
+transport. Rendering into a pipe never sends graphics controls or live queries.
+
+A route describes capabilities, not every image's success. Distinguish no
+support, unknown/probe unavailable, user-disabled graphics, blocked transport,
+and invalid input. Only name a configuration fix when its blocker was actually
+observed; do not suggest enabling passthrough for every failed probe.
 
 ### 2. Probe, only when the environment cannot decide
 
-The probe runs only when the route is otherwise unknown: SSH sessions with no
-recognizable terminal, `TERM_PROGRAM=tmux` with no identifiable outer
-terminal, or an unrecognized local terminal. Known terminals are never probed,
-so the earlier Ghostty reply leak cannot return.
+The probe runs when environment and route information cannot decide, including
+an unknown SSH endpoint or Zellij whose active graphics configuration is unknown.
+Known compatible direct terminals keep their current path without a probe.
+Known incompatible terminals, CI, redirected stdout, explicitly disabled
+graphics, and Windows SSH paths known to strip the query are never probed.
 
-- Sends a Kitty query (`a=q`, fresh nonzero ID) followed by DA1 (`ESC [ c`)
-  through the existing query engine (`discovery/osc_queries`). Kitty `OK`
-  before the DA1 reply means Kitty; a `4` in the DA1 reply means Sixel.
-- Runs only when stdout is a terminal and `biscuit-terminal` owns the input;
-  never inside a running TUI event loop and never inside a synchronized
-  output (mode 2026) block, because WezTerm holds replies there with no
-  timeout.
-- Under tmux, the probe is wrapped for passthrough like any other output.
-- The result is cached per process.
-- **Never selects Kitty for iTerm2.** If `LC_TERMINAL=iTerm2` or another
-  iTerm2 hint is present, the iTerm2 format wins over a Kitty `OK`.
+- Use a valid one-pixel Kitty query (`a=q`, direct data, fresh nonzero image
+  ID, dimensions and pixel format matching its payload). Accept only a complete
+  `OK` response with that ID; a rejection is distinct from silence. See the
+  [Kitty query contract](https://sw.kovidgoyal.net/kitty/graphics-protocol/#querying-support-and-available-transmission-mediums).
+- Parse DA1 structurally: Sixel is parameter `4` in a primary device-attributes
+  reply, not the digit `4` anywhere in the input. Prefer a correlated Kitty
+  success over Sixel when both are usable, subject to the tmux rule below.
+- Use the terminal package's existing
+  [query transport](../../lib/src/discovery/tty_query.rs) for locking, raw-mode
+  restoration, bounded reads, deadlines, and silence budgets. Write queries
+  through the controlling terminal, never through captured stdout. Query only
+  when that terminal is the output endpoint and the caller owns input; never
+  from rendering a component, a running TUI event loop, or a synchronized
+  output block (mode 2026). A TUI supplies a previously resolved route.
+- The existing engine is Unix-only, discards typeahead, strips the DA1 reply
+  before returning, and appends an unwrapped DA1. It cannot be reused unchanged:
+  graphics discovery needs structured query and DA1 results and a caller-chosen
+  transport for **both** requests. Preserve existing color/cursor behavior;
+  extending graphics probing does not enable every other probe inside a mux.
+- Through tmux, send the query and its ordering sentinel through the same
+  passthrough route. A DA1 answered by tmux can establish tmux-native Sixel;
+  it cannot order an outer Kitty response. Keep native and outer results
+  separate. Lost or out-of-order responses end at the existing deadline and
+  yield unknown rather than a confident negative. Wrap no request twice.
+- Cache stable probe results per process and output route, not globally across
+  different transports or caller-supplied terminal snapshots. Skipping because
+  input is busy is not a permanent negative capability result. Cell geometry
+  is refreshed for each render and is not part of this capability cache.
+- **Never automatically selects Kitty for iTerm2.** Reliable iTerm2 hints
+  select its native format before probing. Ordinary Kitty transfers use quiet
+  mode and nonzero IDs; probing owns and consumes its correlated replies.
+- Native Windows currently has no live-query backend. It uses verified version
+  information or known terminal hints, then text fallback when insufficient;
+  `WT_SESSION` alone is insufficient. A native Windows probe is an author
+  decision in Open questions, not an implicit Unix API port.
+
+> **Reader's note:** this intentionally broadens the current environment-only
+> graphics detection contract, which avoids probes because of visible query
+> leakage and replies reaching the shell. The new path must remain bounded and
+> input-owned. Safe handling of unrelated input is unresolved below; the new
+> automatic probe must not be enabled until that decision is implemented.
 
 ### 3. tmux
 
@@ -253,7 +369,15 @@ so the earlier Ghostty reply leak cannot return.
   (`tmux show-options -Apv -t "$TMUX_PANE" allow-passthrough`).
 - **Identify the outer terminal** from the attached client
   (`#{client_termname}`, `#{client_termtype}`) or `tmux show-environment`.
-  Without socket access (for example across SSH), fall back to the probe.
+  Query the client associated with the target pane; a server can have clients
+  using different terminal applications. Do not choose an arbitrary attached
+  client or assume the server's startup environment is current. If clients
+  disagree, use a format all relevant clients can handle or fallback.
+  Without socket access, use a safe probe only when the transport is known;
+  absent `TMUX` across SSH does not establish that the path is direct.
+  Run read-only tmux commands without shell interpolation, with a deadline.
+  A missing executable, inaccessible socket, unsupported option, or command
+  failure produces unknown, not passthrough-off.
 - **Wrap** each complete escape sequence as
   `ESC P tmux; <sequence with every ESC doubled> ESC \`. Each Kitty chunk is
   wrapped separately.
@@ -263,33 +387,64 @@ so the earlier Ghostty reply leak cannot return.
       image ID in the foreground color, row/column combining marks) as
       ordinary text through tmux. Used only when the outer terminal is
       positively identified; Zellij rejects `U=1` and WezTerm ignores it.
+      Require Unicode and the color fidelity needed to encode image IDs;
+      otherwise use ordinary placement with its documented limits. Allocate
+      distinct nonzero image IDs for live uploads, and reset placeholder colors
+      after the grid so subsequent text is unaffected.
     - WezTerm or unidentified outside: ordinary placement through
       passthrough. Known limits (drift on resize, window switch, copy mode)
       are documented.
     - iTerm2 outside: iTerm2 format through passthrough.
 - **Sixel handled by tmux itself:** when tmux was built with Sixel support
   and the outer terminal handles Sixel, prefer Sixel unwrapped, since tmux then
-  redraws it with the pane. The selection rule between this and Kitty
-  passthrough is settled in phase 0.
+  redraws it with the pane. Prefer this native Sixel route over passthrough
+  when it is positively established for the pane and endpoint, even if Kitty
+  is also available. Otherwise prefer the reliable Kitty/iTerm2 route. A build
+  feature alone or a DA1 answer from the outer terminal is insufficient to
+  prove tmux's native Sixel path.
 - Mode 2026 is never wrapped for passthrough; tmux handles it itself.
-- Passthrough off: fallback, and the hint names the setting.
+- Passthrough off blocks tunneled graphics, not native Sixel. Use native
+  Sixel if established; otherwise fallback and name the setting.
+- Before emitting an iTerm2 message, account for base64 expansion, metadata,
+  ESC doubling, and the tmux envelope against the known parser limit. Where
+  the installed tmux limit cannot be read, use the conservative 1 MiB limit
+  for supported modern tmux; unverified older parsers use fallback. An oversized
+  image falls back with a size-limit reason before reserving rows. Never split
+  a legacy `File=` message into arbitrary OSC messages. Multipart remains out
+  of scope; see [iTerm2's framing and limits](https://iterm2.com/documentation-images.html).
 
 ### 4. Zellij
 
-- Kitty with ordinary placements only, for Zellij 0.45 and later. Never
-  placeholders, never the iTerm2 format.
-- Earlier versions or Kitty support disabled: Sixel if the probe reports it,
-  otherwise fallback.
+- Kitty with ordinary placements only. Version 0.45+ establishes eligibility,
+  not enablement: query the pane endpoint to establish active Kitty support.
+  Never infer it from an inherited outer `TERM_PROGRAM`; never use tmux wrapping,
+  placeholders, or the iTerm2 format.
+- Earlier versions, unknown versions, or Kitty disabled: use a positive Sixel
+  reply when available, otherwise fallback. Do not inspect a local config file
+  as proof of the running server's state. Zellij's
+  [graphics option](https://zellij.dev/documentation/options.html#support_kitty_graphics_protocol)
+  depends on the host and requires a restart after changes.
+- A query success does not establish that Zellij knows its host's cell size.
+  Missing geometry or a placement failure gets a distinct reason and fallback;
+  the library's estimated cell size does not fix Zellij's internal measurement.
 
 ### 5. Sixel
 
 - Encoder: `icy_sixel`, no cargo feature flag.
-- Detection: `4` in the DA1 reply; `WT_SESSION` for Windows Terminal.
+- Detection: parameter `4` in a DA1 reply from the relevant renderer, or
+  verified version support for Windows Terminal. `WT_SESSION` identifies the
+  application, not the Sixel capability of every installed version.
 - Sized by the rule in section 7. Sixel has no partial transparency:
   diagrams are rendered opaque on the terminal's background by
   `biscuit-visualized`; plain images are composited against that background
-  by `TerminalImage`.
-- Never sent into a Windows SSH session.
+  by `TerminalImage`. If the measured background is unavailable, use the
+  existing light/dark theme's opaque background and expose that estimate in
+  diagnostics. Quantization uses a bounded palette and deterministic settings;
+  crisp diagrams should not gain dithering noise by default.
+- Preserve terminal mode state. Do not leave scrolling or palette-related
+  private modes changed after an image; use the existing cursor ownership rules
+  and test output at the bottom of the viewport.
+- Never selected automatically for the measured Windows SSH system-conhost path.
 
 ### 6. Fallback and hints
 
@@ -299,60 +454,117 @@ so the earlier Ghostty reply leak cannot return.
   source without touching `biscuit-terminal`.
 - **Plain images** (`bt image`, `TerminalImage`) render as half-blocks
   (`▀` with truecolor foreground and background), degrading to alt text (the
-  file name) without truecolor.
+  file name) without truecolor or Unicode support. Explicit alt text wins over
+  the file name. Sanitize descriptions and file names as literal text so they
+  cannot inject terminal controls. With nonterminal stdout, output a plain text
+  description and never color blocks.
 - **Hint:** when the route's reason has a fix, the `bt` CLI writes one line
-  to stderr, only when stderr is a terminal. The library never writes hints
-  into rendered output.
+  to stderr, only when stderr is a terminal, at most once per distinct reason
+  per command invocation. The library returns structured reasons without
+  writing hints as a side effect. JSON output stays parseable and includes the
+  reason as data, not a diagnostic mixed into stdout.
 - The capability report (`bt` with no arguments, `--json`) shows the route
-  and its reason, not just `Images: None`.
+  and its reason, not just `Images: None`; retain the existing image-support
+  field while adding the route fields.
+- Resolve/load/encode before reserving rows or emitting image bytes. Once a
+  write partially succeeds, return the I/O failure; do not append another pixel
+  format to an incomplete control sequence. A valid image with no usable route
+  gets fallback; invalid paths, policy violations, and corrupt images remain
+  errors under existing error/strictness rules. Preserve the terminal package's
+  image access policy and the shared render tree's existing placeholder style.
+  The new plain-image half-block default does not bypass those explicit policies.
 
 ### 7. Sizing and the double-encoding fix
 
 - **Render at the final display size.** The layout decides an image's width
   (a percentage, a character count, natural width, margins; rarely the full
   terminal width). Diagrams are rasterized at exactly that width in pixels
-  (`RenderRequest::target_width`), with the height rounded to whole rows,
-  rather than rendered at another size and resampled. Placeholders and Sixel
-  depend on the exact cell rectangle.
+  (the visualized package's
+  [`RenderRequest::target_width`](../../../biscuit-visualized/src/src/artifact.rs)).
+  Preserve aspect ratio: compute height from that width, round the reserved
+  cell rectangle up, and pad unused pixels rather than stretching the image.
+  Reuse the terminal package's existing
+  [image width resolver](../../lib/src/components/terminal_image/width.rs),
+  which gives `ImageWidth` precedence and does not read `Layout::width` or
+  `Layout::max_width`. Respect the parent's available width and indentation.
+  Measure cell pixels when available, otherwise use the existing documented
+  cell estimate; never use zero dimensions. Recompute after resize and enforce
+  existing decode/allocation limits before allocating or reserving rows.
 - **Fix: send diagram PNGs without re-encoding.** When the rendered size
   matches the display size, the PNG bytes from `biscuit-visualized` go to the
-  encoder unchanged. Decoding is reserved for formats that need pixels
-  (Sixel, half-blocks) or for an actual resize.
-- **Background instead of a bool.** `RenderRequest::transparent_background`
-  becomes an optional background color, so a diagram can be rendered opaque
-  on the terminal's actual background (Sixel, half-blocks) or transparent
-  (Kitty, iTerm2 format, browser).
+  Kitty/iTerm2 encoder unchanged, with pixel dimensions and cell footprint
+  carried alongside them. Use an encoded-PNG input path in `TerminalImage`
+  instead of handing it an already-decoded image. Existing path-based image
+  validation still applies; the internal artifact path is not a bypass for
+  caller-supplied files. Decoding is reserved for formats that need pixels
+  (Sixel, half-blocks), validation that actually requires it, or an actual
+  resize. Apply this to inline and standalone rendering; both currently have
+  separate protocol dispatch paths.
+- **Background with three meanings.** Replace the visualized package's
+  `RenderRequest::transparent_background` with an explicit choice of theme
+  background, transparent, or solid RGB. Preserve today's default theme
+  background for exports; terminal adapters request transparency for Kitty and
+  iTerm2 or a solid terminal background for Sixel. Apply the choice consistently
+  to SVG and PNG and update all request literals. An optional color alone would
+  conflate theme defaults with transparency and change existing exports.
+- Include resolved background, target dimensions/padding, and encoding options
+  in artifact cache identity; invalidate old artifacts when these semantics
+  change. Keep using `biscuit-hash` for cache keys. Palette and display choices
+  must not reuse an artifact prepared for a different background or geometry.
 
 ### 8. Moving the diagram components
 
 - `MermaidDiagram`, `GraphExpression`, and `GitGraph`, with their tests and
   component docs, move from `biscuit-terminal` to `biscuit-visualized`.
 - `biscuit-visualized` gains a dependency on `biscuit-terminal`;
-  `biscuit-terminal` drops `biscuit-visualized`, `resvg`, and the diagram
-  half of its `image` feature.
+  `biscuit-terminal` drops `biscuit-visualized` and the diagram half of its
+  `image` feature, retaining `resvg` for SVG images and graphical rules.
+  Make the new terminal dependency optional in `biscuit-visualized` behind a
+  `terminal` feature, so browser/artifact-only users do not pull in terminal
+  detection. That feature enables the existing visualization `image` support
+  and the terminal package's `image` feature; neither package enables a feature
+  that creates a reverse dependency. Preserve existing `clap` feature gating.
 - **Render-tree hook.** The terminal render-tree renderer can no longer call
   `MermaidDiagram`. It gains a diagram-rendering hook (a trait object on the
   render options) that `biscuit-visualized` implements; with no hook
   installed, a Mermaid fence stays a code block, as with
   `TerminalMermaidMode::Code` today. Callers that want diagrams
   (darkmatter, the `bt` CLI) install it.
+  Use the existing `Rc` hook ownership style in the terminal package's
+  [render options](../../lib/src/render_tree/options.rs). The hook receives
+  source, node attributes, effective terminal/route, available width and layout;
+  it returns rendered output or a typed error. It is consulted only for Mermaid
+  promotion at `Rich`, before the ordinary code-rendering hook, matching today's
+  ordering. Preserve strict/warn/lossy error handling; a missing hook falls
+  through to code rendering. Cloning child render options retains the hook.
+  The adapter renders directly rather than recursively promoting its own fence.
 - Consumers update imports: the `bt` CLI diagram commands, darkmatter,
-  sniff-cli, worktree (lib and CLI).
+  sniff-cli, worktree (lib and CLI). Search the entire workspace for diagram
+  imports, prelude re-exports, examples, doctests, and diagram-only font/raster
+  helpers; migrate every caller rather than assuming this list is exhaustive.
+  Keep the existing lower-level artifact API distinct from the moved component
+  names (for example expose the latter under `biscuit_visualized::components`),
+  so two `MermaidDiagram` types do not collide. No terminal-crate re-export can
+  remain, because that would restore the dependency cycle.
 - Behavior is unchanged by the move itself; existing tests pass from their
   new location.
 
 ### 9. Housekeeping
 
 - Correct the `protocol.rs` comment on why iTerm2 uses its own format.
-- Review PNG encoding settings for transfer size, in both `TerminalImage`
-  and the `biscuit-visualized` rasterizer.
+- Review PNG encoding settings for transfer size in both packages. The existing
+  size figures justify inspection, not a conclusion that one codec is always
+  smaller. If a compression trade-off remains uncertain, use one host and a
+  quick sample; no performance matrix or statistical gate is required. The
+  measured +82 KB Sixel cost already answers the binary-size question, so do
+  not add a size spike.
 - Remove `viuer` if it is unused.
 
 ## Phases
 
 | Phase | Content | Depends on |
 | --- | --- | --- |
-| 0. Evidence | Visual confirmation of the Windows SSH rule; whether conhost answers DA1 itself and claims Sixel; Ghostty placeholder support; cell pixel size inside tmux and Zellij; what Kitty and Ghostty do with an ordinary placement when tmux switches windows; the tmux Sixel-versus-Kitty rule | — |
+| 0. Evidence | Visual confirmation of the Windows SSH rule; whether conhost answers DA1 itself and claims Sixel; Ghostty placeholder support; cell pixel size inside tmux and Zellij; what Kitty and Ghostty do with an ordinary placement when tmux switches windows; verification of the native-Sixel preference and tmux message limits | — |
 | 1. Component move | Section 8: diagram components to `biscuit-visualized`, dependency flip, render-tree hook, consumer imports. No behavior change. | — |
 | 2. Sizing and double encoding | Section 7: render at display size, PNG pass-through fix, background color in `RenderRequest` | 1 |
 | 3. Route model | Route type, resolution order, `BISCUIT_GRAPHICS`, Windows SSH rule, mintty, Windows Terminal identity, Zellij gating, capability report, stderr hints, housekeeping | 1 |
@@ -363,9 +575,12 @@ so the earlier Ghostty reply leak cannot return.
 | 8. Half-blocks | Half-block fallback for plain images | 3 |
 
 The move comes first so that every later change to diagram behavior is
-written once, in its final package. Phases 1 and 2 change no visible output.
-Phase 3 changes no bytes for setups that work today, except the Windows SSH
-case, which today shows blank rows.
+written once, in its final package. Phase 1 preserves behavior after consumer
+migration. Phase 2 preserves aspect
+ratio and intended footprint; padding, terminal backgrounds, and removing
+resampling can visibly improve pixels. Phase 3 preserves the working direct
+routes, while fixing Windows SSH blank rows and correcting blocked multiplexer
+routes. Probe enablement waits for the input-safety decision below.
 
 ## Verification
 
@@ -375,17 +590,31 @@ case, which today shows blank rows.
   Sixel output for fixed fixtures; half-block output; the probe's reply
   parser over fragmented and out-of-order replies; diagram PNG bytes reach
   the encoder unchanged when sizes match; a render tree without the diagram
-  hook leaves Mermaid fences as code blocks.
+  hook leaves Mermaid fences as code blocks. Include policy precedence,
+  invalid overrides, the new Sixel capability variant, known-incompatible
+  terminals that must not be queried, Zellij enabled/disabled state independent
+  of version, native versus tunneled DA1 results, busy-input skips, and tmux
+  message-limit boundaries. Assert aspect ratio, padding, background cache
+  separation, inline/standalone dispatch parity, and existing SVG/rule behavior.
 - **Move:** the moved components' existing tests pass unchanged in
   `biscuit-visualized`, and `cargo tree -p biscuit-terminal` no longer
-  contains `biscuit-visualized` or `resvg`.
+  contains `biscuit-visualized` or the Mermaid renderer, including with its
+  `image` feature enabled. Optional `resvg` remains expected. Check that
+  artifact-only `biscuit-visualized` does not pull in `biscuit-terminal`, and
+  that enabling terminal support introduces no cycle.
 - **L2:** tmux through the shared test harness, with passthrough on and off;
   Zellij where available; WezTerm.
 - **Manual, recorded:** iTerm2 (iTerm2 format and no reply leak), Windows SSH
   server from WezTerm (iTerm2 format renders), Windows Terminal (Sixel),
   mintty (iTerm2 format), Ghostty under tmux (placeholders survive resize and
   window switch). Results are kept as dated evidence with terminal and
-  multiplexer versions.
+  multiplexer versions. These are behavioral checks, not performance spikes.
+- Use the repository's nextest-backed `just test` / `just test-l2` recipes and
+  shared Test Toolkit. Register moved tests in their new test targets and retain
+  tier/feature gating. Level 2 terminal windows must never gain focus. Exercise
+  platform-independent route/encoder logic on macOS, Linux, native Windows,
+  and WSL2 through the normal test scope; distinguish compile evidence from
+  live terminal behavior. This review itself does not claim those runs occurred.
 
 ## Documentation
 
@@ -394,7 +623,9 @@ case, which today shows blank rows.
   limits under tmux. Written for a developer new to the repository; it links
   to the research, not to this spec.
 - `docs/components/terminal_image.md` updated for the route model and the
-  half-block fallback.
+  half-block fallback. Update the live-query topic page for the intentional
+  graphics-probe exceptions, input ownership, and platform limits. Document
+  unbuilt behavior as planned until its implementation lands.
 - The component docs for `MermaidDiagram`, `GraphExpression`, and `GitGraph`
   move to `biscuit-visualized/docs/`, along with
   `docs/data-visualization/` pages that describe them.
@@ -423,12 +654,70 @@ case, which today shows blank rows.
   behavior changes keeps its review mechanical.
 - **The render-tree hook is a new public seam.** A caller that forgets to
   install it silently gets code blocks instead of diagrams; the capability
-  report or a debug trace should make that visible.
+  debug trace records Mermaid promotion requested without a hook; a terminal
+  capability report cannot know which hooks an application installed.
 
 ## Open questions
 
-- The tmux rule between Sixel handled by tmux and Kitty through passthrough
-  when both are available (phase 0).
-- Whether `BISCUIT_GRAPHICS` also needs a way to force the tmux transport for
-  setups where tmux is present but undetectable (for example a remote program
-  reached over SSH from inside a local tmux, which sees no `TMUX`).
+### Who owns input while graphics discovery runs?
+
+The existing query engine consumes unrelated input, and a mutex between queries
+does not coordinate with an application's event reader. Automatically invoking
+it from terminal construction could lose keystrokes or leave a late response at
+the shell. Choose this contract before enabling the new automatic probe.
+
+1. **Explicit startup discovery with an input owner (recommended).** CLI entry
+   points run discovery before reading input; TUIs provide their own resolved
+   route or perform discovery through their event reader. Return unrelated
+   bytes to the input owner rather than dropping them. Pros: input ownership is
+   visible, works with existing TUI readers, and keeps rendering free of I/O
+   discovery. Cons: participating entry points need a startup call, and generic
+   terminal construction remains environment-only. Recommended because it
+   offers automatic behavior in the shipped CLIs without assuming control of
+   every library consumer's keyboard input.
+2. **A shared terminal-input broker.** Every query and application reader uses
+   one dispatcher. Pros: routes late replies and preserves typeahead centrally.
+   Cons: requires migration of readers beyond these packages and adds a larger
+   lifecycle/API change than graphics routing itself.
+3. **Keep unknown terminals environment-only.** Pros: no new input consumption
+   or query leakage. Cons: unknown SSH endpoints continue to need an explicit
+   format, so the automatic-discovery goal is reduced.
+
+### How should remote programs declare a hidden tmux layer?
+
+A program reached over SSH may have no `TMUX` or socket access even though the
+client is inside tmux. A format override alone cannot express the needed wrapper.
+No reliable local inference can reconstruct that missing path information.
+
+1. **An independent transport override (recommended), such as
+   `BISCUIT_GRAPHICS_TRANSPORT=auto|direct|tmux`.** Pros: describes the missing
+   fact without overloading format choice; can be forwarded explicitly over SSH.
+   Cons: another setting and no automatic proof that passthrough is enabled.
+   Recommend it because it keeps format and transport independent. Treat a
+   forced tmux route as unverified, require ordinary placement unless outer
+   identity is established, and report blocked/unknown honestly.
+2. **Combined format values such as `kitty-tmux`.** Pros: one variable.
+   Cons: duplicates combinations, complicates parsing, and conflates placement
+   and transport with pixel format.
+3. **Document hidden tmux as unsupported.** Pros: smallest implementation.
+   Cons: the opening SSH guarantee must explicitly exclude this topology.
+
+### Should native Windows gain live graphics queries in this feature?
+
+The current query transport uses Unix file descriptors and `/dev/tty`.
+Windows Terminal identification alone cannot establish whether an older build
+supports Sixel. The measured system-conhost SSH route must still avoid APC/DCS.
+
+1. **Keep native Windows detection conservative for now (recommended).** Use
+   known supporting version evidence when available, explicit overrides, and
+   useful fallback otherwise. Pros: bounded scope and preserves the existing
+   no-live-query contract. Cons: an unidentified capable Windows terminal may
+   need an override. Recommended because the motivating Windows SSH route uses
+   terminal identity and cannot safely rely on the stripped queries anyway.
+2. **Add a native Windows query backend now.** Pros: supports automatic
+   discovery in more local Windows sessions. Cons: needs console-handle input
+   ownership, mode restoration, and behavior tests distinct from Unix; it is a
+   substantive expansion of this feature.
+3. **Assume Sixel whenever `WT_SESSION` exists.** Pros: trivial detection.
+   Cons: misclassifies older versions and inherited environments, recreating
+   blank-row failures. Not recommended.
