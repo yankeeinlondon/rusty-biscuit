@@ -42,6 +42,7 @@ related:
     - 2026-10-24-sequence-containers
     - 2026-10-25-loops-and-flow-control
     - 2026-10-28-schema-enhancements
+os_failing: windows
 ---
 
 # Darkmatter Owns Lifecycle Events

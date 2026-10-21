@@ -21,6 +21,152 @@ skills_files_updated_during_phase_1: []
 packages:
     - claudine-cli
     - darkmatter
+    - claudine
+source_files_during_phase_2:
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/prep_target.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/prep_context.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-null.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-null.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/guarded-shell-present.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-initialize.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-preflight-blocked.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-preflight-blocked.trace
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-start.md
+    - claudine/cli/tests/fixtures/lifecycle_traces/retry-in-start.trace
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/lifecycle_traces.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/error/lifecycle_authoring.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/binding_checks.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/cancellation.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/effects.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/diagnostics/error_kind.rs
+    - claudine/lib/src/diagnostics/mod.rs
+    - claudine/lib/src/diagnostics/restored.rs
+    - claudine/lib/src/diagnostics/restored/tests.rs
+    - claudine/lib/src/diagnostics/snapshot.rs
+    - claudine/lib/src/harness/runtime.rs
+    - claudine/lib/src/harness/timeout.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/src/mcp/import.rs
+    - claudine/lib/src/reporting/error.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/lib/tests/l1/path_lookup_guard.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - darkmatter/lib/src/lib.rs
+    - darkmatter/lib/src/lifecycle/action_shape.rs
+    - darkmatter/lib/src/lifecycle/actions.rs
+    - darkmatter/lib/src/lifecycle/actions/tests.rs
+    - darkmatter/lib/src/lifecycle/authored_order.rs
+    - darkmatter/lib/src/lifecycle/cancellation.rs
+    - darkmatter/lib/src/lifecycle/cancellation/tests.rs
+    - darkmatter/lib/src/lifecycle/context.rs
+    - darkmatter/lib/src/lifecycle/context/tests.rs
+    - darkmatter/lib/src/lifecycle/control.rs
+    - darkmatter/lib/src/lifecycle/control/tests.rs
+    - darkmatter/lib/src/lifecycle/duration.rs
+    - darkmatter/lib/src/lifecycle/effects.rs
+    - darkmatter/lib/src/lifecycle/effects/tests.rs
+    - darkmatter/lib/src/lifecycle/envelope.rs
+    - darkmatter/lib/src/lifecycle/envelope/tests.rs
+    - darkmatter/lib/src/lifecycle/error.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/host.rs
+    - darkmatter/lib/src/lifecycle/executor/outcome.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/parse.rs
+    - darkmatter/lib/src/lifecycle/run_guard.rs
+    - darkmatter/lib/src/lifecycle/run_guard/tests.rs
+    - darkmatter/lib/src/lifecycle/run.rs
+    - darkmatter/lib/src/lifecycle/run/protocol.rs
+    - darkmatter/lib/src/lifecycle/runtime.rs
+    - darkmatter/lib/src/lifecycle/runtime/tests.rs
+    - darkmatter/lib/src/lifecycle/services.rs
+    - darkmatter/lib/src/lifecycle/services/tests.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/lifecycle/source_map.rs
+    - darkmatter/lib/src/lifecycle/tests.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/src/markdown/compose/context/merge.rs
+    - darkmatter/lib/tests/l1/dependency_direction_guard.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/engine.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/mod.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/profiles.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/protocol_tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_boundary/replay.rs
+    - darkmatter/lib/tests/l1/lifecycle_run_protocol.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/path_lookup_guard.rs
+docs_updated_during_phase_2:
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/signal-handling.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/validations-and-handlers.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Plan: Darkmatter lifecycle ownership
@@ -153,13 +299,13 @@ Phase 1 fixed its baseline before `2026-10-16-type-narrowing` was built. The
 author ruled that the fix lands first, so Phase 2 opens by moving the baseline
 onto the revision that closes it. These tasks change no production code.
 
-- [ ] **Prerequisite revision**
+- [x] **Prerequisite revision**
   - Confirm `2026-10-16-type-narrowing` has `implemented: true` on its plan and
     spec and a recorded final-phase close. If it does not, record that, set
     `human_review: true`, and stop the phase without extraction work.
   - Record the new starting revision and the fix's closing commits in the log
     as this feature's prerequisite evidence.
-- [ ] **Baseline replay**
+- [x] **Baseline replay**
   - At that revision, run `just test` in `claudine/` (it includes the 30
     `lifecycle_traces` tests), the Darkmatter `lifecycle_boundary` replays and
     protocol tests, and both `lifecycle_control_flow_spike` tests. Record the
@@ -168,7 +314,7 @@ onto the revision that closes it. These tasks change no production code.
     prerequisite, not by this feature: confirm that cause, recapture that trace
     and its replay, and log the before/after lines as a baseline change before
     any extraction. Never recapture a trace after Wave 4 starts.
-- [ ] **Inventory refresh**
+- [x] **Inventory refresh**
   - Inventory the lifecycle code the fix added or changed: the scope-carrying
     lifecycle preflight walk, typed lifecycle templates, sequence task `when`
     scopes, guarded-hole (`HoleTiming::Guarded`) filling at a reached action,
@@ -178,7 +324,7 @@ onto the revision that closes it. These tasks change no production code.
     Claudine. Update the caller inventory and file list Waves 4–6 move.
   - List every file path the fix's guard test and allowlists name, so moves in
     this phase update those paths only.
-- [ ] **Guarded-shell trace**
+- [x] **Guarded-shell trace**
   - Add a trace scenario and its replay for a lifecycle `shell` with a
     `{{ … }}` hole under a `when:` guard: once with the value present (the
     command runs with it), and once with the value `set` to `null` before the
@@ -188,7 +334,7 @@ onto the revision that closes it. These tasks change no production code.
 
 ### Wave 4 — sequential foundational extraction
 
-- [ ] **Model extraction**
+- [x] **Model extraction**
   - Move parser, action shapes, actions, signatures, validation, source maps, and
     their tests from `claudine/lib/src/composition/lifecycle/` to Darkmatter.
     Preserve typed diagnostics, source locations, mutation/snapshot semantics,
@@ -201,7 +347,7 @@ onto the revision that closes it. These tasks change no production code.
 
 ### Wave 5 — parallel engine and service work
 
-- [ ] **Engine extraction**
+- [x] **Engine extraction**
   - Move executor, run guard, catch protocol, terminal selection, control admission,
     finalize accounting, and recovery modes into the gated request/reply API.
   - Reject invalid replies without state mutation; invalidate normal work before
@@ -214,7 +360,7 @@ onto the revision that closes it. These tasks change no production code.
     `MissingValue` before launch. Do not add a second guard walk or fact source;
     the preflight walk itself moves in Phase 3.
 
-- [ ] **Service adapters**
+- [x] **Service adapters**
   - Move neutral effect/emitter interfaces and the full neutral error envelope;
     retain TTS/Playa, messaging settings, provider facts, and effective-diagnostic
     projection in Claudine adapters. Missing required services are typed errors.
@@ -225,7 +371,7 @@ onto the revision that closes it. These tasks change no production code.
 
 ### Wave 6 — sequential adapter integration
 
-- [ ] **Claudine bridge**
+- [x] **Claudine bridge**
   - Repoint imports and drive the moved engine through adapters. Transitional
     exports may ease import migration but must delegate to the sole implementation.
   - Move tests with assertions intact; repoint both historical spike test imports
