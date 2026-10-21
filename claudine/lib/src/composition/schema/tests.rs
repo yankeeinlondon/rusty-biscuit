@@ -177,10 +177,12 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
 
     let prepared = prepare_shipped_implement_plan(&plan, None);
     let frontmatter = prepared.effective_frontmatter.as_object().unwrap();
+    // The shipped prompt declares `commit_message: ""`; absent/null bindings
+    // are covered by the CLI's `implement_plan_commit_message` fixture tests.
     assert_eq!(
         frontmatter.get("commit_message"),
-        Some(&serde_json::Value::Null),
-        "the shipped schema's optional declaration must become a known null binding",
+        Some(&serde_json::Value::String(String::new())),
+        "an unsupplied message must keep the shipped prompt's empty-string default",
     );
 
     let commands = success_shell_commands(&prepared);
