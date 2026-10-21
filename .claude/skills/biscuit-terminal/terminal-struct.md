@@ -90,9 +90,18 @@ let term = Terminal::builder()
 ```
 
 Available builder methods:
-- `app()`, `supports_italic()`, `image_support()`, `underline_support()`
+- `app()`, `supports_italic()`, `image_support()`, `graphics_route()`, `underline_support()`
 - `osc_link_support()`, `is_tty()`, `color_depth()`, `is_ci()`, `is_nerd_font()`
 - `width()`, `height()` (fixed dimensions), `tab_width()`
+- `probe(ProbeMode)`: `ProbeMode::Off` makes construction write nothing to the
+  terminal (colors from `COLORFGBG` / per-terminal defaults / system
+  appearance, route from the environment alone). Use it, or supply a route,
+  for any program with its own input loop; only the first construction in a
+  process probes, so build before the loop starts.
+
+A route supplied with `.graphics_route(..)` or `.image_support(..)` is never
+re-resolved and causes no graphics probe (colors are still queried unless
+`probe(ProbeMode::Off)`).
 
 ## Key Enums
 

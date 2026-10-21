@@ -95,8 +95,11 @@ fn main() {
 - `utils::text` - Content length calculation (escape-aware)
 - `utils::multiplex` - Multiplexing detection
 
-Live terminal queries (colors, window pixels, cursor position) cost a terminal
-that never answers one short wait per process; see
+Live terminal queries (colors, the graphics probe, window pixels, cursor
+position) cost a terminal that never answers one short wait per process. A
+program with its own input loop builds its `Terminal` with
+`Terminal::builder().probe(ProbeMode::Off)` (or runs under
+`BISCUIT_TERMINAL_PROBE=off`) so construction queries nothing; see
 [`docs/discovery/terminal-queries.md`](../docs/discovery/terminal-queries.md).
 
 ## Terminal Images (TerminalImage)
@@ -112,8 +115,9 @@ that never answers one short wait per process; see
 
 ### Protocol selection
 
-`Terminal::new()` resolves a `graphics_route` once from the environment: the
-format (Kitty, iTerm2, Sixel, or none), how sure it is, and why. Every image
+`Terminal::new()` resolves a `graphics_route` once from the environment, and
+asks the terminal (the graphics probe) only when the environment cannot
+decide: the format (Kitty, iTerm2, Sixel, or none), how sure it is, and why. Every image
 rendered with that `Terminal` follows it.
 
 - Kitty-family terminals (Kitty, Ghostty, WezTerm, Warp, Konsole): Kitty protocol

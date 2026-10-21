@@ -400,7 +400,8 @@ bt --completions zsh > ~/.zfunc/_bt
   "graphics_route": {
     "format": "Kitty", "transport": "Direct", "placement": "Ordinary",
     "confidence": "Known",
-    "reason": { "kind": "Supported", "message": "WezTerm (TERM_PROGRAM=WezTerm) is known to render the Kitty graphics protocol", "fix": null }
+    "reason": { "kind": "Supported", "message": "WezTerm (TERM_PROGRAM=WezTerm) is known to render the Kitty graphics protocol", "fix": null },
+    "needs_measured_cells": false
   },
   "underline_support": {
     "straight": true,

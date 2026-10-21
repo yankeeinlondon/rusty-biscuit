@@ -73,6 +73,27 @@ Reference tests: `worktree/cli/tests/level2_powershell_remove.rs` and
 - **Checked-out text may be CRLF** on a host with `core.autocrlf`, so content
   read back from a `git worktree add` checkout gains `\r\n`. Normalize line
   endings before comparing.
+- **Use `xpty`, not `expectrl`, when the test plays the terminal for a
+  child's queries.** Measured 2026-10-21 on `build-win-native` (build 26300,
+  inbox console host) with `biscuit-terminal`'s `discovery_probe`. Under
+  `xpty`'s pseudoconsole, the child's OSC 10/11 queries, the Kitty APC query,
+  and its DA1 arrived verbatim in the output stream, and the replies written
+  to the input pipe reached the child's `ReadConsoleInputW` as key-down
+  records carrying the reply's characters. Under `expectrl`'s pseudoconsole
+  (the `conpty` crate, `CreatePseudoConsole` flags `0`), none of those
+  queries reached the stream, and the console host answered DA1 itself
+  without Sixel's attribute `4`. Unlike the SSH server's console, this one
+  passes APC through. The reference is
+  `biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs`.
+- **Read a child's printed results from a file, not the stream:**
+  `cmd /d /c <exe> > out.txt 2>&1` with `cwd` set to a temp directory. A
+  program that opens `CONIN$`/`CONOUT$` by name still reaches the console.
+  The child's own `IsTerminal` check then reports false.
+- **`WriteConsoleInputW` puts typed keys back.** Key records consumed by
+  `ReadConsoleInputW` and written back, key-down plus key-up, are read by a
+  later line-mode `ReadConsoleW` (Rust's `stdin().read_line`) as typed text.
+  They are appended, so a key typed after the last read lands ahead of
+  them.
 - `CommandBuilder::cwd` sets the child's working directory, so a ConPTY child
   reproduces "a window launched inside the directory" for the
   current-directory lock in [windows.md](windows.md#current-directory-locks).

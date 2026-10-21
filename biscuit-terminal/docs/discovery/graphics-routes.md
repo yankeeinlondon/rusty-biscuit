@@ -6,10 +6,12 @@ terminal, and, when no pixels can be sent, a structured reason saying why.
 This page explains how that decision is made, how to override it, and how to
 read it from code or from the `bt` CLI.
 
-The decision is made once per `Terminal` and only from the environment: no
-query is written to the terminal. It is cheap and has no side effects, but it
-cannot see what the environment does not say (see [SSH](#ssh) and
-[When the route is unknown](#when-the-route-is-unknown)).
+The decision is made once per `Terminal`, from the environment first. When
+the environment cannot decide (an unidentified terminal, an SSH session that
+forwarded nothing, Zellij), the library asks the terminal with the
+[graphics probe](#the-graphics-probe): a Kitty query that rides along with the
+color query `Terminal::new()` already makes, with Sixel read from the DA1
+reply that ends it. Identified terminals are never probed.
 
 ## What you can rely on
 
@@ -26,23 +28,29 @@ cannot see what the environment does not say (see [SSH](#ssh) and
   still an error.
 - **A fix is named only when the blocker was observed.** The reason carries a
   `fix` only for causes the resolver actually saw, such as a Zellij or Windows
-  Terminal release that is too old, never as a guess.
+  Terminal release that is too old, tmux `allow-passthrough` read as `off`, or
+  a likely tmux it cannot see, never as a guess.
+- **Silence is never a "no".** A terminal that does not answer the probe, or a
+  probe skipped because input was waiting, leaves the route `Unknown`; only a
+  terminal that answered (DA1 without Sixel, or a Kitty rejection) is recorded
+  as having no support.
 
 ## What a route records
 
 | Field | Values | Meaning |
 | --- | --- | --- |
 | `format` | `Kitty`, `Iterm2`, `Sixel`, `None` | The pixel format. `None` means the image uses a text fallback. |
-| `transport` | `Direct`, `Tmux` | How escape sequences reach the terminal. Every route is `Direct` today; tmux passthrough is **planned**. |
+| `transport` | `Direct`, `Tmux` | How escape sequences reach the terminal. `Tmux` wraps every graphics sequence for tmux passthrough (see [tmux](#tmux)). |
 | `placement` | `Ordinary`, `Placeholders` | How a Kitty image is placed. Every route is `Ordinary` today; Unicode placeholders (for tmux) are **planned**. |
 | `confidence` | `Forced`, `Verified`, `Known`, `Unknown` | How the route was established (below). |
 | `reason` | `kind`, `message`, `fix` | Why this route, or why no pixels. `fix` is optional. |
+| `needs_measured_cells` | `true`, `false` | The image must be sized from a measured cell size, never the 8×16 estimate. Set for Zellij, which sizes images from its own measurement of the host. |
 
 **Confidence:**
 
 - `Forced`: chosen by `BISCUIT_GRAPHICS`, or by a caller's force override.
-- `Verified`: confirmed by a reply from the terminal. Nothing produces this
-  yet; it arrives with the graphics probe (**planned**).
+- `Verified`: confirmed by a reply to the [graphics probe](#the-graphics-probe),
+  whether the reply says yes or no.
 - `Known`: inferred from the terminal's identity, or supplied by the caller.
 - `Unknown`: nothing established the route.
 
@@ -51,7 +59,7 @@ cannot see what the environment does not say (see [SSH](#ssh) and
 | Kind | When |
 | --- | --- |
 | `Supported` | A pixel route was chosen. |
-| `NoSupport` | The terminal is known to lack a usable format (for example Terminal.app, or Zellij older than 0.45). |
+| `NoSupport` | The terminal is known to lack a usable format (for example Terminal.app, a legacy Windows console, or a terminal whose probe reply offered neither Kitty nor Sixel). |
 | `Unknown` | Nothing established whether graphics work. |
 | `UserDisabled` | `BISCUIT_GRAPHICS=none`. |
 | `BlockedTransport` | Something between the program and the terminal removes the format (the Windows SSH server's console host, or Zellij for the iTerm2 format). |
@@ -80,7 +88,8 @@ environment. `term.image_support()` returns the projection.
 To supply a route instead of detecting one (for a test, or an application that
 already knows its terminal), use the builder. `.image_support(...)` produces a
 `Known`, direct, ordinary route for that format; `.graphics_route(...)` takes
-a full `GraphicsRoute`.
+a full `GraphicsRoute`. A supplied route is never re-resolved, and
+construction sends no graphics probe for it.
 
 ```rust
 use biscuit_terminal::discovery::detection::ImageSupport;
@@ -119,13 +128,36 @@ assert_eq!(resolve_graphics_route(&inputs).format, GraphicsFormat::Kitty);
 ```
 
 `RouteInputs::new(output_is_tty)` starts from an empty environment;
-`with_var` adds a variable as resolution will see it. `is_windows`,
-`zellij_version`, and `windows_terminal_version` are public fields.
+`with_var` adds a variable as resolution will see it. `is_windows`, `is_ci`,
+`zellij_version`, `windows_terminal_version`, `probe_mode`, and `probe` (the
+probe results) are public fields, so a test can describe any probe answer
+without a terminal:
+
+```rust
+use biscuit_terminal::discovery::detection::{
+    Da1Reply, GraphicsFormat, KittyReply, ProbeReply, ProbeResult, RouteConfidence,
+    RouteInputs, probe_plan, resolve_graphics_route,
+};
+
+let mut inputs = RouteInputs::new(true).with_var("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22");
+assert!(probe_plan(&inputs).direct); // nothing forwarded: the probe would run
+
+inputs.probe.direct = Some(ProbeResult::Replied(ProbeReply {
+    kitty: KittyReply::NoReply,
+    da1: Some(Da1Reply { class: 62, attributes: vec![4, 22] }),
+}));
+let route = resolve_graphics_route(&inputs);
+assert_eq!(route.format, GraphicsFormat::Sixel);
+assert_eq!(route.confidence, RouteConfidence::Verified);
+```
+
 `RouteInputs::from_process()` gathers the real inputs: stdout's TTY state,
-the OS, the variables listed below, `zellij --version` (only inside Zellij,
-with a 500 ms deadline), and on native Windows the file version of the
-`WindowsTerminal.exe` found by walking the parent process chain (only when
-`WT_SESSION` is set).
+the OS, whether this is CI, the variables listed below, `zellij --version`
+(only inside Zellij, with a 500 ms deadline), and on native Windows the file
+version of the `WindowsTerminal.exe` found by walking the parent process chain
+(only when `WT_SESSION` is set). `probe_plan(&inputs)` says which probe
+exchanges would help, and `inputs.probed()` runs them (sharing the cached
+startup exchange) and records the results.
 
 ### From the `bt` CLI
 
@@ -144,7 +176,8 @@ with a 500 ms deadline), and on native Windows the file version of the
       "kind": "Supported",
       "message": "WezTerm (TERM_PROGRAM=WezTerm) is known to render the Kitty graphics protocol",
       "fix": null
-    }
+    },
+    "needs_measured_cells": false
   }
   ```
 
@@ -152,12 +185,13 @@ with a 500 ms deadline), and on native Windows the file version of the
 
 ## How the route is resolved
 
-The first rule that decides wins:
+The first rule that decides wins. Where the environment runs out, the
+[graphics probe](#the-graphics-probe) decides:
 
 ```mermaid
 flowchart TD
     A{stdout is a terminal?} -->|no| NT[none: NotATerminal]
-    A -->|yes| V{BISCUIT_GRAPHICS and<br/>BISCUIT_GRAPHICS_TRANSPORT valid?}
+    A -->|yes| V{BISCUIT_GRAPHICS,<br/>BISCUIT_GRAPHICS_TRANSPORT, and<br/>BISCUIT_TERMINAL_PROBE valid?}
     V -->|no| INV[none: InvalidInput]
     V -->|yes| G{BISCUIT_GRAPHICS}
     G -->|none| UD[none: UserDisabled]
@@ -167,23 +201,30 @@ flowchart TD
     WL -->|yes| WI[iTerm2 format]
     WL -->|no| WB[none: BlockedTransport]
     W -->|no| Z{ZELLIJ set?}
-    Z -->|yes| ZR[Zellij rule]
-    Z -->|no| T{tmux in the path?}
-    T -->|yes| TU[none: Unknown<br/>passthrough planned]
-    T -->|no| K{TERM_PROGRAM or LC_TERMINAL<br/>names a known terminal?}
+    Z -->|yes| ZR[Zellij rule + probe]
+    Z -->|no| T{tmux in the path?<br/>TMUX set, or TRANSPORT=tmux;<br/>TRANSPORT=direct says no}
+    T -->|TMUX set| TU[visible tmux rule:<br/>version, allow-passthrough, clients]
+    T -->|declared only| TD[declared tmux rule]
+    T -->|no| H{TRANSPORT auto and TERM<br/>is tmux or screen, no STY?}
+    H -->|yes| HT[hidden tmux rule:<br/>plain + wrapped probe]
+    H -->|no| K{TERM_PROGRAM or LC_TERMINAL<br/>names a known terminal?}
     K -->|yes| KT[that terminal's format]
     K -->|no| S{SSH session?}
-    S -->|yes| U[none: Unknown]
     S -->|no| L{local hints:<br/>WT_SESSION, MSYSTEM,<br/>TERM, ITERM_SESSION_ID}
-    L -->|match| LT[that terminal's format]
-    L -->|none| U
+    L -->|WT_SESSION| WT[Windows Terminal rule]
+    L -->|other match| LT[that terminal's format]
+    L -->|none| LC{legacy Windows<br/>console?}
+    LC -->|yes| LN[none: NoSupport]
+    LC -->|no| P[graphics probe]
+    S -->|yes| P
 ```
 
 The variables consulted are `BISCUIT_GRAPHICS`, `BISCUIT_GRAPHICS_TRANSPORT`,
-`TERM_PROGRAM`, `TERM`, `LC_TERMINAL`, `ITERM_SESSION_ID`, `ITERM_PROFILE`,
-`WT_SESSION`, `MSYSTEM`, `SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY`, `TMUX`,
-and `ZELLIJ`. Any one of the three `SSH_*` variables marks an SSH session.
-A value that is not valid UTF-8 identifies nothing.
+`BISCUIT_TERMINAL_PROBE`, `TERM_PROGRAM`, `TERM`, `LC_TERMINAL`,
+`ITERM_SESSION_ID`, `ITERM_PROFILE`, `WT_SESSION`, `MSYSTEM`,
+`SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY`, `TMUX`, `STY`, and `ZELLIJ`. Any
+one of the three `SSH_*` variables marks an SSH session. A value that is not
+valid UTF-8 identifies nothing.
 
 ### Known terminals
 
@@ -196,7 +237,7 @@ advertises.
 | iTerm2 | `TERM_PROGRAM=iTerm.app`, `LC_TERMINAL=iTerm2`, or locally `ITERM_SESSION_ID` / `ITERM_PROFILE` | iTerm2 |
 | mintty | `TERM_PROGRAM=mintty`, or locally `MSYSTEM` with no `TERM_PROGRAM` | iTerm2 |
 | cterm | `TERM_PROGRAM=cterm` | iTerm2 |
-| Windows Terminal | `WT_SESSION` (local only) | Sixel when `WindowsTerminal.exe` is 1.22 or later |
+| Windows Terminal | `WT_SESSION` (local only) | Sixel when `WindowsTerminal.exe` is 1.22 or later, or its DA1 reply reports Sixel |
 | Terminal.app | `TERM_PROGRAM=Apple_Terminal` | none (`NoSupport`) |
 
 iTerm2 keeps its own format even though it accepts Kitty: it ignores Kitty's
@@ -206,18 +247,23 @@ Kitty route reaching iTerm2 by another path (for example a caller-supplied
 `ImageSupport::Kitty`) is sent in iTerm2 format; only `BISCUIT_GRAPHICS=kitty`
 keeps Kitty there.
 
-**Windows Terminal.** Only a native Windows process can read the
-`WindowsTerminal.exe` version, so:
+**Windows Terminal.** Either of two signals selects Sixel: the
+`WindowsTerminal.exe` hosting the process is 1.22 or later, or the terminal's
+DA1 reply reports Sixel (attribute `4`). Only a native Windows process can read
+the version, so the probe covers the rest, including WSL, which inherits
+`WT_SESSION`:
 
-- 1.22 or later: Sixel (`Known`).
-- Older: none (`NoSupport`), with the fix "upgrade Windows Terminal".
-- Version unreadable (including WSL, which inherits `WT_SESSION`): none
+- Version 1.22 or later: Sixel (`Known`), and no probe is sent.
+- Otherwise the probe runs, and a DA1 reply with attribute `4` gives Sixel
+  (`Verified`).
+- Older, with no Sixel in the reply: none (`NoSupport`), with the fix
+  "upgrade Windows Terminal".
+- Version unreadable, with no Sixel in the reply (or no reply): none
   (`Unknown`), with the fix "set `BISCUIT_GRAPHICS=sixel` if this Windows
   Terminal is 1.22 or later".
 
 A Sixel route currently renders the text fallback: the Sixel encoder is
-**planned**. Detecting Sixel from Windows Terminal's own DA1 reply arrives with
-the probe (**planned**).
+**planned**.
 
 Any `TERM_PROGRAM` not in the table (for example `vscode` or `tmux`)
 identifies nothing, and resolution moves on to the local hints.
@@ -231,9 +277,10 @@ sent by the connecting client (iTerm2 sets it, and many OpenSSH setups forward
 
 The local hints (`WT_SESSION`, `MSYSTEM`, `TERM`, `ITERM_SESSION_ID`,
 `ITERM_PROFILE`) are not used inside SSH, where they may describe a different
-terminal. An SSH session with no forwarded hints resolves to `Unknown`.
-Asking the far terminal directly is the job of the graphics probe
-(**planned**).
+terminal. An SSH session with no forwarded hints is decided by the
+[graphics probe](#the-graphics-probe), which asks the far terminal directly;
+the silence budget is the full timeout over SSH, so a slow link is not
+mistaken for a silent terminal.
 
 ### Windows SSH server
 
@@ -257,57 +304,260 @@ the **iTerm2 list** renders it:
 
 A match gives the iTerm2 format (`Known`); anything else gives none
 (`BlockedTransport`). The route never selects Kitty or Sixel here, and a
-forced `kitty` or `sixel` is blocked too.
+forced `kitty` or `sixel` is blocked too. The graphics probe is never sent
+here: the console host would remove it as well.
 
 This applies only to the system console host. WezTerm's own multiplexer works
 on the same kind of host because WezTerm ships its own console host.
 
 ### Zellij
 
-Zellij renders Kitty graphics from 0.45, when the terminal hosting it supports
-them. The rule needs Zellij's version:
+Zellij renders Kitty graphics from 0.45, but only for a pane whose host
+terminal supports them, and only Zellij knows whether it turned that support
+on. So inside Zellij the probe always runs, and the pane's own answer decides:
 
-| Situation | Route |
+| Pane's answer | Route |
 | --- | --- |
-| Version unreadable | none (`Unknown`) |
-| Older than 0.45 | none (`NoSupport`), fix "upgrade Zellij to 0.45.0 or later" |
-| 0.45+, inside a Kitty-family terminal (from `TERM_PROGRAM`) | Kitty (`Known`) |
-| 0.45+, any other terminal | none (`Unknown`) |
+| Kitty `OK` (Zellij 0.45 or later, or version unreadable) | Kitty (`Verified`) |
+| DA1 reports Sixel | Sixel (`Verified`) |
+| Older than 0.45, no Sixel | none (`NoSupport`), fix "upgrade Zellij to 0.45.0 or later" |
+| DA1 without Kitty or Sixel | none (`NoSupport`, `Verified`): Kitty graphics are off for this pane |
+| No reply, conflicting replies, or probe not sent | none (`Unknown`) |
 
-The 0.45+ rule is interim: Zellij turns on its Kitty support only after
-querying a Kitty-capable host, so an inherited Kitty-family identity is
-reasonable evidence. Asking the Zellij pane directly (which would give
-`Verified`) and detecting Sixel under Zellij arrive with the probe
-(**planned**). Zellij drops the iTerm2 format, so a forced `iterm2` inside
-Zellij is `BlockedTransport`.
+Only the graphics query is sent inside Zellij; the color queries stay off, as
+they are for every multiplexer.
+
+A pixel route through Zellij sets `needs_measured_cells`. Zellij sizes the
+image from its own measurement of the host's cells, so a probe success says
+nothing about whether the library knows the cell size; when no measured cell
+size is available, `TerminalImage` renders the text fallback with its own
+reason instead of guessing with the 8×16 estimate. Zellij drops the iTerm2
+format, so a forced `iterm2` inside Zellij is `BlockedTransport`.
 
 ### tmux
 
-There is no pixel route through tmux today. When `TMUX` is set, or
-`BISCUIT_GRAPHICS_TRANSPORT=tmux`, the route is none (`Unknown`), and a forced
-format is not sent either. Wrapping graphics for tmux passthrough, with
-placement chosen from the outer terminal, is **planned**.
+tmux draws its panes itself, so a graphics sequence written into a pane
+reaches the outer terminal only through **passthrough**: each complete
+sequence is wrapped as `ESC P tmux; <sequence with every ESC doubled> ESC \`,
+and tmux forwards the inside unchanged when the pane allows it. A route with
+transport `Tmux` makes `TerminalImage` wrap every Kitty chunk and every
+iTerm2 message this way (see [Sending an image through tmux](#sending-an-image-through-tmux)).
+The route tells three tmux situations apart.
 
-### When the route is unknown
+**A visible tmux** (`TMUX` set). The library asks tmux itself, with
+read-only commands run without a shell and with a 500 ms deadline each:
 
-`Unknown` means the environment did not say: an unrecognized terminal, an SSH
-session without forwarded hints, Zellij in front of an unidentified terminal,
-or a native Windows console with no modern terminal identified. The image gets
-the text fallback.
+| Question | Command | Unreadable means |
+| --- | --- | --- |
+| Version | `tmux -V` | none (`Unknown`): passthrough needs 3.3 |
+| Passthrough for this pane | `tmux show-options -Apv -t "$TMUX_PANE" allow-passthrough` | unknown, never "off" |
+| Outer terminal | `tmux list-clients -t "$TMUX_PANE" -F '#{client_termname}<TAB>#{client_termtype}'` | unidentified |
 
-The **graphics probe** (**planned**) will settle these cases by asking the
-terminal: a Kitty query and a Sixel check that join the color query round trip
-`Terminal::new()` already makes (see
-[Live Terminal Queries](./terminal-queries.md)), so it adds no extra round
-trip. Which Windows consoles count as "legacy conhost with no modern
-terminal", and so are never probed because they never answer, is defined with
-the probe.
+`list-clients -t <pane>` lists only the clients attached to the session that
+holds this pane, never another session's clients or the server's startup
+environment (so an inherited `LC_TERMINAL` or `TERM_PROGRAM` is ignored).
+Each client is identified from `client_termtype` (the outer terminal's own
+answer to tmux, such as `kitty(0.39.1)` or `iTerm2 3.5.10`) and then
+`client_termname` (its `TERM`, such as `xterm-kitty` or `wezterm`); a generic
+`xterm-256color` identifies nothing.
 
-**Escape hatch for TUIs (planned with the probe).** An application with its
-own input loop will be able to supply a resolved route or turn
-construction-time probing off, so the probe never races its input. Supplying a
-route through `Terminal::builder().graphics_route(...)` already bypasses
-detection today.
+| tmux reports | Route |
+| --- | --- |
+| tmux older than 3.3 | none (`BlockedTransport`), the version in the reason, fix "upgrade tmux to 3.3.0 or later" |
+| version unreadable | none (`Unknown`), no fix |
+| `allow-passthrough off` | none (`BlockedTransport`), fix "set -g allow-passthrough on" |
+| on (`on` or `all`), clients on Kitty or Ghostty | Kitty, `Tmux`, ordinary placement, `Known` |
+| on, clients on WezTerm or Konsole | Kitty, `Tmux`, ordinary placement, `Known` |
+| on, clients on iTerm2 | iTerm2 format, `Tmux`, `Known` |
+| on, no client attached or none recognized | Kitty, `Tmux`, ordinary placement, confidence `Unknown` (sent unverified) |
+| on, clients with no format in common | none (`NoSupport`), the terminals named in the reason |
+| unreadable | the wrapped probe decides (below) |
+
+When several clients are attached, the route uses a format all of them
+render, preferring Kitty: Kitty and WezTerm share Kitty, iTerm2 and WezTerm
+share the iTerm2 format, and Kitty with iTerm2 share nothing. A client whose
+terminal is not recognized counts as Kitty-only, the same default a lone
+unrecognized client gets.
+
+Only when `allow-passthrough` cannot be read (for example the tmux socket is
+not accessible) does the library send the
+[wrapped probe](./terminal-queries.md#the-wrapped-exchange). Any answer to it
+proves passthrough works, and the format then follows the clients as in the
+table (`Verified`); with no recognized client a Kitty `OK` gives Kitty, and an
+answer without one gives none (`NoSupport`). No answer leaves the route none
+(`Unknown`) with no fix: passthrough was not seen to be off, so the library
+does not tell you to turn it on. When passthrough can be read, nothing is
+probed, so a tmux session never waits on a reply that tmux may not forward.
+
+A forced format (`BISCUIT_GRAPHICS=kitty|iterm2|sixel`) inside a visible tmux
+keeps the version floor and the `allow-passthrough off` block, skips client
+identification, and is sent through passthrough (`Forced`).
+Unicode placeholders for Kitty and Ghostty outside tmux, which keep an image
+attached to its pane, are **planned**; until then every tmux route uses
+ordinary placement.
+
+**A likely tmux the program cannot see.** Over SSH, a tmux on the far side
+leaves no `TMUX` in the program's environment, but it usually sets `TERM` to
+`tmux-*` or `screen-*` (or exactly `tmux` or `screen`). With such a `TERM` and
+neither `TMUX` nor `STY` set, a hidden tmux is likely, and graphics written
+directly would be swallowed by it. The probe sends the Kitty query twice at
+the same moment: once plain, and once
+[wrapped for passthrough](./terminal-queries.md#the-wrapped-exchange).
+
+| Answer | Route |
+| --- | --- |
+| `OK` to the wrapped query | transport `Tmux`, ordinary placement, `Verified`: Kitty, or the iTerm2 format when the client forwarded `LC_TERMINAL=iTerm2` |
+| `OK` to the plain query | no tmux after all: direct (`Verified`), Kitty, or the iTerm2 format when the client forwarded `LC_TERMINAL=iTerm2` |
+| Neither | none (`Unknown`), with the fix "set `BISCUIT_GRAPHICS_TRANSPORT=tmux` if a tmux with allow-passthrough on runs between this program and the terminal" |
+
+This hint is checked before a forwarded identity such as `LC_TERMINAL=iTerm2`,
+because that identity describes the terminal outside the tmux, which never
+sees unwrapped graphics. `BISCUIT_GRAPHICS_TRANSPORT=direct` turns the hint
+off.
+
+**A declared tmux** (`BISCUIT_GRAPHICS_TRANSPORT=tmux` with no `TMUX`): the
+user says a tmux runs beyond SSH. The transport is `Tmux` and the format comes
+from, in order:
+
+1. an outer terminal identified by `TERM_PROGRAM` or `LC_TERMINAL`: its format,
+   with confidence `Forced` (the reason says "unverified"), and no probe;
+2. the wrapped probe: Kitty, or the iTerm2 format with `LC_TERMINAL=iTerm2`
+   (`Verified`);
+3. otherwise none (`Unknown`), with the fix "set `BISCUIT_GRAPHICS` to the
+   outer terminal's format".
+
+A forced format plus a declared tmux gives that format, transport `Tmux`,
+`Forced`.
+
+```mermaid
+flowchart TD
+    D{BISCUIT_GRAPHICS_TRANSPORT} -->|direct| N[no tmux: usual rules]
+    D -->|auto or tmux| A{TMUX set?}
+    A -->|yes| V{tmux 3.3 or later?}
+    V -->|no or unreadable| VN[none]
+    V -->|yes| PT{allow-passthrough}
+    PT -->|off| PO[none: BlockedTransport<br/>fix: set -g allow-passthrough on]
+    PT -->|on| PC[clients' common format, Tmux<br/>Kitty unverified if none recognized]
+    PT -->|unreadable| PW{wrapped probe answered?}
+    PW -->|yes| PV[clients' format, Tmux, Verified]
+    PW -->|no| PU[none: Unknown]
+    A -->|no, transport tmux| DT{outer terminal<br/>identified?}
+    DT -->|yes| DF[its format, Tmux, Forced]
+    DT -->|no| DW{wrapped query OK?}
+    DW -->|yes| DV[Kitty or iTerm2, Tmux, Verified]
+    DW -->|no| DU[none: Unknown<br/>fix: set BISCUIT_GRAPHICS]
+    A -->|no, transport auto| H{TERM is tmux or screen<br/>and STY unset?}
+    H -->|no| N
+    H -->|yes| HW{wrapped query OK?}
+    HW -->|yes| HV[Kitty or iTerm2, Tmux, Verified]
+    HW -->|no| HP{plain query OK?}
+    HP -->|yes| HK[Kitty or iTerm2, Direct, Verified]
+    HP -->|no| HU[none: Unknown<br/>fix: set TRANSPORT=tmux]
+```
+
+#### Sending an image through tmux
+
+With a `Tmux` route, `TerminalImage` writes the same image it would write
+directly, with every graphics sequence wrapped:
+
+- **Kitty**: each 4096-byte chunk gets its own envelope. The upload carries a
+  fresh nonzero image ID (`i=`), stays in quiet mode (`q=2`, so no reply lands
+  in the shell), and gives rows explicitly (`c=` and `r=`), because the outer
+  terminal is not the one the library sees.
+- **iTerm2**: the whole `File=` message is one envelope; it is never split.
+  tmux accepts at most 1 MiB (1,048,576 bytes) per wrapped message. The size
+  is counted after base64, metadata, ESC doubling, and the envelope, and an
+  image over it renders the text fallback with a `BlockedTransport` reason
+  that gives the size, before any row is reserved.
+- **Not wrapped**: cursor save, move, and restore, text, and synchronized
+  output (mode 2026), which tmux handles itself. An existing envelope is
+  never wrapped twice.
+
+```text
+ESC [ s                                   cursor save (tmux handles it)
+ESC P tmux; ESC ESC _G q=2,i=7,…,m=1;… ESC ESC \ ESC \   chunk 1
+ESC P tmux; ESC ESC _G m=0;… ESC ESC \ ESC \              chunk 2
+ESC [ u                                   cursor restore
+```
+
+**Known limits of ordinary placement through tmux.** tmux does not know the
+image is there, so the outer terminal draws it at the cursor and keeps it
+where it was drawn. Through WezTerm, or any outer terminal without Unicode
+placeholders, the image can drift when the pane is resized or scrolled in
+copy mode, and may stay visible over other windows after a window switch. A
+client that attaches later sees blank space where the image was: tmux redraws
+its own grid, never the image. These limits are documented, not worked
+around.
+
+## The graphics probe
+
+When the environment cannot decide, the library asks the terminal. The probe
+is part of the color exchange `Terminal::new()` already makes, once per
+process (see [Live Terminal Queries](./terminal-queries.md#the-startup-exchange)):
+a Kitty graphics query for a one-pixel image, with a fresh image ID, and the
+DA1 request that already ends the exchange. It adds no round trip.
+
+### What the replies mean
+
+- A **Kitty reply** counts only when it is complete and carries the query's
+  image ID. `OK` means accepted; any other message (for example
+  `ENOTSUPPORTED:…`) means the terminal understood the protocol and refused,
+  which is different from silence. Two replies for the ID that disagree count
+  as conflicting.
+- The **DA1 reply** (`ESC [ ? class ; attributes c`) is read structurally:
+  Sixel is attribute `4` after the class parameter, never the class itself
+  and never a `4` inside another number (`ESC[?64;14c` does not report Sixel).
+
+| Probe outcome | Route |
+| --- | --- |
+| Kitty `OK` | Kitty (`Verified`); this beats Sixel |
+| DA1 reports Sixel | Sixel (`Verified`) |
+| DA1 without either, or a Kitty rejection | none (`NoSupport`, `Verified`) |
+| No reply before the deadline, conflicting replies | none (`Unknown`) |
+| Skipped because input was waiting, terminal unusable | none (`Unknown`) |
+
+### When the probe runs
+
+The probe runs only when the environment leaves the route open:
+
+- an unidentified terminal;
+- an SSH session without forwarded hints;
+- Zellij, always (see [Zellij](#zellij));
+- Windows Terminal whose `WindowsTerminal.exe` version is unreadable or older
+  than 1.22 (see [Known terminals](#known-terminals));
+- a likely hidden tmux, with the extra wrapped query (see [tmux](#tmux));
+- a declared tmux whose outer terminal is not identified (wrapped query only);
+- a visible tmux whose `allow-passthrough` could not be read (wrapped query
+  only).
+
+It is never sent for:
+
+- a known terminal, compatible or not: its identity decides;
+- stdout that is not a terminal, or CI;
+- `BISCUIT_GRAPHICS=none` or any forced format;
+- an invalid override value;
+- probing turned off (`BISCUIT_TERMINAL_PROBE=off` or `ProbeMode::Off`);
+- a Windows SSH server session;
+- a legacy Windows console: native Windows with no `WT_SESSION`, no
+  `TERM_PROGRAM`, no `MSYSTEM`, and not SSH. It resolves to none
+  (`NoSupport`);
+- a visible tmux whose `allow-passthrough` was read, or whose version is
+  unreadable or older than 3.3.
+
+When probing is not allowed in a case that would have probed, the route is
+`Unknown` and its reason says why, for example "not probed in CI" or "not
+probed: the caller turned probing off".
+
+### Programs that read input themselves
+
+The probe reads the terminal's input to see the reply, so a TUI with its own
+input loop keeps it out of the way: build with
+`Terminal::builder().probe(ProbeMode::Off)`, set `BISCUIT_TERMINAL_PROBE=off`,
+or supply a route with `Terminal::builder().graphics_route(..)`, which is
+never re-resolved and causes no probe. Only the first construction in a
+process probes, so construct before the input loop starts.
+[Who owns input](./terminal-queries.md#who-owns-input) covers busy input and
+the caller's rules.
 
 ## Overrides
 
@@ -325,7 +575,9 @@ Accepted values, exactly and lowercase: `auto`, `kitty`, `iterm2`, `sixel`,
 A forced format skips terminal identity and preferences, so
 `BISCUIT_GRAPHICS=kitty` in iTerm2 sends Kitty. It does **not**:
 
-- enable tmux passthrough: with tmux in the path there is still no route;
+- enable tmux passthrough or lift tmux limits: with `TMUX` set, tmux older
+  than 3.3 or `allow-passthrough off` still give `BlockedTransport`, and an
+  iTerm2 image over tmux's 1 MiB message limit still renders the fallback;
 - get past a path known to remove it: Kitty and Sixel on a Windows SSH server,
   or the iTerm2 format in Zellij, give `BlockedTransport` with the requested
   format in the reason;
@@ -343,13 +595,25 @@ set).
 
 | Value | Effect |
 | --- | --- |
-| unset, `auto` | tmux is in the path when `TMUX` is set. |
-| `direct` | No tmux in the path, even when `TMUX` is set. |
-| `tmux` | tmux is in the path, so no route until passthrough lands (**planned**). |
+| unset, `auto` | tmux is in the path when `TMUX` is set; a `tmux-*` or `screen-*` `TERM` without `TMUX` or `STY` is probed as a likely hidden tmux. |
+| `direct` | No tmux in the path, even when `TMUX` is set, and no hidden-tmux check. |
+| `tmux` | tmux is in the path. With `TMUX` set the [visible tmux](#tmux) rule applies; without it, the [declared tmux](#tmux) rule picks the format and the transport is `Tmux`. |
+
+### `BISCUIT_TERMINAL_PROBE`
+
+Accepted values, exactly and lowercase: `auto`, `off`.
+
+| Value | Effect |
+| --- | --- |
+| unset, `auto` | Construction may query the terminal: the colors, and the graphics probe when the route needs it. |
+| `off` | Construction writes nothing to the terminal. Colors come from the environment fallbacks; the route from the environment alone ("not probed: BISCUIT_TERMINAL_PROBE=off"). |
+
+It is the environment form of `Terminal::builder().probe(ProbeMode::Off)`, for
+running a program you cannot change.
 
 ### Invalid values
 
-Both variables share one validator. An empty value, a padded value
+All three variables share one validator. An empty value, a padded value
 (`" kitty"`), a differently cased value (`Kitty`), any other word, or a value
 that is not valid UTF-8 is invalid: it is never read as `auto`. The route is
 none (`InvalidInput`), and the reason names the variable and the accepted
@@ -360,7 +624,7 @@ BISCUIT_GRAPHICS="Kitty" is not a valid value; accepted values: auto, kitty, ite
 ```
 
 Validation comes before any detection, so an invalid value disables graphics
-even in a terminal that would otherwise get them.
+even in a terminal that would otherwise get them, and nothing is queried.
 
 ## Policy ceilings
 
@@ -387,6 +651,9 @@ When the route has no usable format, a valid image renders as text:
   `[Image: <file name>]` when none was set, with control characters removed so
   a file name cannot inject terminal controls. A half-block rendering in
   truecolor is **planned** as the first fallback before alt text.
+- **Some pixel routes fall back too**, each with its own reason: a Sixel
+  route (encoder **planned**), an iTerm2 image over tmux's 1 MiB passthrough
+  message limit, and a Zellij route when no measured cell size is available.
 - **Diagrams** keep the source code block they produce today.
 - A missing, unreadable, or corrupt image is an error, whether or not the
   route has pixels.
@@ -405,12 +672,16 @@ override is labeled a configuration error rather than "no graphics".
 | --- | --- |
 | Zellij older than 0.45 | Upgrade Zellij to 0.45.0 or later. |
 | Windows Terminal older than 1.22 | Upgrade Windows Terminal to 1.22.0 or later. |
-| Windows Terminal whose version could not be read | Set `BISCUIT_GRAPHICS=sixel` if it is 1.22 or later (the route is then Sixel, which renders the text fallback until the encoder lands). |
-| Invalid `BISCUIT_GRAPHICS` or `BISCUIT_GRAPHICS_TRANSPORT` | Set the variable to one of its accepted values. |
+| Windows Terminal whose version could not be read and whose DA1 reply reports no Sixel | Set `BISCUIT_GRAPHICS=sixel` if it is 1.22 or later (the route is then Sixel, which renders the text fallback until the encoder lands). |
+| tmux older than 3.3 | Upgrade tmux to 3.3.0 or later. |
+| tmux with `allow-passthrough off` for the pane | `set -g allow-passthrough on`. |
+| A likely hidden tmux that answered neither query | Set `BISCUIT_GRAPHICS_TRANSPORT=tmux` if a tmux with allow-passthrough on runs between this program and the terminal. |
+| A declared tmux whose outer terminal is unknown | Set `BISCUIT_GRAPHICS` to the outer terminal's format. |
+| Invalid `BISCUIT_GRAPHICS`, `BISCUIT_GRAPHICS_TRANSPORT`, or `BISCUIT_TERMINAL_PROBE` | Set the variable to one of its accepted values. |
 
 Every other reason, including the Windows SSH block and an unidentified
-terminal, has no fix and produces no hint: there is nothing the user can
-change that is known to help.
+terminal that did not answer the probe, has no fix and produces no hint: there
+is nothing the user can change that is known to help.
 
 ## Background reading
 

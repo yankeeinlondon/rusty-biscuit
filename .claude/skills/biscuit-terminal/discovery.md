@@ -77,10 +77,49 @@ match route.format {
 }
 ```
 
-Resolution is env-only today (`BISCUIT_GRAPHICS`, `BISCUIT_GRAPHICS_TRANSPORT`,
-Windows SSH, Zellij, tmux, known terminals); see
+Resolution is environment first (`BISCUIT_GRAPHICS`,
+`BISCUIT_GRAPHICS_TRANSPORT`, `BISCUIT_TERMINAL_PROBE`, Windows SSH, Zellij,
+tmux, known terminals); `probe_plan(&inputs)` says when the environment cannot
+decide, and then the graphics probe does. Developer guide:
 `biscuit-terminal/docs/discovery/graphics-routes.md`. `image_support()` is a
 projection kept for existing callers.
+
+The graphics probe (`detection::probe`, live exchange in
+`discovery::startup_exchange`):
+
+- Rides on the once-per-process OSC 10/11 exchange: a Kitty query
+  (`ESC _ G i=<fresh id>,s=1,v=1,a=q,t=d,f=24;AAAA ESC \`) in the same write,
+  Sixel read from the DA1 sentinel's reply. Whichever of color lookup / route
+  resolution needs it first sends both parts. Inside a multiplexer only the
+  graphics part is sent (colors stay off).
+- Outcomes: correlated Kitty `OK` → Kitty `Verified` (beats Sixel); DA1
+  attribute `4` (never the class, never a digit of another number) → Sixel
+  `Verified`; DA1 without either or a Kitty rejection → NoSupport `Verified`;
+  silence, conflicting replies, busy input, unusable tty → `Unknown`, never a
+  confident negative.
+- Runs for: unidentified terminal, SSH without forwarded hints, Zellij
+  (always; pixel routes set `needs_measured_cells`), Windows Terminal with
+  version unreadable or < 1.22, likely hidden tmux (`TERM=tmux-*`/`screen-*`
+  without `TMUX`/`STY`: plain plus a tmux-wrapped exchange), declared tmux with
+  unidentified outer terminal (wrapped only), visible tmux whose
+  `allow-passthrough` is unreadable (wrapped only). Never for: known terminals,
+  non-tty, CI, forced/none/invalid overrides, probing off, Windows SSH server,
+  legacy Windows console (no `WT_SESSION`/`TERM_PROGRAM`/`MSYSTEM`, not SSH →
+  NoSupport), visible tmux whose passthrough was read.
+- Visible tmux (`TMUX` set): `RouteInputs::tmux` (`TmuxFacts { version,
+  passthrough, clients }`, `detection/tmux.rs`) is read in `from_process` via
+  `tmux -V`, `show-options -Apv -t $TMUX_PANE allow-passthrough`,
+  `list-clients -t $TMUX_PANE -F '#{client_termname}\t#{client_termtype}'`
+  (500 ms deadline each, no shell; unreadable = unknown, never off). < 3.3 →
+  BlockedTransport + upgrade fix; `off` → BlockedTransport + fix
+  `set -g allow-passthrough on`; `on` → the clients' common format (Kitty
+  preferred; unrecognized client = Kitty-only; none recognized → Kitty with
+  confidence `Unknown`), ordinary placement. Rows:
+  `lib/tests/l1/graphics_tmux_matrix.rs`; live: `tests/level2/level2_graphics_tmux.rs`.
+- Busy input: graphics query not sent, route `Unknown`, skip not cached.
+- Tests set probe answers through `RouteInputs::probe` (`GraphicsProbe`,
+  `ProbeResult`, `ProbeReply`, `KittyReply`, `Da1Reply`); see
+  `lib/tests/l1/graphics_probe_matrix.rs`.
 
 ### OSC8 Hyperlinks
 
@@ -252,16 +291,36 @@ if let Some(bg) = bg_color() {
 
 ### Live query cost contract
 
-Every live query (OSC 10/11/12, CSI 14 t, DSR `CSI 6 n`) goes through one
-engine, `discovery::tty_query::round_trip`, which appends a DA1 (`CSI c`)
-sentinel and reads with `select(2)` against a deadline. A terminal silent for
-the 500 ms local budget is marked silent for the whole process (nothing is
-written again; do not shrink the budget, WezTerm answers in 170-200 ms); a query answered only by DA1 is never re-sent. `bg_color()`
-and `text_color()` share one batched, cached request. Remote sessions
-(`SSH_CLIENT`, Mosh) get the full timeout; `BISCUIT_TERMINAL_QUERY_SILENCE_MS`
-overrides the budget. Full contract: `biscuit-terminal/docs/discovery/terminal-queries.md`.
+Every live query (OSC 10/11/12, the graphics probe, CSI 14 t, DSR `CSI 6 n`)
+goes through one engine, `discovery::tty_query`: a shared loop (deadline,
+silence budget, `MAX_RESPONSE_BYTES`, caller-chosen DA1 sentinel so a wrapped
+request gets a wrapped sentinel) over a platform `QueryPort`: `/dev/tty` in
+raw mode via `select(2)` on Unix (typed keys read are discarded), the console
+handles (`CONIN$`/`CONOUT$`) on native Windows (modes restored). Two entry
+points: `round_trip` for single-purpose queries (cursor, CSI 14 t, standalone
+OSC), which memoizes a request answered only by DA1 so it is never re-sent;
+and `exchange`, the structured path the startup exchange uses (returns the
+DA1 reply too; can skip when input is pending; the tmux-wrapped exchange turns
+off silence recording). A terminal silent for the 500 ms local budget is
+marked silent for the whole process (nothing is written again; do not shrink
+the budget, WezTerm answers in 170-200 ms). `bg_color()`, `text_color()`, and
+the direct graphics probe share one cached request
+(`discovery::startup_exchange`); the wrapped exchange is cached separately.
+Remote sessions (`SSH_CLIENT`, Mosh) get the full timeout;
+`BISCUIT_TERMINAL_QUERY_SILENCE_MS` overrides the budget. On native Windows
+only colors (color-list terminals plus Windows Terminal) and the graphics probe
+are queried, never in a Windows SSH server session; cursor and CSI 14 t stay
+Unix-only. Typed keys read during a Windows exchange are written back with
+`WriteConsoleInputW`. Full contract:
+`biscuit-terminal/docs/discovery/terminal-queries.md`.
 
-Add any new terminal query through `round_trip`, never a hand-rolled read
+Construction-time probing is off with `Terminal::builder().probe(ProbeMode::Off)`
+or `BISCUIT_TERMINAL_PROBE=off` (exact lowercase; an invalid value is an
+`InvalidInput` route and queries nothing). Only the first construction in a
+process probes; a TUI builds before its input loop and never probes inside it
+or inside a mode 2026 synchronized-output block.
+
+Add any new terminal query through `tty_query`, never a hand-rolled read
 loop: a private loop forgets the silent memo, and one unanswering pty then pays
 every timeout in turn (`wt list` once spent ~3.3 s and ~2 s of startup on two
 1 s OSC waits, three CSI 14 t waits, and a 1 s DSR wait).

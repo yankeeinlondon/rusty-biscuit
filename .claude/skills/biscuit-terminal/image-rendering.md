@@ -170,7 +170,8 @@ The policy-style variants are primarily tied to helper checks; they are not all 
 ## Graphics Route and Fallback
 
 - The encoder follows `Terminal::graphics_route` (a `GraphicsRoute`: format,
-  transport, placement, confidence, structured `RouteReason`), resolved once
+  transport, placement, confidence, structured `RouteReason`,
+  `needs_measured_cells`), resolved once
   per `Terminal`; never re-resolve per image. Developer guide:
   `biscuit-terminal/docs/discovery/graphics-routes.md`.
 - `render_with_route(&term)` returns `ImageOutput::Pixels(seq)` or
@@ -179,7 +180,18 @@ The policy-style variants are primarily tied to helper checks; they are not all 
 - A Kitty route to `TerminalApp::ITerm2` uses the iTerm2 format unless the
   route is `Forced` (iTerm2 ignores `q=2` and places nothing for width-only `c=`).
 - A Sixel route falls back (encoder not built yet); a route with no pixels
-  falls back with the route's reason. The library never prints hints; `bt`
+  falls back with the route's reason.
+- Transport `Tmux`: `protocol::for_transport` wraps every APC/OSC/DCS in its
+  own envelope (`terminal_image/tmux.rs`, `wrap_graphics_for_tmux`; CSI such
+  as `ESC[s`/`ESC[u`/mode 2026 stays unwrapped, an existing envelope is never
+  re-wrapped). Kitty uploads through tmux use `render_kitty_with_id`
+  (`i=` from `probe::next_kitty_id`, `q=2`, `c=`+`r=`). Any wrapped message
+  over `TMUX_MESSAGE_BUDGET` (1 MiB) → `Fallback` (`BlockedTransport`, size in
+  the message) before rows are reserved; `render_inline` returns
+  `UnsupportedTerminal` instead.
+- A `needs_measured_cells` route (Zellij) falls back when `term.cell_size()`
+  is `None` (`unmeasured_cells_reason`); never size such a route from the
+  8×16 estimate. The library never prints hints; `bt`
   does (stderr, terminal only, once per reason, only with a `fix`).
 - Tests: assert pixel dispatch through `protocol::encoder_for` (rendering
   pixels queries the live cursor), and build routes with

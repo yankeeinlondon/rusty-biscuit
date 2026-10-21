@@ -49,7 +49,7 @@ let (path, width) = parse_filepath_and_width("photo.jpg|75%");
 
 ### Graphics routes
 
-`TerminalImage` makes no format decision of its own. It follows `Terminal::graphics_route`, which `Terminal::new()` resolves once from the environment (and which a caller can supply through `Terminal::builder()`); [Graphics Routes](../discovery/graphics-routes.md) explains how the route is chosen and overridden with `BISCUIT_GRAPHICS`.
+`TerminalImage` makes no format decision of its own. It follows `Terminal::graphics_route`, which `Terminal::new()` resolves once from the environment and, where that cannot decide, the graphics probe (a caller can also supply a route through `Terminal::builder()`); [Graphics Routes](../discovery/graphics-routes.md) explains how the route is chosen and overridden with `BISCUIT_GRAPHICS`.
 
 | Route format | What is sent |
 |--------------|--------------|
@@ -57,6 +57,13 @@ let (path, width) = parse_filepath_and_width("photo.jpg|75%");
 | iTerm2 | iTerm2's `OSC 1337;File=` format |
 | Sixel | The text fallback; the Sixel encoder is **planned** |
 | none | The text fallback |
+
+A route with transport `Tmux` sends the same image wrapped for tmux passthrough: each Kitty chunk in its own `ESC P tmux; … ESC \` envelope (with a fresh nonzero image ID, quiet mode, and explicit rows), and the iTerm2 `File=` message as one envelope. Cursor movement stays unwrapped for tmux to handle. See [tmux in Graphics Routes](../discovery/graphics-routes.md#tmux) for the wire format and the known limits of ordinary placement through tmux.
+
+Two properties of a pixel route can still send it to the text fallback, each with its own reason so the caller can tell why:
+
+- **An iTerm2 image over tmux's limit.** Through tmux, a wrapped `File=` message larger than 1 MiB (1,048,576 bytes, counted after base64, ESC doubling, and the envelope) renders the fallback with a `BlockedTransport` reason giving the size. The check runs before any row is reserved, and the message is never split.
+- **`needs_measured_cells` without a measured cell size.** Zellij sizes an image from its own measurement of the host's cells, so a Zellij route is drawn only when `Terminal::cell_size()` returns a measured size; otherwise the fallback says the multiplexer did not report its cell size in pixels. The 8×16 estimate is never used for such a route.
 
 `render_with_route` returns an `ImageOutput` so a caller can tell the two outcomes apart:
 
