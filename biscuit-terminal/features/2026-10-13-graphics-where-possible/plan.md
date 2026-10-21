@@ -271,6 +271,65 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - ".claude/skills/biscuit-terminal/discovery.md"
     - ".claude/skills/biscuit-terminal/image-rendering.md"
+source_files_during_phase_6:
+    - "biscuit-terminal/lib/src/components/terminal_image/placeholder.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/src/components/two_column.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
+    - "biscuit-terminal/lib/src/utils/block_constraint.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/two_column_parity.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+docs_updated_during_phase_6:
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+source_files_during_phase_7:
+    - "biscuit-terminal/lib/Cargo.toml"
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/render_tree/render.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_probe_matrix.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+    - "biscuit-visualized/src/src/components/display.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-visualized/src/tests/l1/display_size.rs"
+docs_updated_during_phase_7:
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/dependencies.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-visualized/docs/components/mermaid_diagram.md"
+    - "biscuit-visualized/docs/components/graph_expression.md"
+    - "docs/dependencies.md"
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - ".claude/skills/biscuit-terminal/SKILL.md"
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-visualized/diagram-components.md"
 ---
 
 # Plan: Graphics Where Possible
@@ -329,7 +388,7 @@ Every item is observable without a human at a terminal:
       incompatible terminals, CI, pipes, and Windows-SSH are never queried.
 - [ ] tmux wrapping (ESC doubling, per-chunk), the 1 MiB iTerm2 budget, and
       placeholder grid encoding pass L1; tmux L2 passes with passthrough on/off.
-- [ ] Sixel output is deterministic for fixed fixtures and leaves terminal mode
+- [x] Sixel output is deterministic for fixed fixtures and leaves terminal mode
       state unchanged.
 - [ ] Plain images with no pixel route render half-blocks (truecolor + Unicode),
       else alt text; pipes get plain text.
@@ -862,7 +921,7 @@ the pane (§3 Placement). *Depends on phases 2, 5.*
 
 ### Wave 1 (parallel)
 
-- [ ] **Placeholder grid encoder** (pure)
+- [x] **Placeholder grid encoder** (pure)
     - Virtual placement upload (`U=1`) through passthrough; grid of `U+10EEEE`
       with image ID in the foreground color and row/column combining marks
       (Kitty's diacritic table), printed as ordinary text through tmux.
@@ -870,19 +929,19 @@ the pane (§3 Placement). *Depends on phases 2, 5.*
       truecolor, otherwise ordinary placement with documented limits.
     - L1 fixtures: 1x1, wide, tall, max rows/cols table bound, ID encoding, fg
       reset at end.
-- [ ] **Selection rule**: placeholders only when outer terminal is positively
+- [x] **Selection rule**: placeholders only when outer terminal is positively
       identified as Kitty or Ghostty (Zellij rejects `U=1`; WezTerm ignores it).
 
 ### Wave 2 (sequential; prerequisite: Wave 1)
 
-- [ ] **Integration** into `TerminalImage` for inline and standalone paths;
+- [x] **Integration** into `TerminalImage` for inline and standalone paths;
       sizing from phase 2 (cell rectangle includes padding).
-- [ ] L2 (tmux harness, only if a Kitty/Ghostty backend is available, else
+- [x] L2 (tmux harness, only if a Kitty/Ghostty backend is available, else
       skip): upload bytes + grid captured.
 
 ### Checkpoint
 
-- [ ] `just test`, `just test-l2`, `just lint`; update `graphics-routes.md`.
+- [x] `just test`, `just test-l2`, `just lint`; update `graphics-routes.md`.
 
 ---
 
@@ -893,7 +952,7 @@ the pane (§3 Placement). *Depends on phases 2, 5.*
 
 ### Wave 1 (parallel)
 
-- [ ] **Encoder**
+- [x] **Encoder**
     - Add `icy_sixel` 0.7 (no cargo feature flag); update
       `docs/dependencies.md`.
     - Deterministic settings: bounded palette, no dithering by default, opaque
@@ -904,30 +963,30 @@ the pane (§3 Placement). *Depends on phases 2, 5.*
       changed); follow existing cursor ownership rules; test output at the
       bottom of the viewport.
     - L1: fixed fixture ⇒ golden bytes.
-- [ ] **Diagram adapters**: `biscuit-visualized` requests a solid RGB
+- [x] **Diagram adapters**: `biscuit-visualized` requests a solid RGB
       background (phase 2 enum) for Sixel routes; cache identity already
       separates it.
-- [ ] **Detection completion**: DA1 parameter `4` from the relevant renderer
+- [x] **Detection completion**: DA1 parameter `4` from the relevant renderer
       (WT: either-signal rule, with phase 4 query); remove ruling-2 interim
       "no encoder" fallback; never auto-select Sixel for the Windows-SSH
       system-conhost path.
 
 ### Wave 2 (sequential; prerequisite: Wave 1)
 
-- [ ] **tmux-native Sixel**: *established* only when all three hold: tmux >= 3.4,
+- [x] **tmux-native Sixel**: *established* only when all three hold: tmux >= 3.4,
       tmux's own unwrapped DA1 contains `4`, and `#{client_termfeatures}` for the
       pane's client contains `sixel` (S2 gives the exact shape). Takes
       precedence over passthrough routes even if Kitty is available; emitted
       unwrapped. Passthrough off + native established ⇒ Sixel; else fallback + hint.
-- [ ] **Zellij < 0.45 / Kitty disabled**: positive DA1 Sixel from the pane ⇒
+- [x] **Zellij < 0.45 / Kitty disabled**: positive DA1 Sixel from the pane ⇒
       Sixel, else fallback.
 
 ### Wave 3 (validation checkpoint)
 
-- [ ] L1: golden Sixel, mode-state preservation, viewport-bottom, background
+- [x] L1: golden Sixel, mode-state preservation, viewport-bottom, background
       selection/estimate diagnostics, route rows (tmux native, Zellij old, WT).
-- [ ] L2: tmux built with Sixel when available on the host (else skip).
-- [ ] Docs + `biscuit-terminal` and `biscuit-visualized` skills updated for the
+- [x] L2: tmux built with Sixel when available on the host (else skip).
+- [x] Docs + `biscuit-terminal` and `biscuit-visualized` skills updated for the
       route model and boundary; READMEs.
 
 ---

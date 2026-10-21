@@ -101,181 +101,28 @@ packages:
     - "biscuit-icon"
 human_review: false
 message_to_agent: |-
-    Phase 5 (tmux transport) is done; context for phase 6 (placeholders):
+    Phase 7 (Sixel) is done; context for phase 8 (half-blocks):
 
-    - A visible tmux now resolves from `RouteInputs::tmux` (`TmuxFacts {
-      version, passthrough, clients }`, `detection/tmux.rs`, read in
-      `from_process` only when `TMUX` is set, using `TMUX_PANE`).
-      `route.rs::resolve_visible_tmux` applies the 3.3 floor, the
-      `allow-passthrough off` block, then `passthrough_route` with the
-      clients' common format (`outer_terminal` / `client_terminal`). Every
-      tmux route is `GraphicsPlacement::Ordinary` today. Phase 6 upgrades
-      Kitty/Ghostty clients to `Placeholders`: `client_terminal` returns the
-      display name ("kitty", "Ghostty", "WezTerm", ...), so placeholders can
-      be keyed on that; WezTerm and unidentified clients stay ordinary.
-    - The wrapped probe runs for a visible tmux ONLY when `allow-passthrough`
-      could not be read; with passthrough on and no recognized client the
-      route is Kitty with confidence `Unknown` (deliberate: probing every
-      tmux session would add a 500 ms wait when tmux does not forward the
-      reply).
-    - Emission: `protocol::for_transport` wraps every APC/OSC/DCS per sequence
-      (`terminal_image/tmux.rs::wrap_graphics_for_tmux`; CSI untouched, an
-      existing envelope never re-wrapped) and enforces the 1 MiB budget
-      (`TMUX_MESSAGE_BUDGET`) before rows are reserved. Kitty through tmux
-      uses `render_kitty_with_id` (`i=` from `probe::next_kitty_id`, renamed
-      from `next_probe_id`; `q=2`; explicit `c=`/`r=`). Placeholder uploads
-      need `U=1` plus the placeholder grid printed UNwrapped as ordinary text.
-    - Tests: route rows in `tests/l1/graphics_tmux_matrix.rs` (its macro fixes
-      placement to `Ordinary`; phase 6 must loosen it); live tmux evidence in
-      `tests/level2/level2_graphics_tmux.rs` (private harness server,
-      `pipe-pane` raw capture, `discovery_probe` gained
-      `PROBE_GRAPHICS_IMAGE=<path>` to render an image for the route).
-source_files_during_phase_2:
-    - "Cargo.lock"
-    - "biscuit-terminal/lib/src/components/image_options.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png/tests.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/iterm.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
-    - "biscuit-visualized/src/Cargo.toml"
-    - "biscuit-visualized/src/src/artifact.rs"
-    - "biscuit-visualized/src/src/cache/file_cache.rs"
-    - "biscuit-visualized/src/src/raster/png.rs"
-    - "biscuit-visualized/src/src/graph/render.rs"
-    - "biscuit-visualized/src/src/mermaid/render.rs"
-    - "biscuit-visualized/src/src/components/mod.rs"
-    - "biscuit-visualized/src/src/components/display.rs"
-    - "biscuit-visualized/src/src/components/mermaid.rs"
-    - "biscuit-visualized/src/src/components/graph_expression.rs"
-    - "biscuit-visualized/src/src/components/render_hook.rs"
-    - "biscuit-visualized/src/src/tests/artifact_tests.rs"
-    - "biscuit-visualized/src/src/tests/cache_tests.rs"
-    - "biscuit-visualized/src/src/tests/graph_tests.rs"
-    - "biscuit-visualized/src/src/tests/mermaid_tests.rs"
-    - "biscuit-visualized/src/src/tests/raster_tests.rs"
-    - "biscuit-visualized/src/tests/l1/main.rs"
-    - "biscuit-visualized/src/tests/l1/display_size.rs"
-docs_updated_during_phase_2:
-    - "biscuit-terminal/docs/components/terminal_image.md"
-    - "biscuit-visualized/README.md"
-    - "biscuit-visualized/docs/components/graph_expression.md"
-    - "biscuit-visualized/docs/components/mermaid_diagram.md"
-    - "biscuit-visualized/docs/dependencies.md"
-    - "biscuit-visualized/docs/dot-graph.md"
-docs_created_during_phase_2: []
-skills_files_updated_during_phase_2:
-    - ".claude/skills/biscuit-terminal/diagrams.md"
-    - ".claude/skills/biscuit-terminal/image-rendering.md"
-    - ".claude/skills/biscuit-visualized/SKILL.md"
-    - ".claude/skills/biscuit-visualized/artifacts-caching.md"
-    - ".claude/skills/biscuit-visualized/diagram-components.md"
-    - ".claude/skills/biscuit-visualized/graph-rendering.md"
-    - ".claude/skills/biscuit-visualized/mermaid-rendering.md"
-    - ".claude/skills/biscuit-visualized/rasterization.md"
-    - ".claude/skills/os/windows.md"
-source_files_during_phase_3:
-    - "Cargo.lock"
-    - "biscuit-terminal/lib/Cargo.toml"
-    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/route/tests.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/versions.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/image.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
-    - "biscuit-terminal/lib/src/terminal.rs"
-    - "biscuit-terminal/lib/src/render_tree/options.rs"
-    - "biscuit-terminal/lib/src/render_tree/render.rs"
-    - "biscuit-terminal/lib/src/components/horizontal_rule/mod.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
-    - "biscuit-terminal/lib/examples/discovery_probe.rs"
-    - "biscuit-terminal/lib/examples/terminal_info.rs"
-    - "biscuit-terminal/lib/tests/l1/main.rs"
-    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
-    - "biscuit-terminal/lib/tests/l1/parity_helpers.rs"
-    - "biscuit-terminal/lib/tests/l1/integration.rs"
-    - "biscuit-terminal/lib/tests/l1/horizontal_rule_parity.rs"
-    - "biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs"
-    - "biscuit-terminal/cli/src/hints.rs"
-    - "biscuit-terminal/cli/src/main.rs"
-    - "biscuit-terminal/cli/src/output.rs"
-    - "biscuit-terminal/cli/src/commands/image.rs"
-    - "biscuit-terminal/cli/src/commands/mermaid.rs"
-    - "biscuit-terminal/cli/src/commands/graph.rs"
-    - "biscuit-terminal/cli/tests/l1/main.rs"
-    - "biscuit-terminal/cli/tests/l1/graphics_route.rs"
-    - "biscuit-visualized/src/src/components/graph_expression.rs"
-    - "biscuit-visualized/src/src/components/mermaid.rs"
-    - "darkmatter/lib/src/markdown/output/terminal.rs"
-    - "darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs"
-    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/images.rs"
-    - "darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs"
-    - "darkmatter/lib/tests/level3-terminal/level3_image_painting.rs"
-    - "biscuit-icon/lib/src/icon.rs"
-    - "biscuit-icon/cli/src/commands.rs"
-    - "worktree/cli/src/commands/list.rs"
-docs_updated_during_phase_3:
-    - "biscuit-terminal/README.md"
-    - "biscuit-terminal/lib/README.md"
-    - "biscuit-terminal/docs/components/terminal_image.md"
-    - "biscuit-terminal/docs/discovery/terminal-queries.md"
-    - "biscuit-terminal/docs/dependencies.md"
-    - "docs/dependencies.md"
-docs_created_during_phase_3:
-    - "biscuit-terminal/docs/discovery/graphics-routes.md"
-skills_files_updated_during_phase_3:
-    - ".claude/skills/biscuit-terminal/cli.md"
-    - ".claude/skills/biscuit-terminal/discovery.md"
-    - ".claude/skills/biscuit-terminal/image-rendering.md"
-    - ".claude/skills/biscuit-terminal/render-tree.md"
-    - ".claude/skills/biscuit-terminal/terminal-struct.md"
-    - ".claude/skills/os/SKILL.md"
-    - ".claude/skills/os/windows-console.md"
-source_files_during_phase_4:
-    - "Cargo.lock"
-    - "biscuit-terminal/lib/Cargo.toml"
-    - "biscuit-terminal/lib/src/discovery/mod.rs"
-    - "biscuit-terminal/lib/src/discovery/raw_mode.rs"
-    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
-    - "biscuit-terminal/lib/src/discovery/tty_query.rs"
-    - "biscuit-terminal/lib/src/discovery/tty_query/mod.rs"
-    - "biscuit-terminal/lib/src/discovery/tty_query/unix.rs"
-    - "biscuit-terminal/lib/src/discovery/tty_query/windows.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
-    - "biscuit-terminal/lib/src/discovery/detection/color.rs"
-    - "biscuit-terminal/lib/src/discovery/osc_queries/query.rs"
-    - "biscuit-terminal/lib/src/discovery/osc_queries/support.rs"
-    - "biscuit-terminal/lib/src/terminal.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
-    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
-    - "biscuit-terminal/lib/examples/discovery_probe.rs"
-    - "biscuit-terminal/lib/tests/common/pty.rs"
-    - "biscuit-terminal/lib/tests/l1/main.rs"
-    - "biscuit-terminal/lib/tests/l1/graphics_probe_matrix.rs"
-    - "biscuit-terminal/lib/tests/l1/graphics_route_matrix.rs"
-    - "biscuit-terminal/lib/tests/l1/level1_graphics_probe.rs"
-    - "biscuit-terminal/lib/tests/level2/main.rs"
-    - "biscuit-terminal/lib/tests/level2/level2_graphics_probe_wezterm.rs"
-    - "biscuit-terminal/lib/tests/level2/level2_windows_console_query.rs"
-    - "biscuit-terminal/cli/src/output.rs"
-docs_updated_during_phase_4:
-    - "biscuit-terminal/docs/discovery/terminal-queries.md"
-    - "biscuit-terminal/docs/discovery/graphics-routes.md"
-    - "biscuit-terminal/docs/components/terminal_image.md"
-    - "biscuit-terminal/docs/research/graphics/multiplexing.md"
-    - "biscuit-terminal/lib/README.md"
-docs_created_during_phase_4: []
-skills_files_updated_during_phase_4:
-    - ".claude/skills/biscuit-terminal/SKILL.md"
-    - ".claude/skills/biscuit-terminal/cli.md"
-    - ".claude/skills/biscuit-terminal/discovery.md"
-    - ".claude/skills/biscuit-terminal/image-rendering.md"
-    - ".claude/skills/biscuit-terminal/terminal-struct.md"
-    - ".claude/skills/os/windows-console.md"
+    - `encoder_for` (terminal_image/protocol.rs) now maps Sixel to
+      `Encoder::Sixel`; the only remaining text fallback is
+      `Encoder::Fallback(reason)`, which is where half-blocks plug in
+      (`render_with_route` validates the image, then returns alt text).
+    - `ImagePixels::into_image()` (encoded_png.rs) decodes either input kind;
+      reuse it for half-blocks instead of a new decode path.
+    - `sixel.rs::blend` composites RGBA onto a background, and
+      `SixelBackground::for_terminal` picks the measured or estimated
+      background; half-blocks need the same for transparent pixels.
+    - Colors are never queried inside a multiplexer (`color_query_wanted`
+      checks `detect_multiplexer`), so under tmux the background is always
+      the light/dark estimate.
+    - Known, not fixed: under a hidden tmux (`TERM=tmux-*` without `TMUX`,
+      across SSH) the direct exchange still sends the unwrapped Kitty query,
+      which a tmux on the far side turns into its pane title (`Gi=…`). A
+      visible tmux no longer gets it (`ProbePlan::direct_da1_only`).
+    - The CLI L2 test `level2_cursor_lands_below_rendered_image` failed three
+      times in a row early in phase 7 (WezTerm pane answered no DSR), then
+      passed four times with no code change; treat a repeat as environment
+      first.
 source_files_during_phase_5:
     - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
     - "biscuit-terminal/lib/src/discovery/detection/mod.rs"
@@ -301,6 +148,65 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - ".claude/skills/biscuit-terminal/discovery.md"
     - ".claude/skills/biscuit-terminal/image-rendering.md"
+source_files_during_phase_6:
+    - "biscuit-terminal/lib/src/components/terminal_image/placeholder.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/kitty.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/src/components/two_column.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/tmux.rs"
+    - "biscuit-terminal/lib/src/utils/block_constraint.rs"
+    - "biscuit-terminal/lib/examples/discovery_probe.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/two_column_parity.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+docs_updated_during_phase_6:
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/components/terminal_image.md"
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+source_files_during_phase_7:
+    - "biscuit-terminal/lib/Cargo.toml"
+    - "Cargo.lock"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/sixel/tests.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/mod.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/protocol.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/encoded_png.rs"
+    - "biscuit-terminal/lib/src/components/terminal_image/tests.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/probe.rs"
+    - "biscuit-terminal/lib/src/discovery/detection/route.rs"
+    - "biscuit-terminal/lib/src/discovery/startup_exchange.rs"
+    - "biscuit-terminal/lib/src/render_tree/render.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_tmux_matrix.rs"
+    - "biscuit-terminal/lib/tests/l1/graphics_probe_matrix.rs"
+    - "biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs"
+    - "biscuit-visualized/src/src/components/display.rs"
+    - "biscuit-visualized/src/src/components/mermaid.rs"
+    - "biscuit-visualized/src/src/components/graph_expression.rs"
+    - "biscuit-visualized/src/tests/l1/display_size.rs"
+docs_updated_during_phase_7:
+    - "biscuit-terminal/docs/components/terminal_image.md"
+    - "biscuit-terminal/docs/discovery/graphics-routes.md"
+    - "biscuit-terminal/docs/discovery/terminal-queries.md"
+    - "biscuit-terminal/docs/dependencies.md"
+    - "biscuit-terminal/lib/README.md"
+    - "biscuit-visualized/docs/components/mermaid_diagram.md"
+    - "biscuit-visualized/docs/components/graph_expression.md"
+    - "docs/dependencies.md"
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - ".claude/skills/biscuit-terminal/SKILL.md"
+    - ".claude/skills/biscuit-terminal/discovery.md"
+    - ".claude/skills/biscuit-terminal/image-rendering.md"
+    - ".claude/skills/biscuit-visualized/diagram-components.md"
 ---
 
 # Implementation Log for 2026-10-13-graphics-where-possible (9 phases)
@@ -1123,3 +1029,280 @@ darkmatter, sniff, tree-hugger-cli]`, so the gates were run.
   are pure, and the new L2 file is `cfg(unix)`. Linux CI runs the L2 tmux
   tests (ubuntu tmux 3.4 ≥ 3.3).
 - No pre-existing or load-sensitive failures observed.
+
+## Phase 6
+
+### Wave 1: placeholder grid encoder and selection rule
+
+- **Encoder** — new `lib/src/components/terminal_image/placeholder.rs`:
+  `placeholder_rows(id, columns, rows) -> Option<Vec<String>>`. Each row is
+  `ESC[38;2;R;G;Bm` (the ID), then per column `U+10EEEE` + row mark + column
+  mark, then `ESC[39m`. The foreground is reset at the end of **every** row
+  (not only after the grid), so a row used as one line of a `TwoColumn`
+  never colors the gutter or the other column. `None` for an empty grid,
+  more than 297 rows/columns, or an ID of 0 or above 24 bits.
+- **Diacritic table** — the 297 marks were generated from kitty's own
+  `rowcolumn-diacritics.txt` bundled with the installed kitty 0.49.2
+  (`/Applications/kitty.app/.../rowcolumn-diacritics.txt`), not typed from
+  memory; a unit test pins the first/last entries and that there are no
+  duplicates.
+- **Ruling 9 (image IDs)** — `probe::next_kitty_id` now stays within
+  `MAX_KITTY_ID = 0xFF_FFFF` and wraps back to 1 (the counter is masked, zero
+  skipped; pure helper `kitty_id_from_counter` is tested at 1, max, max+1,
+  max+2, `u32::MAX`, 0). Previously IDs could reach 31 bits. One counter still
+  serves probes and uploads, so IDs stay distinct.
+- **Selection rule, and the "Unicode + truecolor" requirement (interpretation
+  recorded)** — placeholders are chosen in `route.rs::with_placement` when the
+  route is Kitty through a visible tmux and **every** client of the pane's
+  session is identified as kitty or Ghostty **and** tmux reports each with
+  `client_utf8 = 1` and `RGB` in `client_termfeatures`. The plan said
+  "require Unicode and truecolor"; the process's own `COLORTERM`/locale was
+  rejected as the signal because tmux re-encodes the `38;2` ID color for each
+  client and rounds it to 256 colors when it does not believe the client has
+  RGB, which would silently break the ID. tmux's per-client view is the
+  thing that decides it. `TmuxClient` gained `utf8` and `termfeatures`
+  (list-clients format now `termname\ttermtype\tutf8\ttermfeatures`).
+  Kitty/Ghostty missing either → ordinary placement and the reason says
+  "placed ordinarily, because Unicode placeholders need tmux to send UTF-8
+  and 24-bit color (the RGB terminal feature) to every client" (no `fix`:
+  graphics already work). WezTerm, Konsole, unidentified clients, mixed
+  kitty+WezTerm, and hidden/declared tmux (clients unreadable) stay ordinary.
+  A forced `BISCUIT_GRAPHICS=kitty` inside a visible tmux also gets
+  placeholders when the clients allow them (the forced path skipped client
+  identification before; now it reads the clients only for placement).
+
+### Wave 2: integration
+
+- `kitty.rs`: geometry shared through a new `kitty_geometry` (borrows the
+  caller's PNG via a consuming `ImagePixels::into_png`, so no copy was added
+  to the ordinary path); `render_kitty_placeholders` builds the `U=1` upload
+  (`q=2,i=<id>,f=100,a=T,U=1,t=d,c=,r=`) and the indented rows (spaces, not
+  `CUF`, so a column layout measures them); a grid that cannot be encoded
+  (over 297 cells) returns `None` and the caller places the image ordinarily.
+- `protocol.rs`: standalone (`render_to_terminal`) writes upload + each row +
+  `\r\n` (cursor ends below the image like the ordinary path; no cursor
+  rows/scroll compensation needed because the grid is text). The upload goes
+  through `for_transport` (wrapped, budget-checked); the grid is never
+  wrapped. `render_inline` now returns `InlineImage::{Overlay, Lines}`;
+  `TwoColumn` lays `Lines` out as ordinary column lines.
+- **Defect found and fixed in a shared utility:** `utils::block_constraint::
+  visible_width` did not recognize DCS (`ESC P … ESC \`), so a tmux envelope
+  (with doubled inner ESCs) counted its payload as visible columns. It now
+  skips DCS, treating `ESC ESC` inside as a doubled pair. This also affected
+  phase 5's ordinary tmux overlay in a `TwoColumn` (its pad width was
+  miscounted); not separately tested there.
+- `discovery_probe graphics` prints `graphics_placement[i]=`.
+
+### Live evidence (manual, then L2)
+
+Private tmux 3.8 server, a client attached through `script` with
+`TERM=xterm-kitty` (`TERMINFO` = kitty.app's bundled database; macOS
+ncurses lacks `xterm-kitty`): `list-clients` reported
+`xterm-kitty||1|bpaste,ccolour,clipboard,cstyle,focus,RGB,title`. The client
+received the **unwrapped** `ESC_Gq=2,i=10246909,f=100,a=T,U=1,…` and grid
+cells colored `38;2;156;90;253` (= 10246909), so tmux forwards both the
+upload and the 24-bit ID color. The L2 test needed `window-size manual`
+(the client's pty shrank the window and wrapped the probe's lines) and
+`capture-pane -S -` (the grid scrolls the early lines).
+
+### Requirement → test mapping
+
+| Requirement | Test(s) |
+| --- | --- |
+| grid 1x1 / wide / tall, fg reset per row | `terminal_image::placeholder::tests::a_one_by_one_grid_is_one_cell_between_the_id_color_and_its_reset`, `a_wide_grid_numbers_its_columns`, `a_tall_grid_numbers_its_rows_and_resets_color_on_every_row` |
+| ID in 24-bit fg; max rows/cols bound; refused inputs | `the_id_is_the_24_bit_foreground`, `the_table_bounds_rows_and_columns` (297 ok, 298 refused), `empty_grids_and_unencodable_ids_are_refused` |
+| diacritic table fidelity | `the_table_matches_kittys_published_ends_and_has_no_duplicates` |
+| ruling 9 IDs (24-bit, wrap to 1, nonzero, fresh) | `detection::probe::tests::ids_stay_in_24_bits_and_wrap_past_zero`, `probe_ids_are_fresh_and_nonzero` |
+| tmux client facts (utf8, termfeatures) | `detection::tmux::tests::client_lines`, `features_match_whole_names` |
+| selection rule (kitty, Ghostty, both; WezTerm; mixed; unidentified; RGB missing; UTF-8 missing; no features; one client lacking; forced kitty / forced iTerm2; probe-verified unidentified) | `l1 graphics_tmux_matrix::placeholders_*`, `wezterm_with_rgb_is_never_placeholders`, `kitty_and_wezterm_place_ordinarily_without_a_placeholder_note`, `forced_kitty_to_a_kitty_client_uses_placeholders`, `forced_iterm2_to_a_kitty_client_is_never_placeholders`, `unidentified_client_verified_by_the_probe_places_ordinarily`; every existing row now asserts its placement (macro loosened) |
+| standalone emission: wrapped `U=1` upload, unwrapped grid, rows = `r=`, fg reset, fresh ID | `terminal_image::tests::placeholder_dispatch::the_standalone_path_uploads_a_virtual_placement_then_prints_the_grid` |
+| inline emission: one line per row, upload on row 0 takes no columns | `placeholder_dispatch::the_inline_path_returns_one_text_line_per_image_row` |
+| no RGB → ordinary overlay end to end | `placeholder_dispatch::without_rgb_the_same_client_gets_an_ordinary_overlay` |
+| grid over 297 columns → ordinary placement | `placeholder_dispatch::a_grid_wider_than_the_diacritic_table_places_the_image_ordinarily` |
+| `TwoColumn` with a placeholder image: text lines, aligned rows (public API) | `l1 two_column_parity::placeholder_image_column_renders_as_aligned_text_lines` |
+| `visible_width` skips tmux envelopes | `utils::block_constraint::tests::visible_width_strips_tmux_passthrough_envelopes` |
+| live tmux + kitty client: route `Placeholders`, wrapped `U=1` upload, unwrapped grid, tmux forwards upload and ID color to the client | `level2 level2_graphics_tmux::level2_tmux_kitty_client_gets_unicode_placeholders` |
+
+- Mutation check: changing the upload to `U=0` made the L2 test fail at the
+  "a virtual placement" assertion; reverted.
+- Input robustness: the new inputs are tmux command output, not a
+  configuration format; `parse_clients` maps a missing field to empty and any
+  `client_utf8` other than `1` to "no UTF-8" (covered in `client_lines`), and
+  an empty `termfeatures` gives ordinary placement (matrix row).
+- **Linux risk recorded:** the L2 test's Linux branch runs
+  `script -q -c "tmux …" /dev/null` (util-linux) and was only exercised on
+  macOS here (`cross-check` runs L1 only). It runs on CI's Linux L2 leg only
+  when the runner has `xterm-kitty` terminfo (`infocmp xterm-kitty`);
+  otherwise it skips.
+
+### Gates
+
+- `just lint` (biscuit-terminal area): clean (one `needless_range_loop` fixed
+  first). `cargo clippy -p biscuit-terminal --features terminal-tests,image
+  --tests --examples -- -D warnings`: clean.
+- `just test`: 3762 passed, 0 failed.
+- `just test-l2`: biscuit-terminal 7 run / 7 passed (incl. the new test),
+  biscuit-terminal-cli 251 passed.
+- `just check-tier-coverage biscuit-terminal`: 0 stranded.
+- Dependents (serial, filtered): darkmatter
+  `test(/route|graphics|image|visible_width|layout|two_column/)` 270 passed;
+  worktree-cli `test(/graphics|route|image|git_graph|list_table/)` 85 passed;
+  biscuit-visualized (`terminal`) `test(/route|graphics|image|kitty|iterm/)`
+  17 passed; claudine-cli `test(/context_render/)` 22 passed (a
+  `visible_width` consumer).
+- Cross-OS check skipped: no path, process, or `cfg(windows)` code changed;
+  the encoder and route rules are pure, and the L2 file is `cfg(unix)`.
+- No pre-existing or load-sensitive failures observed.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`, after all
+  edits): packages `biscuit-terminal, test-toolkit, darkmatter`,
+  change_class `package`, so the gates were required and were run (above).
+- Packages touched this phase: `biscuit-terminal` only (already in
+  `packages`; no change to the list).
+
+## Phase 7
+
+### Wave 1: encoder, diagram adapters, detection completion
+
+- **Encoder** — new `lib/src/components/terminal_image/sixel.rs`, using
+  `icy_sixel` 0.7 (normal dependency, no cargo feature). Settings: Wu
+  quantization, `SIXEL_PALETTE_COLORS = 256`, diffusion 0 (no dithering),
+  square pixels, `P2=1`. The image is resized to the display size (columns ×
+  cell width, height from the aspect ratio), composited onto an opaque
+  background, and padded below to whole cell rows with that background.
+  `Encoder::Sixel` replaces the ruling-2 interim fallback in `encoder_for`.
+- **Background** — public `SixelBackground { color, source }` with
+  `SixelBackground::for_terminal` and `BackgroundSource::{Measured,
+  Estimated}`: the measured OSC 11 background, else white for a light color
+  mode and black for dark/unknown. The choice (and whether it is an
+  estimate) is in the type and in the `Sixel image render` debug event.
+- **Cursor and modes** — the standalone sequence is IND (`ESC D`) once per
+  row, CUU back, `ESC[s`, optional CUF, the DCS, `ESC[u`, then CUD + CR.
+  Reserving with IND makes the terminal scroll *before* the image at the
+  viewport bottom, so the saved cursor stays valid; no scroll compensation
+  step and no private mode (`?80`, `?1070`) is ever written. The inline path
+  (`TwoColumn`) uses the same reservation as an overlay. Through tmux
+  passthrough only the DCS is wrapped.
+- **Diagram adapters** (biscuit-visualized) — `display_background` in
+  `components/display.rs`: on a Sixel route a `Transparent` diagram is
+  rasterized on `Solid(measured background)`, or on `Theme` (the theme's own
+  opaque background) when nothing was measured. Explicit `Theme`/`Solid`
+  are kept. `MermaidRenderer::render_to_cached_png_at_width` and
+  `GraphExpression::render_png` now take the background; the cache key
+  already includes it, so Sixel and Kitty rasters are separate artifacts.
+- **Detection completion** — DA1 `4` from the relevant renderer, the
+  Windows Terminal either-signal rule, Zellij's DA1 Sixel and the Windows
+  SSH exclusion were already in place from phase 4; this phase removed the
+  encoder fallback and added a row proving a Windows SSH session with a
+  Sixel DA1 and an inherited `WT_SESSION` still never selects Sixel.
+
+### Wave 2: Sixel drawn by tmux itself
+
+- `resolve_visible_tmux` (route.rs) now checks tmux-native Sixel first and
+  delegates to the former body, renamed `resolve_tmux_passthrough`.
+  Established only when tmux ≥ 3.4 (`TMUX_NATIVE_SIXEL_MIN`), every client
+  of the pane's session has `sixel` in `client_termfeatures` (empty or
+  unreadable list does not qualify), and tmux's own unwrapped DA1 reports
+  attribute 4 → Sixel, `Direct`, `Verified`. Beats every passthrough route
+  and works with passthrough off/on/unread; otherwise the passthrough rules
+  apply unchanged (passthrough off → fallback + `set -g allow-passthrough on`).
+- **Forced Sixel** (interpretation recorded): `BISCUIT_GRAPHICS=sixel` in a
+  visible tmux whose version and clients qualify goes to tmux itself
+  (`Direct`, `Forced`) without asking DA1, since a forced format skips
+  probing; otherwise it goes through passthrough as before.
+- **Finding: tmux turns an unwrapped APC into the pane title.** Verified on
+  tmux 3.8: printing `ESC _ Gi=5,a=q;AAAA ESC \` in a pane set
+  `#{pane_title}` to `Gi=5,a=q;AAAA`. So the exchange that asks tmux for its
+  own DA1 must not carry the Kitty query. `ProbePlan` gained
+  `direct_da1_only`; `startup_exchange::run_direct` sends DA1 alone (plus
+  colors when wanted) in that case and records `kitty: NoReply` with the DA1
+  reply. `direct_probe(kitty: bool)` carries the choice.
+- **Pre-existing, not changed (noted for a later phase):** the hidden-tmux
+  path (`TERM=tmux-*` without `TMUX`, across SSH) still sends the *unwrapped*
+  Kitty query alongside the wrapped one, so a remote tmux will set its pane
+  title to `Gi=…`. Fixing it means deciding whether the plain query is still
+  needed to detect "no tmux after all"; left as is to keep this phase's
+  scope.
+- **Zellij < 0.45 / Kitty disabled**: already handled in phase 4 (DA1 `4`
+  from the pane → Sixel); covered by `graphics_probe_matrix::zellij_*`.
+
+### Live evidence
+
+Host tmux 3.8 is built with Sixel: a pane reading its own DA1 got
+`ESC[?1;2;4c`, and `#{sixel_support}` is `1`. `tmux -T sixel attach` gives
+one client the `sixel` feature without touching the server-wide
+`terminal-features` (which other L2 tests share). tmux does not redraw a
+Sixel image for a client whose pseudo-terminal reports no pixel size (the
+`script` client), so the L2 test asserts what reaches tmux, not what tmux
+forwards.
+
+### Requirement → test mapping
+
+| Requirement | Test(s) (tier, rung) |
+| --- | --- |
+| fixed fixture ⇒ golden bytes (hand-decoded: palette, band bits) | `terminal_image::sixel::tests::a_fixed_fixture_encodes_to_golden_bytes` (L1, F1) |
+| deterministic, bounded palette (≤ 256) on a > 256-color gradient | `…::encoding_is_deterministic_and_the_palette_is_bounded` |
+| no dithering by default (two colors stay two) | `…::a_two_color_image_gains_no_dithering_colors` |
+| opaque output: transparency composited, hidden color never shows; blend at alpha 0/128/255 | `…::transparency_is_composited_onto_the_background`, `…::half_transparent_pixels_blend_with_the_background` |
+| pad to whole rows with the background (not stretched); resize to display size | `…::the_raster_is_padded_to_whole_rows_with_the_background`, `…::the_image_is_resized_to_the_display_size`, `…::scaled_height_rounds_and_is_never_zero` |
+| one DCS, square pixels, no mode set | `…::the_sequence_is_one_square_pixel_dcs_and_sets_no_mode` |
+| background: measured (every color mode) vs estimate (light → white, dark/unknown → black), source exposed | `…::background::a_measured_background_is_used_as_is`, `…::without_a_measurement_the_color_mode_decides_the_estimate`; `SixelBackground` doctest |
+| route dispatch: reserve rows (IND), CUU, save, draw, restore, CUD; no `ESC[?` (mode state) | `terminal_image::tests::route_dispatch::a_sixel_route_reserves_its_rows_then_draws_and_moves_below_the_image` (L1, F2 public `render_with_route`) |
+| left offset after the cursor save | `route_dispatch::a_sixel_image_with_a_left_offset_moves_right_after_saving_the_cursor` |
+| plain image composited on measured background / light estimate end to end | `route_dispatch::a_sixel_image_is_composited_on_the_measured_background_or_its_estimate` |
+| inline overlay (TwoColumn) | `route_dispatch::a_sixel_inline_image_is_an_overlay_that_returns_the_cursor` |
+| passthrough: only the DCS is wrapped | `route_dispatch::a_sixel_route_through_tmux_passthrough_wraps_only_the_image` |
+| viewport bottom, live: text after the image lands right below it in an 8-row pane | `level2 level2_graphics_tmux::level2_tmux_draws_sixel_itself_at_the_bottom_of_the_viewport` (L2, real tmux 3.8) |
+| diagrams: Sixel ⇒ Solid(measured) / Theme (estimate); other routes and explicit backgrounds kept | `biscuit-visualized components::display::tests::*` (3) |
+| diagrams end to end: Sixel output, opaque artifact on measured color, separate cache entry from Kitty; theme fallback; graph too | `biscuit-visualized l1 display_size::a_mermaid_diagram_on_a_sixel_route_*` (2), `…::a_graph_on_a_sixel_route_is_opaque_on_the_measured_background` (L1, F2) |
+| tmux-native Sixel: established; beats Kitty; passthrough off/unread; < 3.4; DA1 without 4; one client lacking; no client; unreadable list; no reply; passthrough off + not established ⇒ fix; CI; forced (native / passthrough / forced kitty unchanged) | `l1 graphics_tmux_matrix::native_sixel_*` (14) |
+| probe plan: DA1-only for a candidate (+ wrapped when unread); never below 3.4, without the feature, forced, CI | `graphics_tmux_matrix::plan_native_*`, `plan_never_native_*` (7) |
+| live: DA1 asked without the Kitty query (no `ESC _G` reaches tmux, pane title unchanged), Sixel `Verified`, image unwrapped | `level2_tmux_draws_sixel_itself_at_the_bottom_of_the_viewport` (L2) |
+| Windows SSH never auto-selects Sixel (even with Sixel DA1 + inherited `WT_SESSION`) | `l1 graphics_probe_matrix::windows_ssh_never_selects_sixel_from_a_sixel_reply` (+ existing `windows_ssh_forced_sixel_is_blocked`) |
+| Zellij old / Kitty disabled, Windows Terminal either signal | existing `graphics_probe_matrix::zellij_*`, `windows_terminal_*` (phase 4) |
+
+- The interim test `a_sixel_route_falls_back_until_the_sixel_encoder_exists`
+  was replaced by the dispatch tests above.
+- Mutation check: lowering `TMUX_NATIVE_SIXEL_MIN` to 3.3 failed
+  `native_sixel_needs_tmux_3_4`; reverted. The L2 test was first seen
+  passing while silently skipped (its `#{sixel_support}` check needs a
+  running session); after the fix it was run with
+  `BISCUIT_TEST_LEVEL_REQUIRED=2` and its assertions failed and were
+  corrected twice before passing, so it genuinely exercises tmux.
+- Input robustness: no configuration format or parser was added (tmux
+  facts and DA1 parsing were covered in phases 4–6); not applicable.
+
+### Gates
+
+| Scope | Command | Result |
+| --- | --- | --- |
+| biscuit-terminal | `just lint` | clean (one `field_reassign_with_default` fixed first) |
+| biscuit-terminal | `just test` | 3799 passed, 0 failed, 55 skipped |
+| biscuit-terminal | `just test-l2` | lib 8/8 (incl. the new Sixel test), cli 251/251 |
+| biscuit-terminal | `just doctest SixelBackground` | 1 passed |
+| biscuit-terminal | `just check-tier-coverage biscuit-terminal` | 0 stranded |
+| biscuit-visualized | `just test` / `just lint` | 316 passed / clean |
+| darkmatter | `--features terminal-tests`, `test(/route\|graphics\|image\|sixel\|mermaid\|diagram\|probe/)` minus tier markers | 196 passed |
+| worktree-cli, biscuit-icon, sniff-cli | `--all-features`, `test(/route\|graphics\|image\|git_graph\|list_table\|graph\|deps\|dot/)` minus tier markers | 90 / 2 / 23 passed |
+| Windows | `just cross-check biscuit-terminal --os windows` | 3413 passed, 61 skipped |
+
+- **Environment-sensitive, not a regression:** the first `just test-l2`
+  failed `biscuit-terminal-cli level2_cursor_and_hygiene::
+  level2_cursor_lands_below_rendered_image` (the WezTerm pane answered no
+  DSR: `cursor BEFORE: (query failed)`); it failed again alone and in its
+  module. The same `bt` answered DSR correctly in a tmux pane and in a fresh
+  pane on the same WezTerm mux. With the pre-phase `startup_exchange.rs`
+  (the only runtime change on that path, behavior-identical for a WezTerm
+  route) it passed, and then passed 3/3 with this phase's file; the full
+  `just test-l2` rerun was 251/251.
+- Scope calculator after all edits (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): packages `biscuit-terminal,
+  biscuit-visualized, test-toolkit, darkmatter, sniff, tree-hugger-cli`,
+  change_class `package` (the tree still holds phase 6's uncommitted
+  changes), so the gates were required and were run.
+- Packages touched this phase: `biscuit-terminal`, `biscuit-visualized`
+  (both already in `packages`).
+- Docs and skills were updated by a Documenter subagent from a fact sheet;
+  its one unbriefed claim (colors are not queried through a multiplexer)
+  was checked against `color_query_wanted` and is correct.
