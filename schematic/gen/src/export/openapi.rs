@@ -140,9 +140,10 @@ pub fn write_openapi_grouped(
 ///   numeric suffix if that name is taken or is any operation's original id.
 ///   Links that name a renamed operation are updated for the API that wrote
 ///   them.
-/// - **components.schemas**: unioned across members' [`RestApi::schemas`].
-///   Members of one module group carry the same components, so same-named
-///   entries are equal and collapse.
+/// - **components.schemas**: unioned across members' [`RestApi::schemas`],
+///   first position kept. Equal same-named entries collapse (members of one
+///   module group carry the same components); different ones are an
+///   `invalid-schema-reference` error naming both APIs.
 /// - **components.security_schemes**: unioned across members. If two members
 ///   define the same scheme name with different security-scheme content, the
 ///   second is renamed to `<scheme>_<api_snake>` and that API's operation and
@@ -160,7 +161,8 @@ pub fn write_openapi_grouped(
 ///
 /// - [`GeneratorError::Validation`] when [`validate_openapi`] reports an
 ///   error for any member, when two members declare incompatible operations
-///   on one `path` + `method`, or when the finished document fails
+///   on one `path` + `method` or different schemas under one component
+///   name, or when the finished document fails
 ///   [`operation_id_diagnostics`].
 /// - [`GeneratorError::ConfigError`] when per-API export fails.
 ///
@@ -344,6 +346,8 @@ fn merge_documents(
         }
     }
     let mut contributors: Vec<String> = vec![seed_name];
+    // Component name -> index of the API that supplied it; absent means the seed.
+    let mut schema_owners: IndexMap<String, usize> = IndexMap::new();
 
     for (api_name, mut doc) in docs {
         let api_index = contributors.len();
@@ -356,9 +360,31 @@ fn merge_documents(
         // API's.
         let merged_components = merged.components.get_or_insert_with(Default::default);
         if let Some(incoming_components) = doc.components.take() {
-            // Schemas: IndexMap insert overwrites; identical schemas collapse.
             for (name, schema) in incoming_components.schemas {
-                merged_components.schemas.insert(name, schema);
+                match merged_components.schemas.get(&name) {
+                    Some(existing) if !schemas_equal(existing, &schema) => {
+                        let owner = schema_owners.get(&name).map_or(&contributors[0], |&index| &contributors[index]);
+                        return Err(GeneratorError::Validation {
+                            output: Output::OpenApi,
+                            diagnostics: vec![ValidationDiagnostic::for_group(
+                                Severity::Error,
+                                [owner.as_str(), api_name.as_str()],
+                                Feature::InvalidSchemaReference,
+                                Output::OpenApi,
+                                format!(
+                                    "module '{module_name}': schema component \"{name}\" has \
+                                     different definitions in both APIs; an OpenAPI document \
+                                     holds one schema per component name"
+                                ),
+                            )],
+                        });
+                    }
+                    Some(_) => {}
+                    None => {
+                        schema_owners.insert(name.clone(), api_index);
+                        merged_components.schemas.insert(name, schema);
+                    }
+                }
             }
 
             let mut renames: IndexMap<String, String> = IndexMap::new();
@@ -738,6 +764,13 @@ fn path_methods_present(
 /// `openapiv3::SecurityScheme` does not implement `PartialEq`, so we compare
 /// the JSON form. Equal serialization means identical scheme definitions for
 /// merge purposes.
+fn schemas_equal(a: &ReferenceOr<openapiv3::Schema>, b: &ReferenceOr<openapiv3::Schema>) -> bool {
+    match (serde_json::to_value(a).ok(), serde_json::to_value(b).ok()) {
+        (Some(va), Some(vb)) => va == vb,
+        _ => false,
+    }
+}
+
 fn security_schemes_equal(
     a: &ReferenceOr<openapiv3::SecurityScheme>,
     b: &ReferenceOr<openapiv3::SecurityScheme>,
@@ -1119,6 +1152,44 @@ mod tests {
             fs::read_dir(temp.path()).unwrap().count(),
             0,
             "a rejected module writes no file"
+        );
+    }
+
+    #[test]
+    fn grouped_members_with_different_same_named_components_fail_and_equal_ones_collapse() {
+        use schematic_define::{AuthStrategy, RestMethod, SchemaComponent};
+
+        let with_status = |name: &str, path: &str, value_type: &str| {
+            let mut api = synthetic_api(name, "foo", RestMethod::Get, path, AuthStrategy::None);
+            api.schemas.push(SchemaComponent {
+                name: "Status".into(),
+                rust_path: None,
+                schema: serde_json::json!({"type": "object", "properties": {"value": {"type": value_type}}}),
+            });
+            api
+        };
+        let left = with_status("FooA", "/a", "string");
+        let same = with_status("FooB", "/b", "string");
+        let right = with_status("FooC", "/c", "boolean");
+
+        let merged = build_openapi_grouped(&[&left, &same], "foo", &ExportOptions::new()).unwrap();
+        let schemas = &merged.components.unwrap().schemas;
+        assert_eq!(schemas.keys().filter(|name| *name == "Status").count(), 1);
+
+        let err = build_openapi_grouped(&[&left, &same, &right], "foo", &ExportOptions::new())
+            .expect_err("different same-named components must not merge");
+        let GeneratorError::Validation { output, diagnostics } = err else {
+            panic!("expected a validation error, got {err:?}");
+        };
+        assert_eq!(output, Output::OpenApi);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        let rendered = diagnostics[0].to_string();
+        assert!(
+            rendered.starts_with(
+                "severity=error api=FooA,FooC endpoint=<none> \
+                 feature=invalid-schema-reference output=openapi: module 'foo': schema component \"Status\""
+            ),
+            "{rendered}"
         );
     }
 

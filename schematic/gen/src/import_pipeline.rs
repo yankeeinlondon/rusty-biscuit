@@ -182,7 +182,7 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
             }
 
             // Generate client code using standalone mode (no schematic_definitions imports)
-            with_model_components(&mut api, &models);
+            with_standalone_rust_paths(&mut api);
             generate_and_write_standalone(&api, output_dir, options.dry_run, has_types)?;
         }
     }
@@ -195,23 +195,17 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     })
 }
 
-/// Gives a standalone import one component per generated model, so its
-/// references resolve when the client is generated.
+/// Spells each imported component's Rust path as its bare name, for the
+/// standalone client.
 ///
-/// An imported API carries no components: the models exist only as the
-/// source this run writes, with no JSON Schema to register. The standalone
-/// API module re-exports `crate::types::*`, so each component's Rust path is
-/// the bare model name; its schema is the unconstrained `{}`, because the
-/// standalone client never exports OpenAPI.
-fn with_model_components(api: &mut schematic_define::RestApi, models: &schematic_define::models::ModelCatalog) {
-    api.schemas = model_type_names(models)
-        .into_iter()
-        .map(|name| schematic_define::SchemaComponent {
-            rust_path: Some(name.clone()),
-            name,
-            schema: serde_json::json!({}),
-        })
-        .collect();
+/// The import qualifies Rust paths with `--module-path` when one is given,
+/// but the standalone API module glob-imports `crate::types::*`, where every
+/// generated model is reachable by its bare name. Component names are the
+/// generated model names, and the schemas stay the imported source schemas.
+fn with_standalone_rust_paths(api: &mut schematic_define::RestApi) {
+    for component in &mut api.schemas {
+        component.rust_path = Some(component.name.clone());
+    }
 }
 
 /// Collects the names of every model the catalog defines.
@@ -267,6 +261,19 @@ mod tests {
             verbose: false,
         };
         assert!(format!("{:?}", opts).contains("TestApi"));
+    }
+
+    #[test]
+    fn a_standalone_client_spells_module_qualified_components_by_bare_name() {
+        let yaml = "openapi: '3.0.3'\ninfo: {title: Petstore, version: '1'}\npaths:\n  /pet:\n    get:\n      operationId: getPet\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema: {$ref: '#/components/schemas/Pet'}\ncomponents:\n  schemas:\n    Pet: {type: object, properties: {name: {type: string}}}\n";
+        let mut api = OpenApiImport::new(OpenApiSource::yaml(yaml)).module_path("petstore").build().unwrap().api;
+        let reference = api.endpoints[0].json_references()[0].clone();
+        assert_eq!(api.rust_type(&reference).as_deref(), Some("petstore::Pet"));
+
+        with_standalone_rust_paths(&mut api);
+
+        assert_eq!(api.rust_type(&reference).as_deref(), Some("Pet"));
+        api.validate_references().unwrap();
     }
 
     #[test]

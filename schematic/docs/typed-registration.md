@@ -89,6 +89,29 @@ registration order, with a nested-only type placed after the first type that
 contains it; registering that type later takes over its entry in place.
 Explicit registrations survive even when no endpoint uses them.
 
+One component name holds one wire schema. When a name arrives a second time,
+as another nested copy or as an explicit registration, its schema must equal
+the one already stored, or `components()` (and therefore API build and module
+group assembly) fails with `DefinitionError::Collisions` listing one
+`ComponentConflict { schema_name, first, second }` per name. Each source is a
+registered Rust type or "a schema nested in" one:
+
+```rust,ignore
+mod left  { pub struct Status { pub value: String } pub struct Left  { pub status: Status } }
+mod right { pub struct Status { pub value: bool }   pub struct Right { pub status: Status } }
+
+ctx.register::<left::Left>()?;
+ctx.register::<right::Right>()?;
+ctx.components() // Err: schema component "Status" has different definitions
+                 // from a schema nested in …::left::Left and a schema nested in …::right::Right
+```
+
+The same type reached twice is not a conflict. The comparison ignores the
+top-level `title`, and it applies the OpenAPI 3.0 transforms (such as
+`nullable`) to nested copies, because schemars applies them only to a root
+schema. It also reads a recursive type's `"$ref": "#"` as a reference to the
+registration it was found under.
+
 Endpoints never store a Rust path. They store a `TypeRef`, and every reader
 resolves its names through the API's `schemas` (Rust spellings abbreviated):
 

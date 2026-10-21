@@ -396,7 +396,8 @@ Endpoints store its `TypeRef`: component names plus wrappers (`Named`, `Array`,
 and `Primitive(Json)` for free-form JSON). `RestApi::schemas` holds
 `SchemaComponent { name, rust_path: Option<String>, schema }` for the whole
 context, nested `$defs` flattened (nested-only entries have `rust_path: None` and
-cannot be referenced). `RestApi::{component, rust_type, validate_references}` and
+cannot be referenced). A name reached again with a different wire schema (nested
+or explicit) fails `components()` with `ComponentConflict` inside `Collisions`. `RestApi::{component, rust_type, validate_references}` and
 `Endpoint::json_references` are the readers; `validate_references` rejects
 dangling names (`DefinitionError::UnresolvedReference { api, endpoint, name }`),
 duplicate/empty/malformed components, and empty map keys, for built and
@@ -431,7 +432,13 @@ only by WebSocket messages. Endpoint oauth_scopes is removed; auth_policy is ret
 `import --definitions-out` emits fallible Endpoint/RestApi builders and a public
 `module_group() -> Result<Vec<RestApi>, DefinitionError>`. Its API and schema
 components come from one ordered DefinitionContext; catalog factories unwrap that
-assembly. A standalone (`--output`) import gets one component per generated model.
+assembly. The library `OpenApiImport::build()` result already carries one
+component per catalog model (source order, source schema, Rust path
+`{module_path}::{Name}` or bare) and passes `validate_references`; a dangling
+body/response `$ref` fails as `OpenApiError::Definition(UnresolvedReference)`.
+A standalone (`--output`) import keeps those components with bare Rust paths.
+Assembly's component order and schemas differ (nested definitions flattened
+after their parent; schemars output), names and references do not.
 Nominal generated models implement Registration; aliases reuse their underlying
 implementation, so containers/primitives/Value create no components. The emitter
 bounds debug stack use with small endpoint helpers and batches of registrations.

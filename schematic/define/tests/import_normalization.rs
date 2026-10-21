@@ -22,7 +22,10 @@ fn matrix(yaml: bool, provider_source: &str) {
     let (source, _) = schematic_define::openapi::import::clamp_numeric_bounds(provider_source);
     let provider: Value = serde_yaml_ng::from_str(&source).unwrap();
     let path = "/responses/{response_id}/input_items?beta=true";
-    let input = json!({"openapi":"3.0.0", "info":provider["info"], "paths":{path:provider["paths"][path]}});
+    // The response names this component; an import whose references dangle fails.
+    let response = "BetaResponseItemList";
+    let input = json!({"openapi":"3.0.0", "info":provider["info"], "paths":{path:provider["paths"][path]},
+        "components":{"schemas":{response:provider["components"]["schemas"][response]}}});
     let result = import(&input, yaml).unwrap();
     let endpoint = &result.api.endpoints[0];
     assert_eq!(endpoint.path, "/responses/{response_id}/input_items");

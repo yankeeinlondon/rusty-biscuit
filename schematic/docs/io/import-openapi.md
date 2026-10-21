@@ -30,8 +30,31 @@ let models = result.models;
 Import reads the OpenAPI AST, resolves local references, extracts a `ModelCatalog`,
 and lowers operations into definitions. Inspect the result's diagnostics for lossy
 mappings. The generator emits models before clients. Definitions-module output
-uses typed registration and fallible builders; direct library import retains the
-transfer representation used by the import pipeline.
+uses typed registration and fallible builders.
+
+The imported `api` is ready to validate and export. It carries one schema
+component per catalog model, in source order: the model's final name, its Rust
+path, and the source schema. Endpoint bodies and responses name those
+components, so `api.validate_references()` passes and
+`schematic_define::openapi::export` accepts the API as it is.
+
+```rust
+let pet = result.api.component("Pet").unwrap();
+assert_eq!(pet.rust_path.as_deref(), Some("items::Pet")); // `Pet` without module_path
+```
+
+- **Rust paths** are `{module_path}::{Name}`, or the bare name when no module
+  path is set; the models are generated into that module.
+- **Renamed models** keep their references consistent. A schema whose name an
+  endpoint's request struct claims (`CreatePetRequest` for the `CreatePet`
+  endpoint) becomes `CreatePetRequest2`; the component, endpoint references,
+  and `$ref`s inside other components all use the new name.
+- **A dangling reference fails the import.** If an operation's JSON request or
+  response names a schema the document does not define, `build()` returns
+  `OpenApiError::Definition(DefinitionError::UnresolvedReference { api,
+  endpoint, name })` instead of an API that cannot be generated or exported.
+- **A document without components** imports with no schema components; inline
+  bodies are free-form JSON (`Primitive(Json)`), which needs none.
 
 ## Mapping rules
 
@@ -105,10 +128,16 @@ implement `Registration` beside their declarations; aliases reuse their
 underlying type, and containers, primitives, and free-form JSON remain inline
 (free-form JSON is the reference `Primitive(Json)`).
 
-A standalone import (`--output`) has no definitions module, so the import
-pipeline gives its API one schema component per generated model, with the bare
-model name as the Rust path. That lets the generator resolve the same
-references without a registration context.
+Assembly orders components by registration, with each model's nested
+definitions flattened directly after it, so its order can differ from the
+library import's source order (Petstore: `Pet`, `PetStatus`,
+`CreatePetRequest2` against `Pet`, `CreatePetRequest2`, `PetStatus`). Its
+schemas are the generated models' JSON Schema rather than the source schemas.
+Names and endpoint references are the same.
+
+A standalone import (`--output`) keeps the library import's components but
+spells each Rust path as the bare model name, because the standalone API module
+glob-imports the generated `types` module.
 
 
 ```mermaid

@@ -500,3 +500,110 @@ fn transferred_components_and_references_input_matrix() {
     }
     assert!(load(&format!("{control} trailing")).is_err());
 }
+
+mod left_status {
+    use super::*;
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Status { pub value: String });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Left { pub status: Status });
+}
+mod right_status {
+    use super::*;
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Status { pub value: bool });
+    definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Right { pub status: Status });
+}
+
+fn status_conflict(error: &DefinitionError) -> Option<(&str, &str)> {
+    match error {
+        DefinitionError::Collisions(errors) if errors.len() == 1 => match &errors[0] {
+            DefinitionError::ComponentConflict { schema_name, first, second } if schema_name == "Status" => Some((first, second)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+type Register = fn(&mut DefinitionContext);
+
+#[test]
+fn conflicting_nested_and_explicit_definitions_of_one_name_fail_build() {
+    let nested_then_nested: Register = |ctx| {
+        ctx.register::<left_status::Left>().unwrap();
+        ctx.register::<right_status::Right>().unwrap();
+    };
+    let nested_then_explicit: Register = |ctx| {
+        ctx.register::<left_status::Left>().unwrap();
+        ctx.register::<right_status::Status>().unwrap();
+    };
+    let explicit_then_nested: Register = |ctx| {
+        ctx.register::<left_status::Status>().unwrap();
+        ctx.register::<left_status::Left>().unwrap();
+        ctx.register::<right_status::Right>().unwrap();
+    };
+    let shapes: [(&str, Register, &str, &str); 3] = [
+        ("nested/nested", nested_then_nested, "a schema nested in builders::left_status::Left", "a schema nested in builders::right_status::Right"),
+        ("nested/explicit", nested_then_explicit, "a schema nested in builders::left_status::Left", "builders::right_status::Status"),
+        ("explicit/nested", explicit_then_nested, "builders::left_status::Status", "a schema nested in builders::right_status::Right"),
+    ];
+    for (shape, register, first, second) in shapes {
+        let mut ctx = DefinitionContext::types_in("::models");
+        register(&mut ctx);
+        assert!(ctx.finish().is_ok(), "{shape}: no registration collision");
+        assert_eq!(status_conflict(&ctx.components().unwrap_err()), Some((first, second)), "{shape}");
+        let ep = Endpoint::get("Get", "/").describes("Get").returns_json::<left_status::Left>(&mut ctx).build().unwrap();
+        let error = api(&ctx, ep).unwrap_err();
+        assert_eq!(status_conflict(&error), Some((first, second)), "{shape}");
+        let message = error.diagnostics("Fixture");
+        assert!(message.contains("\"Status\"") && message.contains(first) && message.contains(second), "{shape}: {message}");
+    }
+}
+
+/// Doc comment carried by both the root and the nested schema.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+pub struct Shared { pub value: String, pub count: Option<u8>, pub tags: Option<Vec<String>> }
+impl schematic_define::Registration for Shared {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Shared");
+    fn register(ctx: &mut DefinitionContext) -> Result<schematic_define::TypeDesc, DefinitionError> { ctx.register_nominal::<Self>() }
+}
+definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct FirstHolder { pub shared: Shared });
+definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct SecondHolder { pub shared: Option<Shared> });
+
+#[test]
+fn the_same_type_extracted_repeatedly_or_also_registered_merges_in_first_position() {
+    let names = |components: &[SchemaComponent]| components.iter().map(|c| (c.name.clone(), c.rust_path.clone())).collect::<Vec<_>>();
+    let holder = |name: &str| (name.to_string(), Some(format!("::models::{name}")));
+
+    let mut ctx = DefinitionContext::types_in("::models");
+    ctx.register::<FirstHolder>().unwrap();
+    ctx.register::<SecondHolder>().unwrap();
+    assert_eq!(names(&ctx.components().unwrap()), [holder("FirstHolder"), ("Shared".into(), None), holder("SecondHolder")]);
+
+    ctx.register::<Shared>().unwrap();
+    let ep = Endpoint::get("Get", "/").describes("Get").returns_json::<SecondHolder>(&mut ctx).build().unwrap();
+    let built = api(&ctx, ep).unwrap();
+    assert_eq!(names(&built.schemas), [holder("FirstHolder"), holder("Shared"), holder("SecondHolder")]);
+    assert_eq!(built.component("Shared").unwrap().schema["properties"]["count"]["nullable"], true);
+
+    let mut ctx = DefinitionContext::types_in("::models");
+    ctx.register::<Shared>().unwrap();
+    ctx.register::<FirstHolder>().unwrap();
+    ctx.register::<SecondHolder>().unwrap();
+    assert_eq!(names(&ctx.components().unwrap()), [holder("Shared"), holder("FirstHolder"), holder("SecondHolder")]);
+}
+
+definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Body { pub block: Block });
+definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Block { pub result: Option<Contents> });
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+pub struct Contents { pub blocks: Vec<Block> }
+
+#[test]
+fn a_recursive_type_nested_elsewhere_matches_its_copy_under_its_own_root() {
+    let mut ctx = DefinitionContext::types_in("::models");
+    ctx.register::<Body>().unwrap();
+    ctx.register::<Block>().unwrap();
+    let components = ctx.components().unwrap();
+    assert_eq!(components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Body", "Block", "Contents"]);
+    let contents = components.iter().find(|c| c.name == "Contents").unwrap();
+    assert_eq!(contents.schema["properties"]["blocks"]["items"]["$ref"], "#/components/schemas/Block");
+}

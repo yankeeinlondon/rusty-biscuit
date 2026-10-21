@@ -163,8 +163,11 @@ fn slow_imported_builders_compile_and_match_public_import() {
     let sources = [("petstore", module.as_str())];
     let lockfile = manifest_dir!().join("../schema/Cargo.lock");
     // The client is generated beside the definitions fixture, whose models it
-    // glob-imports, so each referenced model is spelled by its bare name.
-    let generated = crate::common::components::with_referenced_components(imported.api.clone());
+    // glob-imports, so each component's Rust path is its bare name.
+    let mut generated = imported.api.clone();
+    for component in &mut generated.schemas {
+        component.rust_path = Some(component.name.clone());
+    }
     let fresh = FreshCrate::generate(&[&generated], Definitions::Fixture(&sources), &lockfile);
     let expected = serde_json::to_string(&imported.api).unwrap();
     let child = r#"
@@ -173,17 +176,36 @@ fn imported_api_and_components_match_the_public_import() {
     use schematic_define::RestApi;
     let mut api = schematic_definitions::petstore::module_group().unwrap().remove(0);
     api.validate_references().unwrap();
-    let components: Vec<(&str, Option<&str>)> = api.schemas.iter()
-        .map(|component| (component.name.as_str(), component.rust_path.as_deref())).collect();
-    assert_eq!(components, [
-        ("Pet", Some("::schematic_definitions::petstore::Pet")),
-        ("PetStatus", Some("::schematic_definitions::petstore::PetStatus")),
-        ("CreatePetRequest2", Some("::schematic_definitions::petstore::CreatePetRequest2")),
-    ]);
-    // References are names, so the assembled endpoints equal the imported
-    // ones exactly; only the components are added by assembly.
-    api.schemas.clear();
     let expected: RestApi = serde_json::from_str(EXPECTED).unwrap();
+    expected.validate_references().unwrap();
+    let names = |api: &RestApi| -> Vec<(String, Option<String>)> {
+        api.schemas.iter().map(|c| (c.name.clone(), c.rust_path.clone())).collect()
+    };
+    // The public import lists components in source order with Rust paths in
+    // its module path. Assembly registers the same models, but flattens a
+    // model's nested definitions directly after it (so `PetStatus` moves up
+    // behind `Pet`), and places the types module in `schematic_definitions`.
+    assert_eq!(names(&expected), [
+        ("Pet".to_string(), Some("petstore::Pet".to_string())),
+        ("CreatePetRequest2".to_string(), Some("petstore::CreatePetRequest2".to_string())),
+        ("PetStatus".to_string(), Some("petstore::PetStatus".to_string())),
+    ]);
+    assert_eq!(names(&api), [
+        ("Pet".to_string(), Some("::schematic_definitions::petstore::Pet".to_string())),
+        ("PetStatus".to_string(), Some("::schematic_definitions::petstore::PetStatus".to_string())),
+        ("CreatePetRequest2".to_string(), Some("::schematic_definitions::petstore::CreatePetRequest2".to_string())),
+    ]);
+    let mut qualified: Vec<_> = names(&expected).into_iter()
+        .map(|(name, path)| (name, path.map(|path| format!("::schematic_definitions::{path}")))).collect();
+    let mut assembled = names(&api);
+    qualified.sort();
+    assembled.sort();
+    assert_eq!(assembled, qualified);
+    // Schemas differ by source: the import keeps the OpenAPI source schema,
+    // assembly carries the schemars output of the generated model (titles,
+    // `nullable` optionals). Both were compared by name and path above, and
+    // references are names, so the remaining definition must match exactly.
+    api.schemas.clone_from(&expected.schemas);
     assert_eq!(api, expected);
     let client = schematic_schema::petstore::Petstore::new();
     let _ = client.list_pets().limit(2).build().unwrap();

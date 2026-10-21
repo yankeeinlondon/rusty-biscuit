@@ -127,7 +127,7 @@ The same fields are available to code as
 | `invalid-type-syntax`: a body, response, or form JSON type, spelled through the API's schema components, is not a Rust type | ✓ | | | error |
 | `generated-name-collision`: two generated items, fields, or client methods share a name, including two endpoints whose methods get one name and a call type named like another item | ✓ | | | error |
 | `endpoint-method-rename`: an endpoint method or call-type setter was renamed to avoid a method every API struct or call type has (see below) | ✓ | | | warning |
-| `invalid-schema-reference`: a body, response, or form JSON reference names no registered component in the API's `schemas`, or a component is malformed (see below) | ✓ | ✓ | | error |
+| `invalid-schema-reference`: a body, response, or form JSON reference names no registered component in the API's `schemas`, a component is malformed, or two members of one OpenAPI module document define a component name differently (see below) | ✓ | ✓ | | error |
 | `duplicate-method-path` across a module group: two member APIs declare different operations on one method and path | | ✓ | | error (found while building the document) |
 | `duplicate-operation-id`: a finished document declares one `operationId` twice | | ✓ | | error (found while building the document) |
 | `unresolved-link-operation`: a link in a finished document names an `operationId` no operation declares | | ✓ | | error (found while building the document) |
@@ -199,6 +199,13 @@ resolves, `RestApi::validate_references` still runs, so an empty or duplicate
 component name, a schema that is not a JSON Schema object or boolean, or an
 empty map key is reported under the same feature. The Postman collection never
 reads a schema, so it is written regardless.
+
+A grouped OpenAPI document also reports the feature, for the module and both
+APIs, when two members carry one component name with different schemas:
+
+```text
+severity=error api=FooA,FooC endpoint=<none> feature=invalid-schema-reference output=openapi: module 'foo': schema component "Status" has different definitions in both APIs; an OpenAPI document holds one schema per component name
+```
 
 An API built with `RestApi::builder` has already passed the same check, so
 in practice the diagnostic catches a definition that was deserialized or

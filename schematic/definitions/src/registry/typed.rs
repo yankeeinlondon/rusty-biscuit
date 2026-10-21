@@ -117,6 +117,29 @@ mod tests {
         assert_eq!(nested.iter().map(|c| (c.name.as_str(), c.rust_path.is_some())).collect::<Vec<_>>(), [("Explicit", true), ("Nested", false)]);
     }
 
+    mod left_status {
+        use super::*;
+        definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Status { value: String });
+        definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Left { status: Status });
+    }
+    mod right_status {
+        use super::*;
+        definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Status { value: bool });
+        definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] pub struct Right { status: Status });
+    }
+
+    #[test]
+    fn a_nested_component_conflict_registered_after_a_member_build_fails_assembly() {
+        let error = assemble_module_group("::fixture", |ctx| {
+            let first = fixture_api::<left_status::Left>(ctx, "First")?;
+            ctx.register::<right_status::Right>()?;
+            Ok(vec![first])
+        }).unwrap_err();
+        let DefinitionError::Collisions(errors) = &error else { panic!("expected collisions, got {error:?}") };
+        assert!(matches!(errors.as_slice(), [DefinitionError::ComponentConflict { schema_name, first, second }]
+            if schema_name == "Status" && first.ends_with("left_status::Left") && second.ends_with("right_status::Right")), "{errors:?}");
+    }
+
     #[test]
     fn isolated_groups_can_reuse_names_but_shared_collisions_fail_assembly() {
         for clash in [false, true] {

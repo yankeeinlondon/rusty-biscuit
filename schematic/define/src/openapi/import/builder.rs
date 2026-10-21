@@ -152,13 +152,20 @@ impl OpenApiImport {
     /// ## Returns
     ///
     /// Returns `OpenApiImportResult` containing the API definition,
-    /// model catalog, and any diagnostics encountered.
+    /// model catalog, and any diagnostics encountered. The API carries one
+    /// schema component per catalog model, in source order: the model's
+    /// final name, its Rust path (`{module_path}::{Name}`, or the bare name
+    /// without a module path), and its source schema. It passes
+    /// [`RestApi::validate_references`], so it can be exported directly.
     ///
     /// ## Errors
     ///
     /// Returns `OpenApiError` if:
     /// - The source cannot be parsed
     /// - Required fields are missing
+    /// - An endpoint body or response names a schema the document does not
+    ///   define ([`OpenApiError::Definition`] holding
+    ///   [`crate::DefinitionError::UnresolvedReference`])
     /// - Strict mode is enabled and any diagnostics were generated
     pub fn build(self) -> Result<OpenApiImportResult, super::super::error::OpenApiError> {
         let mut diagnostics = Vec::new();
@@ -184,11 +191,11 @@ impl OpenApiImport {
 
         if !schema_result.name_mapping.is_empty() {
             for endpoint in &mut api.endpoints {
-                if let Some(ref mut request) = endpoint.request {
-                    Self::remap_api_request_type_name(request, &schema_result.name_mapping);
-                }
+                Self::remap_reference_names(endpoint, &schema_result.name_mapping);
             }
         }
+        api.schemas = schema_result.components;
+        api.validate_references()?;
 
         if self.options.strict && !diagnostics.is_empty() {
             return Err(super::super::error::OpenApiError::Validation {
@@ -204,16 +211,29 @@ impl OpenApiImport {
         })
     }
 
-    /// Remaps type names in an ApiRequest using the provided name mapping.
-    fn remap_api_request_type_name(
-        request: &mut crate::request::ApiRequest,
+    /// Renames an endpoint's JSON response and request references to the
+    /// final names of models that yielded their name (for example, to a
+    /// request struct).
+    fn remap_reference_names(
+        endpoint: &mut crate::Endpoint,
         name_mapping: &std::collections::HashMap<String, String>,
     ) {
         use crate::request::ApiRequest;
-        if let ApiRequest::Json(crate::TypeRef::Named(name)) = request
-            && let Some(new_name) = name_mapping.get(name)
-        {
-            *name = new_name.clone();
+        use crate::response::ApiResponse;
+        let response = match &mut endpoint.response {
+            ApiResponse::Json(reference) => Some(reference),
+            _ => None,
+        };
+        let request = match &mut endpoint.request {
+            Some(ApiRequest::Json(reference)) => Some(reference),
+            _ => None,
+        };
+        for reference in response.into_iter().chain(request) {
+            if let crate::TypeRef::Named(name) = reference
+                && let Some(new_name) = name_mapping.get(name)
+            {
+                *name = new_name.clone();
+            }
         }
     }
 
@@ -311,6 +331,10 @@ impl OpenApiImport {
     }
 
     /// Maps the OpenAPI document to a RestApi definition.
+    ///
+    /// The result has no schema components yet and its references use
+    /// sanitized source names; [`Self::build`] renames them, attaches the
+    /// catalog's components, and validates the references.
     fn map_to_rest_api(
         &self,
         doc: &openapiv3::OpenAPI,

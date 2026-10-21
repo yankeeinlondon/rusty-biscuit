@@ -66,6 +66,11 @@ println!("Generated {} endpoints, {} models",
     result.models.models.len());
 ```
 
+`result.api` carries one schema component per imported model and passes
+`validate_references()`; an operation whose JSON body or response names an
+undefined schema fails the import with `OpenApiError::Definition`. See
+`schematic/docs/io/import-openapi.md`.
+
 ### Type Mappings
 
 | OpenAPI Type | Rust Type |

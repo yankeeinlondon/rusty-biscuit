@@ -60,11 +60,15 @@ macro_rules! rust_path {
 }
 
 /// Registration or destination validation failure.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DefinitionError {
     /// Distinct canonical types cannot share a component name.
     #[error("schema name \"{schema_name}\" is claimed by {first} and {second}; register an alias or rename one")]
     Collision { schema_name: String, first: &'static str, second: &'static str },
+    /// Two sources define one component name with different wire schemas.
+    /// A source is a registered Rust type or a schema nested in one.
+    #[error("schema component \"{schema_name}\" has different definitions from {first} and {second}; rename one")]
+    ComponentConflict { schema_name: String, first: String, second: String },
     /// All collected collisions, in encounter order.
     #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
     Collisions(Vec<DefinitionError>),
@@ -168,10 +172,17 @@ impl DefinitionContext {
     /// Ordered nominal entries, including explicit types unused by endpoints.
     pub fn registrations(&self) -> &[TypeRegistration] { &self.entries }
     /// Every component this context defines, in registration order, with
-    /// nested `$defs` flattened into their own entries. Fails on collisions.
+    /// nested `$defs` flattened into their own entries.
+    ///
+    /// ## Errors
+    ///
+    /// The collected registration collisions of [`Self::finish`]; otherwise
+    /// [`DefinitionError::Collisions`] of every
+    /// [`DefinitionError::ComponentConflict`], where registered or nested
+    /// schemas give one name different wire schemas.
     pub fn components(&self) -> Result<Vec<SchemaComponent>, DefinitionError> {
         self.finish()?;
-        Ok(crate::components::flatten(self.entries.iter().map(|e| (e.name.as_str(), e.path.as_str(), e.schema.as_value()))))
+        crate::components::flatten(self.entries.iter().map(|e| (e.name.as_str(), e.path.as_str(), e.diagnostic, e.schema.as_value())))
     }
 }
 

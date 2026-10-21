@@ -12,6 +12,10 @@ use crate::models::{
 pub struct SchemaMapResult {
     pub catalog: ModelCatalog,
     pub name_mapping: std::collections::HashMap<String, String>,
+    /// One component per catalog model, in catalog (source) order: the final
+    /// model name, its Rust path, and the source schema with its
+    /// `#/components/schemas/` references renamed to final model names.
+    pub components: Vec<crate::SchemaComponent>,
 }
 
 pub fn map_all_schemas(
@@ -32,6 +36,7 @@ pub fn map_all_schemas(
     let mut name_mapping: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut used_names = reserved_names.clone();
+    let mut model_components = Vec::new();
 
     if let Some(ref components) = doc.components {
         for (name, _) in &components.schemas {
@@ -55,6 +60,7 @@ pub fn map_all_schemas(
             {
                 remap_type_refs_in_model(&mut model, &final_by_original);
                 types.push(model);
+                model_components.push(source_component(&final_name, schema_ref, &final_by_original, options));
             }
         }
     }
@@ -65,6 +71,51 @@ pub fn map_all_schemas(
             types,
         },
         name_mapping,
+        components: model_components,
+    }
+}
+
+/// The component of the model `final_name`, imported from `schema_ref`.
+///
+/// The Rust path follows the catalog's `module_path` (the module the models
+/// are generated into), or is the bare name when none is set.
+fn source_component(
+    final_name: &str,
+    schema_ref: &ReferenceOr<Schema>,
+    final_by_original: &std::collections::HashMap<String, String>,
+    options: &super::super::OpenApiImportOptions,
+) -> crate::SchemaComponent {
+    // An `openapiv3` schema always serializes; `{}` keeps the component valid.
+    let mut schema = serde_json::to_value(schema_ref).unwrap_or_else(|_| serde_json::json!({}));
+    rename_schema_refs(&mut schema, final_by_original);
+    crate::SchemaComponent {
+        name: final_name.to_string(),
+        rust_path: Some(match &options.module_path {
+            Some(module) => format!("{module}::{final_name}"),
+            None => final_name.to_string(),
+        }),
+        schema,
+    }
+}
+
+/// Points each `#/components/schemas/{original}` reference at the model's
+/// final name, so the components agree with renamed models.
+fn rename_schema_refs(value: &mut serde_json::Value, final_by_original: &std::collections::HashMap<String, String>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, value) in object.iter_mut() {
+                let renamed = (key == "$ref")
+                    .then(|| value.as_str()?.strip_prefix("#/components/schemas/"))
+                    .flatten()
+                    .and_then(|original| final_by_original.get(original));
+                match renamed {
+                    Some(name) => *value = format!("#/components/schemas/{name}").into(),
+                    None => rename_schema_refs(value, final_by_original),
+                }
+            }
+        }
+        serde_json::Value::Array(values) => for value in values { rename_schema_refs(value, final_by_original); },
+        _ => {}
     }
 }
 

@@ -25,36 +25,106 @@ pub struct SchemaComponent {
     pub schema: Value,
 }
 
-/// Flatten registrations into components. Each registration replaces a
-/// same-named nested entry in place; a nested entry never replaces an
-/// existing one. This ordering is the OpenAPI `components.schemas` order.
-pub(crate) fn flatten<'a>(registrations: impl Iterator<Item = (&'a str, &'a str, &'a Value)>) -> Vec<SchemaComponent> {
-    let mut components: Vec<SchemaComponent> = Vec::new();
-    for (name, rust_path, schema) in registrations {
+/// Flatten registrations, given as `(name, rust_path, diagnostic, schema)`,
+/// into components. A registration takes over a same-named nested entry in
+/// place; otherwise first position wins. This ordering is the OpenAPI
+/// `components.schemas` order.
+///
+/// ## Errors
+///
+/// [`DefinitionError::Collisions`] holding one
+/// [`DefinitionError::ComponentConflict`] per name that two sources define
+/// with different wire schemas. A registration and its own nested copy
+/// elsewhere compare equal: see [`wire_shape`].
+pub(crate) fn flatten<'a>(
+    registrations: impl Iterator<Item = (&'a str, &'a str, &'a str, &'a Value)>,
+) -> Result<Vec<SchemaComponent>, DefinitionError> {
+    let mut merged = Merged::default();
+    for (name, rust_path, diagnostic, schema) in registrations {
         let entry = SchemaComponent { name: name.into(), rust_path: Some(rust_path.into()), schema: strip(schema) };
-        match components.iter_mut().find(|c| c.name == name) {
-            Some(existing) => *existing = entry,
-            None => components.push(entry),
+        let shape = wire_shape(&entry.schema, name, false);
+        match merged.components.iter().position(|c| c.name == name) {
+            Some(index) if merged.shapes[index].0 != shape => merged.conflict(index, diagnostic.into()),
+            Some(index) => merged.components[index] = entry,
+            None => merged.push(entry, shape, diagnostic.into()),
         }
-        nested(schema, &mut components);
+        merged.nested(schema, name, diagnostic);
     }
-    components
+    if merged.conflicts.is_empty() { Ok(merged.components) } else { Err(DefinitionError::Collisions(merged.conflicts)) }
 }
 
-fn nested(value: &Value, components: &mut Vec<SchemaComponent>) {
-    match value {
-        Value::Object(object) => {
-            let defs = object.get("$defs").and_then(Value::as_object);
-            let schemas = object.get("components").and_then(|c| c.get("schemas")).and_then(Value::as_object);
-            for (name, schema) in defs.into_iter().chain(schemas).flatten() {
-                if !components.iter().any(|c| &c.name == name) {
-                    components.push(SchemaComponent { name: name.clone(), rust_path: None, schema: strip(schema) });
-                    nested(schema, components);
+/// Components with the wire shape and source description of each, by index.
+#[derive(Default)]
+struct Merged {
+    components: Vec<SchemaComponent>,
+    shapes: Vec<(Value, String)>,
+    conflicts: Vec<DefinitionError>,
+}
+
+impl Merged {
+    fn push(&mut self, component: SchemaComponent, shape: Value, source: String) {
+        self.components.push(component);
+        self.shapes.push((shape, source));
+    }
+
+    fn conflict(&mut self, index: usize, second: String) {
+        let error = DefinitionError::ComponentConflict {
+            schema_name: self.components[index].name.clone(), first: self.shapes[index].1.clone(), second };
+        if !self.conflicts.contains(&error) { self.conflicts.push(error); }
+    }
+
+    /// `root_name` is the component of the registration being walked, the
+    /// target of its definitions' `"$ref": "#"`; `root` describes it.
+    fn nested(&mut self, value: &Value, root_name: &str, root: &str) {
+        match value {
+            Value::Object(object) => {
+                let defs = object.get("$defs").and_then(Value::as_object);
+                let schemas = object.get("components").and_then(|c| c.get("schemas")).and_then(Value::as_object);
+                for (name, schema) in defs.into_iter().chain(schemas).flatten() {
+                    let stripped = strip(schema);
+                    let shape = wire_shape(&stripped, root_name, true);
+                    match self.components.iter().position(|c| &c.name == name) {
+                        Some(index) if self.shapes[index].0 != shape => self.conflict(index, format!("a schema nested in {root}")),
+                        Some(_) => {}
+                        None => {
+                            self.push(SchemaComponent { name: name.clone(), rust_path: None, schema: stripped }, shape, format!("a schema nested in {root}"));
+                            self.nested(schema, root_name, root);
+                        }
+                    }
                 }
+                for value in object.values() { self.nested(value, root_name, root); }
             }
-            for value in object.values() { nested(value, components); }
+            Value::Array(values) => for value in values { self.nested(value, root_name, root); },
+            _ => {}
         }
-        Value::Array(values) => for value in values { nested(value, components); },
+    }
+}
+
+/// The part of a stripped component schema that two same-named definitions
+/// must agree on. schemars adds a top-level `title` and applies the OpenAPI
+/// 3.0 transforms (for example `nullable`) only to a root schema, not to the
+/// definitions it places under `components/schemas`, so a nested copy is
+/// transformed here and `title` is ignored on both sides. A recursive type
+/// reaches its registered root as `"$ref": "#"`, which names `root_name`.
+fn wire_shape(schema: &Value, root_name: &str, nested: bool) -> Value {
+    let mut shape = schema.clone();
+    if nested && let Ok(mut transformed) = schemars::Schema::try_from(shape.clone()) {
+        for transform in &mut schemars::generate::SchemaSettings::openapi3().transforms {
+            transform.transform(&mut transformed);
+        }
+        shape = transformed.to_value();
+    }
+    if let Some(object) = shape.as_object_mut() { object.remove("title"); }
+    resolve_root_refs(&mut shape, &format!("#/components/schemas/{root_name}"));
+    shape
+}
+
+fn resolve_root_refs(value: &mut Value, target: &str) {
+    match value {
+        Value::Object(object) => for (key, value) in object.iter_mut() {
+            if key == "$ref" && value == "#" { *value = target.into(); } else { resolve_root_refs(value, target); }
+        },
+        Value::Array(values) => for value in values { resolve_root_refs(value, target); },
         _ => {}
     }
 }

@@ -82,8 +82,10 @@ neither a broken client nor an incomplete OpenAPI artifact is written.
 
 APIs sharing a module (`ollama`, `emqx`) produce grouped OpenAPI documents that merge:
 
-- **Components** — Every member carries the same `schemas`, so the
-  documents' `components.schemas` collapse into one
+- **Components** — Union keyed by component name, in member order. Members
+  of one module group carry the same `schemas`, so they collapse into one; a
+  name that two members define differently fails the OpenAPI output with
+  `invalid-schema-reference`, naming both APIs
 - **Paths** — Union of all endpoints from all APIs. An operation that two
   members declare identically apart from authentication appears once; two
   different operations on one method and path fail the OpenAPI output.
