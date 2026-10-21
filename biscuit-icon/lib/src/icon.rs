@@ -323,7 +323,7 @@ fn pixels_or_unsupported(
         .map_err(|e| std::io::Error::other(e.to_string()))?
     {
         ImageOutput::Pixels(output) => Ok(output),
-        ImageOutput::Fallback { reason, .. } => Err(std::io::Error::new(
+        ImageOutput::Fallback { reason, .. } | ImageOutput::HalfBlocks { reason, .. } => Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             reason.to_string(),
         )),
@@ -332,7 +332,6 @@ fn pixels_or_unsupported(
 
 #[cfg(all(test, feature = "image"))]
 mod render_in_cell_tests {
-    use super::*;
     use crate::domain::DomainIcon;
     use biscuit_terminal::terminal::Terminal;
 

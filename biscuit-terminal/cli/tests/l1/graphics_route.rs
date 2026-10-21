@@ -84,3 +84,26 @@ fn image_with_corrupt_png_fails_even_without_a_pixel_route() {
         "fallback text printed for a corrupt image"
     );
 }
+
+/// Forcing color makes `bt` treat stdout as a truecolor terminal, but the
+/// route still knows it is a pipe: plain text, never half-block color cells.
+#[test]
+fn image_prints_plain_text_not_half_blocks_when_piped_with_forced_color() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = write_file(dir.path(), "forced-fixture.png", TINY_PNG);
+
+    let output = bt()
+        .env("FORCE_COLOR", "1")
+        .env("COLORTERM", "truecolor")
+        .env("TERM_PROGRAM", "Apple_Terminal")
+        .arg("image")
+        .arg(&path)
+        .output()
+        .expect("run bt image");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "bt image failed: {output:?}");
+    assert_eq!(stdout.trim_end(), "[Image: forced-fixture.png]");
+    assert!(!stdout.contains('\x1b'), "escape sequences in {stdout:?}");
+    assert!(output.stderr.is_empty(), "unexpected stderr: {:?}", output.stderr);
+}

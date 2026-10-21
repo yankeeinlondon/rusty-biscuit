@@ -12,6 +12,7 @@ use crate::discovery::fonts::CellSize;
 use crate::discovery::detection::probe::next_kitty_id;
 
 use super::cursor::{compute_cursor_rows, needs_scroll_compensation};
+use super::half_block::half_blocks_permitted;
 use super::tmux::{TMUX_MESSAGE_BUDGET, wrap_graphics_for_tmux};
 use super::{TerminalImage, TerminalImageError};
 
@@ -64,16 +65,29 @@ pub(super) fn unmeasured_cells_reason(route: &GraphicsRoute, cell: Option<CellSi
     })
 }
 
-/// What [`TerminalImage::render_with_route`] produced.
+/// What [`TerminalImage::render_with_route`] or
+/// [`TerminalImage::render_with_half_blocks`] produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageOutput {
     /// Escape sequences that draw the image and advance the cursor past it.
     Pixels(String),
-    /// The route has no usable pixel format; `text` describes the image.
+    /// No pixels were sent, because the route has no usable pixel format or
+    /// refused the image (for example over tmux's message limit); `text`
+    /// describes the image.
     Fallback {
         /// The image's alt text with control characters removed.
         text: String,
         /// Why no pixels were sent.
+        reason: RouteReason,
+    },
+    /// No pixels were sent, for the same reasons as
+    /// [`Fallback`](Self::Fallback), and the image is drawn as colored text
+    /// instead ([`TerminalImage::render_with_half_blocks`]).
+    HalfBlocks {
+        /// One line per text row, joined with `\n`, no trailing newline.
+        text: String,
+        /// Why no pixels were sent; the same reason a
+        /// [`Fallback`](Self::Fallback) would carry.
         reason: RouteReason,
     },
 }
@@ -106,7 +120,7 @@ impl ImageOutput {
     pub fn into_text(self) -> String {
         match self {
             Self::Pixels(sequence) => sequence,
-            Self::Fallback { text, .. } => text,
+            Self::Fallback { text, .. } | Self::HalfBlocks { text, .. } => text,
         }
     }
 }
@@ -116,7 +130,9 @@ impl TerminalImage {
     ///
     /// Everything that can fail (loading, decoding, encoding) happens before
     /// any output is produced. A valid image whose route has no usable pixel
-    /// format becomes [`ImageOutput::Fallback`] with the route's reason.
+    /// format, or whose transport refuses it, becomes
+    /// [`ImageOutput::Fallback`] with the reason; never
+    /// [`ImageOutput::HalfBlocks`].
     ///
     /// ## Errors
     ///
@@ -138,6 +154,47 @@ impl TerminalImage {
             }
             encoder => self.render_to_terminal(term, &encoder),
         }
+    }
+
+    /// Renders a plain image for `term`: like
+    /// [`render_with_route`](Self::render_with_route), but an image with no
+    /// usable pixel format is drawn as half-blocks
+    /// ([`ImageOutput::HalfBlocks`]) when the terminal has truecolor and
+    /// Unicode, stdout is a terminal, and graphics were not disabled or
+    /// misconfigured. Otherwise the result is the alt-text fallback.
+    ///
+    /// Diagrams use `render_with_route`: their fallback is their source.
+    ///
+    /// ## Errors
+    ///
+    /// The same as [`render_with_route`](Self::render_with_route).
+    pub fn render_with_half_blocks(
+        &self,
+        term: &crate::terminal::Terminal,
+    ) -> Result<ImageOutput, TerminalImageError> {
+        let output = match encoder_for(term) {
+            Encoder::Fallback(reason) => {
+                let pixels = self.pixels()?;
+                if half_blocks_permitted(term, &reason) {
+                    let text = self.render_half_blocks(pixels, term)?.join("\n");
+                    return Ok(ImageOutput::HalfBlocks { text, reason });
+                }
+                ImageOutput::Fallback {
+                    text: strip_controls(&self.generate_alt_text()),
+                    reason,
+                }
+            }
+            encoder => self.render_to_terminal(term, &encoder)?,
+        };
+        Ok(match output {
+            // A pixel route refused late, such as an image over tmux's
+            // message limit.
+            ImageOutput::Fallback { reason, .. } if half_blocks_permitted(term, &reason) => {
+                let text = self.render_half_blocks(self.pixels()?, term)?.join("\n");
+                ImageOutput::HalfBlocks { text, reason }
+            }
+            output => output,
+        })
     }
 
     /// Render the image to escape sequences for `encoder`, advancing the
@@ -239,11 +296,16 @@ impl TerminalImage {
 
     /// Renders the image into a layout column `term.width()` cells wide.
     ///
+    /// When the route has no usable pixel format, or the wrapped image is
+    /// over tmux's message limit, the image is drawn as half-block
+    /// [`InlineImage::Lines`] where [`TerminalImage::render_with_half_blocks`]
+    /// would draw them.
+    ///
     /// ## Errors
     ///
     /// [`TerminalImageError::UnsupportedTerminal`] when stdout is not a
-    /// terminal, the route has no usable pixel format, or the wrapped image
-    /// is over tmux's message limit; otherwise the load or encoding error.
+    /// terminal or neither pixels nor half-blocks can be drawn; otherwise the
+    /// load or encoding error.
     pub(crate) fn render_inline(
         &self,
         term: &crate::terminal::Terminal,
@@ -251,11 +313,26 @@ impl TerminalImage {
         if !term.is_tty {
             return Err(TerminalImageError::UnsupportedTerminal);
         }
-        let encoder = encoder_for(term);
-        if matches!(encoder, Encoder::Fallback(_)) {
+        let reason = match encoder_for(term) {
+            Encoder::Fallback(reason) => reason,
+            encoder => match self.render_inline_pixels(term, encoder)? {
+                Ok(image) => return Ok(image),
+                Err(reason) => reason,
+            },
+        };
+        if !half_blocks_permitted(term, &reason) {
             return Err(TerminalImageError::UnsupportedTerminal);
         }
+        Ok(InlineImage::Lines(self.render_half_blocks(self.pixels()?, term)?))
+    }
 
+    /// [`render_inline`](Self::render_inline) for a pixel `encoder`, or the
+    /// reason the transport refused the image.
+    fn render_inline_pixels(
+        &self,
+        term: &crate::terminal::Terminal,
+        encoder: Encoder,
+    ) -> Result<Result<InlineImage, RouteReason>, TerminalImageError> {
         let pixels = self.pixels()?;
         let (pixel_width, pixel_height) = pixels.size();
         let cell = term.cell_size();
@@ -264,12 +341,10 @@ impl TerminalImage {
         let x_offset = dims.x_offset;
         if matches!(encoder, Encoder::Sixel) {
             let image = self.render_sixel(pixels, width_cells, x_offset, term)?;
-            let sequence = for_transport(term, "sixel", image.sequence)
-                .map_err(|_| TerminalImageError::UnsupportedTerminal)?;
-            return Ok(InlineImage::Overlay {
+            return Ok(for_transport(term, "sixel", image.sequence).map(|sequence| InlineImage::Overlay {
                 sequence,
                 rows: image.rows,
-            });
+            }));
         }
 
         let (cell_pixel_width, cell_pixel_height) = cell
@@ -287,13 +362,15 @@ impl TerminalImage {
             && let Some(image) =
                 self.render_kitty_placeholders(&png_data, width_cells, height_cells, x_offset)
         {
-            let upload = for_transport(term, "kitty", image.upload)
-                .map_err(|_| TerminalImageError::UnsupportedTerminal)?;
+            let upload = match for_transport(term, "kitty", image.upload) {
+                Ok(upload) => upload,
+                Err(reason) => return Ok(Err(reason)),
+            };
             let mut lines = image.rows;
             if let Some(first) = lines.first_mut() {
                 first.insert_str(0, &upload);
             }
-            return Ok(InlineImage::Lines(lines));
+            return Ok(Ok(InlineImage::Lines(lines)));
         }
         let tmux = term.graphics_route.transport == GraphicsTransport::Tmux;
         let image = match encoder {
@@ -313,7 +390,7 @@ impl TerminalImage {
                     .unwrap_or_else(|| "image.png".to_string());
                 self.render_iterm2(&png_data, &width_cells.to_string(), &filename)
             }
-            Encoder::Sixel | Encoder::Fallback(_) => return Err(TerminalImageError::UnsupportedTerminal),
+            Encoder::Sixel | Encoder::Fallback(_) => unreachable!("handled above or by the caller"),
         };
 
         let prefix = if x_offset > 0 {
@@ -324,13 +401,10 @@ impl TerminalImage {
 
         let sequence = format!("\x1b[s{}{}\x1b[u", prefix, image);
         let protocol = if matches!(encoder, Encoder::Kitty) { "kitty" } else { "iterm2" };
-        let sequence = for_transport(term, protocol, sequence)
-            .map_err(|_| TerminalImageError::UnsupportedTerminal)?;
-
-        Ok(InlineImage::Overlay {
+        Ok(for_transport(term, protocol, sequence).map(|sequence| InlineImage::Overlay {
             sequence,
             rows: height_cells,
-        })
+        }))
     }
 }
 

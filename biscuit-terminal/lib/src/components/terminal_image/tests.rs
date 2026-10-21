@@ -1387,7 +1387,9 @@ mod route_dispatch {
         let (_dir, file_path) = create_temp_test_image();
         let image = TerminalImage::new(&file_path).unwrap();
         let route = route_for(&[("TERM_PROGRAM", "Apple_Terminal")]);
-        let term = terminal_with_route(TerminalApp::AppleTerminal, route.clone());
+        let mut term = terminal_with_route(TerminalApp::AppleTerminal, route.clone());
+        // Without truecolor, so `render` cannot draw half-blocks either.
+        term.color_depth = crate::discovery::detection::ColorDepth::Enhanced;
 
         let output = image.render_with_route(&term).unwrap();
 
@@ -1693,7 +1695,9 @@ mod route_dispatch {
     fn an_oversized_tmux_iterm2_image_falls_back_before_reserving_rows() {
         let (_dir, file_path) = create_oversized_test_image();
         let image = TerminalImage::new(&file_path).unwrap();
-        let term = tmux_terminal("iterm2");
+        let mut term = tmux_terminal("iterm2");
+        // Without truecolor, so the inline path cannot draw half-blocks.
+        term.color_depth = crate::discovery::detection::ColorDepth::Enhanced;
 
         let ImageOutput::Fallback { text, reason } = image.render_with_route(&term).unwrap() else {
             panic!("an image over the tmux limit must fall back");

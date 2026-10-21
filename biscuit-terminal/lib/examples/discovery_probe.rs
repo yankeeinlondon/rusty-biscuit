@@ -450,6 +450,7 @@ fn print_image(i: usize, path: &std::path::Path, term: &biscuit_terminal::termin
             let _ = std::io::stdout().flush();
         }
         Ok(ImageOutput::Fallback { text, .. }) => println!("graphics_image[{i}]=fallback:{text}"),
+        Ok(ImageOutput::HalfBlocks { .. }) => unreachable!("render_with_route never draws half-blocks"),
         Err(error) => println!("graphics_image[{i}]=error:{error}"),
     }
 }
@@ -460,7 +461,7 @@ fn print_image(i: usize, path: &std::path::Path, term: &biscuit_terminal::termin
 /// whole line has been typed.
 #[cfg(unix)]
 fn await_stdin_line(wait_ms: u64) -> bool {
-    // SAFETY: `set` is zero-initialised by FD_ZERO, fd 0 is below
+    // SAFETY: `set` is zero-initialized by FD_ZERO, fd 0 is below
     // FD_SETSIZE, and every pointer is valid for the duration of the call.
     unsafe {
         let mut set: libc::fd_set = std::mem::zeroed();
@@ -642,9 +643,9 @@ fn probe_prose() {
     let force_straight = parse_bool_env("PROBE_FORCE_UNDERLINE_STRAIGHT");
     let force_double = parse_bool_env("PROBE_FORCE_UNDERLINE_DOUBLE");
 
-    // Build the Terminal manually so the probe never triggers the
-    // viuer-based image detection cascade — that path sends terminal
-    // queries and blocks indefinitely inside a non-responding test PTY.
+    // Build the Terminal manually so the probe never triggers the startup
+    // color and graphics queries — they send terminal queries and wait on
+    // a non-responding test PTY.
     //
     // Start from `Terminal::new_optimistic(80)` (no probes; all fields
     // explicit), then stamp the prose-relevant capabilities from the

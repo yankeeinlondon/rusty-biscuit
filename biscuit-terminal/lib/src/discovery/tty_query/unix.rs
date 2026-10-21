@@ -61,7 +61,7 @@ fn wait_readable(fd: libc::c_int, timeout: Duration) -> std::io::Result<bool> {
     if fd < 0 || fd as usize >= libc::FD_SETSIZE {
         return Err(std::io::Error::other("tty descriptor out of select range"));
     }
-    // SAFETY: `set` is a plain bitset zero-initialised by FD_ZERO, `fd` is in
+    // SAFETY: `set` is a plain bitset zero-initialized by FD_ZERO, `fd` is in
     // range (checked above), and every pointer passed to select is valid for
     // the duration of the call.
     unsafe {

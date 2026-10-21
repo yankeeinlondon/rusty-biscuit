@@ -1,8 +1,9 @@
 //! Mermaid diagram rendering for terminals.
 //!
 //! This module provides [`MermaidDiagram`], a composable [`TerminalRenderable`] component
-//! for rendering Mermaid diagrams inline in the terminal. It delegates rendering
-//! to `biscuit-visualized` and displays via the terminal's image protocol.
+//! for rendering Mermaid diagrams inline in the terminal. It renders with this
+//! crate's [`crate::mermaid`] module and displays the PNG in the format the
+//! terminal's graphics route selects.
 //!
 //! ## Examples
 //!
@@ -668,7 +669,9 @@ impl MermaidDiagram {
             .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
         {
             ImageOutput::Pixels(output) => output,
-            ImageOutput::Fallback { .. } => return Err(MermaidRenderError::NoImageSupport),
+            ImageOutput::Fallback { .. } | ImageOutput::HalfBlocks { .. } => {
+                return Err(MermaidRenderError::NoImageSupport);
+            }
         };
 
         Ok((output, png_path, cache_hit, width_cells))

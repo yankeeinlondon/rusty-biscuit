@@ -324,8 +324,9 @@ pub enum MermaidMode {
     /// Render mermaid diagrams as images via mermaid.ink service.
     ///
     /// Uses mermaid.ink to convert diagrams to SVG, then resvg to convert
-    /// to PNG, and viuer to display in the terminal. Falls back to `Text`
-    /// mode if terminal doesn't support graphics or rendering fails.
+    /// to PNG, and biscuit-terminal to display it in the terminal's graphics
+    /// format. Falls back to `Text` mode if terminal doesn't support graphics
+    /// or rendering fails.
     Image,
 
     /// Display mermaid diagrams as fenced code blocks.
@@ -356,7 +357,8 @@ const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// Renderer for inline images in terminal output.
 ///
 /// Wraps `biscuit_terminal::components::TerminalImage` to provide image rendering
-/// with automatic protocol detection (Kitty/iTerm2) and graceful fallback.
+/// in the format the terminal's graphics route selects (Kitty, iTerm2, or
+/// Sixel) and graceful fallback.
 ///
 /// ## Security
 ///
@@ -1896,7 +1898,7 @@ mod tests {
 
         // Should get fallback text either because:
         // 1. graphics_supported is false, or
-        // 2. viuer fails to decode invalid PNG data
+        // 2. the image fails to decode
         assert!(
             result.contains("▉ IMAGE[Test]"),
             "Expected fallback placeholder for invalid image data"

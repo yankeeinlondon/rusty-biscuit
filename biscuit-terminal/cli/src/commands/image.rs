@@ -129,14 +129,14 @@ pub fn render_image(
     // Load, decode, and encode before anything is printed, so a bad image
     // fails without partial output.
     let output = term_image
-        .render_with_route(&terminal)
+        .render_with_half_blocks(&terminal)
         .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
     match output {
         ImageOutput::Pixels(sequence) => {
             emit_vertical_margins(layout, || emit_image_output(&sequence))?;
         }
-        ImageOutput::Fallback { text, reason } => {
+        ImageOutput::Fallback { text, reason } | ImageOutput::HalfBlocks { text, reason } => {
             emit_vertical_margins(layout, || {
                 println!("{text}");
                 Ok(())

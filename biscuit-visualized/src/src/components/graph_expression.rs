@@ -1,8 +1,8 @@
 //! Graph expression rendering for terminals.
 //!
 //! This module provides a `TerminalRenderable` component that renders graph diagrams
-//! in the terminal. It delegates graph layout to `biscuit-visualized` and
-//! uses `TerminalImage` for inline image display.
+//! in the terminal. It lays the graph out with this crate's [`crate::graph`]
+//! module and uses `TerminalImage` for inline image display.
 //!
 //! ## Examples
 //!
@@ -377,7 +377,9 @@ impl GraphExpression {
             .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?
         {
             ImageOutput::Pixels(output) => output,
-            ImageOutput::Fallback { .. } => return Err(GraphRenderError::NoImageSupport),
+            ImageOutput::Fallback { .. } | ImageOutput::HalfBlocks { .. } => {
+                return Err(GraphRenderError::NoImageSupport);
+            }
         };
 
         Ok((output, png_path, cache_hit))

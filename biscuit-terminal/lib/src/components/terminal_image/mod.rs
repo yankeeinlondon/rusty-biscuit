@@ -1,6 +1,7 @@
 //! Terminal image rendering in the format the terminal's graphics route
-//! selects: the Kitty graphics protocol, iTerm2 inline images, or Sixel,
-//! with plain text for terminals that have no pixel route.
+//! selects: the Kitty graphics protocol, iTerm2 inline images, or Sixel.
+//! Without a pixel route a plain image is drawn as half-blocks where the
+//! terminal has truecolor and Unicode, and as its alt text otherwise.
 //!
 //! ## Module Layout
 //!
@@ -9,6 +10,7 @@
 //! - [`placeholder`] — Kitty Unicode placeholder grids.
 //! - [`iterm`] — iTerm2 protocol render paths.
 //! - [`sixel`] — Sixel render paths and the opaque background they use.
+//! - [`half_block`] — half-block text for a plain image with no pixel route.
 //! - [`cursor`] — cursor row computation and scroll compensation helpers.
 //! - [`protocol`] — protocol dispatch (`render_to_terminal`, `render_inline`).
 //! - [`tmux`] — tmux passthrough wrapping and its message budget.
@@ -39,6 +41,7 @@ use renderable::tree::{RenderNode, TreeRenderable};
 
 mod cursor;
 mod encoded_png;
+mod half_block;
 mod iterm;
 mod kitty;
 mod placeholder;
@@ -134,7 +137,8 @@ pub enum TerminalImageError {
     #[error("Remote URLs not allowed: '{url}'")]
     RemoteUrlBlocked { url: String },
 
-    /// viuer rendering error.
+    /// Formerly a viuer rendering error. No longer produced; kept so
+    /// existing matches still compile.
     #[error("viuer rendering error: {message}")]
     ViuerError { message: String },
 }
@@ -142,9 +146,9 @@ pub enum TerminalImageError {
 /// A terminal image component that can be rendered using various protocols.
 ///
 /// This struct represents an image file that can be displayed in terminals
-/// supporting inline graphics. It supports the **Kitty graphics protocol**
-/// and **iTerm2 inline images**, with automatic protocol selection based on
-/// terminal capabilities.
+/// supporting inline graphics. It supports the **Kitty graphics protocol**,
+/// **iTerm2 inline images**, and **Sixel**, with the format chosen by the
+/// terminal's graphics route.
 ///
 /// ## Protocol Support
 ///
@@ -155,7 +159,7 @@ pub enum TerminalImageError {
 /// | WezTerm  | Kitty    | Requires explicit cell sizing |
 /// | Ghostty  | Kitty    | Full support |
 /// | Warp     | Kitty    | Uses floor-based row counting |
-/// | Other    | None     | Falls back to alt text |
+/// | Other    | None     | Half-blocks or alt text (see [`TerminalImage::render_with_half_blocks`]) |
 ///
 /// ## Usage
 ///
@@ -268,12 +272,12 @@ impl Default for TerminalImage {
 }
 
 impl TerminalRenderable for TerminalImage {
-    /// Renders for the terminal's graphics route: escape sequences, or the
-    /// alt text when the route has no usable pixel format (see
-    /// [`TerminalImage::render_with_route`]). A load or encoding error
-    /// renders as an empty string.
+    /// Renders for the terminal's graphics route: escape sequences, or
+    /// half-blocks or the alt text when the route has no usable pixel format
+    /// (see [`TerminalImage::render_with_half_blocks`]). A load or encoding
+    /// error renders as an empty string.
     fn render(&self, term: &Terminal) -> String {
-        match self.render_with_route(term) {
+        match self.render_with_half_blocks(term) {
             Ok(output) => output.into_text(),
             Err(e) => {
                 tracing::warn!(

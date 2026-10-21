@@ -204,7 +204,7 @@ pub(super) fn encode_sixel(
 }
 
 /// `over` composited onto `under` at `alpha`, rounded.
-fn blend(over: u8, under: u8, alpha: u8) -> u8 {
+pub(super) fn blend(over: u8, under: u8, alpha: u8) -> u8 {
     let alpha = u32::from(alpha);
     ((u32::from(over) * alpha + u32::from(under) * (255 - alpha) + 127) / 255) as u8
 }

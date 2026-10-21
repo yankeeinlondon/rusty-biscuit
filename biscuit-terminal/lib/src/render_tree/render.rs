@@ -1873,12 +1873,14 @@ impl Writer<'_> {
 
         let image = TerminalImage::new(&full_path).ok()?.with_alt_text(alt);
         // A fallback (for example an image too large for tmux's message
-        // limit) keeps the render tree's own placeholder style.
+        // limit) keeps the render tree's own placeholder style; the tree
+        // never draws half-blocks, which `render_with_route` does not produce.
         match image.render_with_route(&term).ok()? {
             crate::components::terminal_image::ImageOutput::Pixels(output) => {
                 (!output.is_empty()).then_some(output)
             }
-            crate::components::terminal_image::ImageOutput::Fallback { .. } => None,
+            crate::components::terminal_image::ImageOutput::Fallback { .. }
+            | crate::components::terminal_image::ImageOutput::HalfBlocks { .. } => None,
         }
     }
 
@@ -4054,6 +4056,35 @@ mod render_tree_tests {
             !out.contains("\x1b_G"),
             "no-capability fallback must not emit image protocol bytes; got: {out:?}",
         );
+    }
+
+    /// Plain images outside the tree draw half-blocks on a truecolor Unicode
+    /// terminal with no pixel route; the tree keeps its placeholder style at
+    /// every graphics mode instead.
+    #[test]
+    fn render_tree_image_without_pixels_keeps_its_placeholder_not_half_blocks() {
+        use crate::discovery::detection::ImageSupport;
+
+        let (dir, name) = temp_png();
+        let node = RenderNode::paragraph(vec![RenderNode::image(&name, None, "a cat")]);
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::None)
+            .is_tty(true)
+            .color_depth(ColorDepth::TrueColor)
+            .supports_unicode(true)
+            .build();
+        assert!(!term.graphics_route.has_pixels());
+
+        for mode in [GraphicsMode::Rich, GraphicsMode::Vector, GraphicsMode::Off] {
+            let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+            opts.context.graphics_mode = mode;
+            opts.context.image_base_path = Some(dir.path().to_path_buf());
+
+            let out = render_terminal_node(&node, &opts).expect("render").output;
+            assert!(strip_escape_codes(&out).contains("[a cat]"), "{mode:?}: {out:?}");
+            assert!(!out.contains('▀'), "{mode:?} drew half-blocks: {out:?}");
+        }
     }
 
     /// Finding 3 (review-3): the security contract. At `Rich` on a fully
